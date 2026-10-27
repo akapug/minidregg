@@ -29,6 +29,11 @@ struct Helper {
     run: PathBuf,
     gateway_uid: u32,
     dev: bool,
+    /// The bodies THIS process spawned and has not reaped. A pid in a session record is never
+    /// trusted on its own: after a helper restart (or a fresh run directory) the recorded pid may
+    /// be another process, and connecting to a listener that no longer exists stranded the front
+    /// page (dregg-build 2026-10-27: `connect body: No such file or directory`).
+    children: std::collections::HashSet<u32>,
 }
 
 fn main() {
@@ -79,8 +84,9 @@ fn run() -> Result<(), String> {
         }
     };
     listener.set_nonblocking(true).map_err(|e| e.to_string())?;
-    let mut helper = Helper { store: Store::open(&state)?, spawner: Spawner { layout }, run, gateway_uid, dev: false };
+    let mut helper = Helper { store: Store::open(&state)?, spawner: Spawner { layout }, run, gateway_uid, dev: false, children: Default::default() };
     helper.dev = layout_is_dev(&helper.spawner.layout);
+    helper.forget_bodies();
     eprintln!("mini-web-spawn: serving (gateway uid {gateway_uid}{})", if helper.dev { ", dev" } else { "" });
     let mut last_sweep = std::time::Instant::now();
     loop {
@@ -226,17 +232,39 @@ impl Helper {
         }
     }
 
+    /// A fresh helper has no children: every recorded body pid is stale. A body that outlived its
+    /// helper is ended if it is still ours by command line (Linux), and every record forgets it.
+    fn forget_bodies(&mut self) {
+        let mut sessions = self.store.all();
+        sessions.push(self.store.public());
+        for mut s in sessions {
+            if let Some(pid) = s.body_pid.take() {
+                #[cfg(target_os = "linux")]
+                {
+                    let ours = fs::read(format!("/proc/{pid}/cmdline")).map(|c| String::from_utf8_lossy(&c).contains("web\0--body")).unwrap_or(false);
+                    if ours {
+                        unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+                        eprintln!("mini-web-spawn: body {pid} from an earlier helper ended");
+                    }
+                }
+                let _ = self.store.save(&s);
+            }
+        }
+    }
+
     /// A connected stream to the session's body, spawning it on its root-only listener first if
-    /// it is not alive.
+    /// it is not one this helper started and still serving.
     fn body(&mut self, session: &mut Session, member: &Member) -> Result<UnixStream, String> {
         let path = self.run.join("bodies").join(format!("{}.sock", &session.hash[..16.min(session.hash.len())]));
-        if !session.body_pid.is_some_and(alive) {
+        let live = session.body_pid.is_some_and(|pid| self.children.contains(&pid) && alive(pid)) && path.exists();
+        if !live {
             let _ = fs::remove_file(&path);
             let listener = UnixListener::bind(&path).map_err(|e| format!("bind body listener: {e}"))?;
             fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
             let listener = OwnedFd::from(listener);
             let unit = format!("mini-web-body-{}", session.prefix());
             let pid = self.spawner.body(member, &unit, &listener)?;
+            self.children.insert(pid);
             session.body_pid = Some(pid);
             self.store.save(session)?;
             eprintln!("mini-web-spawn: body {pid} started for {}", member.account);
@@ -265,6 +293,7 @@ impl Helper {
                 break;
             }
             let pid = pid as u32;
+            self.children.remove(&pid);
             let mut sessions = self.store.all();
             sessions.push(self.store.public());
             for mut s in sessions {

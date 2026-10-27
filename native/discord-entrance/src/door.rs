@@ -208,12 +208,16 @@ impl Request {
                 if !is_door_name(name) {
                     return Err(format!("{name:?} is not a door name"));
                 }
-                let ssh_key = ssh_ed25519(text(o, "sshKey")?)?;
+                // An empty sshKey is a browser-only join: the box makes the hosted key and the door
+                // answers a one-time web login link; the roster's login key is then a throwaway the
+                // processor generates and destroys (the paid route needs the stranger's own key).
+                let ssh_key = if text(o, "sshKey")?.is_empty() { String::new() } else { ssh_ed25519(text(o, "sshKey")?)? };
                 if ssh_key != text(o, "sshKey")? {
                     return Err("sshKey is not normalized".into());
                 }
                 let route = match text(o, "route")? {
                     "free" => Route::Free,
+                    "paid" if ssh_key.is_empty() => return Err("the paid route needs an ssh key (its memo is signed with it)".into()),
                     "paid" => Route::Paid,
                     other => return Err(format!("route {other:?} is neither free nor paid")),
                 };

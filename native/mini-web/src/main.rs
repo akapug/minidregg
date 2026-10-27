@@ -4,7 +4,7 @@
 //! `mini-web-spawn`) for everything about kernel state.
 //!
 //!   mini-web --listen 127.0.0.1:8797 --helper /run/mini-web-spawn.sock --origin https://demo.dregg.online
-//!            [--shutdown "11 November 2026"] [--frame-src https://*.demo.dregg.online] [--apps-index PATH]
+//!            [--shutdown "11 November 2026"] [--frame-src https://*.demo.dregg.online] [--registry PATH]
 //!
 //! A dev gateway (`--origin http://127.0.0.1:PORT`) carries the cookie without `Secure`.
 
@@ -24,7 +24,7 @@ use std::time::Duration;
 
 use mini_web_spawn::{is_token, Client, Error as HelperError, Request as Helper};
 
-use http::{html_escape as h, read_request, Request, Response};
+use http::{read_request, Request, Response};
 use page::{page, refusal};
 use proxy::Target;
 use session::{Sessions, Who};
@@ -39,8 +39,8 @@ struct Gateway {
     terminals: Terminals,
     shutdown: String,
     frame_src: String,
-    apps_index: Option<PathBuf>,
     registry: Option<PathBuf>,
+    defaults: Option<PathBuf>,
 }
 
 fn main() {
@@ -52,7 +52,7 @@ fn main() {
 
 fn run() -> Result<(), String> {
     let mut args = std::env::args().skip(1);
-    let (mut listen, mut helper, mut origin, mut shutdown, mut frame_src, mut apps_index, mut registry) = (None, None, None, String::new(), String::new(), None, None);
+    let (mut listen, mut helper, mut origin, mut shutdown, mut frame_src, mut registry, mut defaults) = (None, None, None, String::new(), String::new(), None, None);
     while let Some(flag) = args.next() {
         let value = args.next().ok_or_else(|| format!("{flag} takes a value"))?;
         match flag.as_str() {
@@ -61,8 +61,8 @@ fn run() -> Result<(), String> {
             "--origin" => origin = Some(value),
             "--shutdown" => shutdown = value,
             "--frame-src" => frame_src = value,
-            "--apps-index" => apps_index = Some(PathBuf::from(value)),
             "--registry" => registry = Some(PathBuf::from(value)),
+            "--defaults" => defaults = Some(PathBuf::from(value)),
             other => return Err(format!("unknown option {other}")),
         }
     }
@@ -86,8 +86,8 @@ fn run() -> Result<(), String> {
         terminals: Terminals::default(),
         shutdown,
         frame_src,
-        apps_index,
         registry,
+        defaults,
     });
     let sweeper = gateway.clone();
     std::thread::Builder::new().name("mini-web-sweep".into()).spawn(move || loop {
@@ -241,14 +241,9 @@ impl Gateway {
                 Some(who) => self.websocket(request, stream, id, &who),
                 None => Reply::Raw(Response::text(401, "no session")),
             },
-            ("GET" | "HEAD", ["apps"]) => {
-                let who = self.sessions.who(request);
-                let html = self.apps(who.as_ref());
-                self.stage(200, "Apps", html, who, request)
-            }
             ("GET" | "HEAD", ["registry"]) => {
                 let who = self.sessions.who(request);
-                let html = page::registry(self.registry.as_deref());
+                let html = format!("{}{}", page::registry(self.registry.as_deref()), page::default_laws(self.defaults.as_deref()));
                 self.stage(200, "Registry", html, who, request)
             }
             (_, ["join", ..]) => Reply::Raw(Response::redirect("/join")),
@@ -407,36 +402,6 @@ impl Gateway {
                 self.stage(status, "Unavailable", refusal(headline, &why), who, request)
             }
         }
-    }
-
-    fn apps(&self, who: Option<&Who>) -> String {
-        let Some(path) = &self.apps_index else {
-            return "<p>The Sandstorm app market: browse the index, install any SPK as a grain of your own, open it in a pane on its own origin. \
-                    This box has no app index configured yet (<code>--apps-index PATH</code>; the install path and the per-grain hostnames are the SPK lane's). \
-                    Grains already running answer under their own origins; <code>app status NAME</code> in the Terminal shows yours.</p>".to_owned();
-        };
-        let index: serde_json::Value = match std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()) {
-            Some(v) => v,
-            None => return refusal("No app index", &format!("{} is missing or malformed", path.display())),
-        };
-        let mut rows = String::new();
-        for app in index["apps"].as_array().into_iter().flatten() {
-            let name = app["name"].as_str().unwrap_or("?");
-            let id = app["id"].as_str().unwrap_or("");
-            let about = app["description"].as_str().unwrap_or("");
-            let install = match who {
-                Some(_) => format!(
-                    "<form method=\"post\" action=\"/apps/install\" class=\"inline\"><input type=\"hidden\" name=\"id\" value=\"{}\"><button class=\"quiet\">Install</button></form>",
-                    h(id)
-                ),
-                None => String::new(),
-            };
-            rows.push_str(&format!("<tr><td><strong>{}</strong><br><span class=\"note\">{}</span></td><td><code>{}</code></td><td>{install}</td></tr>", h(name), h(about), h(id)));
-        }
-        format!(
-            "<p>The Sandstorm app market, as this box indexes it. Installing runs the app's package as a grain of your own, on its own origin; open it in a pane from Rooms or here.</p>\
-             <table><thead><tr><th>app</th><th>package</th><th></th></tr></thead><tbody>{rows}</tbody></table>"
-        )
     }
 
     fn asset(&self, name: &str) -> Response {

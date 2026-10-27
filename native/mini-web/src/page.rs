@@ -10,12 +10,13 @@ pub const PLACES: &[(&str, &str, &str)] = &[
     ("Documents", "/doc", "The documents you hold: pages, history, diffs, append and edit."),
     ("Boards", "/board", "Tasks on columns: add, move, take."),
     ("Rooms", "/room", "Members, streams as chat, residents."),
-    ("Apps", "/apps", "The app market: install, open a grain."),
+    ("Apps", "/apps", "The app market: claims beside verdicts; install; your grains, opened on their own origins."),
     ("Receipts", "/receipts", "Every attempt and its decoded outcome."),
     ("Purse", "/purse", "Your account as a meter; pay, top up, tariffs."),
     ("Grants & laws", "/grants", "What your grants cover; delegate, revoke, install a law."),
     ("Keys & sessions", "/keys", "Your hosted key, its status; your browser sessions."),
-    ("Registry", "/registry", "The box's laws: every Host operation, its receiver and effect; the response markers; the consent plans."),
+    ("Registry", "/registry", "The box's laws: every Host operation, its receiver and effect; the response markers; the consent plans; the default laws."),
+    ("Tour", "/tour", "Fifteen minutes from a browser: the twelve steps, with the real forms."),
     ("Commands", "/verb", "Every shell verb as a form, derived from the shell's own table."),
     ("Terminal", "/term", "mini shell, in the page."),
 ];
@@ -231,6 +232,29 @@ pub fn registry_html(value: &serde_json::Value) -> String {
     out
 }
 
+/// The default laws Lean emits (`deploy/shell/templates/defaults/law.*.json`, from
+/// `Kernel/DefaultLaw.lean`: the owner-only account law, the founder-governed room law), as the
+/// files say them: the predicate, with its `@OWNER`/`@FOUNDER` placeholder named. The clause text
+/// as the Host prints it is `law show REF` on a reference that carries the law (`/verb/law`).
+pub fn default_laws(dir: Option<&std::path::Path>) -> String {
+    let Some(dir) = dir else {
+        return "<section><h2>Default laws</h2><p class=note>The laws every member account and room is installed under are emitted from Lean (<code>Kernel/DefaultLaw.lean</code>); this gateway was started without <code>--defaults DIR</code>, so they are not shown here.</p></section>".to_owned();
+    };
+    let mut files: Vec<_> = std::fs::read_dir(dir).map(|d| d.flatten().filter_map(|e| e.file_name().into_string().ok()).filter(|n| n.starts_with("law.") && n.ends_with(".json")).collect()).unwrap_or_default();
+    files.sort();
+    if files.is_empty() {
+        return format!("<section><h2>Default laws</h2><p class=note>No <code>law.*.json</code> under <code>{}</code>: this candidate carries no Lean-emitted default laws yet (L1's <code>scripts/gen-default-laws.sh</code> writes them).</p></section>", h(&dir.display().to_string()));
+    }
+    let mut out = String::from("<section><h2>Default laws</h2><p>Emitted from Lean (<code>Kernel/DefaultLaw.lean</code>) and installed on every member account and room; the placeholder is substituted by the client at install (<code>@OWNER</code> the account's owner, <code>@FOUNDER</code> the room's founder). <code>law show REF</code> prints the clause as the Host holds it on any reference.</p>");
+    for name in files {
+        let text = std::fs::read_to_string(dir.join(&name)).unwrap_or_default();
+        let pretty = serde_json::from_str::<serde_json::Value>(&text).map(|v| serde_json::to_string_pretty(&v).unwrap_or(text.clone())).unwrap_or(text.clone());
+        let placeholder = ["@OWNER", "@FOUNDER"].iter().find(|p| text.contains(*p)).copied().unwrap_or("");
+        out.push_str(&format!("<h3><code>{}</code>{}</h3><pre>{}</pre>", h(&name), if placeholder.is_empty() { String::new() } else { format!(" <span class=note>placeholder {}</span>", h(placeholder)) }, h(&pretty)));
+    }
+    out + "</section>"
+}
+
 pub fn when(t: u64) -> String {
     // Unix seconds as an ISO-like UTC stamp, without a clock library.
     let days = t / 86400;
@@ -274,6 +298,12 @@ mod tests {
         let table = registry_html(&serde_json::json!({"format": 3, "operations": [{"code": 0, "symbol": "DESCRIBE", "status": "active", "routes": ["public"], "owner": "kernel-client", "purpose": "describe", "receiver": "dispatchSession", "effect": "none"}, {"code": 9, "symbol": "X", "status": "reserved"}], "response_markers": {"253": "NO_RECORD"}}));
         assert!(table.contains("DESCRIBE") && table.contains("(1 active)") && table.contains("NO_RECORD"), "{table}");
         assert!(registry(None).contains("--registry"));
+        let dir = std::env::temp_dir().join(format!("mini-web-defaults-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("law.account.json"), "{\"type\":\"all\",\"predicates\":[{\"type\":\"eq\",\"slot\":\"request/subject\",\"value\":\"@OWNER\"}]}").unwrap();
+        let laws = default_laws(Some(&dir));
+        assert!(laws.contains("law.account.json") && laws.contains("placeholder @OWNER") && laws.contains("request/subject"), "{laws}");
+        assert!(default_laws(None).contains("--defaults"));
         assert_eq!(when(0), "1970-01-01 00:00Z");
         assert_eq!(when(1_761_600_000), "2025-10-27 21:20Z");
     }

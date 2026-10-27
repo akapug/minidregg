@@ -129,8 +129,8 @@ impl Door {
         let mut body = String::from(
             "<p class=warn><strong>Everything on this box is world-readable</strong> to every member, and your Mini \
              signing key is held on the box (a hosted account). Do not put anything here you would not publish.</p>\
-             <p>You get a Mini account on this demo box: an ssh login that opens <code>mini shell</code>. \
-             It takes a minute or two after you submit.</p>",
+             <p>You get a Mini account on this demo box: your workspace in the browser, and, if you give an ssh key, \
+             the same account as <code>ssh -t mini-s-NAME@demo.dregg.online</code>. It takes a minute or two after you submit.</p>",
         );
         if !free && !paid {
             let why = state["freeReason"].as_str().unwrap_or("the door is not open yet");
@@ -140,8 +140,9 @@ impl Door {
         body.push_str("<form method=post action=/join>\
             <p><label>Name (2 to 25 letters, digits or -, starting with a letter; you log in as <code>mini-s-NAME</code>)<br>\
             <input type=text name=name required maxlength=25 pattern=\"[a-z][a-z0-9-]{1,24}\"></label></p>\
-            <p><label>Your ssh public key (the one line in <code>~/.ssh/id_ed25519.pub</code>; make one with \
-            <code>ssh-keygen -t ed25519</code>)<br><textarea name=key rows=3 required maxlength=600></textarea></label></p>");
+            <p><label>Your ssh public key, <em>optional</em> (the one line in <code>~/.ssh/id_ed25519.pub</code>; make one with \
+            <code>ssh-keygen -t ed25519</code>). Without one, your account opens in the browser only, through the one-time link the \
+            status page shows; the paid route needs a key (its memo is signed with it).<br><textarea name=key rows=3 maxlength=600></textarea></label></p>");
         if free {
             body.push_str("<p><label><input type=radio name=route value=free checked> Free: the box funds a small starting balance</label><br>");
         } else {
@@ -179,8 +180,9 @@ impl Door {
         }
         if let Some(web) = v["webLogin"].as_str() {
             body.push_str(&format!(
-                "<p>Or open your workspace in the browser (this link works once, within 7 days; it opens a session, never a key):</p><pre><a href=\"{0}\">{0}</a></pre>",
-                html(web)
+                "<p>{lead} open your workspace in the browser (this link works once, within 7 days; it opens a session, never a key):</p><pre><a href=\"{web}\">{web}</a></pre>",
+                web = html(web),
+                lead = if v["login"].is_null() { "Your account has no ssh login (you gave no key):" } else { "Or" }
             ));
         }
         if let Some(code) = v["linkCode"].as_str() {
@@ -254,13 +256,18 @@ impl Door {
                 if !door::is_door_name(name) {
                     return refuse(400, "that name is not available: 2 to 25 lowercase letters, digits or -, starting with a letter, and not a reserved word");
                 }
-                let ssh_key = match door::ssh_ed25519(field("key")) {
-                    Ok(k) => k,
-                    Err(e) => return refuse(400, &e),
+                let ssh_key = if field("key").trim().is_empty() {
+                    String::new()
+                } else {
+                    match door::ssh_ed25519(field("key")) {
+                        Ok(k) => k,
+                        Err(e) => return refuse(400, &e),
+                    }
                 };
                 let state = self.state();
                 let route = match field("route") {
                     "free" if state["free"] == true => Route::Free,
+                    "paid" if ssh_key.is_empty() => return refuse(400, "the paid route needs your ssh key: its memo is signed with it"),
                     "paid" if state["paid"] == true => Route::Paid,
                     _ => return refuse(400, "choose a route the door offers"),
                 };

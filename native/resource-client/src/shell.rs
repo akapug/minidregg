@@ -75,14 +75,14 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "create", usage: "create NAME STORAGE LAW|PREDICATE-JSON|@FILE [FIELDS|open] [--in ROOM] [--owner SUBJECT] | create NAME --from KIND LAW [--in ROOM]", operation: "mini workspace --action create (--fields: the fields a declared cell may hold) [--in ROOM] [--owner SUBJECT]" },
     Verb { name: "propose", usage: "propose ID REQUEST-JSON|@FILE", operation: "mini workspace --action propose --proposal-id ID" },
     Verb { name: "invoke", usage: "invoke ID REF create FIELD VALUE | invoke ID REF write FIELD VALUE EXPECTED", operation: "mini workspace --action propose (action invoke, one scalar action)" },
-    Verb { name: "delegate", usage: "delegate ID REF RECIPIENT VERB[,VERB...] MAX-COST", operation: "mini workspace --action propose (action delegate)" },
+    Verb { name: "delegate", usage: "delegate ID REF RECIPIENT VERB[,VERB...] MAX-COST [--until H]", operation: "mini workspace --action propose (action delegate; --until H: the grant's notAfter height)" },
     Verb { name: "law", usage: "law ID REF \"CLAUSE; CLAUSE; …\"|PREDICATE-JSON|@FILE [--allow-unsatisfiable] [--i-lock-myself-out] [--freeze-roster] | law show REF | law export ID REF COMPONENT-JSON|@FILE|none | law export show REF | law check \"CLAUSE; …\"|PREDICATE-JSON|@FILE|-", operation: "mini workspace --action propose (action install-policy), after asking the Host whether the law can ever pass (op 150): a law no step can satisfy is not proposed, and the reply names the clauses that contradict (--allow-unsatisfiable installs it anyway: `sealed` is such a law on purpose); a law no request BY YOU can pass is not proposed either (--i-lock-myself-out installs it anyway); sealing a room also requires --freeze-roster; a law no write can pass, or one you can never change again, is proposed with a warning | check: the same question without installing (- reads the law from standard input)" },
     Verb { name: "apps", usage: "apps search [TERM] [--category C] [--json] | apps show APP-ID|PACKAGE-ID [--json] | apps install APP-ID|PACKAGE-ID [--class S|M|L] | apps retry REQUEST-ID | apps list [--json] | apps status GRAIN | apps open GRAIN | apps stop GRAIN | apps start GRAIN | apps share GRAIN MEMBER | apps export GRAIN FILE | apps delete GRAIN | apps identities GRAIN | apps revoke-identity GRAIN TOKEN", operation: "mini apps --action search|show (the market index mini-market caches: the index's claims beside Mini's verdict) | install (a member turn: the application birth and the hosting delegation, then the worker installs the signed package, starts it and hands back the grain's origin https://GRAIN.demo.dregg.online) | retry (the exact retry of a lost reply, never a second install) | list|status|open|stop|start|share|export|delete|identities|revoke-identity --grain GRAIN over the worker socket; every reply is a decoded outcome: performed, refused by name, or undecided with its exact retry (docs/APP-MARKET-2026-10-27.md)" },
     Verb { name: "market", usage: "market open NAME CLOSE REVEAL-END SUPPLY | market settle MARKET [ID]", operation: "mini workspace --action market-open (create under the sealed-market law + the setup write, submitted) | market-settle --proposal-id ID (default settle-MARKET)" },
     Verb { name: "bid", usage: "bid MARKET PRICE QTY [ID]", operation: "mini workspace --action market-bid --proposal-id ID (default bid-MARKET): commit to (PRICE, QTY) in a free slot; the opening stays in WORKSPACE/market/MARKET/" },
     Verb { name: "reveal", usage: "reveal MARKET [ID]", operation: "mini workspace --action market-reveal --proposal-id ID (default reveal-MARKET): write the kept opening" },
     Verb { name: "bids", usage: "bids MARKET", operation: "mini workspace --action market-bids: a signed read, sealed bids shown as commitments" },
-    Verb { name: "submit", usage: "submit ID", operation: "mini workspace --action submit --intent proposals/ID/intent.json --attempt attempts/ID" },
+    Verb { name: "submit", usage: "submit ID [--lose-reply-once]", operation: "mini workspace --action submit --intent proposals/ID/intent.json --attempt attempts/ID (--lose-reply-once: a client-side fault that writes the exact call and never reads the answer; the attempt is retained undecided and `lookup`/`retry` ask for the same decided outcome)" },
     Verb { name: "lookup", usage: "lookup ID", operation: "mini workspace --action recover --attempt attempts/ID" },
     Verb { name: "retry", usage: "retry ID", operation: "mini retry --attempt attempts/ID --mode submit" },
     Verb { name: "publish", usage: "publish ID", operation: "mini workspace --action publish-delegation --proposal-id ID --attempt attempts/ID" },
@@ -2155,12 +2155,20 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             proposal(session, &w[1], &request)
         }
         "delegate" => {
-            arity(&w, 5, 5, u)?;
+            arity(&w, 5, 7, u)?;
             workspace_name(&w[1], "proposal ID")?;
             ref_name(&w[2], "reference name")?;
             let verbs: Vec<&str> = w[4].split(',').collect();
-            let request = json!({"type":"minidregg-workspace-proposal-v1","action":"delegate",
+            let mut request = json!({"type":"minidregg-workspace-proposal-v1","action":"delegate",
                 "name":w[2],"recipient":w[3],"verbs":verbs,"maxCost":w[5]});
+            match (w.get(6).map(String::as_str), w.get(7)) {
+                (None, None) => {}
+                (Some("--until"), Some(height)) => {
+                    decimal(height, "--until height")?;
+                    request["notAfter"] = json!(height);
+                }
+                _ => return Err(u.to_owned()),
+            }
             proposal(session, &w[1], &request)
         }
         "law" if w.get(1).map(String::as_str) == Some("export") => {
@@ -2344,8 +2352,13 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             plan
         }
         "submit" => {
-            arity(&w, 1, 1, u)?;
+            arity(&w, 1, 2, u)?;
             workspace_name(&w[1], "proposal ID")?;
+            match w.get(2).map(String::as_str) {
+                None => {}
+                Some("--lose-reply-once") => std::env::set_var(mini_sdk::operator::LOSE_REPLY_ENV, mini_sdk::flow::Request::Submit.operation().to_string()),
+                _ => return Err(u.to_owned()),
+            }
             client(
                 "workspace",
                 vec![

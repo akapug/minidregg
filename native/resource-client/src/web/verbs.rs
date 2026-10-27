@@ -38,14 +38,46 @@ pub(super) struct Alt {
 }
 
 impl Alt {
+    /// The leading literal words: the leaf's name (`doc append`, `room template show`), as the
+    /// journey's face-coverage row reads it from `help`.
     pub fn literals(&self) -> String {
-        self.tokens.iter().filter_map(|t| if let Tok::Lit(l) = t { Some(l.as_str()) } else { None }).collect::<Vec<_>>().join(" ")
+        self.tokens.iter().map_while(|t| if let Tok::Lit(l) = t { Some(l.as_str()) } else { None }).collect::<Vec<_>>().join(" ")
     }
 
     /// A proposal: its first placeholder is the proposal `ID`; `submit ID` is offered after it.
     pub fn proposes(&self, operation: &str) -> bool {
         operation.contains("propose") && self.tokens.iter().any(|t| matches!(t, Tok::Arg { kind: Kind::Id, .. }))
     }
+}
+
+/// Whether the alternative at `index` of `usage` is a WORLD TRANSITION (a proposal, a submit, a
+/// birth, a payment) rather than a read or a local verb, read from the `operation` segment that
+/// names it (the segments align with the usage alternatives; a verb with one segment applies it
+/// to every alternative). Interim: the structured command grammar (A0) carries this as data.
+pub(super) fn transition(usage: &str, operation: &str, index: usize, literals: &str) -> bool {
+    let segments: Vec<&str> = operation.split(" | ").collect();
+    let alternatives_count = usage.split(" | ").count();
+    let segment = if segments.len() == alternatives_count {
+        segments.get(index).copied().unwrap_or(operation)
+    } else {
+        // Fewer segments than alternatives (`doc`): the segment that names this subcommand
+        // (`doc-show`, or the word inside `propose (payload document: append, edit, …)`).
+        let mut words = literals.split(' ');
+        let verb = words.next().unwrap_or("");
+        match words.next() {
+            Some(sub) => segments
+                .iter()
+                .find(|seg| seg.contains(&format!("{verb}-{sub}")) || seg.starts_with(sub) || seg.contains(&format!(" {sub},")) || seg.contains(&format!(" {sub})")) || seg.contains(&format!(": {sub}")))
+                .copied()
+                .unwrap_or(operation),
+            None => operation,
+        }
+    };
+    let lower = segment.to_ascii_lowercase();
+    let read = lower.starts_with("local") || lower.contains("signed read") || lower.contains("signed view") || lower.contains("signed tail") || lower.contains("--action list") || lower.contains("--action read") || lower.contains("--action describe") || lower.contains("--action inspect") || lower.contains("--action can") || lower.contains("--action recover") || lower.contains("dry-run") || lower.contains("--format") || lower.contains("doc-show") || lower.contains("doc-history") || lower.contains("doc-diff") || lower.contains("--action status") || lower.contains("--action balance") || lower.contains("--action tariff") && !lower.contains("--set") || lower.starts_with("who") || lower.starts_with("describe") || lower.starts_with("chat:") || lower.starts_with("current app admission") || lower.contains("--action search") || lower.contains("--action key-status");
+    // Anything the segment does not name as a read or a local verb is a world transition: the
+    // safe default for a verb that may write (its exit 0 is then "admitted" only when it is).
+    !read
 }
 
 /// Split a usage into alternatives (` | ` between them; a `|` inside a word is a choice).
@@ -137,8 +169,17 @@ fn tokens(alt: &str) -> Vec<Tok> {
             continue;
         }
         if is_literal(first) {
-            out.push(Tok::Lit(first.to_owned()));
-            // `[FIELDS|open]`: a literal choice inside brackets is still one optional field.
+            if optional {
+                // `[all]`, `[again]`, `[at N]`: an optional literal word is a choice of one.
+                out.push(Tok::Arg { name: first.to_owned(), optional: true, kind: Kind::Choice(vec![first.to_owned()]) });
+                for more in parts {
+                    if !is_literal(more) {
+                        out.push(Tok::Arg { name: more.to_owned(), optional: true, kind: kind_of(more) });
+                    }
+                }
+            } else {
+                out.push(Tok::Lit(first.to_owned()));
+            }
             continue;
         }
         if first.contains('|') && first.split('|').all(is_literal) {
@@ -176,7 +217,8 @@ pub(super) fn index(site: &Site) -> Page {
     let note = if site.front.read_only {
         "<p class=note>The public reader runs no verb; with a session every one of these is a form.</p>"
     } else {
-        "<p>Every verb of <code>mini shell</code>, as a form: the same words, the same Host, the same decoded outcome. Derived from the shell's verb table, so a verb is here the day it exists.</p>"
+        "<p>Every verb of <code>mini shell</code>, as a form: the same words, the same Host, the same decoded outcome. Derived from the shell's verb table, so a verb is here the day it exists.</p>\
+         <p class=note>Interim: these forms are read from each verb's usage string. The structured command grammar (one data structure per verb: subcommands, typed arguments, reference kinds, uploads, confirmations, outcome schema) that the shell's parsing, help, completion and this page will all consume replaces them verb by verb (docs/DEMO-EXPERIENCE-2026-10-27.md A0).</p>"
     };
     Page { status: 200, title: "Commands".into(), stamp: Stamp::None, body: format!("{note}\n<table><thead><tr><th>verb</th><th>usage</th><th>operation</th></tr></thead><tbody>{rows}</tbody></table>") }
 }
@@ -203,17 +245,26 @@ pub(super) fn page(site: &Site, name: &str) -> Page {
         return Page { status: 200, title: name.to_owned(), stamp: Stamp::None, body };
     }
     for (i, alt) in alts.iter().enumerate() {
-        body.push_str(&form(name, i, alt, verb.operation));
+        body.push_str(&form(name, i, alt, verb.operation, &format!("/verb/{}", escape(name)), ""));
     }
     Page { status: 200, title: name.to_owned(), stamp: Stamp::None, body }
 }
 
-fn form(name: &str, index: usize, alt: &Alt, operation: &str) -> String {
+/// The form of one verb alternative, by the literal words that name it (`"doc append"`), posted
+/// to `action` with `hidden` fields before its own: the tour embeds the real forms this way.
+pub(super) fn form_for(name: &str, literals: &str, action: &str, hidden: &str) -> Option<String> {
+    let verb = crate::shell::command_catalog().find(|v| v.name == name)?;
+    let alts = alternatives(verb.usage);
+    let (index, alt) = alts.iter().enumerate().find(|(_, a)| a.literals() == literals)?;
+    Some(form(name, index, alt, verb.operation, action, hidden))
+}
+
+fn form(name: &str, index: usize, alt: &Alt, operation: &str, action: &str, hidden: &str) -> String {
     let mut out = format!(
-        "<section class=\"verb-form\"><h2><code>{}</code></h2><form method=\"post\" action=\"/verb/{}\"><input type=\"hidden\" name=\"alt\" value=\"{index}\"><div class=\"fields\">",
+        "<section class=\"verb-form\"><h2><code>{}</code></h2><form method=\"post\" action=\"{action}\">{hidden}<input type=\"hidden\" name=\"alt\" value=\"{index}\"><div class=\"fields\">",
         escape(&alt.literals()),
-        escape(name)
     );
+    let _ = name;
     for (i, tok) in alt.tokens.iter().enumerate() {
         let field = format!("a{i}");
         match tok {
@@ -308,12 +359,17 @@ pub(super) fn post(site: &Site, name: &str, form: &std::collections::BTreeMap<St
         }
     }
     let mut lines = vec![words.join(" ")];
+    let index = form.get("alt").and_then(|a| a.parse::<usize>().ok()).unwrap_or(0);
+    let mut is_transition = transition(verb.usage, verb.operation, index, &alt.literals());
     if form.get("submit").map(String::as_str) == Some("on") && alt.proposes(verb.operation) && !id.is_empty() {
-        lines.push(format!("submit {id}"));
+        // The tour's lost-reply switch rides on the submit line (DEMO-EXPERIENCE A11).
+        let lose = if form.get("lose").map(String::as_str) == Some("on") { " --lose-reply-once" } else { "" };
+        lines.push(format!("submit {id}{lose}"));
+        is_transition = true;
     }
     let next: Vec<(String, String)> = vec![(format!("{name} again"), format!("/verb/{name}")), ("all commands".into(), "/verb".into())];
     let refs: Vec<(&str, &str)> = next.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
-    super::body::act(site, &alt.literals(), lines, &id, &refs)
+    super::body::act_as(site, &alt.literals(), lines, &id, &refs, is_transition)
 }
 
 #[cfg(test)]
@@ -348,6 +404,9 @@ mod tests {
         assert_eq!(room.len(), 2);
         assert_eq!(room[0].tokens[3], Tok::Flag { name: "--law".into(), value: Some(("open|realm".into(), Kind::Choice(vec!["open".into(), "realm".into()]))), optional: true });
         assert_eq!(room[1].tokens[3], Tok::Flag { name: "--private".into(), value: None, optional: false });
+        let hist = alternatives("history [all] | doc transclude NAME SOURCE FROM TO [snapshot|live] [at N] | invoke ID REF create FIELD VALUE | pay ROOM week|N [--account REF] [again]");
+        assert_eq!(hist.iter().map(|a| a.literals()).collect::<Vec<_>>(), ["history", "doc transclude", "invoke", "pay"]);
+        assert_eq!(hist[0].tokens[1], Tok::Arg { name: "all".into(), optional: true, kind: Kind::Choice(vec!["all".into()]) });
         let law = alternatives("law ID REF \"CLAUSE; CLAUSE; …\"|PREDICATE-JSON|@FILE [--allow-unsatisfiable] | law show REF");
         assert_eq!(law[0].tokens[3], Tok::Arg { name: "\"CLAUSE; CLAUSE; …\"|PREDICATE-JSON|@FILE".into(), optional: false, kind: Kind::Text });
         assert_eq!(law[0].tokens[4], Tok::Flag { name: "--allow-unsatisfiable".into(), value: None, optional: true });
@@ -357,7 +416,18 @@ mod tests {
         assert_eq!(chat[1].tokens[1], Tok::Flag { name: "-n".into(), value: Some(("N".into(), Kind::Number)), optional: true });
         let create = alternatives("create NAME STORAGE LAW|PREDICATE-JSON|@FILE [FIELDS|open] [--in ROOM]");
         assert_eq!(create[0].tokens[4], Tok::Arg { name: "FIELDS|open".into(), optional: true, kind: Kind::Word });
-        let html = form("delegate", 0, &alts[0], "propose");
+        let html = form("delegate", 0, &alts[0], "propose", "/verb/delegate", "");
+        assert!(form_for("doc", "doc append", "/tour/3", "<input type=\"hidden\" name=\"verb\" value=\"doc\">").unwrap().contains("action=\"/tour/3\""));
+        assert!(form_for("doc", "doc nope", "/x", "").is_none());
+        let doc = crate::shell::command_catalog().find(|v| v.name == "doc").unwrap();
+        let show = alternatives(doc.usage).iter().position(|a| a.literals() == "doc show").unwrap();
+        let append = alternatives(doc.usage).iter().position(|a| a.literals() == "doc append").unwrap();
+        assert!(!transition(doc.usage, doc.operation, show, "doc show"), "doc show is a read");
+        assert!(transition(doc.usage, doc.operation, append, "doc append"), "doc append proposes");
+        for (name, is) in [("whoami", false), ("help", false), ("history", false), ("can", false), ("inspect", false), ("refs", false), ("submit", true), ("delegate", true), ("create", true), ("retry", true)] {
+            let v = crate::shell::command_catalog().find(|v| v.name == name).unwrap();
+            assert_eq!(transition(v.usage, v.operation, 0, name), is, "{name}: {}", v.operation);
+        }
         assert!(html.contains("name=\"a1\"") && html.contains("list=\"refs\"") && html.contains("name=\"submit\""), "{html}");
     }
 }

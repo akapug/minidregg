@@ -21,7 +21,7 @@ search · Log out), a rail of places, and the stage.
 | Documents | `/doc`, `/doc/N`, `/doc/N/history`, `/doc/N/diff/A/B`, `/at/H/doc/N`, `/doc/N/edit`, `/new-document` | the list, a page (element-tree order, transclusions inline, links and backlinks), history, a page at a height, a diff, append/edit, create | signed reads (`workspace::signed_view`, `rendered_document`), the editor's pinned diff + durable attempt, `doc append`, `doc link` |
 | Boards | `/board/N` | columns and tasks; add / move / take | `board add|move|take` |
 | Rooms | `/room/N` | members, the room's streams as chat, say; the index; a resident's turns | `room ls`, `say`, `tail`, `room members`, `summon` |
-| Apps | `/apps`, `/grain/N` | the Sandstorm app market index; install; a grain opened in a pane (its own origin, L13's per-grain hostnames) | `app status`, L13's install verb (one seam, named in §5) |
+| Apps | `/apps[?q=]`, `/apps/APP`, `/grain`, `/grain/N`, `/grain/N/pane` | the Sandstorm app market (`apps search --json`: the publisher's claims beside the box's verdict), one entry, install; the member's grains, a grain's state / routes / held identities with open, start, stop, share, export, delete, revoke-identity; the one-time bootstrap posted to the grain's own origin, then the grain in a pane | `apps search|show|install|list|status|open|share|…` (L13, `docs/APP-MARKET-2026-10-27.md` §5a) |
 | Residents | `/room/N/resident` | summon a Hermes resident into a room; its turns as they land | `summon`, `tail` |
 | Receipts | `/receipts`, `/receipts/ID` | every retained attempt with its decoded outcome: **admitted** / **refused** with the clause / **undecided** with the exact retry; `why`; `lookup`; `retry` | `history all`, `inspect receipt`, `why`, `lookup`, `retry` |
 | Grants & laws | `/grants`, `/laws` | what my grants cover (`can`), delegate, revoke; the law on a reference, install a law | `can`, `delegate`, `revoke`, `inspect law`, `law` |
@@ -29,11 +29,18 @@ search · Log out), a rail of places, and the stage.
 | Purse | `/purse` | the account as a meter (`credit`), pay status, top up, tariffs | `credit`, `pay status`, `topup`, `tariff` |
 | Commands | `/verb`, `/verb/NAME` | **every shell verb as a form, derived from the shell's verb table** (`shell::command_catalog`: shell, chat, hermes, story): one form per usage alternative, reference arguments as pickers over the workspace's refs, text through `@FILE`, a fresh proposal id with "and `submit ID`"; the answer is the one outcome partial | all of them |
 | Terminal | `/term` | `mini shell` as this member, in the page (a convenience, never the parity mechanism) | the shell itself |
+| Tour | `/tour`, `/tour/N` | the twelve steps of `docs/DEMO-EXPERIENCE-2026-10-27.md` §1 as one page whose forms are the real derived forms; a step's outcome lands under it | the steps' verbs |
+| Registry | `/registry` | the operation registry (bytes, receivers, effects, markers, consent plans) and the Lean-emitted default laws, for every visitor | data files of the candidate |
+| the front page (public) | `/` | what the public reader may observe: published documents, the operations room (`operations`, posted into by `mini-s-box`; named when absent), the receipts stream newest first, the laws | the public body |
 
 **Parity** (ember 2026-10-27, `docs/DEMO-EXPERIENCE-2026-10-27.md` §1a): everything the shell can do,
 the browser can do, visually. The derived forms (`web/verbs.rs`) are the mechanism: a new verb is
-visual the day its row enters the table; the journey's `verb-parity` row checks every verb `help`
-lists against `/verb/NAME` and names any without a face. Bespoke views sit where a place deserves
+visual the day its row enters the table; the journey's `face-coverage` row checks every verb × subcommand leaf
+`help` lists against `/verb/NAME`'s forms and names any without a face (and red-proofs itself on a
+verb the shell lacks); it is coverage, not parity, until every leaf also has an outcome test. The
+usage-derived forms are the interim; the structured command grammar (A0) replaces them verb by verb.
+Outcome truth: admitted / refused / undecided name world transitions only; a read or a local verb
+answers (`answered`, `read refused`), classified per usage alternative from the verb table. Bespoke views sit where a place deserves
 one: the document page, history and diff pages, the board, the room as a live stream (the chat
 section refreshes), the receipt, the grants drawn as a tree from the Host's capability view, the
 purse as a meter, and a refusal as its clause highlighted.
@@ -144,8 +151,43 @@ Studio stays routed nowhere in the body (its deletion is L2's, D7).
 
 ## 5. Seams owned elsewhere
 
-L13 names the install verb and the per-grain hostname (`/apps` renders its index and opens a grain
-in a pane; the install form posts to `/apps/install`, which runs L13's verb once it exists). L5 owns
+L13's `apps` verb (lane/app-market 1c7a7f30) is the market: `web/apps.rs` runs it as the member and
+draws its `--json` replies; `MINI_WEB_FRAME_SRC` names the grain origins for the pane; the
+`identityNotice` on its receipts is shown on the receipt and the Grants page. L5 owns
 the door; the patch in `deploy/web-frontend/door.patch` adds the login record and the one status
 line. The infra lane installs `deploy/web-frontend/INSTALL.md` and retargets Caddy's `handle` to the
 gateway (the fallback `handle` and the `/` snapshot route go).
+
+## 6. A0: the structured command grammar, verb by verb (the series after this batch)
+
+The council's finding stands: `Verb` is three strings and the forms are read from usage prose, so
+"derived from the verb table" is an interim. The honest artifact (ATLAS law 13) is ONE grammar per
+verb, as data, that the shell's parsing, `help`, Tab completion and the web body all consume. The
+series, each step a commit that keeps the usage-string form for every verb whose grammar is not
+yet data and labels the page accordingly:
+
+1. **The type** (`shell::Grammar`): a verb is a list of leaves; a leaf is its literal path
+   (`doc append`), its positional arguments (name, kind: `Id | Ref(kind) | Subject | Text | Json |
+   File | Number | Height | Choice(..) | Word`, optional), its flags (name, value kind, dangerous:
+   needs confirmation, as `--i-know`, `--freeze-roster`, `--i-lock-myself-out`), its effect
+   (`Read | Local | Transition { proposes: bool }`) and its outcome schema (what the ending prints:
+   a JSON view, a receipt, a text). `usage` and `operation` are RENDERED from the grammar (one
+   printer), so `help` cannot drift from the parser; `subcommands()` reads the leaves, not prose.
+2. **The parser arm consumes the grammar**: `plan()` for a converted verb walks the leaf's
+   arguments (arity, validators per kind) and hands the plan builder typed values; the per-verb
+   `match` arm shrinks to the builder. The web body renders the form from the same leaf (kinds →
+   fields, dangerous flags → an explicit confirmation checkbox, effect → the outcome class, the
+   outcome schema → the bespoke renderer or the one partial).
+3. **Order**: `doc` (the forty leaves: the tour's step 3), `room`/`chat`/`say`/`tail`, `delegate`/
+   `revoke`/`renounce`/`law`/`can`/`why`/`inspect`, the money verbs (`pay`/`credit`/`tariff`/
+   `topup`/`market`/`bid`/`reveal`/`bids`/`job`/`jobs`), the lifecycle (`propose`/`submit`/`lookup`/
+   `retry`/`publish`/`history`), `summon`/`ask`/`dismiss`/`hermes`, `apps`, `story`, keys, the rest.
+4. **The gate**: `face-coverage` becomes `parity` when every leaf has (a) a route and a no-JS
+   form from its grammar and (b) an outcome test: a journey row per spine flow (steps 3–7 of the
+   tour) asserting the decoded outcome class and the receipt, plus a per-leaf dry-run where the
+   verb has one (`can`, op 130) and a usage-ending test where it does not. The red-proof stays.
+5. **Deletions as each verb lands**: its usage/operation strings (rendered now), its hand-written
+   arity checks, the body's bespoke form where the grammar renders the same, the usage scraper in
+   `subcommands()` once the last verb converts.
+
+Not started in this batch; nothing on the page claims it is.

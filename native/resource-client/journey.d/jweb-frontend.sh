@@ -24,9 +24,13 @@
 #   doc-new            POST /doc/new (law note) through the form                             -> admitted
 #   doc-append         POST /doc/NAME/append through the form                               -> admitted; the page shows the text
 #   receipt            GET /receipts/ID shows the attempt's decoded outcome                  -> 200, outcome admitted
-#   verb-parity        every verb in `help` has a form at /verb/NAME (derived from the verb table)  -> none missing
+#   face-coverage      every verb x subcommand leaf in `help` has a route and a no-JS form        -> none missing
+#   face-coverage-redproof  a verb the shell lacks has no face                                      -> 404
 #   verb-index         /verb lists the catalog                                                       -> 200
-#   verb-run           POST /verb/whoami through the derived form                                    -> admitted, the subject
+#   verb-run           POST /verb/whoami through the derived form                                    -> answered, the subject
+#   tour               GET /tour: twelve steps with the real forms                                      -> 200, 12
+#   tour-step          POST /tour/4 (`can` through the tour's form) lands an outcome under the step   -> outcome
+#   tour-chromium      jtour.mjs: login, /tour, step 4 through the pane, a terminal prompt (needs Playwright) -> PASS
 #   logout             POST /logout clears the cookie; the old cookie no longer opens /term   -> 303; 401
 #   public-reader      GET / without a session answers (the public body, or a named refusal) -> 200|502, "public reader"
 # Output: one row per check (`PASS|FAIL<TAB>row<TAB>detail`), then `J-WEB-FRONTEND PASS n/n` or
@@ -150,18 +154,46 @@ row receipt "$([ "$(st)" = 200 ] && grep -q 'outcome admitted' <<<"$page" && ech
 # Parity (docs/DEMO-EXPERIENCE-2026-10-27.md §1a): every verb the shell's `help` lists has a form at
 # /verb/NAME in the body; a verb with no face is red by name.
 help=$("$MINI" shell --socket "$SOCKET" --workspace "$WS" --home "${HOMEDIR:-$R/home}" --host "$HOST" --config "$CONFIG" --line help 2>/dev/null)
+# FACE COVERAGE (not yet parity: parity needs an outcome test per leaf): every verb x subcommand leaf
+# the shell's `help` lists (each usage alternative's leading literal words) has a route and a no-JS
+# form in the body; a leaf without one is red by name.
 verbs=$(awk '/^  [a-z][a-z-]* / {print $1}' <<<"$help" | sort -u)
-missing=""; count=0
+missing=""; count=0; leaves=0
 for v in $verbs; do
   count=$((count + 1))
   page=$(req GET "/verb/$v")
-  [ "$(st)" = 200 ] && grep -q "action=\"/verb/$v\"" <<<"$page" || missing="$missing $v"
+  if [ "$(st)" != 200 ] || ! grep -q "action=\"/verb/$v\"" <<<"$page"; then missing="$missing $v"; continue; fi
+  usage=$(awk -v v="$v" '$1==v && /^  [a-z]/ {sub(/^  [a-z-]+ +/, ""); print; exit}' <<<"$help")
+  while IFS= read -r alt; do
+    lits=""; for w in $alt; do case $w in [a-z]*) [[ $w =~ ^[a-z/-]+$ ]] && lits="$lits $w" || break;; *) break;; esac; done
+    lits=${lits# }; [ -n "$lits" ] || continue
+    leaves=$((leaves + 1))
+    grep -qF "<h2><code>$lits</code></h2>" <<<"$page" || missing="$missing $v($lits)"
+  done < <(sed 's/ | /\n/g' <<<"$usage")
 done
-row verb-parity "$([ "$count" -gt 40 ] && [ -z "$missing" ] && echo 1 || echo 0)" "$count verbs in help; without a form:${missing:- none}"
+row face-coverage "$([ "$count" -gt 40 ] && [ "$leaves" -gt 100 ] && [ -z "$missing" ] && echo 1 || echo 0)" "$count verbs, $leaves leaves in help; without a face:${missing:- none}"
+# Red-proof: a verb the shell does not have must have no face (the check can go red).
+req GET /verb/no-such-verb-x >/dev/null
+row face-coverage-redproof "$([ "$(st)" = 404 ] && echo 1 || echo 0)" "$(st) for a verb the shell lacks"
 page=$(req GET /verb)
 row verb-index "$([ "$(st)" = 200 ] && grep -q '/verb/delegate' <<<"$page" && echo 1 || echo 0)" "$(st)"
 page=$(req POST /verb/whoami --data-urlencode "csrf=$CSRF" --data-urlencode "alt=0")
-row verb-run "$(grep -q 'outcome admitted' <<<"$page" && grep -q "$SUBJECT" <<<"$page" && echo 1 || echo 0)" "$(st) whoami through the derived form"
+row verb-run "$(grep -q 'outcome answered' <<<"$page" && grep -q "$SUBJECT" <<<"$page" && echo 1 || echo 0)" "$(st) whoami through the derived form answers (a local verb, never admitted)"
+# The tour (DEMO-EXPERIENCE §1): twelve steps whose forms are the real forms; step 4's `can` runs
+# through /tour/4 and its outcome lands under the step.
+page=$(req GET /tour)
+row tour "$([ "$(st)" = 200 ] && [ "$(grep -c 'class="step"' <<<"$page")" = 12 ] && grep -q 'action="/tour/4"' <<<"$page" && echo 1 || echo 0)" "$(st) steps=$(grep -c 'class="step"' <<<"$page")"
+page=$(req POST /tour/4 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=can" --data-urlencode "alt=0")
+row tour-step "$(grep -q 'id="step-4"' <<<"$page" && grep -q 'step-outcome' <<<"$page" && grep -qE 'outcome (admitted|refused|undecided)' <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-100)"
+# The same, headless through Chromium (jtour.mjs), with a second one-time code; needs Playwright.
+PW=${PLAYWRIGHT_DIR:-$HOME/tools/playwright/node_modules}
+if [ -f "$PW/playwright/index.mjs" ] && command -v node >/dev/null && [ "$mode" != --box ]; then
+  CODE2=$(token); printf '{"name":"alice","expires":%d}\n' "$(( $(date +%s) + 3600 ))" >"$R/state/logins/$(sha256 "$CODE2").json"
+  out=$(PLAYWRIGHT_DIR=$PW node "$HERE/jtour.mjs" "$BASE" "$CODE2" "$SUBJECT" 2>"$R/jtour.err"); rc=$?
+  row tour-chromium "$([ "$rc" = 0 ] && echo 1 || echo 0)" "$out $(tail -1 "$R/jtour.err" | cut -c1-120)"
+else
+  printf 'UNCONFIGURED\ttour-chromium\tno Playwright at %s (PLAYWRIGHT_DIR), or --box\n' "$PW"
+fi
 req POST /logout --data-urlencode "csrf=$CSRF" >/dev/null
 logout_status=$(st)
 after=$(curl -s -o /dev/null -w '%{http_code}' -H "Cookie: $COOKIE_NAME=$COOKIE_VALUE" "$BASE/term")
