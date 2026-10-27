@@ -163,6 +163,9 @@ trait BoxOps {
     fn sponsor_credit(&self) -> Ran;
     /// Hand NAME's account a file in its own home (written by root, then given to the tenant).
     fn give(&self, name: &str, path: &Path, bytes: &[u8]) -> Result<(), String>;
+    /// A fresh ssh-ed25519 public line whose secret is destroyed at once: the roster needs one key
+    /// per account, a browser-only stranger has none, and nobody must ever log in with it.
+    fn throwaway_key(&self) -> Result<String, String>;
 }
 
 struct RealBox {
@@ -244,6 +247,22 @@ impl BoxOps for RealBox {
             .arg(node.join("sponsor"))
             .arg(node.join("sponsor-home"));
         run(cmd)
+    }
+    fn throwaway_key(&self) -> Result<String, String> {
+        let dir = self.p.state().join("tmp");
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        std::fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o700)).map_err(|e| e.to_string())?;
+        let file = dir.join(format!("web-only-{}", std::process::id()));
+        let _ = std::fs::remove_file(&file);
+        let _ = std::fs::remove_file(file.with_extension("pub"));
+        let ran = run({ let mut c = Command::new("ssh-keygen"); c.arg("-q").arg("-t").arg("ed25519").arg("-N").arg("").arg("-C").arg("web-only").arg("-f").arg(&file); c });
+        let public = std::fs::read_to_string(file.with_extension("pub"));
+        let _ = std::fs::remove_file(&file);
+        let _ = std::fs::remove_file(file.with_extension("pub"));
+        if !ran.ok {
+            return Err(format!("ssh-keygen: {}", ran.why()));
+        }
+        door::ssh_ed25519(&public.map_err(|e| e.to_string())?)
     }
     fn give(&self, name: &str, path: &Path, bytes: &[u8]) -> Result<(), String> {
         let uid = self.uid(&format!("mini-s-{name}")).ok_or("no hosted account")?;
@@ -385,12 +404,12 @@ impl<O: BoxOps> Processor<O> {
     /// The stranger's view: root-owned, readable by the form's group, never the secrets.
     fn publish_status(&self, r: &Value) -> Result<(), String> {
         let mut v = json!({"type":door::STATUS_TYPE,"id":r["id"],"phase":r["phase"],"name":r["name"],"route":r["route"]});
-        for k in ["detail", "linkCode", "sign", "payment", "webLogin"] {
+        for k in ["detail", "linkCode", "sign", "payment", "webLogin", "webOnly"] {
             if !r[k].is_null() {
                 v[k] = r[k].clone();
             }
         }
-        if matches!(r["phase"].as_str(), Some("enrolled" | "sign" | "signed" | "awaiting-payment" | "paid" | "keyed" | "account")) {
+        if r["webOnly"] != true && matches!(r["phase"].as_str(), Some("enrolled" | "sign" | "signed" | "awaiting-payment" | "paid" | "keyed" | "account")) {
             v["login"] = json!(format!("mini-s-{}@{}", r["name"].as_str().unwrap_or(""), self.cfg.login_host));
         }
         self.publish(&format!("{}.json", r["id"].as_str().unwrap_or("x")), &v)
@@ -614,8 +633,13 @@ impl<O: BoxOps> Processor<O> {
                         return self.refuse(r, &why);
                     }
                 }
+                if r["sshKey"].as_str().unwrap_or("").is_empty() {
+                    // Browser-only: the roster line is a key nobody holds; the account has no ssh login.
+                    r["sshKey"] = json!(self.ops.throwaway_key()?);
+                    r["webOnly"] = json!(true);
+                }
                 let entry = self.p.door_friends().join(format!("{name}.pub"));
-                let text = format!("# door request {}\n{} {name}\n", r["id"].as_str().unwrap_or(""), r["sshKey"].as_str().unwrap_or(""));
+                let text = format!("# door request {}{}\n{} {name}\n", r["id"].as_str().unwrap_or(""), if r["webOnly"] == true { " (web-only: the secret of this login key was destroyed)" } else { "" }, r["sshKey"].as_str().unwrap_or(""));
                 std::fs::create_dir_all(self.p.door_friends()).map_err(|e| e.to_string())?;
                 write_atomic(&entry, text.as_bytes(), 0o644)?;
                 let ran = self.ops.render();
@@ -935,6 +959,10 @@ mod tests {
             }
             Ran { ok: true, stdout: String::new(), stderr: String::new() }
         }
+        fn throwaway_key(&self) -> Result<String, String> {
+            self.calls.borrow_mut().push("throwaway-key".into());
+            Ok(KEY2.into())
+        }
         fn tenant_line(&self, name: &str, line: &str) -> Ran {
             self.calls.borrow_mut().push(format!("{name}: {line}"));
             let home = self.p.home(name);
@@ -1017,6 +1045,27 @@ mod tests {
     fn run(w: &mut Processor<Fake>) {
         w.sponsor = None;
         w.run_once().unwrap();
+    }
+
+    #[test]
+    fn a_browser_only_join_gets_a_throwaway_login_key_and_only_the_web_link() {
+        let mut w = world("webonly", false);
+        let r = join("bea", "", Route::Free, false);
+        submit(&w, &r);
+        run(&mut w);
+        let s = status(&w, r.id());
+        assert_eq!(s["phase"], "enrolled", "{s}");
+        assert!(s["login"].is_null(), "no ssh login line: {s}");
+        assert_eq!(s["webOnly"], true);
+        assert!(s["webLogin"].as_str().unwrap().starts_with("https://demo.example/login/"));
+        assert!(w.ops.calls.borrow().contains(&"throwaway-key".to_string()));
+        let entry = std::fs::read_to_string(w.p.door_friends().join("bea.pub")).unwrap();
+        assert!(entry.contains("web-only") && entry.ends_with(&format!("{KEY2} bea\n")), "{entry}");
+        // The schema: an empty sshKey round-trips as a free join, never as a paid one.
+        let bytes = r.to_json().to_string();
+        assert!(matches!(Request::parse(bytes.as_bytes()).unwrap(), Request::Join { ssh_key, .. } if ssh_key.is_empty()));
+        let paid = Request::Join { id: door::new_request_id().unwrap(), at: 1, name: "cy".into(), ssh_key: String::new(), discord: false, route: Route::Paid };
+        assert!(Request::parse(paid.to_json().to_string().as_bytes()).is_err());
     }
 
     #[test]
