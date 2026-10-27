@@ -26,19 +26,51 @@ configuration and request examples.
 ## Runtime, data and state
 
 - **Signed runtime SPK:** Linux Python environment, Oracle code, selected kernels,
-  providers, launcher and the Mini bridge. The v5 package is about 97 MB compressed.
+  providers, launcher and the Mini bridge. The new v6 package is about 97 MB compressed.
 - **Shared public data:** 26 files, about 15 GB, published once by the operator.
   The runtime's signed declaration binds their inventory digest. Mini mounts the
   matching revision read-only at `/opt/oracle-data`; the app cannot choose a host
   path or another dataset. No chunking or reassembly is needed.
 - **Private state:** each grain has a separate writable `/var` for conversation
-  and request history. Two grains can share data without sharing conversations.
+  and request history. The new hosted build divides this into private workspaces
+  for each authenticated source session, with separate request journals. The
+  installed v5 package predates this pool and retains one workspace per grain.
 
 Publication hashes the data; startup checks protected custody metadata. This
 assumes a trusted operator and filesystem. Only deliberately published public
 data is supported. A private dataset would need its own access-control design.
 The [packaging guide](oracle-shared-data-packaging.md) describes the existing
 contract without requiring changes to the SPK format.
+
+## Shared hosting
+
+The new hosted build serves many users and agents from one grain. Mini derives
+the tenant identity from the authenticated principal and source session; callers
+cannot select another tenant by changing a request or conversation ID. A new
+source session gets a new workspace. Two agents using the very same source
+session intentionally share its workspace.
+
+The worker pool bounds resident computation independently of tenant count. The
+initial class-L configuration permits one resident Oracle worker and 128
+persistent workspaces. Idle workers retire before a replacement starts; busy
+capacity returns a retryable refusal. Increasing concurrent workers also needs
+an appropriate memory budget. Runtime files and the public dataset remain
+shared and read-only, while each resident worker has separate process state.
+
+Completed requests replay from disk without starting a worker. Oracle loses
+some conversational context when its worker exits, so a new turn after eviction
+requires a fresh conversation ID and supplied context. The service reports this
+explicitly rather than silently answering without the earlier context.
+
+The new browser page offers questions, operation discovery and direct calls
+through the same routes agents use. It retains exact request bytes for manual
+retry and makes conversation resets explicit. These changes are signed in
+[version 6](../deploy/oracle/runtime-v6.md), whose complete archive and signature
+passed independent verification. A real Linux Engine/bridge run also passed
+tenant separation and exact replay through restart. Mini receiving and the
+full agent lifecycle still need qualification. Version 6 requires a fresh grain;
+it refuses a legacy shared journal rather than guessing its tenant owner.
+See the [bridge contract](oracle-appliance-bridge.md) for the identity boundary.
 
 ## Checked state — 27 October 2026
 
@@ -57,11 +89,12 @@ and request are retained. Agent discovery/calls and the complete restart journey
 still need to pass. Do not resend that uncertain request as a new operation.
 The [v5 evidence](evidence/oracle-u3-acceptance-2026-10-27.json) holds exact state.
 
-The separate, newer veri7vn U5 v2 candidate has 351 direct operations. Its focused
+The veri7vn U5 v2 source composition has 351 direct operations. Its focused
 57-request Engine run observed 37 completed tasks, 13 appropriate refusals or
 clarifications, seven valid tasks still incomplete, and no wrong answers. It
 includes conversation, geometry and transfer-time repairs beyond installed v5;
-it has not yet been signed and received as the next Mini package. Versioned
+that composition is now included in signed v6 with the newer tenant adapter,
+but has not yet completed the new Mini receiving journey. Versioned
 operation counts are not specialist-panel scores or proof of every answer.
 
 Repeated STOP-history inspection on a retained Store fell from roughly 425 s to

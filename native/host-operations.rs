@@ -113,7 +113,7 @@ pub const APPLICATION_LIFECYCLE_CLAIM_PLAN: u8 = 52;
 pub const APPLICATION_LIFECYCLE_CLAIM_ASSEMBLE: u8 = 53;
 // active; operator; owner: spk; effect: append
 pub const GRAIN_SHARE_ISSUE_SUBMIT: u8 = 54;
-// active; operator; owner: spk; effect: none
+// active; public,operator; owner: spk; effect: none
 pub const GRAIN_SHARE_ISSUE_LOOKUP: u8 = 55;
 // active; operator; owner: spk; effect: none
 pub const GRAIN_SHARE_ISSUE_PLAN: u8 = 56;

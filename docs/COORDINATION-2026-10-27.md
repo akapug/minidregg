@@ -153,9 +153,11 @@ regeneration, no decisions ledger, no census of the research tree, no accepted-r
 - **Rehearsal ships every few days with reds named** (`ship.sh --rehearsal`, re-genesis allowed);
   the opening waits for the §1 contract and nothing else (§6 states the gate).
 - No status censuses, no reviews of reviews, no ledgers unless they unblock the ship.
-- **One Lean closure on the build box at a time, and it is the cut's.** `dregg-build` builds the Host
-  closure for the integrator's cut and for the nightly; a lane elaborates per file (`lean-ask`,
-  `lake env lean`) and runs its closure on the Mac's warm `.lake` or waits for the cut (2026-10-27
+- **One Lean closure per box at a time; the cut's is on `dregg-build`, the lanes' on `dregg-ref`.**
+  `dregg-build` builds the Host closure for the integrator's cut; a lane elaborates per file (`lean-ask`,
+  `lake env lean`) and runs its closure on `dregg-ref` (the lanes' second Linux box, shared with
+  nanodregg's announced measurement windows: ember, 2026-10-27 evening, "USE all these machines while we
+  have them"), or on the Mac's warm `.lake`, or waits for the cut (2026-10-27
   afternoon: four concurrent closures put the box at load 25 and a cut's host build was killed by
   memory). A lane that needs a box closure asks the orchestrator for the slot after the cut's host stage.
 - **Design the whole change before the first build.** A Lean change that adds a kind, a field or a

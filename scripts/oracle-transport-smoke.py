@@ -29,6 +29,20 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def probe_tenant(session=3):
+    """Synthetic operator probe identity; never evidence of Mini admission."""
+    tab = b"mini-session-v1\0" + b"".join(n.to_bytes(8, "big") for n in (1, 2, session))
+    return digest(b"mini-oracle-tenant-v1\0" + bytes([1]) * 32 + tab)
+
+
+def adapter_command(args, workspace, port):
+    return [str(args.python), "-B", str(args.adapter),
+            "--runtime", str(args.runtime), "--data-root", str(args.runtime / "root"),
+            "--workspace", str(workspace), "--port", str(port), "--tenant-pool",
+            "--max-resident", "1", "--max-tenants", "8", "--max-request-bytes", "65536",
+            "--query-timeout", "120", "--startup-timeout", "180"]
+
+
 def inventory(root):
     entries = {}
     for path in sorted(root.rglob("*")):
@@ -44,11 +58,13 @@ def inventory(root):
     return entries
 
 
-def direct(port, method, path, data=None, timeout=130):
+def direct(port, method, path, data=None, timeout=130, tenant=None):
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
     try:
-        connection.request(method, path, body=data,
-                           headers={"Content-Type": "application/json", "Connection": "close"})
+        headers = {"Content-Type": "application/json", "Connection": "close"}
+        if path != "/health":
+            headers["X-Mini-Oracle-Tenant"] = probe_tenant() if tenant is None else tenant
+        connection.request(method, path, body=data, headers=headers)
         response = connection.getresponse()
         payload = response.read(MAX_REPLY + 1)
         if len(payload) > MAX_REPLY:
@@ -79,12 +95,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runtime", type=Path, required=True)
     parser.add_argument("--python", type=Path, required=True)
+    parser.add_argument("--adapter", type=Path, help="tenant-aware serve.py; defaults to runtime/adapter/serve.py")
     parser.add_argument("--bridge", type=Path, required=True)
     parser.add_argument("--probe", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True, help="new directory only")
     args = parser.parse_args()
     args.runtime = args.runtime.resolve()
     args.output = args.output.resolve()
+    args.adapter = (args.adapter or args.runtime / "adapter/serve.py").resolve()
+    if not args.adapter.is_file() or not (args.adapter.parent / "tenant_pool.py").is_file():
+        parser.error("adapter must include tenant-aware serve.py and tenant_pool.py")
     for name in ("python", "bridge", "probe"):
         setattr(args, name, getattr(args, name).absolute())  # preserve virtualenv interpreter path
     if args.output == args.runtime or args.runtime in args.output.parents or args.output in args.runtime.parents:
@@ -94,7 +114,9 @@ def main():
     before = inventory(args.runtime)
     (args.output / "inventory-before.json").write_text(json.dumps(before, sort_keys=True))
     report = {"scope": "Real OracleEngine through app fd3; not Mini admission, fleet qualification or specialist panel coverage",
-              "runtime": str(args.runtime), "queries": [], "checks": {}, "owned_adapter_pids": [],
+              "runtime": str(args.runtime), "tenant_key": probe_tenant(),
+              "adapter": str(args.adapter), "adapter_sha256": digest(args.adapter.read_bytes()),
+              "tenant_pool_sha256": digest((args.adapter.parent / "tenant_pool.py").read_bytes()), "queries": [], "checks": {}, "owned_adapter_pids": [],
               "inventory_scope": "all paths/modes/sizes/mtime/ctime/link targets; SHA256 for files <=1MiB; no full store rehash",
               "binary_sha256": {name: digest(getattr(args, name).read_bytes()) for name in ("bridge", "probe")},
               "passed": False}
@@ -108,10 +130,7 @@ def main():
     def start(number):
         log = (args.output / f"adapter-{number}.log").open("wb")
         logs.append(log)
-        command = [str(args.python), "-B", str(args.runtime / "adapter/serve.py"),
-                   "--runtime", str(args.runtime), "--data-root", str(args.runtime / "root"),
-                   "--workspace", str(workspace), "--port", str(port),
-                   "--query-timeout", "120", "--startup-timeout", "180"]
+        command = adapter_command(args, workspace, port)
         child = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT,
                                  close_fds=True, start_new_session=True,
                                  env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
@@ -191,6 +210,16 @@ def main():
         if status != 409 or conflict_reply != direct_conflict or json.loads(conflict_reply).get("error") != "request_id_conflict":
             raise RuntimeError("changed-body conflict was not preserved")
         report["checks"]["changed_body_conflict_409"] = True
+        # Same request/conversation IDs in a different source-session namespace
+        # must not collide with this tenant's durable request journal.
+        other_status, other_reply = direct(port, "POST", "/query", conflict, tenant=probe_tenant(4))
+        if other_status != 200 or "Austen" not in json.loads(other_reply).get("reply", {}).get("response", ""):
+            raise RuntimeError("another tenant inherited the first tenant's request ID or wrong answer")
+        (args.output / "other-tenant.reply.json").write_bytes(other_reply)
+        report["checks"]["same_ids_separate_tenant"] = True
+        if bridge_request("after-other-tenant-replay", requests[0], 200) != replies[0]:
+            raise RuntimeError("tenant switch changed exact original replay")
+        report["checks"]["original_replay_after_tenant_switch_identical"] = True
         stop_owned(adapter)
         adapter = None
         adapter = start(2)

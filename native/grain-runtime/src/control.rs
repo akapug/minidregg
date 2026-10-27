@@ -112,6 +112,14 @@ pub fn start_admin(path: &Path) -> Result<AdminServer, String> {
     })
 }
 
+fn admin_action_timeout(command: &str) -> Duration {
+    // Leave thirty seconds inside the installer's 1800-second outer bound
+    // for the framed reply and process exit. Other admin actions keep 300s.
+    let exact_session = command.strip_prefix("recover foreground session ")
+        .is_some_and(|id| id.len() == 32 && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
+    Duration::from_secs(if exact_session { 1770 } else { 300 })
+}
+
 fn serve_admin_connection(mut stream: UnixStream, tx: SyncSender<AdminRequest>) {
     // The listener is nonblocking; an accepted stream inherits that on BSDs.
     let _ = stream.set_nonblocking(false);
@@ -121,7 +129,8 @@ fn serve_admin_connection(mut stream: UnixStream, tx: SyncSender<AdminRequest>) 
         Ok(command) => {
             let (reply, recv) = mpsc::channel();
             let phase = Arc::new(AtomicU8::new(0));
-            let deadline = Instant::now() + Duration::from_secs(300);
+            let timeout = admin_action_timeout(&command);
+            let deadline = Instant::now() + timeout;
             if tx
                 .try_send(AdminRequest {
                     command,
@@ -133,7 +142,7 @@ fn serve_admin_connection(mut stream: UnixStream, tx: SyncSender<AdminRequest>) 
             {
                 "admin queue full".to_owned()
             } else {
-                match recv.recv_timeout(Duration::from_secs(300)) {
+                match recv.recv_timeout(timeout) {
                     Ok(value) => value,
                     Err(_)
                         if phase
@@ -199,7 +208,7 @@ pub fn admin_call(path: &Path, command: &str) -> Result<String, String> {
     }
     let mut stream = UnixStream::connect(path).map_err(|e| format!("admin connect: {e}"))?;
     stream
-        .set_read_timeout(Some(Duration::from_secs(310)))
+        .set_read_timeout(Some(admin_action_timeout(command) + Duration::from_secs(10)))
         .map_err(|e| e.to_string())?;
     admin_write_frame(&mut stream, command).map_err(|e| e.to_string())?;
     admin_read_frame(&mut stream).map_err(|e| e.to_string())
@@ -1111,5 +1120,17 @@ mod tests {
         assert!(sink.is_empty(), "an oversize reply writes nothing");
         admin_write_frame(&mut sink, "ok").unwrap();
         assert_eq!(admin_read_frame(&mut io::Cursor::new(sink)).unwrap(), "ok");
+    }
+}
+
+#[cfg(test)]
+mod session_recovery_deadline_tests {
+    use super::*;
+    #[test]
+    fn only_exact_recovery_request_gets_extended_admin_deadline() {
+        assert_eq!(admin_action_timeout("recover foreground session 839a6731941b62b1179b4de9c076f0df"), Duration::from_secs(1770));
+        for command in ["reconcile effects", "recover foreground session", "recover foreground session bad", "recover foreground session 839A6731941b62b1179b4de9c076f0df", "recover foreground session 839a6731941b62b1179b4de9c076f0df extra"] {
+            assert_eq!(admin_action_timeout(command), Duration::from_secs(300));
+        }
     }
 }

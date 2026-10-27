@@ -2,6 +2,7 @@
 use capnp::traits::HasTypeId;
 use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
 use futures::AsyncReadExt as _;
+use sha2::{Digest, Sha256};
 use minidregg_spk_rpc::{api_session_capnp, grain_capnp, web_session_capnp as web};
 use std::{
     net::{Ipv4Addr, SocketAddrV4},
@@ -54,21 +55,21 @@ impl Reply {
     }
 }
 
-async fn exchange(config: &Config, method: &str, path: &str, body: &[u8]) -> capnp::Result<Reply> {
+async fn exchange(config: &Config, tenant: &str, method: &str, path: &str, body: &[u8]) -> capnp::Result<Reply> {
     let _permit = match config.slots.clone().try_acquire_owned() {
         Ok(permit) => permit,
         Err(_) => return Ok(Reply::error(429, "bridge_busy")),
     };
-    tokio::time::timeout(config.deadline, http(config.port, method, path, body)).await
+    tokio::time::timeout(config.deadline, http(config.port, tenant, method, path, body)).await
         .map_err(|_| failure("upstream deadline; delivery may be uncertain; retry only the original request ID and bytes"))?
         .map_err(|e| failure(format!("upstream transport failure ({e}); delivery may be uncertain; retry only the original request ID and bytes")))
 }
 
-async fn http(port: u16, method: &str, path: &str, body: &[u8]) -> Result<Reply, String> {
+async fn http(port: u16, tenant: &str, method: &str, path: &str, body: &[u8]) -> Result<Reply, String> {
     let mut stream = TcpStream::connect(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port))
         .await
         .map_err(|e| e.to_string())?;
-    let head = format!("{method} /{path} HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+    let head = format!("{method} /{path} HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nX-Mini-Oracle-Tenant: {tenant}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
     stream
         .write_all(head.as_bytes())
         .await
@@ -223,16 +224,15 @@ fn write_reply(
 fn plain_context(ctx: web::web_session::context::Reader<'_>) -> capnp::Result<bool> {
     Ok(ctx.get_cookies()?.is_empty()
         && ctx.get_additional_headers()?.is_empty()
-        && ctx.get_accept_encoding()?.is_empty()
         && matches!(
             ctx.get_e_tag_precondition().which()?,
             web::web_session::context::e_tag_precondition::None(())
         ))
 }
 
-// JSON is the only representation. A more specific range overrides a wildcard,
+// A more specific range overrides a wildcard,
 // including q=0: `application/json;q=0, */*;q=1` must not receive JSON.
-fn accepts_json(ctx: web::web_session::context::Reader<'_>) -> capnp::Result<bool> {
+fn accepts_mime(ctx: web::web_session::context::Reader<'_>, mime: &str) -> capnp::Result<bool> {
     let accept = ctx.get_accept()?;
     if accept.is_empty() {
         return Ok(true);
@@ -241,8 +241,8 @@ fn accepts_json(ctx: web::web_session::context::Reader<'_>) -> capnp::Result<boo
     for range in accept.iter() {
         let name = range.get_mime_type()?.to_str()?.to_ascii_lowercase();
         let specificity = match name.as_str() {
-            "application/json" => 2,
-            "application/*" => 1,
+            name if name == mime => 2,
+            name if name == format!("{}/*", mime.split('/').next().unwrap()) => 1,
             "*/*" => 0,
             _ => continue,
         };
@@ -255,6 +255,23 @@ fn accepts_json(ctx: web::web_session::context::Reader<'_>) -> capnp::Result<boo
         }
     }
     Ok(best.is_some_and(|(_, quality)| quality > 0.0))
+}
+
+// Identity encoding is acceptable unless explicitly excluded, or excluded by
+// a zero-quality wildcard without a more specific identity preference.
+fn accepts_identity(ctx: web::web_session::context::Reader<'_>) -> capnp::Result<bool> {
+    let mut identity = None;
+    let mut wildcard = None;
+    for value in ctx.get_accept_encoding()?.iter() {
+        let q = value.get_q_value();
+        if !q.is_finite() || !(0.0..=1.0).contains(&q) { return Ok(false); }
+        match value.get_content_coding()?.to_str()?.to_ascii_lowercase().as_str() {
+            "identity" => identity = Some(identity.map_or(q, |old: f32| old.max(q))),
+            "*" => wildcard = Some(wildcard.map_or(q, |old: f32| old.max(q))),
+            _ => (),
+        }
+    }
+    Ok(identity.or(wildcard).is_none_or(|q| q > 0.0))
 }
 
 fn operation_id(value: &str) -> bool {
@@ -312,6 +329,23 @@ fn get_path_error(path: &str) -> Option<Reply> {
     Some(Reply::error(404, "route_not_found"))
 }
 
+/// Only Mini's source-inspected newSession identity/tab enter this namespace.
+/// Display names, HTTP headers and JSON conversation IDs never select a tenant.
+fn tenant_key(identity: &[u8], tab: &[u8]) -> capnp::Result<String> {
+    const PREFIX: &[u8] = b"mini-session-v1\0";
+    if identity.len() != 32 || identity.iter().all(|b| *b == 0)
+        || tab.len() != PREFIX.len() + 24 || !tab.starts_with(PREFIX)
+        || tab[PREFIX.len()..].chunks_exact(8).any(|n| n.iter().all(|b| *b == 0))
+    {
+        return Err(failure("Mini authenticated principal and source session binding required"));
+    }
+    let mut hash = Sha256::new();
+    hash.update(b"mini-oracle-tenant-v1\0");
+    hash.update(identity);
+    hash.update(tab);
+    Ok(hash.finalize().iter().map(|b| format!("{b:02x}")).collect())
+}
+
 struct MainView(Config);
 impl grain_capnp::ui_view::Server for MainView {
     async fn get_view_info(
@@ -325,7 +359,7 @@ impl grain_capnp::ui_view::Server for MainView {
         p.set_name("query");
         p.reborrow().init_title().set_default_text("Ask questions");
         p.init_description()
-            .set_default_text("Use this appliance's shared conversation workspace");
+            .set_default_text("Use a session-isolated workspace on a bounded shared Oracle runtime");
         let mut r = info.init_roles(1).get(0);
         r.reborrow().init_title().set_default_text("Researcher");
         r.reborrow()
@@ -351,11 +385,13 @@ impl grain_capnp::ui_view::Server for MainView {
                 "only WebSession/ApiSession supported".into(),
             ));
         }
-        let permissions = params.get_user_info()?.get_permissions()?;
+        let user = params.get_user_info()?;
+        let tenant = tenant_key(user.get_identity_id()?, params.get_tab_id()?)?;
+        let permissions = user.get_permissions()?;
         if permissions.len() != 1 || !permissions.get(0) {
             return Err(failure("query permission is required"));
         }
-        let session: web::web_session::Client = capnp_rpc::new_client(Session(self.0.clone()));
+        let session: web::web_session::Client = capnp_rpc::new_client(Session { config: self.0.clone(), tenant });
         results.get().set_session(grain_capnp::ui_session::Client {
             client: session.client,
         });
@@ -363,7 +399,7 @@ impl grain_capnp::ui_view::Server for MainView {
     }
 }
 impl grain_capnp::main_view::Server<capnp::data::Owned> for MainView {}
-struct Session(Config);
+struct Session { config: Config, tenant: String }
 impl grain_capnp::ui_session::Server for Session {}
 impl web::web_session::Server for Session {
     async fn get(
@@ -373,16 +409,25 @@ impl web::web_session::Server for Session {
     ) -> capnp::Result<()> {
         let params = params.get()?;
         let path = params.get_path()?.to_str()?;
+        if path.is_empty() && plain_context(params.get_context()?)? && !params.get_ignore_body()
+            && accepts_mime(params.get_context()?, "text/html")? && accepts_identity(params.get_context()?)?
+        {
+            let mut response = results.get().init_content();
+            response.set_status_code(web::web_session::response::SuccessCode::Ok);
+            response.set_mime_type("text/html; charset=utf-8");
+            response.init_body().set_bytes(include_bytes!("index.html"));
+            return Ok(());
+        }
         let reply = if !plain_context(params.get_context()?)? {
             Reply::error(400, "context_unsupported")
-        } else if !accepts_json(params.get_context()?)? {
+        } else if !accepts_mime(params.get_context()?, "application/json")? || !accepts_identity(params.get_context()?)? {
             Reply::error(406, "json_not_acceptable")
         } else if let Some(error) = get_path_error(path) {
             error
         } else if params.get_ignore_body() {
             Reply::error(405, "head_unsupported")
         } else {
-            exchange(&self.0, "GET", path, &[]).await?
+            exchange(&self.config, &self.tenant, "GET", path, &[]).await?
         };
         write_reply(results.get(), reply)
     }
@@ -397,7 +442,7 @@ impl web::web_session::Server for Session {
         let bytes = content.get_content()?;
         let reply = if !plain_context(params.get_context()?)? {
             Reply::error(400, "context_unsupported")
-        } else if !accepts_json(params.get_context()?)? {
+        } else if !accepts_mime(params.get_context()?, "application/json")? || !accepts_identity(params.get_context()?)? {
             Reply::error(406, "json_not_acceptable")
         } else if !matches!(path, "query" | "invoke") {
             Reply::error(404, "route_not_found")
@@ -408,7 +453,7 @@ impl web::web_session::Server for Session {
         {
             Reply::error(415, "json_required")
         } else {
-            exchange(&self.0, "POST", path, bytes).await?
+            exchange(&self.config, &self.tenant, "POST", path, bytes).await?
         };
         write_reply(results.get(), reply)
     }
@@ -429,4 +474,29 @@ pub fn connection(stream: UnixStream, config: Config) -> RpcSystem<rpc_twoparty_
         },
     );
     RpcSystem::new(Box::new(net), Some(main.client))
+}
+
+#[cfg(test)]
+mod tenant_tests {
+    use super::*;
+    #[test]
+    fn tenant_namespace_requires_exact_source_identity_and_tab() {
+        let tab = [b"mini-session-v1\0".as_slice(), &1_u64.to_be_bytes(), &2_u64.to_be_bytes(), &3_u64.to_be_bytes()].concat();
+        assert_eq!(tab.len(), 40);
+        let key = tenant_key(&[1; 32], &tab).unwrap();
+        assert_eq!(key.len(), 64);
+        assert_eq!(key, "7ee2ad3454d58f2cda8213344f2e3432fb41b894687ea992ccf8e99a1e6b124c");
+        assert!(key.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
+        for identity in [vec![], vec![1;31], vec![1;33], vec![0;32]] {
+            assert!(tenant_key(&identity, &tab).is_err());
+        }
+        for bad in [vec![], tab[..39].to_vec(), [tab.as_slice(), &[0]].concat()] {
+            assert!(tenant_key(&[1;32], &bad).is_err());
+        }
+        for offset in [16,24,32] {
+            let mut bad=tab.clone();bad[offset..offset+8].fill(0);
+            assert!(tenant_key(&[1;32], &bad).is_err());
+        }
+        let mut bad=tab.clone();bad[0]=b'X';assert!(tenant_key(&[1;32], &bad).is_err());
+    }
 }

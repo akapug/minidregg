@@ -686,10 +686,11 @@
       "symbol": "GRAIN_SHARE_ISSUE_LOOKUP",
       "status": "active",
       "routes": [
+        "public",
         "operator"
       ],
       "owner": "spk",
-      "purpose": "grain share issue lookup",
+      "purpose": "Read-only exact-ingress original event-22 receipt lookup from the verified history; no issue submit or current authority grant",
       "receiver": "fnDispatch",
       "effect": "none"
     },
