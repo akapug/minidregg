@@ -87,7 +87,9 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "publish", usage: "publish ID", operation: "mini workspace --action publish-delegation --proposal-id ID --attempt attempts/ID" },
     Verb { name: "revoke", usage: "revoke ID REF RECIPIENT", operation: "mini workspace --action propose (action revoke: the capability this workspace delegated on REF to RECIPIENT)" },
     Verb { name: "renounce", usage: "renounce ID REF | renounce ID CAPABILITY [object|account|program]", operation: "mini workspace --action propose (action renounce: give up a capability you hold, and with it everything delegated from it)" },
-    Verb { name: "doc", usage: "doc app-export capture ID @FILE | doc app-export publish|status|recover ID | doc app-export rebase ID NEXT | doc search QUERY NAME[,NAME...]|@held [OFFSET CURSOR] | doc hit NAME DOCUMENT ATOM REVISION | doc device | doc share ID NAME SUBJECT @DEVICE @INVITATION | doc accept NAME CATALOG @INVITATION | doc revoke ID NAME SUBJECT | doc membership-recover ID NAME [@INVITATION] | doc protect NAME | doc protect-current NAME | doc protect-recover NAME | doc epoch-export NAME @FILE | doc epoch-import NAME CATALOG @FILE | doc new NAME [draft|note|index|LAW] [--in ROOM] | doc show NAME [--at H] [--raw|--json|--html] | doc outline NAME | doc history NAME [--json|--html] | doc diff NAME H1 H2 [--json|--html] | doc pull NAME | doc push ID NAME @FILE|@- | doc append ID NAME TEXT|@FILE | doc edit ID NAME LINE TEXT|@FILE | doc insert NAME N TEXT|@FILE | doc move NAME FROM TO | doc remove NAME N | doc mark NAME LINE bold|italic|code|heading|link [TARGET] | doc unmark NAME MARK | doc unmark NAME LINE KIND | doc annotate ID NAME LINE TEXT|@FILE | doc link ID FROM TO [RELATION] | doc links NAME | doc backlinks NAME | doc range NAME FROM TO | doc transclude NAME SOURCE FROM TO [snapshot|live] [at N] | doc transclusions NAME | doc follow NAME T", operation: "mini workspace --action doc-new (a content cell and its document) | doc-show [--at H] [--format raw|json|html] | doc-outline | doc-history | doc-diff | doc-pull | doc-push (propose payload document: push, then submit) | propose (payload document: append, edit, annotate, link) | doc-insert | doc-move | doc-remove | mark | unmark | doc-links | doc-backlinks (the Host's link index) | doc-range (createRun) | transclude (--from-line --to-line) | transclusions | follow" },
+    // `doc` is the first verb whose grammar is data (shell_grammar::DOC): its usage and operation
+    // are rendered from it by `command_catalog`; this row only holds its place in the order.
+    Verb { name: "doc", usage: "", operation: "" },
     Verb { name: "forget", usage: "forget ROOM [EPOCH]", operation: "mini workspace --action room-key --op forget: delete this client's copies of a private room's keys (all epochs, or one). A promise of this client only: the wraps stay in the room's keys cell, so your encryption key could still open them until the room is rotated (room rotate). Private rooms: devnet quality; privacy not audited" },
     Verb { name: "room", usage: "room index ID ROOM INDEX-DOC | room bind ID ROOM NAME TARGET | room rename ID ROOM NAME NEW-NAME | room unbind ID ROOM NAME | room resolve ROOM/NAME | room new NAME [--law open|realm] [--referee SUBJECT] [--in PARENT] | room new NAME --private [--in PARENT] | room new NAME --template workroom|social|story|@FILE | room welcome NAME SUBJECT --template T|@FILE | room template list | room template show T|@FILE [member] | room invite ID NAME SUBJECT [DECLARATION|KEY-ID|@FILE] [--past] [--i-know] [--verbs V,...] [--fields F,...] [--max-delta F=N,...] [--max-cost N] | room kick ID NAME SUBJECT | room seal ID NAME --freeze-roster | room rotate ID NAME | room transition ID NAME NEXTFILE | room register ID NAME | room rewrap ID NAME SUBJECT | room keys NAME | room leave ID NAME | room members NAME | room list | room ls [ROOM] [--since H] [--import] [--json] | room law NAME | room status NAME | room renew NAME SUBJECT [--for N|--until H] | room concierge NAME SUBJECT [--period N] [--fund N] | room new NAME [--template T] --concierge SUBJECT [--period N]", operation: "mini workspace --action create (storage declared, the room's law, --room-template LAW; private [DEVNET QUALITY; PRIVACY NOT AUDITED]: + the room key, the keys cell, your own wrap) | the template's lines, each one typed line, in order | the template's member lines | local | local: print the template file | propose (action delegate, room: true; private: room-key --op invite, which also releases the room key to the invitee's hybrid X25519 + ML-KEM-768 key in one keys write) | room-kick: one revoke per standing grant SUBJECT holds under NAME (the Host's signed who view: the invite, a concierge's window, any other), proposed; `submit ID` submits them all (private: room-key --op kick = every revoke + rotate + rewrap, submitted) | propose (action install-policy, `sealed`): sealing a room freezes its membership forever (no invite, no kick, while members keep the cells under it), so it needs --freeze-roster | room-key --op rotate | room-key --op transition (founder: hand the room to your next signing key before rotate-key) | room-key --op list (local) | propose (action renounce, leave: your room grant) | who | local: references that are rooms | chat: the Host's signed since view under the room grant, with the roster's streams and my names (--import names the rest ROOM-cell-ID) | describe | mini credit --action status (my window, the tariff, the till; adopts a newer window from HOME/inbox) | mini credit --action renew (one delegation under the room with notAfter; copy in HOME/outbox/SUBJECT) | mini credit --action install (the till, the runner account, the tariff's account fields, the concierge's grants; program in HOME/concierge/NAME.json) | the room's lines, then `room concierge`" },
     Verb { name: "board", usage: "board new NAME | board add ID BOARD TASK | board move ID BOARD TASK FROM TO | board take ID BOARD TASK", operation: "mini workspace --action create (storage declared, the board law) | propose (action invoke: task TASK state is field 2*TASK+2, owner field 2*TASK+3)" },
@@ -108,7 +110,25 @@ pub(crate) const VERBS: &[Verb] = &[
 /// One command catalog for help, completion and member action discovery.
 /// The owning modules keep their actual grammars; callers use this iterator.
 pub(crate) fn command_catalog() -> impl Iterator<Item = &'static Verb> {
-    VERBS.iter().chain(crate::chat::VERBS).chain(crate::hermes::VERBS).chain(crate::story::VERBS)
+    VERBS.iter().chain(crate::chat::VERBS).chain(crate::hermes::VERBS).chain(crate::story::VERBS).map(rendered_row)
+}
+
+/// A verb whose grammar is data (`shell_grammar::GRAMMARS`) shows the usage and operation rendered
+/// from it, once per process; every other verb shows its hand-written row.
+fn rendered_row(verb: &'static Verb) -> &'static Verb {
+    static ROWS: std::sync::OnceLock<Vec<Verb>> = std::sync::OnceLock::new();
+    let Some(_) = crate::shell_grammar::grammar(verb.name) else { return verb };
+    let rows = ROWS.get_or_init(|| {
+        crate::shell_grammar::GRAMMARS
+            .iter()
+            .map(|g| Verb {
+                name: g.verb,
+                usage: Box::leak(crate::shell_grammar::usage(g).into_boxed_str()),
+                operation: Box::leak(crate::shell_grammar::operation(g).into_boxed_str()),
+            })
+            .collect()
+    });
+    rows.iter().find(|r| r.name == verb.name).unwrap_or(verb)
 }
 
 /// Subcommands spelled by the command's actual usage, without another table.
@@ -1253,142 +1273,74 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             client("workspace", flags)
         }
         "doc" => {
-            let Some(action) = w.get(1) else {
-                return Err(u.to_owned());
+            // The grammar does the counting and the checking; each leaf keeps only its semantics.
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::DOC, &w)?;
+            let requests = |file: &str| session.home.join("requests").join(file.trim_start_matches('@'));
+            let session_file_of = |value: &str, label: &str| -> std::result::Result<PathBuf, String> {
+                let file = value.strip_prefix('@').ok_or_else(|| format!("{label} uses @FILE in HOME/requests"))?;
+                session_file(file, label)?;
+                Ok(session.home.join("requests").join(file))
             };
-            match action.as_str() {
-                "app-export" => {
-                    let op = w.get(2).map(String::as_str).ok_or("doc app-export capture ID @FILE | doc app-export publish|status|recover ID | doc app-export rebase ID NEXT")?;
-                    let id = w.get(3).ok_or("doc app-export needs an operation ID")?;
-                    workspace_name(id,"operation ID")?;
-                    let mut flags = vec![flag("action","app-document"),flag("dir",ws()),flag("op",op),flag("id",id)];
-                    match op {
-                        "capture" if w.len()==5 => {
-                            let file=w[4].strip_prefix('@').ok_or("doc app-export capture takes @FILE in HOME/requests")?;
-                            session_file(file,"app export binding")?;
-                            flags.push(flag("binding",session.home.join("requests").join(file)));
-                        }
-                        "publish" | "status" | "recover" if w.len()==4 => {}
-                        "rebase" if w.len()==5 => {
-                            workspace_name(&w[4],"next operation ID")?;
-                            flags.push(flag("next",&w[4]));
-                        }
-                        _ => return Err("doc app-export capture ID @FILE | doc app-export publish|status|recover ID | doc app-export rebase ID NEXT".into()),
+            match p.leaf.path {
+                ["doc", "app-export", "capture"] => client("workspace", vec![flag("action", "app-document"), flag("dir", ws()), flag("op", "capture"), flag("id", p.arg(0)), flag("binding", session_file_of(p.arg(1), "app export binding")?)]),
+                ["doc", "app-export"] => client("workspace", vec![flag("action", "app-document"), flag("dir", ws()), flag("op", p.arg(0)), flag("id", p.arg(1))]),
+                ["doc", "app-export", "rebase"] => client("workspace", vec![flag("action", "app-document"), flag("dir", ws()), flag("op", "rebase"), flag("id", p.arg(0)), flag("next", p.arg(1))]),
+                ["doc", "device"] => client("workspace", vec![flag("action", "doc-device"), flag("dir", ws())]),
+                ["doc", "share"] => client("workspace", vec![flag("action", "doc-share"), flag("dir", ws()), flag("change", p.arg(0)), flag("name", p.arg(1)), flag("subject", p.arg(2)),
+                    flag("device", session_file_of(p.arg(3), "document sharing file")?), flag("output", session_file_of(p.arg(4), "document sharing file")?)]),
+                ["doc", "revoke"] => client("workspace", vec![flag("action", "doc-revoke"), flag("dir", ws()), flag("change", p.arg(0)), flag("name", p.arg(1)), flag("subject", p.arg(2))]),
+                ["doc", "membership-recover"] => {
+                    let mut flags = vec![flag("action", "doc-membership-recover"), flag("dir", ws()), flag("change", p.arg(0)), flag("name", p.arg(1))];
+                    if let Some(Some(invitation)) = p.args.get(2) {
+                        flags.push(flag("output", session_file_of(invitation, "invitation")?));
                     }
-                    Plan::Client {command:"workspace".into(),flags,writes:vec![]}
-                }
-                "device" => {
-                    arity(&w, 1, 1, u)?;
-                    client("workspace", vec![flag("action", "doc-device"), flag("dir", ws())])
-                }
-                "share" | "revoke" => {
-                    let count=if action=="share"{6}else{4};arity(&w,count,count,u)?;
-                    workspace_name(&w[2],"membership change")?;ref_name(&w[3],"document name")?;
-                    decimal(&w[4],"member subject")?;
-                    let mut flags=vec![flag("action",format!("doc-{action}")),flag("dir",ws()),
-                        flag("change",w[2].clone()),flag("name",w[3].clone()),flag("subject",w[4].clone())];
-                    if action=="share" {
-                        for (argument,key) in [(&w[5],"device"),(&w[6],"output")] {
-                            let file=argument.strip_prefix('@').ok_or("document sharing uses @FILE in requests")?;
-                            session_file(file,"document sharing file")?;flags.push(flag(key,session.home.join("requests").join(file)));
-                        }
-                    }
-                    client("workspace",flags)
-                }
-                "membership-recover" => {
-                    arity(&w,3,4,u)?;workspace_name(&w[2],"membership change")?;ref_name(&w[3],"document name")?;
-                    let mut flags=vec![flag("action","doc-membership-recover"),flag("dir",ws()),flag("change",w[2].clone()),flag("name",w[3].clone())];
-                    if let Some(argument)=w.get(4){let file=argument.strip_prefix('@').ok_or("invitation uses @FILE in requests")?;
-                        session_file(file,"invitation")?;flags.push(flag("output",session.home.join("requests").join(file)));}
-                    client("workspace",flags)
-                }
-                "accept" => {
-                    arity(&w,4,4,u)?;ref_name(&w[2],"document name")?;ref_name(&w[3],"catalog name")?;
-                    let file=w[4].strip_prefix('@').ok_or("invitation uses @FILE in requests")?;session_file(file,"invitation")?;
-                    client("workspace",vec![flag("action","doc-accept"),flag("dir",ws()),flag("name",w[2].clone()),
-                        flag("catalog",w[3].clone()),flag("bundle",session.home.join("requests").join(file))])
-                }
-                "protect" | "protect-current" | "protect-recover" => {
-                    arity(&w, 2, 2, u)?;
-                    ref_name(&w[2], "document name")?;
-                    client("workspace", vec![flag("action", format!("doc-{action}")), flag("dir", ws()), flag("name", w[2].clone())])
-                }
-                "epoch-export" | "epoch-import" => {
-                    let count = if action == "epoch-export" { 3 } else { 4 };
-                    arity(&w, count, count, u)?;
-                    ref_name(&w[2], "document name")?;
-                    let file = w[count].strip_prefix('@').ok_or("epoch bundles use @FILE in your requests directory")?;
-                    session_file(file, "epoch bundle")?;
-                    let mut flags = vec![flag("action", format!("doc-{action}")), flag("dir", ws()), flag("name", w[2].clone())];
-                    if action == "epoch-import" {
-                        ref_name(&w[3], "device catalog reference")?;
-                        flags.push(flag("catalog", w[3].clone()));
-                    }
-                    flags.push(flag(if action == "epoch-export" { "output" } else { "bundle" }, session.home.join("requests").join(file)));
                     client("workspace", flags)
                 }
-                "context" => {
-                    if !matches!(w.len(),3|5) {return Err("doc context NAME [MAX-ROWS MAX-BYTES]".into());}
-                    ref_name(&w[2],"context document")?;
-                    let mut flags=vec![flag("action","doc-context"),flag("dir",ws()),flag("name",w[2].clone())];
-                    if w.len()==5 {flags.push(flag("max-rows",w[3].clone()));flags.push(flag("max-bytes",w[4].clone()));}
-                    client("workspace",flags)
+                ["doc", "accept"] => client("workspace", vec![flag("action", "doc-accept"), flag("dir", ws()), flag("name", p.arg(0)), flag("catalog", p.arg(1)), flag("bundle", session_file_of(p.arg(2), "invitation")?)]),
+                ["doc", action @ ("protect" | "protect-current" | "protect-recover")] => client("workspace", vec![flag("action", format!("doc-{action}")), flag("dir", ws()), flag("name", p.arg(0))]),
+                ["doc", "epoch-export"] => client("workspace", vec![flag("action", "doc-epoch-export"), flag("dir", ws()), flag("name", p.arg(0)), flag("output", session_file_of(p.arg(1), "epoch bundle")?)]),
+                ["doc", "epoch-import"] => client("workspace", vec![flag("action", "doc-epoch-import"), flag("dir", ws()), flag("name", p.arg(0)), flag("catalog", p.arg(1)), flag("bundle", session_file_of(p.arg(2), "epoch bundle")?)]),
+                ["doc", "context"] => {
+                    let mut flags = vec![flag("action", "doc-context"), flag("dir", ws()), flag("name", p.arg(0))];
+                    match (p.args.get(1).copied().flatten(), p.args.get(2).copied().flatten()) {
+                        (None, None) => {}
+                        (Some(rows), Some(bytes)) => { flags.push(flag("max-rows", rows)); flags.push(flag("max-bytes", bytes)); }
+                        _ => return Err("doc context NAME [MAX-ROWS MAX-BYTES]".into()),
+                    }
+                    client("workspace", flags)
                 }
-                "review" => {
-                    arity(&w,4,4,"doc review ID @CONTEXT @REQUEST")?;
-                    workspace_name(&w[2],"review proposal")?;
-                    let context=w[3].strip_prefix('@').ok_or("review context uses @FILE")?;
-                    let request=w[4].strip_prefix('@').ok_or("review request uses @FILE")?;
-                    session_file(context,"review context")?;session_file(request,"review request")?;
-                    client("workspace",vec![flag("action","context-review"),flag("dir",ws()),
-                        flag("proposal-id",w[2].clone()),flag("context",session.home.join("requests").join(context)),
-                        flag("request",session.home.join("requests").join(request))])
+                ["doc", "review"] => client("workspace", vec![flag("action", "context-review"), flag("dir", ws()), flag("proposal-id", p.arg(0)),
+                    flag("context", session_file_of(p.arg(1), "review context")?), flag("request", session_file_of(p.arg(2), "review request")?)]),
+                ["doc", "search"] => {
+                    let mut flags = vec![flag("action", "doc-search"), flag("dir", ws()), flag("text", p.arg(0)), flag("scope", p.arg(1))];
+                    match (p.args.get(2).copied().flatten(), p.args.get(3).copied().flatten()) {
+                        (None, None) => {}
+                        (Some(offset), Some(cursor)) => { flags.push(flag("offset", offset)); flags.push(flag("cursor", cursor)); }
+                        _ => return Err("doc search QUERY NAME[,NAME...]|@held [OFFSET CURSOR]".into()),
+                    }
+                    client("workspace", flags)
                 }
-                "search" => {
-                    if !matches!(w.len(), 4 | 6) { return Err("doc search QUERY NAME[,NAME...]|@held [OFFSET CURSOR]".into()); }
-                    let mut flags = vec![flag("action","doc-search"),flag("dir",ws()),flag("text",w[2].clone()),flag("scope",w[3].clone())];
-                    if w.len()==6 { flags.push(flag("offset",w[4].clone())); flags.push(flag("cursor",w[5].clone())); }
-                    client("workspace",flags)
-                }
-                "hit" => {
-                    arity(&w,5,5,"doc hit NAME DOCUMENT ATOM REVISION")?;
-                    client("workspace",vec![flag("action","doc-search-follow"),flag("dir",ws()),flag("name",w[2].clone()),
-                        flag("target",w[3].clone()),flag("atom",w[4].clone()),flag("revision",w[5].clone())])
-                }
-
-                "new" => {
-                    arity(&w, 2, 3, u)?;
-                    ref_name(&w[2], "document name")?;
-                    // `draft`, `note`, or the document's own law in the law
-                    // grammar (one word: quote it), JSON, or `@FILE`.
-                    let law = match w.get(3).map(String::as_str).unwrap_or("draft") {
+                ["doc", "hit"] => client("workspace", vec![flag("action", "doc-search-follow"), flag("dir", ws()), flag("name", p.arg(0)), flag("target", p.arg(1)), flag("atom", p.arg(2)), flag("revision", p.arg(3))]),
+                ["doc", "new"] => {
+                    // `draft`, `note`, `index`, or the document's own law in the law grammar (one
+                    // word: quote it), JSON, or `@FILE`.
+                    let law = match p.args.get(1).copied().flatten().unwrap_or("draft") {
                         stock @ ("draft" | "note" | "index") => document_law(stock).expect("stock document law"),
-                        _ => law_argument(session, &w[3..4])?,
+                        other => law_argument(session, &[other.to_owned()])?,
                     };
-                    let path = session.home.join("requests").join(format!("create-{}.json", ref_file(&w[2])));
-                    let mut flags = vec![
-                        flag("action", "doc-new"),
-                        flag("dir", ws()),
-                        flag("name", w[2].clone()),
-                        flag("predicate", path.clone()),
-                    ];
+                    let path = requests(&format!("create-{}.json", ref_file(p.arg(0))));
+                    let mut flags = vec![flag("action", "doc-new"), flag("dir", ws()), flag("name", p.arg(0)), flag("predicate", path.clone())];
                     if let Some(room) = &room {
                         flags.push(flag("in", room.clone()));
                     }
-                    Plan::Client {
-                        command: "workspace".into(),
-                        flags,
-                        writes: vec![request_file(path, &law)],
-                    }
+                    Plan::Client { command: "workspace".into(), flags, writes: vec![request_file(path, &law)] }
                 }
-                "show" | "outline" | "history" | "diff" | "pull" | "range" | "mark" | "unmark" | "insert"
-                | "move" | "remove" | "transclude" | "transclusions" | "follow" | "links" | "backlinks" => {
+                ["doc", "show" | "outline" | "history" | "diff" | "pull" | "range" | "mark" | "unmark" | "insert" | "move" | "remove" | "transclude" | "transclusions" | "follow" | "links" | "backlinks"] => {
+                    // The render verbs keep their own flag mapping (`doc_render::doc_flags`); the grammar
+                    // has already checked the words.
                     let mut words = w.clone();
-                    if action == "insert" && words.len() == 5 {
+                    if p.leaf.path[1] == "insert" {
                         words[4] = text_argument(session, &words[4])?;
-                    }
-                    if let Some(name) = words.get(2) {
-                        ref_name(name, "document name")?;
                     }
                     let mut flags: Vec<(String, OsString)> = doc_render::doc_flags(&words)
                         .map_err(|message| message.strip_prefix("usage: ").map(str::to_owned).unwrap_or(message))?
@@ -1398,78 +1350,26 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                     flags.insert(1, flag("dir", ws()));
                     client("workspace", flags)
                 }
-                "push" => {
-                    arity(&w, 4, 4, u)?;
-                    workspace_name(&w[2], "proposal ID")?;
-                    ref_name(&w[3], "document name")?;
-                    // @FILE is HOME/requests/FILE; @- is standard input
-                    // (`ssh … doc push ID NAME @- < f.md`).
-                    let file = match w[4].strip_prefix('@') {
-                        Some("-") => PathBuf::from("-"),
-                        Some(file) => {
-                            session_file(file, "pushed file")?;
-                            session.home.join("requests").join(file)
-                        }
-                        None => return Err("doc push takes the file as @FILE or @-".into()),
-                    };
-                    client(
-                        "workspace",
-                        vec![
-                            flag("action", "doc-push"),
-                            flag("dir", ws()),
-                            flag("name", w[3].clone()),
-                            flag("file", file),
-                            flag("proposal-id", w[2].clone()),
-                            flag("attempt", ws().join("attempts").join(&w[2])),
-                        ],
-                    )
+                ["doc", "push"] => {
+                    // @FILE is HOME/requests/FILE; @- is standard input (`ssh … doc push ID NAME @- < f.md`).
+                    let file = if p.arg(2) == "@-" { PathBuf::from("-") } else { session_file_of(p.arg(2), "pushed file")? };
+                    client("workspace", vec![flag("action", "doc-push"), flag("dir", ws()), flag("name", p.arg(1)), flag("file", file), flag("proposal-id", p.arg(0)), flag("attempt", ws().join("attempts").join(p.arg(0)))])
                 }
-                "append" => {
-                    arity(&w, 4, 4, u)?;
-                    workspace_name(&w[2], "proposal ID")?;
-                    ref_name(&w[3], "document name")?;
-                    let text = text_argument(session, &w[4])?;
-                    document_proposal(session, &w[2], &w[3], json!({"type":"append","text":text}))
+                ["doc", "append"] => {
+                    let text = text_argument(session, p.arg(2))?;
+                    document_proposal(session, p.arg(0), p.arg(1), json!({"type":"append","text":text}))
                 }
-                "edit" => {
-                    arity(&w, 5, 5, u)?;
-                    workspace_name(&w[2], "proposal ID")?;
-                    ref_name(&w[3], "document name")?;
-                    decimal(&w[4], "line")?;
-                    let text = text_argument(session, &w[5])?;
-                    document_proposal(
-                        session,
-                        &w[2],
-                        &w[3],
-                        json!({"type":"edit","line":w[4],"text":text}),
-                    )
+                ["doc", "edit"] => {
+                    let text = text_argument(session, p.arg(3))?;
+                    document_proposal(session, p.arg(0), p.arg(1), json!({"type":"edit","line":p.arg(2),"text":text}))
                 }
-                "link" => {
-                    arity(&w, 4, 5, u)?;
-                    workspace_name(&w[2], "proposal ID")?;
-                    ref_name(&w[3], "document name")?;
-                    ref_name(&w[4], "document name")?;
-                    let relation = w.get(5).cloned().unwrap_or_else(|| "0".into());
-                    decimal(&relation, "relation")?;
-                    document_proposal(
-                        session,
-                        &w[2],
-                        &w[3],
-                        json!({"type":"link","to":w[4],"relation":relation}),
-                    )
+                ["doc", "annotate"] => {
+                    let text = text_argument(session, p.arg(3))?;
+                    document_proposal(session, p.arg(0), p.arg(1), json!({"type":"annotate","line":p.arg(2),"text":text}))
                 }
-                "annotate" => {
-                    arity(&w, 5, 5, u)?;
-                    workspace_name(&w[2], "proposal ID")?;
-                    ref_name(&w[3], "document name")?;
-                    decimal(&w[4], "line")?;
-                    let text = text_argument(session, &w[5])?;
-                    document_proposal(
-                        session,
-                        &w[2],
-                        &w[3],
-                        json!({"type":"annotate","line":w[4],"text":text}),
-                    )
+                ["doc", "link"] => {
+                    let relation = p.args.get(3).copied().flatten().unwrap_or("0");
+                    document_proposal(session, p.arg(0), p.arg(1), json!({"type":"link","to":p.arg(2),"relation":relation}))
                 }
                 _ => return Err(u.to_owned()),
             }
@@ -3740,8 +3640,8 @@ mod tests {
     #[test]
     fn usage_errors_name_the_usage() {
         let s = session();
-        assert_eq!(plan(&s, "submit").unwrap_err(), "submit ID");
-        assert_eq!(render(&Ending::Usage(plan(&s, "submit").unwrap_err())).1, "usage: submit ID\n");
+        assert_eq!(plan(&s, "submit").unwrap_err(), "submit ID [--lose-reply-once]");
+        assert_eq!(render(&Ending::Usage(plan(&s, "submit").unwrap_err())).1, "usage: submit ID [--lose-reply-once]\n");
         assert!(plan(&s, "frobnicate").unwrap_err().starts_with("unknown verb"));
         assert!(plan(&s, "invoke x shared delete 2").is_err());
         assert!(plan(&s, "init k notanumber").is_err());
@@ -4091,7 +3991,9 @@ mod tests {
         ] {
             assert_eq!(client(plan(&s, line).unwrap()).1, pairs(&want), "{line}");
         }
-        assert!(plan(&s, "doc mark paper 2 underline").unwrap_err().starts_with("unknownKind: underline"));
+        // The grammar refuses an unknown mark kind by name before any client operation.
+        let unknown = plan(&s, "doc mark paper 2 underline").unwrap_err();
+        assert!(unknown.contains("must be one of") && unknown.contains("underline"), "{unknown}");
         assert!(plan(&s, "doc show ../paper").is_err());
         for bad in ["doc", "doc show", "doc append p1 paper", "doc edit e1 paper x 'y'",
             "doc append p1 ../paper x", "doc append p1 paper @../../etc/passwd", "doc link l1 a b c"] {
