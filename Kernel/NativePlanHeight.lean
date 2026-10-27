@@ -59,6 +59,47 @@ def pinSlot (height : Nat) (slot : SigningSlot) : Except String SigningSlot := d
   return { slot with header := (CredentialSignedEnvelopeController.headerCodec.encode
     (pinHeader height header)) }
 
+/-- `pinSlot` changes the slot's header only, to the same header with its deadline
+pinned (`pinHeader`); role and index are untouched. -/
+theorem pinSlot_only_header (height : Nat) (slot pinned : SigningSlot)
+    (ok : pinSlot height slot = .ok pinned) :
+    pinned.role = slot.role ∧ pinned.index = slot.index ∧
+      ∃ header, CredentialSignedEnvelopeController.headerCodec.decode slot.header = some header ∧
+        pinned.header =
+          CredentialSignedEnvelopeController.headerCodec.encode (pinHeader height header) := by
+  unfold pinSlot at ok
+  split at ok
+  · rename_i header decoded
+    simp only [pure, Except.pure, Except.ok.injEq] at ok
+    subst ok
+    exact ⟨rfl, rfl, header, decoded, rfl⟩
+  · cases ok
+
+private theorem mapM_ok_pointwise {α β : Type} (f : α → Except String β) :
+    ∀ (l : List α) (l' : List β), l.mapM f = .ok l' →
+      l'.length = l.length ∧
+        ∀ i (hi : i < l.length) (hi' : i < l'.length), f l[i] = .ok l'[i]
+  | [], l', ok => by
+      simp only [List.mapM_nil, pure, Except.pure, Except.ok.injEq] at ok
+      subst ok
+      exact ⟨rfl, fun i hi _ => absurd hi (Nat.not_lt_zero _)⟩
+  | a :: as, l', ok => by
+      rw [List.mapM_cons] at ok
+      cases fa : f a with
+      | error e => simp [fa, bind, Except.bind] at ok
+      | ok b =>
+        cases fas : as.mapM f with
+        | error e => simp [fa, fas, bind, Except.bind] at ok
+        | ok bs =>
+          simp only [fa, fas, bind, Except.bind, pure, Except.pure, Except.ok.injEq] at ok
+          subst ok
+          obtain ⟨len, point⟩ := mapM_ok_pointwise f as bs fas
+          refine ⟨by simp [len], ?_⟩
+          intro i hi hi'
+          cases i with
+          | zero => simpa using fa
+          | succ j => exact point j (Nat.lt_of_succ_lt_succ hi) (Nat.lt_of_succ_lt_succ hi')
+
 /-- Reject non-invocations and malformed/empty plans; never change the signed
 command, role ordering, subject, nonce, keys, footprint or request bytes. -/
 def pin (plan : SigningPlan) : Except String SigningPlan := do
@@ -73,6 +114,31 @@ def pin (plan : SigningPlan) : Except String SigningPlan := do
   else
     let slots ← plan.slots.mapM (pinSlot plan.height)
     return { plan with slots := slots }
+
+/-- **The pin changes nothing but the slot deadlines.** A pinned plan is the local plan
+with its slot list replaced, slot for slot, by `pinSlot plan.height`: same domain,
+semantics, world root, height and finalized draft; the same number of slots, each with
+its role and index and with its header re-encoded at a deadline no later than the plan's
+height (`pinHeader_deadline`) and no later than before (`pinHeader_never_extends`). -/
+theorem pin_only_slots (plan pinned : SigningPlan) (ok : pin plan = .ok pinned) :
+    pinned = { plan with slots := pinned.slots } ∧
+      pinned.slots.length = plan.slots.length ∧
+      ∀ i (hi : i < plan.slots.length) (hi' : i < pinned.slots.length),
+        pinSlot plan.height plan.slots[i] = .ok pinned.slots[i] := by
+  unfold pin at ok
+  split at ok <;> try (cases ok)
+  split at ok <;> try (cases ok)
+  split at ok <;> try (cases ok)
+  cases m : plan.slots.mapM (pinSlot plan.height) with
+  | error e => simp [m, bind, Except.bind] at ok
+  | ok slots =>
+    simp only [m, bind, Except.bind, pure, Except.pure, Except.ok.injEq] at ok
+    subst ok
+    obtain ⟨len, point⟩ := mapM_ok_pointwise _ _ _ m
+    exact ⟨rfl, len, point⟩
+
+#assert_axioms pinSlot_only_header
+#assert_axioms pin_only_slots
 
 /-- Invert one refusal guard without simplifying any symbolic codec terms. -/
 private theorem refusal_else {E A : Type} {condition : Prop} [Decidable condition]

@@ -266,6 +266,33 @@ def receiveCandidateWithFresh (transport : Transport) (rootBytes : List UInt8 �
         | .error message => return (false, .ordinary (.unavailable message))
         | .ok prepared => publish transport rootBytes loaded commit prepared
 
+/-- A candidate the loaded image's own schedule rejects is answered with NO transport
+effect: the receive action IS the pure refusal. This is the receiver half of the
+NO_RECORD contract (`Host.RequestRefusal`): a `rejected` the Host turns into a
+`refused` outcome was decided before any append. -/
+theorem receiveCandidateWithFresh_rejected_at_prepare (transport : Transport)
+    (rootBytes : List UInt8 → Digest) (loaded : Loaded rootBytes) (candidate : Candidate loaded)
+    (reason : RejectReason)
+    (prepared : loaded.prepare candidate.intent = .inr (.rejected reason)) :
+    receiveCandidateWithFresh transport rootBytes loaded candidate =
+      pure (false, .ordinary (.rejected reason)) := by
+  unfold receiveCandidateWithFresh
+  rw [prepared]
+
+/-- A candidate the judge refuses (gate, source gate or tail bound) is likewise answered
+before the checkpoint key is read and before anything is prepared or published. -/
+theorem receiveCandidateWithFresh_rejected_at_judge (transport : Transport)
+    (rootBytes : List UInt8 → Digest) (loaded : Loaded rootBytes) (candidate : Candidate loaded)
+    (ready : Ready rootBytes loaded.image loaded.baseHeight loaded.base loaded.snapshot
+      candidate.intent)
+    (reason : RejectReason)
+    (prepared : loaded.prepare candidate.intent = .inl ready)
+    (judged : loaded.judge transport candidate = .error reason) :
+    receiveCandidateWithFresh transport rootBytes loaded candidate =
+      pure (false, .ordinary (.rejected reason)) := by
+  unfold receiveCandidateWithFresh
+  rw [prepared, judged]
+
 /-- The raw wrapper constructs only the ordinary arm. In particular, choosing
 a permissive transport source gate cannot bypass the protected-cell check. -/
 def receiveLoadedDetailedWithFresh (transport : Transport) (rootBytes : List UInt8 → Digest)

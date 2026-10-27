@@ -2379,15 +2379,18 @@ def dispatchApplicationSubmitSession (config : NativeHost.Config)
       | .error detail =>
           writeSessionFrame output 34 <| outcomeCodec.encode <|
             NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
+  -- The three outcomes the receiver decides before any permit or append go out under
+  -- NO_RECORD (the grain fence settles the dispatch on this frame); only `uncertain`,
+  -- which follows an attempted append, keeps the op's own frame.
   | .rejected _ =>
-      writeSessionFrame output 34 <| outcomeCodec.encode <|
+      writeSessionFrame output HostOperations.noRecordMarker <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome
           (.refused .operationRejected "application-dispatch".toUTF8.toList "request refused".toUTF8.toList)
   | .contention =>
-      writeSessionFrame output 34 <| outcomeCodec.encode <|
+      writeSessionFrame output HostOperations.noRecordMarker <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome .contention
   | .unavailable detail =>
-      writeSessionFrame output 34 <| outcomeCodec.encode <|
+      writeSessionFrame output HostOperations.noRecordMarker <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome (.unavailable detail.toUTF8.toList)
   | .uncertain detail =>
       writeSessionFrame output 34 <| outcomeCodec.encode <|
@@ -2607,7 +2610,8 @@ partial def discardExactly (input : IO.FS.Stream) (count : Nat) : IO Unit := do
   discardExactly input (count - chunk.size)
 
 /-- One request. Every frame is answered: by its handler, or — when the handler
-throws — by `RequestRefusal.frame` under operation 255, and the loop goes on.
+throws — by `RequestRefusal.exceptionAnswer` (NO_RECORD 253 for a proven no-append
+refusal, the undecided envelope 255 otherwise), and the loop goes on.
 The process ends only on end of input, a truncated frame (the supervisor's pipe
 closed), a poisoned session (Store integrity: a new process must reopen from the
 MAC'd checkpoint; the request is answered `unavailable` first), or a handler
@@ -2640,18 +2644,25 @@ def serveFrame (config : NativeHost.Config)
       let started ← IO.monoMsNow
       let (responseOperation, responsePayload) ←
         dispatchSession config state meteringProfile providerRoutes fnDispatch operation payload
-      writeSessionFrame tracked responseOperation responsePayload
+      -- A refusal returned under 255 is a receiver's decision: it goes out as NO_RECORD
+      -- (`RequestRefusal.returnedMarker`); undecided outcomes keep the 255 envelope.
+      writeSessionFrame tracked (RequestRefusal.returnedMarker responseOperation responsePayload)
+        responsePayload
       if (← IO.getEnv "MINIDREGG_HOST_TRACE").isSome then
         IO.eprintln s!"host-trace op {operation} {(← IO.monoMsNow) - started} ms"
   catch error =>
     if ← wrote.get then
       throw (IO.userError s!"op {operation} failed after its reply was written: {error}")
     if (← state.get).isNone then
-      writeSessionFrame output 255 <| outcomeCodec.encode <|
+      writeSessionFrame output HostOperations.hostOutcomeMarker <| outcomeCodec.encode <|
         .unavailable "host session reopening".toUTF8.toList
       throw (IO.userError s!"op {operation}: native host session invalidated: {error}")
-    IO.eprintln s!"minidregg-host: op {operation} refused: {error}"
-    writeSessionFrame output 255 (RequestRefusal.frame operation error)
+    -- NO_RECORD for a grammar verdict or an append-free operation; otherwise the
+    -- undecided envelope (`RequestRefusal.exceptionAnswer`): a thrown handler on an
+    -- append operation never masquerades as a refusal.
+    let (marker, answer) := RequestRefusal.exceptionAnswer operation error
+    IO.eprintln s!"minidregg-host: op {operation} {if marker == HostOperations.noRecordMarker then "refused" else "undecided"}: {error}"
+    writeSessionFrame output marker answer
   if (← state.get).isNone then
     throw (IO.userError s!"op {operation}: native host session invalidated")
 
@@ -2667,12 +2678,12 @@ partial def serveSession (config : NativeHost.Config)
   let lengthWire ← readExactly input 4 first
   let length := frameLength lengthWire
   if length == 0 then
-    writeSessionFrame output 255 (RequestRefusal.frame 255
+    writeSessionFrame output HostOperations.noRecordMarker (RequestRefusal.frame 255
       (RequestRefusal.malformed "empty native host frame"))
   else match Kernel.Bounds.check .lookupFrameBytes length with
   | .error refusal =>
     discardExactly input length
-    writeSessionFrame output 255 (RequestRefusal.frame 255
+    writeSessionFrame output HostOperations.noRecordMarker (RequestRefusal.frame 255
       (RequestRefusal.overBound refusal))
   | .ok () =>
     let opcode ← readExactly input 1
@@ -2682,7 +2693,7 @@ partial def serveSession (config : NativeHost.Config)
     match Kernel.Bounds.check (frameBound operation) length with
     | .error refusal =>
       discardExactly input (length - 1)
-      writeSessionFrame output 255 (RequestRefusal.frame operation
+      writeSessionFrame output HostOperations.noRecordMarker (RequestRefusal.frame operation
         (RequestRefusal.overBound refusal))
     | .ok () =>
       let payload ← readExactly input (length - 1)
@@ -2701,17 +2712,19 @@ partial def serveCodec (config : NativeHost.Config)
   let lengthWire ← readExactly input 4 first
   let length := frameLength lengthWire
   if length == 0 then
-    writeSessionFrame output 255 (RequestRefusal.frame 255
+    writeSessionFrame output HostOperations.noRecordMarker (RequestRefusal.frame 255
       (RequestRefusal.malformed "empty native codec frame"))
   else if let .error refusal := Kernel.Bounds.check .frameBytes length then
     discardExactly input length
-    writeSessionFrame output 255 (RequestRefusal.frame 255
+    writeSessionFrame output HostOperations.noRecordMarker (RequestRefusal.frame 255
       (RequestRefusal.overBound refusal))
   else
     let body ← readExactly input length
     let operation := body[0]!
+    -- The codec channel reads no Store: every refusal here is a proven no-append one,
+    -- which is what `exceptionAnswer` answers for these append-free operations.
     let answer ← try pureCodec config providerRoutes operation (body.toList.drop 1)
-      catch error => pure (255, RequestRefusal.frame operation error)
+      catch error => pure (RequestRefusal.exceptionAnswer operation error)
     writeSessionFrame output answer.1 answer.2
   serveCodec config providerRoutes input output
 
@@ -7783,10 +7796,14 @@ def run (arguments : List String) : IO UInt32 := do
                               custody operation payload
                         | _ => throw (IO.userError "unsupported native host operation")
                       catch error =>
+                        -- The same discipline as `serveFrame` (`RequestRefusal.exceptionAnswer`):
+                        -- NO_RECORD for a grammar verdict or an append-free operation, the
+                        -- undecided envelope for anything thrown on an append operation. The
+                        -- two read-only history operations keep their uniform wording.
                         if operation == 151 || operation == 153 then
-                          return ((255 : UInt8), failure .operationRejected "carried-history"
-                            "retained historical request refused")
-                        else return ((255 : UInt8), failure .operationRejected "fn-session" s!"{error}")
+                          return (HostOperations.noRecordMarker, failure .operationRejected
+                            "carried-history" "retained historical request refused")
+                        else return (RequestRefusal.exceptionAnswer operation error)
                   let meteringProfile := profileDescription pinnedConfig
                     (← IO.ofExcept settings.providerServicePins)
                   let applicationDispatch := fun routeBound payload output =>
