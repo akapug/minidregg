@@ -79,4 +79,9 @@ which is not committed.
 - Native (dregg-build, worktree at the candidate's commit, under `swarm-build`, PID file, one box-wait):
   - `scripts/world-native-admit.sh activity --route activity --scenario effect --method world/activity/Effects.obend --entry effects --deposit 100000000`
   - `scripts/world-native-admit.sh dues --route activity --scenario dues --entry dues --deposit 300000000`
+  - `scripts/world-native-admit.sh bounty --route activity --scenario bounty --method world/bounty/BountyBoard.obend --entry bounty --deposit 300000000`
+  - `scripts/world-native-admit.sh play --route activity --scenario play --entry play --deposit 300000000`
+  - `scripts/world-native-admit.sh ballot --route activity --scenario ballot --entry ballot --deposit 100000000`
+  - `scripts/world-native-admit.sh story --route activity --scenario story --entry tell --deposit 100000000`
+  - `scripts/world-native-admit.sh commons --route activity --scenario commons --entry lifecycle --deposit 100000000`
   - For `dues`, the driver builds the `Opening` input and the `{paid: Nat}` state type itself.

@@ -105,14 +105,29 @@ private def asciiLetter (c : UInt8) : Bool :=
 private def asciiDigit (c : UInt8) : Bool :=
   48 ≤ c.toNat && c.toNat ≤ 57
 
-/-- Sandstorm PermissionDef names are identifiers: ASCII alphanumeric, first
-byte a letter. Empty and duplicate names cannot be mapped to stable IDs. -/
+/-- A PermissionDef name: first byte an ASCII letter, then ASCII letters, digits, `_`,
+`-` or `.`. Empty and duplicate names cannot be mapped to stable IDs. Sandstorm checks no
+charset at all. A name is compared here only as bytes, and it never reaches a parser or a
+filesystem path. Its one textual use is the app's own `X-Sandstorm-Permissions` header, a
+comma-separated list, so commas, spaces and control bytes stay out. -/
 def Permission.validName (name : List UInt8) : Bool :=
   match name with
   | [] => false
   | first :: rest => asciiLetter first &&
-      rest.all (fun c => asciiLetter c || asciiDigit c) &&
+      rest.all (fun c => asciiLetter c || asciiDigit c || c == 95 || c == 45 || c == 46) &&
       decide (name.length ≤ 256)
+
+/-- Admitted: the names real packages use with separators. Refused: a comma (it would
+split the permissions header), a space, a leading digit, the empty name. -/
+theorem validName_examples :
+    Permission.validName "view_stats".toUTF8.toList = true ∧
+    Permission.validName "edit-board".toUTF8.toList = true ∧
+    Permission.validName "a.b".toUTF8.toList = true ∧
+    Permission.validName "read,write".toUTF8.toList = false ∧
+    Permission.validName "read write".toUTF8.toList = false ∧
+    Permission.validName "1read".toUTF8.toList = false ∧
+    Permission.validName [] = false := by
+  decide +kernel
 
 /-- Explicit bounds avoid silently truncating a wire role ID or mask. Short
 historical masks are allowed, but masks longer than current definitions are

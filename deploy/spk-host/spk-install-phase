@@ -78,10 +78,16 @@ image_dir=$(jq -er '.imageDir | select(type == "string" and startswith("/"))' "$
 source_parent=$(dirname -- "$source_spk")
 image_store=$(dirname -- "$image_dir")
 case $profile in
-  standard-v1) file_limit=805306368; seconds=900 ;;
-  operator-appliance-v1) file_limit=21474836480; seconds=1800 ;;
+  standard-v1|market-large-v1|operator-appliance-v1) ;;
   *) echo 'unknown SPK import profile' >&2; exit 2 ;;
 esac
+# The pinned Host states the profile's decoded bound and the wall clock for this package
+# (spk-host import-limits). An install phase also writes the image, so it keeps the longer of
+# the scaled intake clock and 900 s.
+[[ -f $source_spk && ! -L $source_spk ]] || { echo 'INSTALL source SPK absent' >&2; exit 1; }
+read -r _ file_limit seconds < <("$host_binary" import-limits "$profile" "$(stat -c '%s' -- "$source_spk")") || exit 2
+[[ $file_limit =~ ^[0-9]+$ && $seconds =~ ^[0-9]+$ ]] || { echo 'SPK import limits unavailable' >&2; exit 2; }
+(( seconds >= 900 )) || seconds=900
 
 unit=mini-spk-install-$(date -u +%Y%m%d%H%M%S)-$$
 stdout_log=$(mktemp /var/lib/minidregg/spk/.install-stdout.XXXXXXXX)

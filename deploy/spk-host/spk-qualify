@@ -11,12 +11,12 @@ if [[ ${1:-} == --import-profile ]]; then
 fi
 (( $# == 3 )) || { echo 'usage: spk-qualify [--import-profile PROFILE] HOST_BINARY HOST_SHA256 INBOX_SPK' >&2; exit 2; }
 # Trusted operator invocation selects fixed parser/resource limits.
-case $profile in
-  standard-v1) raw_limit=268435456; file_limit=805306368; seconds=120 ;;
-  operator-appliance-v1) raw_limit=8589934592; file_limit=21474836480; seconds=1800 ;;
-  *) echo 'unknown SPK import profile' >&2; exit 2 ;;
-esac
-host_binary=$1 expected_host_sha=$2 package=$3
+[[ $(sha256sum "$host_binary" | cut -d ' ' -f1) == "$expected" ]] || { echo 'SPK ingest binary pin differs' >&2; exit 1; }
+# The profile's bounds come from the pinned Host (spk-host import-limits): the raw and decoded
+# limits, and a wall clock that scales with this package's size up to the profile's cap.
+read -r raw_limit file_limit seconds < <("$host_binary" import-limits "$profile" "$(stat -c '%s' "$package")") || exit 2
+[[ $raw_limit =~ ^[0-9]+$ && $file_limit =~ ^[0-9]+$ && $seconds =~ ^[0-9]+$ ]] || { echo 'SPK import limits unavailable' >&2; exit 2; }
+[[ $(stat -c '%u:%a' "$package") == "$EUID:600" && $(stat -c '%s' "$package") -le $raw_limit ]] || exit 2host_binary=$1 expected_host_sha=$2 package=$3
 [[ $expected_host_sha =~ ^[0-9a-f]{64}$ ]] || exit 2
 (( EUID == 0 )) || { echo 'spk-qualify requires root' >&2; exit 1; }
 base=/var/lib/minidregg/spk
@@ -53,9 +53,6 @@ flock -n 9 || { echo 'another SPK ingest/qualification is active' >&2; exit 1; }
 [[ $(stat -c '%u:%a' -- "$package") == 0:600 ]] || {
   echo 'SPK inbox file owner/mode drift' >&2; exit 1;
 }
-(( $(stat -c '%s' -- "$package") <= raw_limit )) || {
-  echo 'SPK exceeds input cap' >&2; exit 1;
-}
 input_sha=$(sha256sum -- "$package")
 input_sha=${input_sha%% *}
 output=$qualifications/sha256-$input_sha.json
@@ -78,6 +75,13 @@ for segment in "${segments[@]}"; do
 done
 actual_host_sha=$(sha256sum -- "$host_binary")
 [[ ${actual_host_sha%% *} == "$expected_host_sha" ]] || { echo 'Host SHA mismatch' >&2; exit 1; }
+# The profile's bounds come from the pinned Host (spk-host import-limits), the wall clock scaled
+# to this package's size up to the profile's cap.
+read -r raw_limit file_limit seconds < <("$host_binary" import-limits "$profile" "$(stat -c '%s' -- "$package")") || exit 2
+[[ $raw_limit =~ ^[0-9]+$ && $file_limit =~ ^[0-9]+$ && $seconds =~ ^[0-9]+$ ]] || { echo 'SPK import limits unavailable' >&2; exit 2; }
+(( $(stat -c '%s' -- "$package") <= raw_limit )) || {
+  echo 'SPK exceeds input cap' >&2; exit 1;
+}
 unit=mini-spk-qualify-$(date -u +%Y%m%d%H%M%S)-$$
 stdout_log=$(mktemp "$base/.qualify-stdout.XXXXXXXX")
 stderr_log=$(mktemp "$base/.qualify-stderr.XXXXXXXX")

@@ -3,6 +3,7 @@
 `CommitReveal.obend` is rock, paper, scissors between two players who do not trust each other,
 with a stake each. Preview evidence only (effect-free preview, `preview-cohort.json`, 29 rows);
 no native receipt exists for this package.
+Native: native scenario `play` in world-activity-admit.py (not yet run; runs in the central gate).
 
 ## What it does
 

@@ -1,7 +1,32 @@
 # Oracle shared-data acceptance
 
-The latest v5/U3 attempt is **incomplete**. Both grains are installed and the
-public dataset is published. The retained Store is `d4090a0c4c356d31` on
+The current v7 agent/browser qualification is **incomplete**. Its fresh Store
+installed both appliances and admitted an agent session, then refused lifetime
+grant planning before submission. The dedicated grant repair and fresh-world
+factory permission are pushed on `lane/oracle-lifetime-grant` and
+`lane/oracle-grant-factory`. They await centralized integration and a coherent
+Host/consent build; the [appliance overview](oracle-appliance.md) distinguishes
+the source checks, completed 32-tenant runtime qualification and remaining
+hosted journey.
+
+The next positive run uses a fresh Store and matching current Host, consent,
+native tools and helpers. It must exercise the agent tools, authority refusals,
+same-grain tenant separation, actual browser interaction, restart replay and
+cleanup. The existing harness supports these through its controller phases,
+`ORACLE_POOLED_TENANT_PROBE=1` and `ORACLE_BROWSER_B=1` (with the required pinned
+Caddy executable and browser port). Browser interaction is an additional check;
+an HTTP helper response alone does not establish that the page works.
+
+The retained v5 parent reservation is a separate unresolved recovery case:
+its terminal-only repair attempt timed out during historical ticket lookup,
+with no result or ACK. Do not resend it or copy that Store into the fresh
+qualification. [Latest recovery evidence](evidence/oracle-hosted-recovery-2026-10-27.json)
+records both stopped Stores.
+
+## Earlier v5 and v4 attempts
+
+The earlier v5/U3 attempt was **incomplete**. Both grains were installed and the
+public dataset was published. The retained Store is `d4090a0c4c356d31` on
 `dregg-build`; no v5 application START or query has occurred.
 
 The final checked continuation repaired public-listener restart, admitted the
@@ -17,9 +42,9 @@ The attempt ended with execution 1 and cleanup 0. Services are stopped; both
 volumes and journals remain. The controller retains a confirmed parent reserve
 of 1 and the uncertain foreground operation, with no retained foreground result
 or born session resource. Nothing was resent or acknowledged. Further work
-requires audited exact recovery before the remaining application, lifetime-tool,
-data-refusal and restart journey. No repair or relaunch is scheduled in this
-checkpoint. [Exact U3 evidence](evidence/oracle-u3-acceptance-2026-10-27.json)
+required audited exact recovery before further operations in that Store.
+The later recovery attempt is described above.
+[Exact U3 evidence](evidence/oracle-u3-acceptance-2026-10-27.json)
 records the receipts and separates earlier failures from these observed results.
 
 The earlier v4 result is **partial acceptance, not a full pass**. The retained

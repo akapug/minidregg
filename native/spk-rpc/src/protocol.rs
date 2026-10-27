@@ -522,8 +522,9 @@ pub(crate) fn decode_view_info(
     let mut permissions = Vec::with_capacity(raw_permissions.len() as usize);
     for item in raw_permissions.iter() {
         let name = bounded_text(item.get_name()?, 256)?;
+        // Lean's `Permission.validName`: a letter, then letters, digits, '_', '-' or '.'.
         if !name.starts_with(|c: char| c.is_ascii_alphabetic())
-            || !name.chars().all(|c| c.is_ascii_alphanumeric())
+            || !name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
             || !names.insert(name.clone())
         {
             return Err(capnp::Error::failed(
@@ -1219,6 +1220,27 @@ mod tests {
                 assert!(unimplemented.contains("not implemented"), "{unimplemented}");
             })
             .await;
+    }
+
+    #[test]
+    fn permission_names_admit_separators_but_not_header_breaking_bytes() {
+        let decode = |names: &[&str]| {
+            let mut message = capnp::message::Builder::new_default();
+            let mut info = message.init_root::<grain_capnp::ui_view::view_info::Builder>();
+            info.reborrow().init_app_title().set_default_text("App");
+            let mut permissions = info.reborrow().init_permissions(names.len() as u32);
+            for (i, name) in names.iter().enumerate() {
+                let mut p = permissions.reborrow().get(i as u32);
+                p.set_name(*name);
+                p.reborrow().init_title().set_default_text("t");
+                p.reborrow().init_description().set_default_text("d");
+            }
+            decode_view_info(info.into_reader()).map(|v| v.permission_names)
+        };
+        assert_eq!(decode(&["view_stats", "edit-board", "a.b"]).unwrap(), ["view_stats", "edit-board", "a.b"]);
+        for hostile in [&["read,write"][..], &["read write"], &["1read"], &[""], &["read", "read"], &["r\u{e9}ad"]] {
+            assert!(decode(hostile).is_err(), "{hostile:?}");
+        }
     }
 
     #[test]

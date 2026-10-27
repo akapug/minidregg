@@ -2053,15 +2053,17 @@ order) and dry run (130). `none`: the operation is not rated, or its bytes do no
 receiver refuses it `malformed`, and nothing is charged). Unsigned operations are never rated:
 nothing verifies a subject there. -/
 def ratedClaims (operation : UInt8) (payload : List UInt8) : Option (List Nat) :=
-  match operation with
-  | 1 => (claimOf payload).map fun subject => [subject]
-  | 5 =>
-      if NativeObservationCodec.isBatch payload then
-        (NativeObservationCodec.batchCodec.decode payload).bind fun members =>
-          if members.isEmpty then none else members.mapM claimOf
-      else (claimOf payload).map fun subject => [subject]
-  | 130 => (pairFirst? payload).bind fun observation => (claimOf observation).map fun subject => [subject]
-  | _ => none
+  -- An if-chain, not a `match` on the operation: `scripts/host-operations.py` reads the request
+  -- arms of the dispatch functions by their `| N =>` headers, and this classifier receives nothing.
+  if operation == 1 then (claimOf payload).map fun subject => [subject]
+  else if operation == 5 then
+    if NativeObservationCodec.isBatch payload then
+      (NativeObservationCodec.batchCodec.decode payload).bind fun members =>
+        if members.isEmpty then none else members.mapM claimOf
+    else (claimOf payload).map fun subject => [subject]
+  else if operation == 130 then
+    (pairFirst? payload).bind fun observation => (claimOf observation).map fun subject => [subject]
+  else none
 
 /-- Check every claimed subject at `now`; the first full window refuses, with its retry time. -/
 def RateGate.check (gate : RateGate) (claims : List Nat) (now : Nat) : IO (Option Nat) := do
