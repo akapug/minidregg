@@ -57,6 +57,14 @@
     document.title = (stage.querySelector(".pane .pane-title") || {}).textContent || "Mini";
   }
 
+  // The footer's "Report a problem" link follows the pane that last loaded (it is a plain link
+  // to the derived feedback form, prefilled with the page; without this file it names the page
+  // the document was served for).
+  function reportLink(path) {
+    const a = document.querySelector("footer .report");
+    if (a) a.href = "/verb/feedback?page=" + encodeURIComponent(String(path).split("?")[0]);
+  }
+
   async function load(pane, path, options) {
     options = options || {};
     if (!options.quiet) pane.classList.add("busy");
@@ -77,6 +85,7 @@
       wire(pane);
       sync();
       fill(pane);
+      reportLink(landed);
     } catch (e) {
       pane.querySelector(".pane-body").innerHTML = '<div class="outcome refused"><p class="headline">The page did not load</p><pre></pre></div>';
       pane.querySelector("pre").textContent = String(e);

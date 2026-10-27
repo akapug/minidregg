@@ -14,6 +14,10 @@ pub const COMMAND_LINE: &str = "mini";
 pub const COMMAND_HELP: &str = "mini-help";
 pub const COMMAND_WORLD: &str = "mini-world";
 pub const COMMAND_STATUS: &str = "mini-status";
+/// `/feedback text:...`: one report, the `feedback --via discord TEXT` line of the member's session.
+pub const COMMAND_FEEDBACK: &str = "feedback";
+/// The name of `/feedback`'s one string option.
+pub const OPTION_TEXT: &str = "text";
 /// The name of `/mini`'s one string option.
 pub const OPTION_LINE: &str = "line";
 /// Discord's EPHEMERAL message flag.
@@ -34,6 +38,7 @@ pub struct Command {
     pub user_id: String,
     pub name: String,
     pub line: Option<String>,
+    pub text: Option<String>,
     pub target: Option<String>,
     pub page: usize,
 }
@@ -75,9 +80,10 @@ pub fn parse(body: &[u8]) -> Result<Interaction, String> {
                 .map(str::to_string);
             let options=v["data"]["options"].as_array();
             let option=|name:&str| options.and_then(|opts|opts.iter().find(|o|o["name"]==name)).map(|o|&o["value"]);
+            let text=option(OPTION_TEXT).and_then(Value::as_str).map(str::to_owned);
             let target=option("target").and_then(Value::as_str).map(str::to_owned);
             let page=option("page").and_then(Value::as_u64).unwrap_or(1) as usize;
-            Ok(Interaction::Command(Command { id, application_id, token, user_id, name, line, target, page }))
+            Ok(Interaction::Command(Command { id, application_id, token, user_id, name, line, text, target, page }))
         }
         other => Ok(Interaction::Unsupported(other)),
     }
@@ -136,6 +142,7 @@ mod tests {
                 user_id: "33".into(),
                 name: "mini".into(),
                 line: Some("read shared".into()),
+                text: None,
                 target: None,
                 page: 1,
             })

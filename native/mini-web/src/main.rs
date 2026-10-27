@@ -165,7 +165,7 @@ impl Gateway {
             Reply::Stage { status, title, html, who, path, set_cookie } => {
                 // Every POST form on the page (the shell's and the stage's) gets this session's
                 // token; the body's forms are plain and the token never reaches the body.
-                let document = if fragment { html } else { page(&title, who.as_ref(), &path, &html, &self.shutdown) };
+                let document = if fragment { html } else { page(&title, status, who.as_ref(), &path, &html, &self.shutdown) };
                 let document = match &who {
                     Some(who) => page::inject_csrf(&document, &who.csrf),
                     None => document,
