@@ -32,30 +32,35 @@ Enrol:
 
 Untouched-areas items:
 - `compatible-upgrade-custody` dropped from resource-client (`ec81fd91`): its only user,
-  `mini session-reenroll`, was deleted in 0c261e76; the crate stays for spk-host and grain-runtime.
-- Rooms: no new row. The room lifecycle already has two demo-set rows, `K10C` (birth gate, kick,
-  the kicked member's reads and born docs refused `revoked`, founder keeps the room) and `JPRIV1`
-  (private room born, key released to an invitee by signed declaration, kick = revoke + rotate +
-  rewrap); the demo's wall budget (JOURNEY_BUDGET_S=5000, K12C 1424 s, KC 729 s) had starved both
+  `mini session-reenroll`, was deleted in 0c261e76.
+- Rooms: `K10C` and `JPRIV1` are the room-lifecycle rows. The demo's wall budget had starved both
   on every candidate. The scout's "1/8 Room modules reached" is the Host.Main import closure:
-  `RoomRelease*` sit under `ResearchWip.lean` with no Host receiver and `RoomKick` is theorems in
-  `Kernel.lean`, so no journey can reach them; wiring a release receiver is a Lean lane's.
-  Run here on cut 7 with this lane's mini (`--only K10C --only JPRIV1`, 1952 s): **JPRIV1 229/229
-  PASS** (its first run); K10C 182/184, all kick rows ok.
+  `RoomRelease*` has no Host receiver, so wiring one is a Lean lane's job. On cut 7 with this
+  lane's mini: **K10C PASS (`73a2a542`), JPRIV1 229/229 PASS (`5da65342`)**.
+- K10C rows 92-93 (`73a2a542`): RENOUNCE's by-number form now requires its kind. A bare number
+  matched the reference form first, so carl's grant number was read as a ref name. The row now
+  reaches the Host's `notHolder`.
+- `wrapAtomId` twin (`5da65342`): JPRIV1's two inline Python formulas are replaced by
+  `room-key --op wrap-atom`, which prints `roomkey::wrap_atom_id`. A test checks that the verb's
+  output is byte-identical to the function's.
 
-## Mid-flight
-
-- K10C rows 92-93 (`leave carl: renounce c-bob <grant>`, then `submit c-bob`, expecting the Host's
-  `notHolder`): the client fails first, "cannot read .../w/carl/refs/<grant>.json": carl renounces a
-  grant id he never imported as a ref. Fix in `native/resource-client/journey.d/j10c.sh` near the
-  `leave` rows (~:290-295): carl imports bob's grant ref (or `renounce` takes the raw id) so the Host
-  answers `notHolder` by name. Rerun: `/build/lanes/custody-drivers-logs/run-rooms.sh`.
-- The demo budget starving K10C/JPRIV1 is the integrator's partition question (move them earlier,
-  or split the demo set), not this lane's.
+World template (ember: snapshots, not replays):
+- `f45a6379`: the fixture's template is ON by default. When NEWPARTICIPANT_TEMPLATE_DIR is unset,
+  templates go to `$TMPDIR/minidregg-world-templates-UID` (about 200 KB per variant). Setting it
+  empty (the runner's JOURNEY_WORLD_TEMPLATES=0) builds fresh: that is the control run.
+- Every row in journey-rows has a `# world:` header saying template or genesis. Genesis is the
+  subject in four: hostupgrade, welcomecontinuity, births, perf. Four more are
+  `genesis, OWED a template`, each with its reason: sshe2e, m6grain, m7, jpay.
+- Owed elsewhere (Host, a Lean lane): a restored Store still replays its suffix on open. The Host
+  checkpoints only when `height % checkpointEvery == 0` (Compiler/DurableReceiverCore.lean
+  `checkpointDue`, default 64), so a template captured off that boundary replays up to 63 records.
+  Two fixes are possible: a Host verb that seals a checkpoint at the head, which the fixture would
+  call before taring, or checkpointing at a clean shutdown.
 
 ## Owed on cut 9 (28235a17)
 
-- The world template's before/after: the standing run with `JOURNEY_WORLD_TEMPLATES=0`, then `=1`,
+- The world template's before/after (waiting for the coordinator's cut 9 path). The run that matters is
+  `JOURNEY_WORLD_TEMPLATES=1` (the default). `=0` runs once, as the control for the published number,
   via `/build/lanes/custody-drivers-logs/run-measure.sh` (re-add the frozen tree
   `/build/lanes/custody-drivers-measure` at the tip first; point it at the cut 9 set). Last numbers
   (a94bed71 binaries, without this lane's mini fixes): 1119 s off, 1089 s on, both cut short.
