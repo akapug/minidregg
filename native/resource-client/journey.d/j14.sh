@@ -223,7 +223,7 @@ paid_turns() { "$MINI" credit --action ledger --dir "$WS/alice" --account lab-ti
 resident_completed() { jq -r '.completed // 0' "$RSTATE/resident.json" 2>/dev/null || echo 0; }
 hermes() { # STEP WHAT: one resident pass that runs exactly one more prompt (or the dismissal)
   local next=$(( $(resident_completed) + 1 ))
-  jq -n --arg c "$G/controller.json" --arg i "$H/hermes/inbox" --arg s "$RSTATE" --argjson m "$next" \
+  jq -n --arg c "$G/controller.json" --arg i "$RINBOX" --arg s "$RSTATE" --argjson m "$next" \
     '{type:"mini-hermes-room-resident-v1",controller:$c,inbox:$i,state:$s,maxPrompts:$m,intervalSeconds:5}' >"$RCFG"
   operator "$1" "hermes resident pass: $2" timeout 900 "$GRAIN_RUNTIME" hermes-room resident "$RCFG"
   cp "$OUT" "$SD/resident-$1.jsonl"; cp "$ERR" "$SD/resident-$1.err"
@@ -274,8 +274,6 @@ done
 FEE=$(jq -r '.tariffBase' "$CONFIG")
 require_nat setup "the configured fee" "$FEE"
 TURN=$((PRICE + FEE))
-operator setup "NODE: the node's Hermes is subject $HS (HOME/hermes/node.json)" \
-  sh -c "mkdir -p -m 700 '$H/alice/hermes' && printf '{\"subject\":\"%s\"}\n' '$HS' >'$H/alice/hermes/node.json'"
 ok setup alice "credit"
 A0=$(credit_of alice)
 require_nat setup "alice's initial signed balance" "$A0"
@@ -291,44 +289,7 @@ ok room alice "chat invite lab $B bob --verbs observe,place,append"
 operator room "DELIVER: bob's invitation" install_private 0600 "$H/alice/chat/invites/lab-$B.json" "$H/bob/requests/lab-invite.json"
 ok room bob "chat join lab @lab-invite.json"
 
-# ------------------------------------------------ summon
-# Later recovery and payment assertions require a successful room setup and
-# summon. Preserve the first failed row rather than cascading into empty state.
-[ "$FAILED" = 0 ] || finish
-ok summon alice "summon lab as librarian --budget $BUDGET"
-cp "$OUT" "$SD/summon.out"
-[ "$RC" = 0 ] || finish
-OUTBOX=$H/alice/outbox/$HS
-checkp summon "the hand-off: account, invitation, index, digest, manifest" \
-  sh -c "for f in lab-hermes lab-invite lab-index lab-digest summon-lab; do test -s '$OUTBOX/'\$f.json || exit 1; done"
-[ "$FAILED" = 0 ] || finish
-checkp summon "Hermes's account is owned by Hermes and funded $BUDGET" \
-  jq -e --arg h "$HS" --arg b "$BUDGET" '.owner == $h and .funding == $b' "$OUTBOX/lab-hermes.json"
-PROGRAM_T=$(jq -r .program.target "$OUTBOX/summon-lab.json")
-ACCOUNT_T=$(jq -r .account.target "$OUTBOX/summon-lab.json")
-A1=$(credit_of alice)
-require_nat summon "alice's balance after summon" "$A1"
-N=$((N + 1)); WALL=-
-record summon check "alice paid the budget and the births (signed reads before/after)" "A0 - A1 >= $BUDGET" "$A0 - $A1 = $((A0 - A1))" \
-  "$([ $((A0 - A1)) -ge "$BUDGET" ] && echo ok || echo FAIL)" "births: till, account, Hermes's stream, digest, program, and their fees"
-ok summon alice "room status lab"
-checkp summon "room status names Hermes and its budget account" grep -q "hermes: $HS, budget account $ACCOUNT_T" "$OUT"
-ok summon alice "tariff lab"
-checkp summon "the tariff: hermes/turn $PRICE; hermes = $HS" sh -c "grep -q '^  hermes/turn *$PRICE\$' '$OUT' && grep -q '^  hermes  *$HS\$' '$OUT'"
-# the program is a document members read and the founder edits
-BCAP=$(jq -r .observeCapability "$WS/bob/refs/lab.json")
-ok program bob "import lab-program object $PROGRAM_T $BCAP $BCAP"
-ok program bob "doc show lab-program"
-checkp program "bob reads the librarian's program" grep -q "Librarian of lab" "$OUT"
-# bob holds observe/place/append under lab, not mutate, and the program's
-# law admits only the founder's writes; the Host's prepare reports the law's
-# failing clause first (the clause names alice).
-two_step_refused program bob "doc append bp lab-program 'bob: be nicer'" "submit bp" "law-denied: subject == $A"
-ok program alice "doc append ap lab-hermes-librarian 'Founder: keep answers short.'"
-ok program alice "submit ap"
-
 # ------------------------------------------------ Hermes's grain, controller and the deterministic provider
-operator hermes "DELIVER: alice's hand-off into Hermes's inbox" deliver "$OUTBOX" "$H/hermes/inbox"
 PARENT_T=9870001 TOOL_T=9870002 PURSE_T=9870003 USER_FEE=5
 MODEL=mini-hermes-protocol-fixture
 GPORT=$((20000 + RANDOM % 20000))
@@ -453,6 +414,63 @@ for i in $(seq 1 600); do [ -S "$G/state/control.sock" ] && break; sleep 0.1; do
 checkp hermes "the controller listens on its control socket" test -S "$G/state/control.sock"
 [ "$FAILED" = 0 ] || finish
 
+# The operator registers Hermes's task for lab and advertises it to the
+# founder (hermes-handoff registration/registry: what `summon` resolves).
+mkdir -p -m 700 "$SD/registrations" "$H/hermes/inbox" "$H/alice/hermes"
+operator hermes "REGISTER: Hermes's task $PARENT_T for lab (hermes-handoff registration)" \
+  "$MINI" hermes-handoff --action registration --dir "$WS/hermes" --task "$PARENT_T" --room-cell "$LAB" \
+    --inbox "$H/hermes/inbox" --socket "$SOCKET"
+REG=$SD/registrations/$PARENT_T.json
+install -m 0600 "$OUT" "$REG"
+operator hermes "ADVERTISE: the resident registry the founder's summon reads" \
+  "$MINI" hermes-handoff --action registry --registrations "$SD/registrations" --socket "$SOCKET"
+install -m 0600 "$OUT" "$H/alice/hermes/registry.json"
+check hermes "the registry lists exactly Hermes's task for lab" "$HS $PARENT_T $LAB" \
+  "$(jq -r '.residents | if length == 1 then "\(.[0].subject) \(.[0].task) \(.[0].roomCell)" else "residents=\(length)" end' "$H/alice/hermes/registry.json")"
+[ "$FAILED" = 0 ] || finish
+
+# ------------------------------------------------ summon
+# Later recovery and payment assertions require a successful room setup and
+# summon. Preserve the first failed row rather than cascading into empty state.
+[ "$FAILED" = 0 ] || finish
+ok summon alice "summon lab as librarian --budget $BUDGET"
+cp "$OUT" "$SD/summon.out"
+[ "$RC" = 0 ] || finish
+OUTBOX=$(sed -n 's/.*hand-off in //p' "$OUT" | tail -1)
+checkp summon "the hand-off: account, invitation, index, digest, manifest, sealed bundle" \
+  sh -c "for f in lab-hermes lab-invite lab-index lab-digest summon-lab handoff; do test -s '$OUTBOX/'\$f.json || exit 1; done"
+[ "$FAILED" = 0 ] || finish
+checkp summon "Hermes's account is owned by Hermes and funded $BUDGET" \
+  jq -e --arg h "$HS" --arg b "$BUDGET" '.owner == $h and .funding == $b' "$OUTBOX/lab-hermes.json"
+PROGRAM_T=$(jq -r .program.target "$OUTBOX/summon-lab.json")
+ACCOUNT_T=$(jq -r .account.target "$OUTBOX/summon-lab.json")
+A1=$(credit_of alice)
+require_nat summon "alice's balance after summon" "$A1"
+N=$((N + 1)); WALL=-
+record summon check "alice paid the budget and the births (signed reads before/after)" "A0 - A1 >= $BUDGET" "$A0 - $A1 = $((A0 - A1))" \
+  "$([ $((A0 - A1)) -ge "$BUDGET" ] && echo ok || echo FAIL)" "births: till, account, Hermes's stream, digest, program, and their fees"
+ok summon alice "room status lab"
+checkp summon "room status names Hermes and its budget account" grep -q "hermes: $HS, budget account $ACCOUNT_T" "$OUT"
+ok summon alice "tariff lab"
+checkp summon "the tariff: hermes/turn $PRICE; hermes = $HS" sh -c "grep -q '^  hermes/turn *$PRICE\$' '$OUT' && grep -q '^  hermes  *$HS\$' '$OUT'"
+# the program is a document members read and the founder edits
+BCAP=$(jq -r .observeCapability "$WS/bob/refs/lab.json")
+ok program bob "import lab-program object $PROGRAM_T $BCAP $BCAP"
+ok program bob "doc show lab-program"
+checkp program "bob reads the librarian's program" grep -q "Librarian of lab" "$OUT"
+# bob holds observe/place/append under lab, not mutate, and the program's
+# law admits only the founder's writes; the Host's prepare reports the law's
+# failing clause first (the clause names alice).
+two_step_refused program bob "doc append bp lab-program 'bob: be nicer'" "submit bp" "law-denied: subject == $A"
+ok program alice "doc append ap lab-hermes-librarian 'Founder: keep answers short.'"
+ok program alice "submit ap"
+
+operator hermes "DISPATCH: the sealed hand-off into Hermes's registered inbox (verified against the admitted origin)" \
+  "$MINI" hermes-handoff --action dispatch --registration "$REG" --bundle "$OUTBOX/handoff.json" --socket "$SOCKET"
+RINBOX=$(jq -r '.inbox // empty' "$(find "$H/hermes" -name current.json | head -1)" 2>/dev/null)
+checkp hermes "the delivered assignment inbox is current ($RINBOX)" test -d "$RINBOX"
+[ "$FAILED" = 0 ] || finish
+
 # ------------------------------------------------ attach 1: two docs, three things said
 H0=$(room_height lab)
 ok attach1 bob "doc new paper --in lab"
@@ -518,7 +536,8 @@ require_nat dismiss "Hermes's balance before dismissal" "$BEFORE_RETURN"
 require_nat dismiss "alice's balance before dismissal" "$A2"
 ok dismiss alice "dismiss lab"
 cp "$OUT" "$SD/dismiss.out"
-operator dismiss "DELIVER: the dismissal into Hermes's inbox" deliver "$OUTBOX" "$H/hermes/inbox"
+operator dismiss "DISPATCH: the sealed dismissal into Hermes's inbox" \
+  "$MINI" hermes-handoff --action dispatch --registration "$REG" --bundle "$OUTBOX/dismissal.json" --socket "$SOCKET"
 hermes dismiss "returns the remainder"
 RETURNED=$(jq -r '.returned.returned // "none"' "$RSTATE/resident.json")
 check dismiss "Hermes returned its balance less the fee" "$((BEFORE_RETURN - FEE))" "$RETURNED"
