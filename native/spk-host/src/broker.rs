@@ -698,11 +698,8 @@ impl Broker {
         eprintln!("{line}");
     }
 
-    /// The supervisor template and the grains slice, rendered at startup.
-    /// The supervisor is `Type=exec`, not oneshot: while an `OnFailure=`
-    /// target's start job is pending, systemd keeps the failed resident unit
-    /// loaded with its old InvocationID, and STOP's exact post-stop audit
-    /// requires that InvocationID cleared (Mini's `managerInvocationCleared`).
+    /// The grains slice, rendered at startup; supervisor instances are
+    /// rendered per app (`render_store_supervisor`), the names `OnFailure=` uses.
     fn render_static(&self) -> io::Result<()> {
         let prefix = &self.config.unit_prefix;
         let store = &self.config.store;
@@ -711,22 +708,6 @@ impl Broker {
         write_operator_text(
             &crate::os::runtime_units().join(format!("s{store}-{prefix}-grains.slice")),
             slice,
-            0o644,
-            true,
-        )?;
-        let supervisor = format!(
-            "# rendered by mini-spk-broker\n[Unit]\nDescription=Mini SPK grain supervisor %i\n\
-             StartLimitIntervalSec=1800\nStartLimitBurst=3\n\n[Service]\nType=exec\n\
-             Slice=s{store}-{prefix}-grains.slice\n\
-             ExecStart={spk} grain supervise-instance {root} %i\n\
-             Restart=on-failure\nRestartSec=30\nRestartPreventExitStatus=3\n\
-             NoNewPrivileges=yes\nUMask=0077\n",
-            spk = self.config.spk_host.display(),
-            root = self.root().display(),
-        );
-        write_operator_text(
-            &crate::os::runtime_units().join(format!("{prefix}-spk-supervisor-s{store}@.service")),
-            &supervisor,
             0o644,
             true,
         )?;
