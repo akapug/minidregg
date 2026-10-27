@@ -1,134 +1,91 @@
-# Operator: one friend, from their public key to "you're in"
+# Operator: accounts on a Mini box
 
-This is ember's checklist for the Mini node on `dregg-workhorse` (2.28.141.27). Box
-layout, units and scripts are in `dregg-infra/edge/mini/README.md`; this file only puts
-them in order for one friend. Friends get `FRIENDS.md`.
+This is ember's checklist. Box layout, units and scripts are in `dregg-infra/edge/mini/README.md`
+(and `edge/demo/` for the demo box); members read `FRIENDS.md`.
+
+**Strangers never need the operator.** On the demo box (`demo.dregg.online`) a stranger gets an account
+at `/join`: the door's root processor writes their roster entry, renders the login, runs their own
+`keygen`, enrols them with `mini-reenroll`, and issues their Discord link code (`deploy/door/README.md`).
+The operator watches the door, not each stranger:
+
+```
+journalctl -u mini-door-process --since today         # one line per decision
+cat /var/lib/mini-door-status/door-state.json         # open or closed, and why
+ls /var/lib/mini-door-process/requests/ /var/lib/mini-door-process/rejected/
+```
+
+The free route closes by itself when the sponsor's balance is below `sponsorFloor + funding` or the caps
+in `/etc/mini/door.json` are reached; the page and `door-state.json` say which. Top the sponsor up or raise
+the caps; nothing else reopens it.
 
 Names used below:
 
 ```
-BOX=dregg-workhorse            # root ssh
+BOX=<the box's root ssh destination>
 C=/var/lib/mini/candidate/current
-NODE=/var/lib/mini/store/node   # Store, sponsor workspace (NODE/sponsor), socket
-S=/var/lib/mini/sessions        # S/NAME = a friend's session home; S/ember = the sponsor's
-ASMINI='systemd-run -q --wait --pipe --collect --slice=mini.slice --uid=mini --gid=mini -p UMask=0077 -E TMPDIR=/var/lib/mini/store/node/tmp --'
+NODE=/var/lib/mini/store/node   # Store, sponsor workspace (NODE/sponsor), sockets
+S=/var/lib/mini/sessions        # S/NAME = a member's session home
 ```
 
-The sponsor session is `ssh -t -i ~/.ssh/id_portable mini@2.28.141.27` (`friends/ember.pub`;
-its workspace is `NODE/sponsor` and its home is `S/ember`).
+**Precondition.** The shipped candidate's client has `mini shell` and `provision`, and the box runs split
+tenancy (each member is the account `mini-s-NAME`). Check the render with
+`ssh $BOX 'head -n 2 /etc/mini/authorized_keys.d/mini'`: it must say `mode=open`.
 
-**Precondition.** The shipped candidate's client has `mini shell` and `provision`
-(product-20260930 or later; `deploy-1.md` §"Phase 2"). Check it with
-`ssh $BOX "sed -n 2p /etc/mini/authorized_keys"`, which must say `mode=open`. While it
-says `mode=closed`, every friend gets `mini-closed` and exit 69.
+## An operator friend (by hand, same path as the door)
 
-## Per friend
+1. **Roster.** One line `ssh-ed25519 AAAA… comment` and a NAME matching `^[a-z][a-z0-9-]{0,24}$`.
+   Put it in the box's own roster directory in dregg-infra (`edge/demo/friends/` for the demo box,
+   `edge/mini/friends/` for the workhorse; each has a `BOX` file) and render:
+   ```
+   cp their.pub edge/demo/friends/NAME.pub && git add edge/demo/friends/NAME.pub && git commit -m "mini: add NAME"
+   BOX=dregg-demo MINI_ROSTER_DIR=edge/demo/friends edge/mini/render-authorized-keys.sh
+   ```
+   The render creates `mini-s-NAME` and `S/NAME` (0700). The door's own entries live in the box's
+   `friends/door/`, which the Mac half never touches.
+2. **Their first login.** `ssh -t mini-s-NAME@HOST`, then `keygen mini.key`. Check:
+   `ssh $BOX test -s $S/NAME/keys/mini.key.pub && echo ok`.
+3. **Enrol and provision.** `ssh $BOX /usr/local/lib/mini/mini-reenroll NAME` prints `NAME SUBJECT`.
+   It plans from the member's public key, has the member's account sign possession over the public plan
+   files in its own home, seals, submits, provisions a funded account (`MINI_REENROLL_FUNDING`, default
+   1000) and delivers the birth context. **No copy of the member's key is made anywhere** (this is the
+   `mini-reenroll` of `deploy/door/infra/dregg-infra.patch`; the version before it copied
+   `keys/mini.key` into the sponsor's home and must not be used for strangers).
+4. **Tell them** their SUBJECT: `init mini.key SUBJECT`, then `whoami` (it shows `"initialized": true`).
 
-1. **Receive the key.** You need exactly one line, `ssh-ed25519 AAAA… comment`, and a
-   NAME matching `^[a-z][a-z0-9-]{0,31}$`. NAME names the session forever: a renamed
-   file is a new, empty session.
-2. **Roster.** From `~/dev/dregg-infra`:
-   ```
-   cp their.pub edge/mini/friends/NAME.pub
-   git add edge/mini/friends/NAME.pub && git commit -m "mini: add friend NAME"
-   edge/mini/render-authorized-keys.sh     # rsyncs friends/ and renders on the box; prints "N key(s), mode=open"
-   ```
-   There is no ship step. `ship.sh` re-renders too, but the roster needs only this.
-   Rendering also creates `S/NAME` (mini, 0700).
-3. **Their first login.** Tell them: `ssh -t -i ~/.ssh/mini mini@2.28.141.27`, then
-   `keygen mini.key`. Check that the key exists:
-   `ssh $BOX test -s $S/NAME/keys/mini.key.pub && echo ok`
-   If they type `init` before step 6 is done, the shell answers one line
-   (`error: init needs your provisioning at …/provision/birth-context.json …`) and
-   makes nothing, so there is nothing to clean up.
-4. **Custody copy (today's contract, `m4-shell.md` §Deviations 1).** `enroll plan` and
-   `seal` sign with the sponsor's key and the newcomer's key in one process:
-   ```
-   ssh $BOX "install -d -o mini -g mini -m 0700 $S/ember/keys && \
-             install -o mini -g mini -m 0600 $S/NAME/keys/mini.key $S/ember/keys/NAME.key"
-   ```
-   Only the daily key is copied. The friend's NEXT key (K-PREROTATE) enters the enrollment
-   as two hex words the FRIEND gives you -- `keygen` printed them ("next public key",
-   "co-signature"); `mini enroll --action cosign --key mini.key` prints them again. The
-   co-signature is the next key's signature of (daily key, next key): the Host admits a
-   record that commits to a next key only with it (FIX-IDENTITY), and the friend's `init`
-   refuses a subject whose commitment is not the digest of THEIR next key. Never take the
-   next key from a file in a sponsor home: whoever writes that file could commit a key it
-   holds and later rotate the friend's subject to itself. The next secret (`mini.key.next`)
-   stays with the friend, who should move it off the box.
-5. **Enroll, from the sponsor session.**
-   ```
-   mini> enroll plan NAME NAME.key NEXT-PUB-HEX COSIGN-HEX     # the friend's two words
-   mini> enroll seal NAME
-   mini> enroll submit NAME        # "authority": "admitted-key-only", "subject": "<SUBJECT>"; note SUBJECT
-   ```
-   `enroll lookup NAME` asks again and returns the same receipt. Afterwards remove the copy:
-   `ssh $BOX rm $S/ember/keys/NAME.key` (keep `NAME.key.pub`).
-6. **Provision (M3): factory observation plus a funded account the friend owns.**
-   ```
-   ssh $BOX "install -d -o mini -g mini -m 0700 $S/ember/requests && \
-     printf '%s\n' '{\"type\":\"all\",\"predicates\":[]}' > $S/ember/requests/permit-all.json && \
-     chown mini:mini $S/ember/requests/permit-all.json"          # once, not per friend
-   ssh $BOX "$ASMINI $C/bin/mini workspace --action provision --dir $NODE/sponsor \
-     --name NAME --holder SUBJECT --funding 1000 \
-     --account-predicate $S/ember/requests/permit-all.json --factory-ref factory"
-   ```
-   This writes `NODE/sponsor/provisions/NAME/{provision.json,birth-context.json}`.
-   `--action provision-lookup --dir $NODE/sponsor --name NAME --factory-ref factory` asks again.
-   Deliver the birth context into their session home, where their `init` looks for it:
-   ```
-   ssh $BOX "install -d -o mini -g mini -m 0700 $S/NAME/provision && \
-     install -o mini -g mini -m 0600 $NODE/sponsor/provisions/NAME/birth-context.json \
-       $S/NAME/provision/birth-context.json"
-   ```
-7. **Tell them** their SUBJECT and "you're in: `init mini.key SUBJECT`, `whoami`, then the
-   first 10 minutes." Their `init` binds `provision/birth-context.json` and a namespace at
-   `$S/NAME/namespace` itself. `whoami` must show `"initialized": true` and their subject.
+A stranger's Discord user is linked by the door (`/mini line:link CODE`). For an operator friend, add
+`"<discord id>": "NAME"` to `/etc/mini/discord-roster.json` (root 0644) by hand. The roster never maps
+to the sponsor.
 
-## Re-genesis, as friends experience it
+## Re-genesis, as members experience it
 
-Before: post in the friends' channel, e.g. "reset at HH:MM UTC. keys stay, everything you
-made goes. i'll re-enroll you; then redo your first 10 minutes with new IDs."
+Before: post in the members' channel ("reset at HH:MM UTC; keys stay, everything you made goes").
 
-1. Ship: `edge/mini/ship.sh L --regenesis` (`deploy-1.md` §"Phase 2" steps 1–3). The old
-   Store moves to `store/retired-<ts>` and the sponsor workspace goes with it. Ship
-   re-renders the roster and runs `mini-health`.
-2. For every friend, move the old-Store state aside and keep the keys:
+1. Ship: `edge/mini/ship.sh L --regenesis`. The old Store moves to `store/retired-<ts>`; ship re-renders
+   the roster and runs `mini-health`.
+2. Move every member's old-Store state aside and keep the keys:
    ```
-   ssh $BOX 'ts=$(date -u +%Y%m%dT%H%M%SZ); for d in /var/lib/mini/sessions/*/; do n=$(basename $d); \
-     install -d -o mini -g mini -m 0700 $d/retired-$ts; \
-     for x in workspace namespace provision requests inbox refusals enroll; do [ -e $d/$x ] && mv $d/$x $d/retired-$ts/; done; done'
+   ssh $BOX 'ts=$(date -u +%Y%m%dT%H%M%SZ); for d in /var/lib/mini/sessions/*/; do \
+     for x in workspace namespace provision requests inbox refusals enroll possess; do \
+       [ -e $d/$x ] && install -d -m 0700 -o "$(stat -c %U $d)" $d/retired-$ts && mv $d/$x $d/retired-$ts/; done; done'
    ```
-   `requests/` must go too: request files are write-once, so an old ID with new content
-   is refused. Then restore the permit-all file (step 6).
-3. Redo steps 4–7 per friend (their `keys/mini.key` is still there; they do **not** keygen
-   again). Their subject may change, so tell them the new one.
-
-What friends redo: nothing until you say so, then their own resources, grants and
-references. Hand-offs between friends (`export`/`import`) must be done again.
+3. `ship.sh --regenesis` runs `mini-reenroll --all`, which covers operator friends and door accounts;
+   members then `init mini.key SUBJECT` with their new subject (door accounts: the processor's status page
+   does not re-run; tell members through the channel).
 
 ## Health, restart, backups
 
-- **Health:** `ssh $BOX "$ASMINI /usr/local/lib/mini/mini-health"`. Healthy means a signed
-  sponsor read of `factory` was answered, not that a pid exists.
-- **Restart:** `ssh $BOX systemctl restart mini-store`, then health. A friend's `retry ID`
-  afterwards returns `replayed`.
-- **Backups:** `mini-backup.timer` runs nightly at 03:17 UTC. Archives are in `/var/lib/mini-backups/`
-  (14 kept, and they contain the **sponsor secret key**), and the anchor pulls them off-box.
-  List them: `ssh $BOX ls -l /var/lib/mini-backups`. Check one restores without touching
-  anything live: `ssh $BOX /usr/local/lib/mini/mini-restore-check [ARCHIVE]`. For a real
-  restore, follow the README §"Restore for real".
-- **Not backed up: friends' session homes** (their secret keys, workspaces, requests). If
-  the box is lost, friends keygen again and you redo steps 2–7.
+- **Health:** `ssh $BOX /usr/local/lib/mini/mini-health`. Healthy means a signed sponsor read was
+  answered, not that a pid exists.
+- **Restart:** `ssh $BOX systemctl restart mini-store`, then health.
+- **Backups:** `mini-backup.timer` nightly; archives in `/var/lib/mini-backups/` contain the **sponsor
+  secret key**. `mini-restore-check [ARCHIVE]` checks one without touching anything live.
+- **Not backed up: members' session homes** (their keys, workspaces). If the box is lost, members keygen
+  again and are re-enrolled.
 
-## Removing a friend
+## Removing a member
 
-1. `git rm edge/mini/friends/NAME.pub && git commit -m "mini: remove friend NAME"`, then
-   `edge/mini/render-authorized-keys.sh`. Their ssh stops working at once.
-2. Their signing key stays enrolled and their grants stay live in the Store, but the
-   secret exists only in `S/NAME/keys` (and in `S/ember/keys/NAME.key` if step 5's `rm` was
-   skipped: remove it). No verb prints a secret key.
-3. Revoke what they were granted, from the session that delegated it (the owner's or
-   yours): `revoke ID REF SUBJECT`, then `submit ID`. It revokes the capability that
-   session delegated on REF to SUBJECT; their next read of REF is `refused: revoked`.
-4. `S/NAME` is their data. Archive it or delete it by hand; the script doesn't decide that.
+1. Remove their roster file (`edge/<box>/friends/NAME.pub` for an operator friend, the box's
+   `/usr/local/lib/mini/infra/friends/door/NAME.pub` for a door account) and render. Their ssh stops at once.
+2. Their key stays enrolled and their grants live in the Store; the secret exists only in `S/NAME/keys`.
+   Revoke what they were granted from the session that delegated it: `revoke ID REF SUBJECT`, `submit ID`.
+3. Remove their Discord roster line if any. `S/NAME` is their data: archive or delete it by hand.
