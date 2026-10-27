@@ -78,29 +78,41 @@ from one structured command grammar.
 
 ## What is live
 
-From the integrator's latest cut report (2026-10-27) and the plan's §2. Box paths are on
-`dregg-build`.
+Each row says what the next shipped build carries, and its state is one of **built** (on main),
+**in progress** (being written, not on main complete), or **not in this edition**. Nothing here is
+a claim about the running box except the first row. Box paths are on `dregg-build`.
 
 | surface | state | evidence |
 |---|---|---|
-| Rehearsal ship #2 on `dregg-demo` | serving since 2026-10-27 10:54 UTC, every login closed, reds in the login notice; `mini-health` OK, door on 8796 (`/join` held closed), key broker in the split shape, web gateway and root helper, app front reaching the store (98 apps); restart, certifier and backup drills green (backup pushed, restore check OK) | [plan](docs/DEMO-PREFIX-2026-10-26.md) §2 |
-| Discord | live on the box over the gateway, READY as Dragon's Egg; no inbound route | plan §2; `native/discord-entrance` |
-| Standing rows, round 3 (candidate `6236826f`) | PASS 131 / FAIL 5 / UNCONFIGURED 9 / UNJUDGED 3 (round 2: 112 / 25 / 8 / 3); reds: `demo` (J12X, K12I), `activity`, `m3`, `hermes` phase E (a 300 s timeout), `jserve` (timing) | `/build/candidates/6236826f…`; rows in `scripts/pipeline/journey-rows` |
-| Cut 4 gate (integration `a94bed71`, merged to main at `6b824270`) | FAIL, two reds: the tour's world refuses genesis at J0 with `completionCustodianKeyUnfilled` (the journey bootstrap does not fill the completion key `run.sh init` fills; owner L13); the composed scenario stops at `enroll seal member-4` with "enrollment Plan inspection changed before signing" (owner L1 with the L2 successor) | `/build/candidates/a94bed71…`, `/build/CANDIDATE-a94bed71.md` |
-| Web front end, JWF row | 35/35 | `native/resource-client/journey.d/jweb-frontend.sh` |
-| Parity (structured command grammar) | 203 leaves dry-run through the real handlers: 0 usage and 0 world refusals; face coverage, not outcome tests | plan §2; `native/resource-client/src/shell_grammar.rs`, `src/web/verbs.rs` |
+| The box today | rehearsal #2 is still the build serving on `demo.dregg.online`, with every login closed and `/join` held closed until the owner opens it; the next build is not shipped yet | [plan](docs/DEMO-PREFIX-2026-10-26.md) §2 |
+| Admission path, receipts, refusals | built: documents, grants, money, programs and applications go through the Host's Lean-owned admission; a refusal names its clause and the web shows the one request that would have passed | [DEMO-EXPERIENCE](docs/DEMO-EXPERIENCE-2026-10-27.md) tour step 4; `native/resource-client/src/can.rs` |
+| Lost reply and exact retry | built: the custody record retains the exact call before it travels, so an undecided attempt is looked up and retried byte for byte; the tour's lose-reply, exact-retry and `can --any` paste-back rows pass on the build box | `native/mini-sdk/src/custody.rs`; DEMO-EXPERIENCE tour step 6 |
+| One client wire | built: operation numbers are named constants and consent frames are registered; a gate refuses a literal operation byte in Rust | commits `6445a8b48`, `9cc655c58`; `scripts/host-operations.py` |
+| Platform cell | in progress: the cell kind and the install receiver are built; the genesis seed, replay, Host operations and births priced from the cell are not complete | [`Kernel/PlatformCell.lean`](Kernel/PlatformCell.lean); [`Kernel/PlatformInstallReceiver.lean`](Kernel/PlatformInstallReceiver.lean); commits `a0403a358`, `7d5019b4b` |
+| Fast Store open | in progress: compaction is built (a cold open of a 483-record Store took 160 to 175 s before it); the checkpoint that carries the world, so an open replays only the records after it, is stated and being proved, and is not on main complete | commit `2421dc511`; [HOT-PATH](docs/HOT-PATH-2026-10-27.md) item (h); commit `107f040d9` |
+| Browser join, free and paid routes | built: a name, a hosted key and one session link; the free route has a fixed number of seats; the paid route is 50 DREGG a week on Solana mainnet, with the pay page's audit fixes; not open to strangers until the owner opens the door | [WEB-FRONTEND](docs/WEB-FRONTEND-2026-10-27.md); [enrol-terms.json](deploy/pay/enrol-terms.json); commit `861fe953` |
+| Invite codes and a reserve of free seats | built on main, not yet on the box: the last seats of the free route can need an invite code | commit `9e3d6c731`; [`deploy/door/README.md`](deploy/door/README.md) (`inviteReserve`) |
+| Web pages and accessibility | built: server-rendered pages, every shell verb a form derived from the command grammar (203 leaves dry-run through the real handlers with 0 usage and 0 world refusals), live-region outcomes | `native/resource-client/src/web/verbs.rs`, `src/shell_grammar.rs`; `native/resource-client/journey.d/jweb-frontend.sh` |
+| Export my world | built: one archive of a member's documents, receipts and key, streamed and deleted after download; one export per member per ten minutes | commits `370d606e`, `071aaf95`; WEB-FRONTEND |
+| Research consent | built: an unchecked box at the door; the choice is a fact in the member's own world, shown and changeable on the export page | commit `0bf68599`; [`deploy/policy/RETENTION.txt`](deploy/policy/RETENTION.txt); WEB-FRONTEND |
+| Stories and laws | built: the built-in tale under its sealed law, and a member can install a law on their own document and see the next write judged | [`Kernel/StoryLaw.lean`](Kernel/StoryLaw.lean); DEMO-EXPERIENCE doors 11 and 12 |
+| Objective Bend | built: the `bend` verb is in this edition | [`native/resource-client/src/bend.rs`](native/resource-client/src/bend.rs); [OBJECTIVE-BEND-FRONTEND](docs/OBJECTIVE-BEND-FRONTEND.md) |
+| Discord | built: the same subject and receipts over the Discord gateway as on the web; live on the box in rehearsal #2 with no inbound route | `native/discord-entrance`; DEMO-EXPERIENCE door 9 |
+| Hermes residents with per-member caps | built: an agent resident in a room on a shared model key, with a per-member share of the spend ceiling (1/40 a day and 1/10 in all of the row's ceiling); not live on the box until the next build ships | [`deploy/hermes/README.md`](deploy/hermes/README.md); commit `39d802f5` |
+| Subscriber tier | built: a house Hermes on the `glm-5.3-flash` route in a `subscribers` room, joined by an invitation after `pay subscribers week`, with a Subscribe page | `native/resource-client/src/web/subscribe.rs`; commit `0ac2e8df`; [`deploy/hermes/demo/provider-services.json`](deploy/hermes/demo/provider-services.json) |
+| App market: featured apps | built: any Sandstorm package from the real store, 13 featured apps listed first with the interface an agent drives beneath the HTML; qualifying more apps, one write each, is in progress toward two to three dozen | [APP-MARKET](docs/APP-MARKET-2026-10-27.md) §2a; commit `f7b8fe5f` |
+| WebDAV, CalDAV and git | built on main: the DAV verbs, chunked request bodies and git push and fetch; bodies over 8 MiB are designed, not built | commit `dfdecbbac`; APP-MARKET |
+| Two browsers co-editing one grain | in progress: a second session's route on a running grain is refused; the cause is found and the fix is being stated | APP-MARKET (route registration note) |
+| Abuse limits per member | built: connection and in-flight limits per member at the web gateway, an export cooldown, memory, CPU and task size classes for grains; a per-member request rate in the Host is stated and proved but not yet wired in | commit `90f7f959`; commit `879fc8ec1`; [`Kernel/SubjectRate.lean`](Kernel/SubjectRate.lean); [PD-HOST-RATE-DESIGN](docs/PD-HOST-RATE-DESIGN.md) |
+| Effect Plans for world programs | in progress: the activity effect's keystone is stated and proved on main; transfers from a program's purse and committed writes are being finished; each new effect is still a hand-written kernel change and deriving them is owed after the demo | [`Kernel/ObjectiveActivityEffect.lean`](Kernel/ObjectiveActivityEffect.lean); commit `b1ff71950`; commit `9123503ff` |
 | Reproducible build (M7) | PASS: a cold build on a second Debian 13 box reproduces all 26 outputs byte for byte | [evidence](docs/evidence/2026-10-27-m7-round2-dregg-ref/) |
 | SPK sandbox floor on Debian 13 | audit PASS | [evidence](docs/evidence/2026-10-27-sandbox-floor-dregg-build/) |
 | Private-constructor census (`TokenCensus`) | 374 private constructors reviewed as of 2026-10-27, each minted only at home (18 are open `defect` rows, triaged in docs/review/2026-10-27-untouched-areas/TOKEN-DEFECTS.md); the census catches a planted forgery for every one of the 374 and 11 scripted fault kinds, red-proving inside `lake build TokenCensus`. Regenerate with `scripts/token-census-count.sh` | [`TokenCensus/Table.lean`](TokenCensus/Table.lean); [`TokenCensus/SelfTest.lean`](TokenCensus/SelfTest.lean) |
-| fn transport | The fn transport is not on this demo; the exchange row runs in the nightly against a loopback peer when its image exists. | [AFFORDANCES](docs/review/2026-10-26-deploy/AFFORDANCES.md) §1.7 |
-| Lost reply and exact retry | the custody record and its crash tests; the tour's lose-reply, exact-retry and `can --any` paste-back rows PASS on the build box | plan §2; `native/mini-sdk/src/custody.rs` |
-| The `public` member | **not live**: its `enroll plan` goes stale while the clock writes, so the front page answers 502 to the public reader. Owner: the client lane | plan §2 |
-| Hermes residents on the box | **not live**: the controller is not stood up and `HERMES-LIVE` has not run through the pool route. Owner: L4 | plan §2, §5 R4 |
-| Apps on the box | **not live**: the apps world's metered tasks wait on L13's bootstrap verb; Etherpad and TT-RSS qualify from the real store (`japps --box` 22/22), units and ports staged on the box | plan §2; [APP-MARKET](docs/APP-MARKET-2026-10-27.md) |
-| The oracle | **not live**: the veri7vn appliance is landing as a grain through the same grain gate. Owner: the oracle lane (ember's codex session) | [Appliance overview](docs/oracle-appliance.md); [ORACLE-GRAIN](docs/ORACLE-GRAIN-2026-10-27.md); plan §5 R15 |
-| Pay-to-enrol | **not live**: mainnet endpoints and the enrolment address are configured on the box; the payment observer is fixed at genesis and arrives with rehearsal #3's re-genesis; 50 DREGG a week from the first open day | [enrol-terms.json](deploy/pay/enrol-terms.json); plan §1 |
+| fn transport | not in this edition: the fn transport is not on this demo | plan §5 ("fn is out of this demo") |
+| The oracle as a grain | not in this edition | [ORACLE-GRAIN](docs/ORACLE-GRAIN-2026-10-27.md); DEMO-EXPERIENCE door 8 |
+| A networked private-computation service | not in this edition | [UNTOUCHED-DEPUTY-STATE](docs/UNTOUCHED-DEPUTY-STATE.md) (private-backend, tier 2 after the opening) |
 
-A row's state is the run it cites, not this commit. The public-opening contract (plan §1) is
+A row's state is the evidence it cites, not this commit. The public-opening contract (plan §1) is
 measured on the demo box itself.
 
 ## How it is built

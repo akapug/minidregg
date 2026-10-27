@@ -9,6 +9,7 @@ no JavaScript, no external fonts or scripts.
 | `language.html` | Objective Bend: Core4, one example, what is and is not proved |
 | `laws.html` | laws, object records, the Objective pin, activities, seats, and which a Host runs |
 | `architecture.html` | admission, laws, receipts, consent, private rooms, agreement |
+| `edition.html` | what the next build carries: built, in progress, not in this edition; each line is a row of the What is live table |
 | `status.html` | **generated**: the README's What is live table (`gen-status.py`); every row names the landing commit or journey row it rests on |
 | `join.html` | a redirect to the join page on the demo host (the door owns the join copy) |
 
