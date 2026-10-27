@@ -155,7 +155,7 @@ regeneration, no decisions ledger, no census of the research tree, no accepted-r
 - No status censuses, no reviews of reviews, no ledgers unless they unblock the ship.
 - **One Lean closure per box at a time; the cut's is on `dregg-build`, the lanes' on `dregg-ref`.**
   `dregg-build` builds the Host closure for the integrator's cut; a lane elaborates per file (`lean-ask`,
-  `lake env lean`) and runs its closure on `dregg-ref` (the lanes' second Linux box, shared with
+  `lake env lean`) and runs its closure on `dregg-ref` through `closure-lock swarm-build <cmd>` (one closure at a time on the box, `closure-lock --who` names the holder; the nightly at 00:03 UTC and M7's reference build hold the same lock; seed only `.lake/packages`, never a hard-linked `build/`) (the lanes' second Linux box, shared with
   nanodregg's announced measurement windows: ember, 2026-10-27 evening, "USE all these machines while we
   have them"), or on the Mac's warm `.lake`, or waits for the cut (2026-10-27
   afternoon: four concurrent closures put the box at load 25 and a cut's host build was killed by

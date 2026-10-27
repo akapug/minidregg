@@ -121,3 +121,72 @@ successor read it; making elided outputs addressable (ids in the ledger, or `cv 
 index) or dropping the sidecar is a decision for ember. The carried first generation is now the
 largest part of a third-generation pack (150 KB): its verbatim words are the pack's contract,
 and cutting them further would need a ruling on what "verbatim" owes an old generation.
+
+## Second round: ember's rulings (2026-10-27 evening)
+
+Seven more commits on the same branch.
+
+- **The sidecar is now usable.** Every ledger row ends with its tool_use id and output size, and
+  the hand-off's last line says `cv cat <ref> <tool_use_id>` fetches it. Tested end to end: the
+  CLI test takes the id from a ledger row and gets the 9 KB payload back through `cv cat`.
+- **Old generations are owed little.** A generation's entry is its brief's first paragraph (for
+  a resumed generation, the first message sent to it), its commits, heads, tips and branches,
+  its state-file paths and its PID files. The 150 + 55 KB of carried timelines are now 1.5 + 2.4 KB.
+- **`## 1. Grounding`** follows the hand-off: the last state file the lane wrote in its last 60
+  calls (path and content), the open items it listed in those calls (a heading such as
+  "**Batch for you:**" brings its list), and the decisions it recorded, as verbatim lines with
+  message indices. Measuring it on infra found two more losses, both now fixed:
+  - **The infra lane's state file is `edge/demo/CHECKLIST.md`.** The name rule (`docs/` or
+    `scratch`, named *STATE*) cannot find it, and the lane rewrote it 9 times with `python3`
+    scripts, so no content is in the transcript. A file that a message calls the lane's "state
+    file" now counts. When its last write was in place, it is read from disk when distilled.
+    That file is 83 KB, so it is cut to 24 KB.
+  - **Coordinator messages were missing from the timeline.** Claude Code records a
+    coordinator's SendMessage as an `isMeta` user turn: "The coordinator sent a message while
+    you were working:". Distill kept only `queued_command` copies. a221a2ea got 11 and kept 3,
+    and the root's resume message (its quest and its state file) was among the 8 lost. The
+    first infra lane got 53 and kept 29. These now go into the timeline and into the verbatim
+    tail.
+
+**Infra after both rounds** (`--keep-last 14`, written to scratch and deleted):
+
+| lane | 0.18.0 | round 1 | round 2 |
+|---|---|---|---|
+| `a221a2ea8cf1d4104` | 1.6× | 2.8× | 5.8× |
+| `a8850c5b2ebab4f7c` | 2.1× | — | 6.3× |
+
+The a221 pack is 4.5 KB hand-off, 26 KB grounding, 7 KB brief, 4 KB of earlier generations,
+52 KB timeline, 5 KB facts and 21 KB ledger, plus a 33 KB tail.
+
+**Re-orientation, before and after: no measurable gain.** No new successor was run, because
+that would act on live boxes. So this is a counterfactual over the real successors' first 40
+calls. A git/PID/log check or re-read counts as "answered" when at least half of its distinct
+output lines (12 characters or more) appear in the pack. The lines are compared to the
+re-distilled pack, not to whatever the next successor will actually do.
+
+| successor | checks + re-reads | answered by old pack | answered by new pack |
+|---|---|---|---|
+| a221a2ea | 26 (19k tokens) | 2 | 0 |
+| ae649955 | 23 (8k tokens) | 0 | 0 |
+
+The two that the old pack answered were `sed -n` range reads of CHECKLIST.md. The old pack had
+them only because it carried the first generation's notes verbatim. The new pack carries the
+file's head and tail, and those ranges are in the middle. The rest of the checks read live state
+(git status, box job logs, code regions) that no pack written earlier could hold. The pack is
+3× smaller and the re-orientation count is unchanged by this measure. The real "after" number
+is the next actual resume.
+
+**Live distills with the branch binary** (the coordinator, tonight; real resumes, not counterfactuals):
+
+| lane | before | after | note |
+|---|---|---|---|
+| infra `ae6499559bb424054` | 1.4× (0.18.0) | 2.6× (164k tokens) | debug build at fa4e3af1, before the slim generations |
+| L1 `a436f5b0c02ab4364` | — | 8.2× (516k → 62.8k) | |
+| integrator `a67de9cf3f217c50e` | — | 4.3× (976k → 226k) | 60 commits kept |
+
+None of the three successors asked the coordinator a re-orientation question. Their first calls
+read live box state (git, PID files, logs), which no pack written earlier can answer.
+
+**Left for ember.** Whether a state file this large is carried whole (83 KB is about 36k
+tokens, which would bring a221 to about 4.4×), and whether coordinator turns should become a
+first-class kind in the IR instead of being matched by their opening line in distill.

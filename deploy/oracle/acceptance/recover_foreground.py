@@ -34,7 +34,21 @@ def decode_export(value, store):
     return decoded
 
 
-def prebirth(export, store, request_id, operation_id):
+def settle_only(plan):
+    goal = plan.get('goal', 'resume-session')
+    require(goal in ('resume-session','settle-refusal'), 'unknown recovery plan goal')
+    if goal == 'settle-refusal':
+        require(type(plan.get('native_operation_id')) is int and plan['native_operation_id'] > 0,
+                'native refusal operation malformed')
+    return goal == 'settle-refusal'
+
+
+def evidence_directory(plan):
+    suffix = '-refusal-settlement' if settle_only(plan) else ''
+    return Path(plan['run'])/'continuations'/('foreground-'+str(plan['operation_id'])+suffix)
+
+
+def prebirth(export, store, request_id, operation_id, native_refusal=None):
     """Evidence shape only; native command rechecks actual current authority."""
     require(re.fullmatch('[0-9a-f]{32}', request_id) and type(operation_id) is int and operation_id > 0,
             'foreground identity malformed')
@@ -62,8 +76,27 @@ def prebirth(export, store, request_id, operation_id):
     for name in ('pending','toolPending','dispatchPending','providerPending','toolHold','dispatchHold','providerHold',
                  'birthOperation','birthPending','applicationApiAttempt','dispatchAttempt','child','settlementDue'):
         require(journal.get(name) is None, 'conflicting retained work: ' + name)
-    require(journal.get('bornResources') == [] and journal.get('birthNextOrdinal') == {}
+    expected_ordinals = {} if native_refusal is None else {'oracle-session':1}
+    require(journal.get('bornResources') == [] and journal.get('birthNextOrdinal') == expected_ordinals
             and journal.get('unresolvedExternal') == [], 'a birth or unrelated uncertainty already exists')
+    if native_refusal is not None:
+        # These are retained evidence joins, not a decision that a birth was
+        # refused. The native recovery revalidates the source and cleanup chain.
+        require(type(native_refusal) is int and native_refusal > 0, 'refusal operation malformed')
+        prefix = f'attempt-{native_refusal:016}/'
+        require(not any(prefix+n in files for n in ('call.bin','submit-marker.json','outcome.bin')),
+                'refusal attempt has submission evidence')
+        proof = json.loads(files[prefix+'pre-submit-refusal.json'])
+        require(proof.get('type') == 'minidregg-pre-submit-refusal-v1' and proof.get('stage') == 'prepare'
+                and proof.get('operation') == 1
+                and proof.get('frameSha256') == hashlib.sha256(files[prefix+'pre-submit-refusal.frame']).hexdigest()
+                and proof.get('attemptManifestSha256') == hashlib.sha256(files[prefix+'attempt.json']).hexdigest(),
+                'native pre-submit refusal evidence differs')
+        verified = [name for name in files if name.startswith(prefix+'prepare-refusal-verify-') and name.endswith('/outcome.json')]
+        require(len(verified) == 1, 'expected one native refusal verification')
+        refusal = json.loads(files[verified[0]])
+        require(refusal.get('type') == 'refused' and refusal.get('reason') == 'law-denied'
+                and refusal.get('phase') == '70726570617265', 'native verified prepare refusal differs')
     require(not any(name.startswith(('birth-','foreground-recovery-')) for name in files),
             'native birth or recovery already began')
     hold = journal.get('parentHold') or {}
@@ -90,7 +123,8 @@ def prepare(plan_path, exported_path, status_path, sources_path, output):
     world = read(run/'world-identity.json')
     require(world['store'] == plan['store'] and not list((run/'world/evidence').glob('start-*.cmd')),
             'retained Store or unstarted application boundary differs')
-    require(output == run/'continuations'/('foreground-'+str(plan['operation_id'])) and not output.exists(),
+    terminal = settle_only(plan)
+    require(output == evidence_directory(plan) and not output.exists(),
             'recovery evidence already exists or path differs; inspect, never repeat')
     for key in ('predecessor_export','predecessor_status','runtime','public_mini','spk','inventory','benchmark','qualification_manifest'):
         pin = plan[key]; path = Path(pin['path'])
@@ -101,7 +135,8 @@ def prepare(plan_path, exported_path, status_path, sources_path, output):
     exported, status = read(exported_path), read(status_path)
     require(exported == read(Path(plan['predecessor_export']['path']))
             and status == read(Path(plan['predecessor_status']['path'])), 'fresh stopped evidence differs from reviewed predecessor')
-    boundary = prebirth(exported,plan['store'],plan['request_id'],plan['operation_id'])
+    boundary = prebirth(exported,plan['store'],plan['request_id'],plan['operation_id'],
+                        plan['native_operation_id'] if terminal else None)
     require(status.get('store') == plan['store'] and status.get('stopped') is True
             and status['publicListener']['binarySha256'] == plan['old_public_mini_sha256']
             and status['runtimeSha256'] == plan['old_runtime_sha256'], 'installed binary predecessor differs')
@@ -151,9 +186,10 @@ def validate_result(plan, recovered, retained, journal, exported):
             and recovered.get('requestId') == plan['request_id']
             and str(recovered.get('operationId')) == str(plan['operation_id'])
             and recovered.get('acknowledged') is False, 'native recovery identity or ACK differs')
+    terminal = settle_only(plan)
     require(retained.get('type') == 'tool-complete' and retained.get('requestId') == plan['request_id']
-            and str(retained.get('operationId')) == str(plan['operation_id']) and retained.get('isError') is False
-            and retained.get('result', {}).get('isError') is False, 'retained result is not definite success')
+            and str(retained.get('operationId')) == str(plan['operation_id']) and retained.get('isError') is terminal
+            and retained.get('result', {}).get('isError') is terminal, 'retained result differs from selected recovery goal')
     for name in ('parentHold','toolHold','pending','toolPending','birthOperation','birthPending'):
         require(journal.get(name) is None,'recovered session retains unsettled work: '+name)
     attempt=journal.get('foregroundAttempt') or {}
@@ -168,14 +204,42 @@ def validate_result(plan, recovered, retained, journal, exported):
     require(attempt.get('resultPath') == str(state / result_name)
             and hashlib.sha256(raw).hexdigest() == attempt.get('resultSha256') == recovered.get('resultSha256')
             and json.loads(raw) == retained.get('result'), 'native recovery result digest or bytes differ')
-    require({str(row.get('target')) for row in journal.get('bornResources',[])} == {'29420','29421'}
-            and len(journal['bornResources']) == 2,'native session pair was not retained')
+    if terminal:
+        refusal = json.loads(retained['result']['text'])
+        require(refusal.get('type') == 'mini-resource-birth-refused-v1'
+                and refusal.get('reason') == 'law-denied' and refusal.get('phase') == 'prepare'
+                and refusal.get('born') is False and refusal.get('toolCharge') == '0'
+                and str(refusal.get('nativeOperationId')) == str(plan['native_operation_id']),
+                'native definite refusal payload differs')
+        disposition_name = f"foreground-{plan['operation_id']:016}.birth-refusal.json"
+        disposition_raw = files[disposition_name]
+        require(hashlib.sha256(disposition_raw).hexdigest() == refusal.get('dispositionSha256'),
+                'native refusal disposition digest differs')
+        disposition = json.loads(disposition_raw)
+        origin = disposition.get('origin') or {}
+        require(disposition.get('requestId') == plan['request_id']
+                and disposition.get('requestSha256') == attempt.get('requestSha256')
+                and origin.get('promptOperationId') == plan['operation_id']
+                and origin.get('operationId') == plan['native_operation_id']
+                and origin.get('family') == 'oracle-session' and origin.get('ordinal') == 0
+                and origin.get('route') == 'session', 'native refusal disposition identity differs')
+        require(journal.get('bornResources') == [] and journal.get('birthNextOrdinal') == {'oracle-session':1},
+                'terminal refusal must preserve consumed ordinal without a born resource')
+        for name in ('dispatchPending','providerPending','dispatchHold','providerHold',
+                     'applicationApiAttempt','dispatchAttempt','child','settlementDue'):
+            require(journal.get(name) is None, 'terminal refusal retains work: '+name)
+        require(journal.get('unresolvedExternal') == [], 'terminal refusal retains external uncertainty')
+    else:
+        require({str(row.get('target')) for row in journal.get('bornResources',[])} == {'29420','29421'}
+                and len(journal['bornResources']) == 2,'native session pair was not retained')
 
 
 if __name__ == '__main__':
     try:
         if len(sys.argv)==7 and sys.argv[1]=='prepare':
             print(prepare(*map(Path,sys.argv[2:])))
+        elif len(sys.argv)==3 and sys.argv[1]=='directory':
+            print(evidence_directory(read(Path(sys.argv[2]))))
         elif len(sys.argv)==7 and sys.argv[1]=='result':
             validate_result(*[read(Path(p)) for p in sys.argv[2:]])
         else:raise ValueError('usage: recover_foreground.py prepare PLAN EXPORT STATUS SOURCES OUT | result PLAN RECOVERY RESULT JOURNAL EXPORT')

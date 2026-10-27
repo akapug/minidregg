@@ -184,6 +184,107 @@ class RecoveryTests(unittest.TestCase):
                 self.assertEqual(calls.read_text().splitlines(),['controller-status' if old==new else 'controller-public-listener-upgrade'])
                 if ok and old==new:self.assertEqual(json.loads((continuation/'public-listener.json').read_bytes())['publicListenerSelection'],'already-qualified')
 
+    def test_terminal_refusal_boundary_requires_consumed_ordinal_and_native_evidence(self):
+        request,export=self.fixture()
+        self.change_journal(export,lambda j:j.update(birthNextOrdinal={'oracle-session':1}))
+        prefix='attempt-0000000000000039/'
+        def add(name,raw):
+            export['files'][name]={'sha256':hashlib.sha256(raw).hexdigest(),'base64':base64.b64encode(raw).decode()}
+        add(prefix+'attempt.json',b'{}');add(prefix+'pre-submit-refusal.frame',b'native refusal frame')
+        proof={'type':'minidregg-pre-submit-refusal-v1','stage':'prepare','operation':1,
+               'frameSha256':hashlib.sha256(b'native refusal frame').hexdigest(),
+               'attemptManifestSha256':hashlib.sha256(b'{}').hexdigest()}
+        add(prefix+'pre-submit-refusal.json',json.dumps(proof).encode())
+        add(prefix+'prepare-refusal-verify-fixture/outcome.json',json.dumps({
+            'type':'refused','reason':'law-denied','phase':'70726570617265'}).encode())
+        r.prebirth(export,'fixture',request,13,39)
+        with self.assertRaises(ValueError):r.prebirth(export,'fixture',request,13)
+        for marker in ('call.bin','submit-marker.json','outcome.bin'):
+            bad=copy.deepcopy(export);bad['files'][prefix+marker]={'sha256':hashlib.sha256(b'x').hexdigest(),'base64':base64.b64encode(b'x').decode()}
+            with self.assertRaises(ValueError):r.prebirth(bad,'fixture',request,13,39)
+        bad=copy.deepcopy(export);self.change_journal(bad,lambda j:j.update(birthNextOrdinal={'oracle-session':2}))
+        with self.assertRaises(ValueError):r.prebirth(bad,'fixture',request,13,39)
+        plan={'run':'/fixture','operation_id':13,'goal':'settle-refusal','native_operation_id':39}
+        self.assertEqual(str(r.evidence_directory(plan)),'/fixture/continuations/foreground-13-refusal-settlement')
+        with self.assertRaises(ValueError):r.settle_only(dict(plan,goal='automatic-retry'))
+
+    def test_terminal_result_joins_typed_refusal_and_all_settlements(self):
+        request='ab'*16;plan={'request_id':request,'operation_id':13,'store':'fixture',
+                             'goal':'settle-refusal','native_operation_id':39}
+        payload={'type':'mini-resource-birth-refused-v1','reason':'law-denied','phase':'prepare',
+                 'born':False,'toolCharge':'0','nativeOperationId':'39'}
+        disposition={'requestId':request,'requestSha256':'fixture-original-request',
+                     'origin':{'promptOperationId':13,'operationId':39,'family':'oracle-session','ordinal':0,'route':'session'}}
+        def fixture(body=payload, record=disposition):
+            disposition_raw=json.dumps(record).encode()
+            result={'isError':True,'text':json.dumps(dict(body,dispositionSha256=hashlib.sha256(disposition_raw).hexdigest()))}
+            raw=json.dumps(result).encode();digest=hashlib.sha256(raw).hexdigest()
+            recovered={'type':'mini-foreground-session-recovery-v1','requestId':request,'operationId':'13',
+                       'resultSha256':digest,'resultReady':True,'acknowledged':False}
+            retained={'type':'tool-complete','requestId':request,'operationId':'13','isError':True,'result':result}
+            journal={'binding':{'config':{'stateDir':'/private/state'}},'foregroundAttempt':{
+                'requestId':request,'operationId':13,'phase':'definite','reported':False,'requestSha256':'fixture-original-request',
+                'resultPath':'/private/state/foreground-0000000000000013.result.json','resultSha256':digest},
+                'bornResources':[],'birthNextOrdinal':{'oracle-session':1},'unresolvedExternal':[]}
+            files={'journal.json':json.dumps(journal).encode(),'foreground-0000000000000013.result.json':raw,
+                   'foreground-0000000000000013.birth-refusal.json':disposition_raw}
+            exported={'protocol':'mini-spk-controller-evidence-v1','store':'fixture','files':{name:{
+                'sha256':hashlib.sha256(data).hexdigest(),'base64':base64.b64encode(data).decode()} for name,data in files.items()}}
+            return recovered,retained,journal,exported
+        r.validate_result(plan,*fixture())
+        recovered,retained,journal,exported=fixture()
+        changed=json.dumps(dict(disposition,requestId='cd'*16)).encode()
+        exported['files']['foreground-0000000000000013.birth-refusal.json']={'sha256':hashlib.sha256(changed).hexdigest(),'base64':base64.b64encode(changed).decode()}
+        with self.assertRaisesRegex(ValueError,'disposition digest'):r.validate_result(plan,recovered,retained,journal,exported)
+        for field,value in [('requestId','cd'*16),('requestSha256','different')]:
+            with self.subTest(disposition=field),self.assertRaisesRegex(ValueError,'disposition identity'):
+                r.validate_result(plan,*fixture(record=dict(disposition,**{field:value})))
+        for field,value in [('promptOperationId',14),('operationId',40),('family','other'),('ordinal',1),('route','application')]:
+            bad=dict(disposition,origin=dict(disposition['origin'],**{field:value}))
+            with self.subTest(origin=field),self.assertRaisesRegex(ValueError,'disposition identity'):
+                r.validate_result(plan,*fixture(record=bad))
+        for key,value in [('type','other-error'),('reason','unknown'),('phase','submit'),('born',True),('toolCharge','1'),('nativeOperationId','40')]:
+            with self.subTest(key=key),self.assertRaises(ValueError):r.validate_result(plan,*fixture(dict(payload,**{key:value})))
+        for key,value in [('parentHold',{'reserve':'1'}),('bornResources',[{'target':'29420'}]),('dispatchPending',{'pending':True}),('unresolvedExternal',['unknown'])]:
+            recovered,retained,journal,exported=fixture();journal[key]=value
+            raw=json.dumps(journal).encode();exported['files']['journal.json']={'sha256':hashlib.sha256(raw).hexdigest(),'base64':base64.b64encode(raw).decode()}
+            with self.subTest(key=key),self.assertRaises(ValueError):r.validate_result(plan,recovered,retained,journal,exported)
+        recovered,retained,journal,exported=fixture();recovered['resultSha256']='0'*64
+        with self.assertRaises(ValueError):r.validate_result(plan,recovered,retained,journal,exported)
+        with self.assertRaises(ValueError):r.validate_result(dict(plan,goal='resume-session'),*fixture())
+
+    def test_terminal_shell_returns_after_ack_without_grant(self):
+        source=(ROOT/'deploy/oracle/acceptance/world.sh').read_text()
+        start=source.index('  if [[ ${preserve_retained_namespace:-0} == 1 ]]; then')
+        end=source.index('  (set -o noclobber; cat "$continuation/retained-result.json"',start)
+        branch=source[start:end]
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);calls=root/'calls';installer=root/'installer'
+            installer.write_text('#!/usr/bin/env python3\nimport json,os,sys\nopen(os.environ["CALLS"],"a").write(sys.argv[1]+"\\n")\nprint(json.dumps({"type":"tool-acknowledged","requestId":"fixture"}) if sys.argv[1]=="controller-tool-ack" else "{}")\n')
+            installer.chmod(0o755)
+            setup='timeout() { shift; "$@"; }; sudo() { shift 2; "$@"; }; world_phase_record() { :; };'
+            setup+=f'installer={installer}; continuation={root}; store=fixture; helper=/helper; request_id=fixture; preserve_retained_namespace=1;'
+            result=subprocess.run(['bash','-eu','-c',setup+'finish() {\n'+branch+'echo unexpected-grant; }; finish; test "$foreground_settlement_only" = 1'],
+                                  env={**os.environ,'CALLS':str(calls)},capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertEqual(calls.read_text().splitlines(),['controller-tool-ack','controller-journal'])
+            self.assertNotIn('unexpected-grant',result.stdout)
+
+    def test_successful_terminal_cleanup_preserves_namespace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);(root/'continuation').mkdir();calls=root/'calls'
+            setup='source "$REPO/deploy/oracle/acceptance/world.sh"; '
+            setup+='world_controller_stop() { :; }; systemctl() { :; }; journalctl() { :; }; '
+            setup+='world_cleanup_volumes() { printf "%s\\n" "$1" > "$CALLS"; }; '
+            setup+='sudo() { echo forbidden-remove >&2; return 99; }; '
+            setup+='configured=1; controller_created=1; controller_staged=0; preserve_retained_namespace=1; preserve_existing_exit=0; '
+            setup+='run=$RUN; continuation=$RUN/continuation; repo=$REPO; journey=/usr/bin/true; store=fixture; helper=/helper; installer=/installer; units=/unused; state=; world_cleanup 0'
+            result=subprocess.run(['bash','-eu','-c',setup],env={**os.environ,'REPO':str(ROOT),'RUN':str(root),'CALLS':str(calls)},capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertEqual(calls.read_text().strip(),'true')
+            self.assertEqual(json.loads((root/'continuation/exit.json').read_bytes()),{
+                'execution_exit':0,'cleanup_exit':0,'namespace_preserved':True})
+
     def test_shell_recovery_has_one_fixed_admin_and_no_tool_resubmission(self):
         source=(ROOT/'deploy/oracle/acceptance/world.sh').read_text()
         body=source.split('world_recover_foreground() {',1)[1].split('\n}\n',1)[0]

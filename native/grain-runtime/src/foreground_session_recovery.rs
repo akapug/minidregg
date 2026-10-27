@@ -25,6 +25,9 @@ pub(super) fn successful_reply(request_id: &str, response: &str) -> bool {
 }
 
 fn candidate(journal: &Journal, state: &Path) -> Result<ForegroundRequest> {
+    candidate_at(journal, state, false)
+}
+fn candidate_at(journal: &Journal, state: &Path, refused: bool) -> Result<ForegroundRequest> {
     journal.validate_foreground(state)?;
     let attempt = journal
         .foreground_attempt
@@ -64,7 +67,11 @@ fn candidate(journal: &Journal, state: &Path) -> Result<ForegroundRequest> {
     if arguments.len() != 2
         || family.is_empty()
         || application.is_empty()
-        || journal.birth_next_ordinal.contains_key(family)
+        || if refused {
+            journal.birth_next_ordinal.get(family) != Some(&1)
+        } else {
+            journal.birth_next_ordinal.contains_key(family) || journal.birth_refusal.is_some()
+        }
         || journal
             .born_resources
             .iter()
@@ -136,10 +143,13 @@ fn candidate(journal: &Journal, state: &Path) -> Result<ForegroundRequest> {
     {
         return Err("session recovery requires original soft reserved parent witness".into());
     }
+    if refused && journal.birth_refusal.is_none() {
+        birth_refusal::legacy_execution_trace(journal, attempt)?;
+    }
     Ok(request)
 }
 
-fn parent_matches(journal: &Journal, task: &str, observed: &Value) -> Result<()> {
+pub(super) fn parent_matches(journal: &Journal, task: &str, observed: &Value) -> Result<()> {
     let witness = journal
         .prompt_witness
         .as_ref()
@@ -229,10 +239,28 @@ impl Runtime {
         }
         let source: Value = serde_json::from_slice(&source_bytes).map_err(|e| e.to_string())?;
         reserve_source_matches(&source, &self.parent(), hold, id)?;
+        self.verify_retained_grain_call(id, trace_id, "reserve")
+    }
+
+    pub(super) fn verify_retained_grain_call(
+        &self,
+        id: u64,
+        trace_id: u64,
+        label: &str,
+    ) -> Result<PathBuf> {
+        let original = self.config.state_dir.join(format!("attempt-{id:016}"));
+        let source_bytes = bounded_regular_file(
+            &self.config.state_dir.join(format!("source-{id:016}.json")),
+            131_072,
+        )?;
+        if source_bytes != bounded_regular_file(&original.join("intent.json"), 131_072)? {
+            return Err("retained transition source differs from original intent".into());
+        }
+        let source: Value = serde_json::from_slice(&source_bytes).map_err(|e| e.to_string())?;
         let directory = self
             .config
             .state_dir
-            .join(format!("foreground-reserve-codec-{trace_id:016}"));
+            .join(format!("foreground-{label}-codec-{trace_id:016}"));
         fs::create_dir(&directory).map_err(|e| format!("reserve codec directory: {e}"))?;
         fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))
             .map_err(|e| e.to_string())?;
@@ -323,7 +351,13 @@ impl Runtime {
     }
 
     pub(super) fn recover_foreground_session(&mut self, request_id: &str) -> Result<Value> {
-        let request = candidate(&self.journal, &self.config.state_dir)?;
+        let (request, refused) = match candidate(&self.journal, &self.config.state_dir) {
+            Ok(request) => (request, false),
+            Err(before) => match candidate_at(&self.journal, &self.config.state_dir, true) {
+                Ok(request) => (request, true),
+                Err(_) => return Err(before),
+            },
+        };
         if request.request_id != request_id
             || !valid_foreground_request_id(request_id)
             || self.child.is_some()
@@ -353,10 +387,10 @@ impl Runtime {
             .as_ref()
             .unwrap()
             .operation_id;
-        // The runtime holds its exclusive journal flock. Any previous orphaned
-        // custody child from this pre-birth prefix can only be a read-only lookup:
-        // the first write requires a durable ordinal/birth marker excluded above.
-        // Do not generalize this to a worker or a request that crossed that marker.
+        // The runtime holds its exclusive journal flock. The pre-birth branch
+        // excludes every write marker. The refusal branch below instead proves
+        // the canonical prepare refusal and source-bound zero cleanup, and may
+        // only finish its error; it never re-enters resource creation.
         self.journal.connection = Connection::Fenced;
         let trace_id = self.next_id()?;
         self.journal.reconciliation_log.push(json!({"decisionId":trace_id.to_string(),
@@ -439,7 +473,14 @@ impl Runtime {
             {
                 return Err("session delegated tool is not signed idle".into());
             }
-            candidate(&self.journal, &self.config.state_dir)?;
+            candidate_at(&self.journal, &self.config.state_dir, refused)?;
+            if refused {
+                if self.journal.birth_refusal.is_none() {
+                    self.adopt_legacy_session_refusal(&request, trace_id)?;
+                }
+                self.completed_birth_refusal_result()?
+                    .ok_or("session refusal was not retained")?;
+            }
             Ok(replay)
         })();
         let receipt = match validation {
@@ -463,31 +504,20 @@ impl Runtime {
             self.save()?;
             self.foreground_operation = Some(operation_id);
             self.completion_phase.store(PHASE_RUNNING, Ordering::SeqCst);
-            let result =
-                self.create_resource(&request.arguments, Some(ApplicationBirthRoute::Session));
+            let result = if refused {
+                Err("retained native prepare refusal".to_owned())
+            } else {
+                self.create_resource(&request.arguments, Some(ApplicationBirthRoute::Session))
+            };
             self.foreground_operation = None;
-            let result = result?;
-            let (_result, bytes) =
-                bounded_foreground_result(json!({"isError":false,"text":result.to_string()}))?;
-            let path = self
-                .config
-                .state_dir
-                .join(format!("foreground-{operation_id:016}.result.json"));
-            write_new(&path, &bytes)?;
-            let attempt = self.journal.foreground_attempt.as_mut().unwrap();
-            attempt.result_path = Some(path);
-            attempt.result_sha256 = Some(sha256_bytes(&bytes)?);
-            self.save()?;
-            if !self.claim_completion(&profile.charge)? {
-                return Err("session recovery completion was interrupted".into());
-            }
-            self.transition(
-                json!({"type":"settle","charge":profile.charge}),
-                "settle",
-                "recovered foreground session complete",
-            )?;
-            self.journal.prompt_witness = None;
-            self.journal.foreground_attempt.as_mut().unwrap().phase = ForegroundPhase::Definite;
+            let (result, charge) = match result {
+                Ok(value) => (
+                    json!({"isError":false,"text":value.to_string()}),
+                    profile.charge.as_str(),
+                ),
+                Err(error) => (self.completed_birth_refusal_result()?.ok_or(error)?, "0"),
+            };
+            self.complete_foreground_result(result, charge)?;
             self.journal.reconciliation_log.push(json!({"decisionId":trace_id.to_string(),
             "action":"foreground-session-resume","stage":"completed","operationId":operation_id.to_string(),"requestId":request_id}));
             self.completion_phase.store(PHASE_IDLE, Ordering::SeqCst);
