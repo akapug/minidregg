@@ -50,3 +50,55 @@ make them fit; none was attempted.
   not caller-supplied `now` fields.
 - Pure-function domains (automatafl, collective, market, station, workshop) are Route A (objective-invoke) and
   need a hostInput adapter; none attempted.
+
+## The effect Plan: statement first (deputy, 2026-10-27; written before any Lean)
+
+**Design.** The seven domains' Plans are effect requests performed now (`pay`, `disburse`, `publish`,
+`admit`), answered `settled` or `refused`, beside `await`. The activity kernel keeps its two load-bearing
+contracts unchanged: ONE extraction per segment (`runSegment`, `single_extraction_reservation_budget`) and
+every kernel outcome typed at birth (`outcomeProtocol`). So an effect is not performed inside a segment:
+an effect Plan is a YIELD whose await is decided by the kernel at the yield. `decodePlan` widens to
+`await | transfer {to, amount, write} | commit {write}`, each decoded to a `PlanAwait` whose source is a new
+`PlanSource.performed (effect)`. `commitYield` judges the effect in the same batch: a `transfer` posts
+`amount` from the activity's purse to account `to` when the purse still reserves the await's fee pair and
+its storage after it and `to` is an open account other than the purse, the collector and the issuer well;
+`commit` applies `write` through the object's law exactly as `await.write` does (`stateWrite`). The await is
+recorded already decided: outcome `settled` (a new `AwaitOutcome`) when performed, `refused` otherwise,
+with nothing posted and nothing written. The next `deliver` turn (any subject; no decider, no due height)
+resumes the activity with `resumed {outcome, view}`, so every unfolding past a yield still costs one
+admitted turn. `settled` is not added to `kernelOutcomes` (Tally and every existing program stay valid);
+an effect yield instead requires the outcome type to type `settled` and `refused`, or the Plan is refused
+(`Refusal.plan "effect outcomes"`). `publish` and `admit` are `commit` (a declared-state write);
+`pay` and `disburse` are `transfer`. Not in this change: drex's action list (a batch of effects) and
+Route A's pure domains. No new registry operation, no new Store kind: the transfer is a posting in the
+activity turn's existing batch; the record gains one await-source tag (a persisted-byte change carried by
+the codec identity gate, a re-emit commit, not a kind).
+
+**Keystone (the Prop, before proof).** For a birth or delivery whose segment yields `transfer {to, amount, write}`:
+1. *Performed.* If `purse(before) ≥ amount + reserve(record)` and `to` is admissible, the committed batch
+   moves exactly `amount` of the credit asset from the purse to `to`, the object's state is
+   `stateWrite … write`, the record's await is decided `settled`, and the Book's total of every asset is
+   unchanged (conservation, as `Batch.apply` already proves for the activity's postings).
+2. *Refused (teeth).* If either premise fails, the batch posts nothing from the purse to `to`, the object
+   state is unchanged, and the await is decided `refused` by name (the reason recorded); a delivery then
+   resumes with outcome `refused`.
+3. *Resumed.* A delivery of a performed await resumes the segment with exactly
+   `responseData (.settled | .refused) view` and needs no decider.
+
+**Poles.**
+- *Satisfiable:* a Tally-shaped program (world/activity) whose step yields `commit {write: total add n}` then
+  `transfer {to: payer, amount: 1}` is born with a deposit covering both, both effects are performed, and its
+  responses decode as `settled`. Witnessed natively on the activity route by `world-native-admit.sh`, and
+  in Lean by a decided example over the kernel's own `commitYield`.
+- *Teeth:* the same program with `amount` one above `purse − reserve` is refused by name; the purse, the
+  recipient and the state are byte-identical before and after (decided example plus the native row).
+  A second tooth: `to` = the purse itself is refused.
+- *Premise inhabitation:* `∃` a purse balance, reserve and amount with `purse ≥ amount + reserve`
+  (the birth deposit of the satisfiable pole), and an open account other than purse/collector/well
+  (the payer's own account).
+
+**Proof that it is used.** dues first, then bounty Board and play (`transfer`), ballot, story and commons
+(`commit`): each domain re-expressed in the kernel's response shape (`resumed {outcome: reply Event |
+settled | refused | unknown | timedOut | broken | upgraded, view}`, one input value), its preview cohort
+still green, and admitted natively through `world-native-admit.sh DOMAIN --route activity` with one law
+asserted as the Host's decided outcome and one refusal by name.
