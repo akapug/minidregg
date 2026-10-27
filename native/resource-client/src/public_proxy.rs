@@ -1080,8 +1080,9 @@ mod tests {
     #[test]
     fn resident_operator_proxy_forwards_its_operations_and_refuses_the_rest_by_name() {
         let (fixture, backend) = Fixture::new(Bounds { resident_uid: Some(mini_sdk::private::euid()), ..bounds() });
-        for operation in [0u8, 2, 3, 5, 17, 98, 151] {
-            let frame = envelope(CONFIG, &[operation, 1]);
+        for request in [vec![0u8], vec![2, 1], vec![3, 1], vec![5, 1], vec![98, 1], [vec![151], b"{}".to_vec()].concat()] {
+            let operation = request[0];
+            let frame = envelope(CONFIG, &request);
             let mut client = fixture.client();
             transport::write_frame(&mut client, &frame).unwrap();
             let mut private = accept(&backend);
