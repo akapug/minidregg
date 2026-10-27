@@ -24,8 +24,9 @@
 #   doc-new            POST /doc/new (law note) through the form                             -> admitted
 #   doc-append         POST /doc/NAME/append through the form                               -> admitted; the page shows the text
 #   receipt            GET /receipts/ID shows the attempt's decoded outcome                  -> 200, outcome admitted
-#   face-coverage      every verb x subcommand leaf in `help` has a route and a no-JS form        -> none missing
-#   face-coverage-redproof  a verb the shell lacks has no face                                      -> 404
+#   parity             every verb x subcommand leaf in `help` has a route, a no-JS form, and its
+#                      placeholder-filled form plans through the shell (/verb/NAME/dry)          -> none missing, 0 refusals
+#   parity-redproof    a verb the shell lacks has no face                                          -> 404
 #   verb-index         /verb lists the catalog                                                       -> 200
 #   verb-run           POST /verb/whoami through the derived form                                    -> answered, the subject
 #   tour               GET /tour: twelve steps with the real forms                                      -> 200, 12
@@ -57,10 +58,22 @@ case $mode in
 hook|--dry)
   if [ "$mode" = hook ]; then
     D=${JOURNEY_STEP_DIR:?}; WS=${NEWCOMER_WS:?}; SUBJECT=${NEWCOMER_SUBJECT:?}
-    # The document rows birth a document, which the spine's newcomer cannot (no birth context, and
-    # `shared` is under J8's deny-all law); after K12C the docuverse's carol can, so she is the member.
-    if [ -f "${JOURNEY_WORLD:?}/carol-workspace/workspace.json" ]; then
-      WS=$JOURNEY_WORLD/carol-workspace; SUBJECT=$(jq -r .subject "$WS/workspace.json")
+    # The document rows birth a document, which the spine's newcomer cannot (no birth context). JWF
+    # provisions its own member `jwf` from the sponsor's shell, the way the docuverse provisions its
+    # authors (K12C): keygen, enroll plan/seal/submit, provision, the birth context, init.
+    if [ -n "${SPONSOR_WS:-}" ] && [ -f "$SPONSOR_WS/workspace.json" ]; then
+      M=$D/jwf-member; mkdir -p -m 700 "$M/home/requests" "$M/home/provision" "$M/sponsor-home/keys" "$M/sponsor-home/requests"
+      mline() { # WORKSPACE HOME LINE -> stdout; rc in $?
+        "$MINI" shell --socket "$SOCKET" --workspace "$1" --home "$2" --host "$HOST" --config "$CONFIG" --line "$3" 2>"$M/last.err"
+      }
+      pinned=$(jq -r '.socket // empty' "$SPONSOR_WS/workspace.json" 2>/dev/null); [ -z "$pinned" ] || SOCKET=$pinned
+      mline "$WS" "$M/home" "keygen mini.key" >/dev/null         && install -m 0600 "$M/home/keys/mini.key" "$M/sponsor-home/keys/jwf.key"         && mline "$SPONSOR_WS" "$M/sponsor-home" "enroll plan jwf jwf.key $(xxd -p -c 256 "$M/home/keys/mini.key.next.pub") $(xxd -p -c 256 "$M/home/keys/mini.key.next.cosign")" >/dev/null         && mline "$SPONSOR_WS" "$M/sponsor-home" "enroll seal jwf" >/dev/null         && mline "$SPONSOR_WS" "$M/sponsor-home" "enroll submit jwf" >"$M/submit.out"         && rm -f "$M/sponsor-home/keys/jwf.key"         && JSUBJ=$(jq -r '.subject // empty' "$M/submit.out") && [ -n "$JSUBJ" ]         && printf '%s\n' '{"type":"all","predicates":[]}' >"$M/permit-all.json"         && "$MINI" workspace --action provision --dir "$SPONSOR_WS" --name jwf --holder "$JSUBJ" --funding 1000 --account-predicate "$M/permit-all.json" --factory-ref factory >"$M/provision.out" 2>"$M/provision.err"         && install -m 0600 "$SPONSOR_WS/provisions/jwf/birth-context.json" "$M/home/provision/birth-context.json"         && mline "$M/home/workspace" "$M/home" "init mini.key $JSUBJ" >/dev/null 2>&1 || true
+      if [ -f "$M/home/workspace/workspace.json" ] && [ "$(jq -r '.birthContext != null' "$M/home/workspace/workspace.json")" = true ]; then
+        WS=$M/home/workspace; SUBJECT=$JSUBJ; JWF_HOME=$M/home
+        echo "jwf: provisioned member jwf as subject $JSUBJ" >&2
+      else
+        echo "jwf: could not provision its own member ($(tail -1 "$M/last.err" 2>/dev/null; tail -1 "$M/provision.err" 2>/dev/null)); using the newcomer" >&2
+      fi
     fi
   else
     D=${STEP_DIR:?STEP_DIR}; WS=${WS:?WS}; SUBJECT=${SUBJECT:?SUBJECT}
@@ -76,7 +89,7 @@ hook|--dry)
   R=$D/jwf; mkdir -p "$R/state" "$R/home" "$R/pubhome"
   # Unix sockets need a short path (sun_path); the step directory can be long.
   RUNDIR=$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/jwf.XXXXXX"); trap 'stop; rm -rf "$RUNDIR"' EXIT
-  HOMEDIR=$R/home
+  HOMEDIR=${JWF_HOME:-$R/home}
   cat >"$R/dev.json" <<EOF
 {"mini":"$MINI","host":"$HOST","config":"$CONFIG","socket":"$SOCKET","wrapper":"$WRAPPER",
  "sessions":{"alice":{"workspace":"$WS","home":"$HOMEDIR"}},
@@ -171,10 +184,20 @@ for v in $verbs; do
     grep -qF "<h2><code>$lits</code></h2>" <<<"$page" || missing="$missing $v($lits)"
   done < <(sed 's/ | /\n/g' <<<"$usage")
 done
-row face-coverage "$([ "$count" -gt 40 ] && [ "$leaves" -gt 100 ] && [ -z "$missing" ] && echo 1 || echo 0)" "$count verbs, $leaves leaves in help; without a face:${missing:- none}"
+# PARITY = every leaf has a route and a no-JS form (above) AND its placeholder-filled form assembles
+# to a line the shell's planner accepts (`/verb/NAME/dry`: the real parser and plan builder, no Host).
+mkdir -p "${HOMEDIR:-$R/home}/requests"; printf 'hello\n' >"${HOMEDIR:-$R/home}/requests/x.txt"
+dry_leaves=0; dry_errors=0; dry_bad=""
+for v in $verbs; do
+  page=$(req GET "/verb/$v/dry")
+  l=$(grep -o 'data-leaves="[0-9]*"' <<<"$page" | grep -o '[0-9]*'); e=$(grep -o 'data-errors="[0-9]*"' <<<"$page" | grep -o '[0-9]*')
+  dry_leaves=$((dry_leaves + ${l:-0})); dry_errors=$((dry_errors + ${e:-0}))
+  [ "${e:-1}" = 0 ] || dry_bad="$dry_bad $v($(grep -o '<tr class="error"><td><code>[^<]*' <<<"$page" | sed 's/.*<code>//' | tr '\n' ',' | cut -c1-80))"
+done
+row parity "$([ "$count" -gt 40 ] && [ "$leaves" -gt 100 ] && [ -z "$missing" ] && [ "$dry_errors" = 0 ] && [ "$dry_leaves" -ge "$leaves" ] && echo 1 || echo 0)" "$count verbs, $leaves leaves in help, $dry_leaves dry-run leaves, $dry_errors planner refusals; without a face:${missing:- none}; refused:${dry_bad:- none}"
 # Red-proof: a verb the shell does not have must have no face (the check can go red).
 req GET /verb/no-such-verb-x >/dev/null
-row face-coverage-redproof "$([ "$(st)" = 404 ] && echo 1 || echo 0)" "$(st) for a verb the shell lacks"
+row parity-redproof "$([ "$(st)" = 404 ] && echo 1 || echo 0)" "$(st) for a verb the shell lacks"
 page=$(req GET /verb)
 row verb-index "$([ "$(st)" = 200 ] && grep -q '/verb/delegate' <<<"$page" && echo 1 || echo 0)" "$(st)"
 page=$(req POST /verb/whoami --data-urlencode "csrf=$CSRF" --data-urlencode "alt=0")
