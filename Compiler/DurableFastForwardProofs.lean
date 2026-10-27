@@ -13,6 +13,7 @@ open Minidregg.Kernel
 open Minidregg.Kernel.DurableDataIntent
 open Minidregg.Kernel.DurableReceiver
 open Minidregg.Kernel.DurableCheckpoint
+open Minidregg.Compiler.DurableCheckpointCodec (MacKey)
 
 set_option autoImplicit false
 
@@ -86,6 +87,19 @@ theorem worldAt_fastForward {seed : Seed} {pre suf : List IntentRecord}
   rfl
 
 #assert_axioms worldAt_fastForward
+/-- **The semantics refusal, by name** (`Spec.macRefusals`, first half, for the deployed open): a
+decodable checkpoint under this key whose body names another fold is `.foreignSemantics`, whatever
+its root and MAC. -/
+theorem openSealed_foreign_semantics (key : MacKey) (sealed : DurableCheckpointCodec.Sealed)
+    (keyOk : sealed.body.keyId = key.id)
+    (other : sealed.body.semantics ≠ DurableCheckpointCodec.foldSemantics) :
+    DurableCheckpointCodec.openSealed key rootBytes (DurableCheckpointCodec.checkpointFrame.encode sealed) =
+      .error .foreignSemantics := by
+  unfold DurableCheckpointCodec.openSealed
+  simp [DurableCheckpointCodec.Framed.decode_encode, keyOk, other]
+  rfl
+
+#assert_axioms openSealed_foreign_semantics
 #assert_axioms headState_snapshot
 #assert_axioms resume_honest
 
