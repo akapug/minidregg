@@ -108,7 +108,6 @@ struct WakeConfig {
 
 pub(super) struct FnPostConfig {
     pub(super) port: u16,
-    pub(super) cert: PathBuf,
     pub(super) cert_pem: Vec<u8>,
     pub(super) username: String,
     pub(super) password_file: PathBuf,
@@ -170,7 +169,6 @@ pub(super) fn post_config(path: &Path) -> Result<FnPostConfig> {
     }
     Ok(FnPostConfig {
         port,
-        cert,
         cert_pem,
         username,
         password_file,

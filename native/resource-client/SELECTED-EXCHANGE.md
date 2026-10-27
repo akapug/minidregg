@@ -33,7 +33,7 @@ The private contract is a JSON object with `type` equal to
 | `ownerKey`, `sourceDelegateCapability` | Owner signing key and current source publication capability. |
 | `destinationDomain`, `destinationSemantics`, `destinationTarget`, `group`, `messageId`, `policyRoot`, `keysetRoot`, `epoch`, `ownerSubject`, `ownerNonce`, `expiresAt`, `from`, `date`, `subject` | Exact public release request passed to Lean. The group is a routing label, not an access control list. |
 | `privatePostConfig`, `fnBinary`, `fnRuntimeImage`, `fnScope`, `fnControl` | Protected fn POST custody and explicit fn consumer launcher, underlying executable/core image, scope and socket. Use a separately initialized test fn Store for experiments. |
-| `recipientCapability`, `recipientAuthorityRoot`, `recipientTargetRoot`, `recipientSocket`, `recipientOperatorSocket`, `gatewayKey` | Recipient current admission and event17 coverage inputs. Roots must come from a fresh authorized recipient read. |
+| `recipientCapability`, `recipientAuthorityRoot`, `recipientTargetRoot`, `recipientSocket` | Recipient current admission inputs. Roots must come from a fresh authorized recipient read. |
 | `recipientQueryIntent`, `recipientQueryKey` | Separately authorized signed read of the exact recipient content resource after admission. |
 
 Every numeric field is a canonical decimal string. The contract and source,

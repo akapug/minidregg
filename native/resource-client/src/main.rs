@@ -32,8 +32,6 @@ mod current_birth;
 #[cfg(unix)]
 mod drain;
 #[cfg(unix)]
-mod fn_frontier;
-#[cfg(unix)]
 mod fleet;
 #[cfg(unix)]
 mod append_proof;
@@ -720,7 +718,7 @@ usage:
   mini well --action mint|burn --dir WORKSPACE --well NAME|ID --account NAME|ID --amount N [--capability ID] [--attempt NEW-DIR]
   mini well --action ledger --dir WORKSPACE --output LEDGER.json
   mini fleet-sign join|send|transfer|receipt|retry [--profile P] ...   (dregg-client-sign's verbs on Mini; `mini fleet-sign --help`)
-  mini selected-exchange --phase prepare|status|publish|receive|receive-transport|cover-plan|cover-advance|ack|verify|verify-transport --contract CONTRACT.json --state-dir PRIVATE-STATE [--approval APPROVAL.json]
+  mini selected-exchange --phase prepare|status|publish|receive-transport|verify-transport --contract CONTRACT.json --state-dir PRIVATE-STATE
   mini profile --host HOST --config CONFIG.json [--socket SOCKET]
   mini describe --host HOST --config CONFIG.json [--socket SOCKET]
   mini bootstrap --host HOST --config OPERATOR.json --source GENESIS.json --dir DEPLOYMENT
@@ -771,9 +769,6 @@ usage:
   mini fn-namespace-plan --host HOST --config FN-POLL-CONFIG.json --socket OPERATOR-SOCKET --state-dir NEW-PRIVATE-DIR
   mini fn-namespace-register --state-dir PRIVATE-DIR --key GATEWAY.key --approval APPROVAL.json
   mini fn-namespace-lookup --state-dir PRIVATE-DIR
-  mini fn-frontier-plan --host HOST --config FN-POLL-CONFIG.json --socket OPERATOR-SOCKET --kind selected|empty --transaction MINI-TX|- --state-dir NEW-PRIVATE-DIR
-  mini fn-frontier-advance --state-dir PRIVATE-DIR --key GATEWAY.key --approval APPROVAL.json
-  mini fn-frontier-lookup --state-dir PRIVATE-DIR
   mini export-evidence --host HOST --config CONFIG.json --call CALL.bin --output PACKAGE.bin
   mini verify-evidence --host HOST --config INDEPENDENT-PIN.json --package PACKAGE.bin --output RESULT.json
   mini serve --host HOST --config CONFIG.json --socket PRIVATE-DIR/mini.sock
@@ -3113,9 +3108,8 @@ fn run(mut args: Args) -> Result<()> {
                 .ok_or("selected-exchange phase must be UTF-8")?;
             let contract = path(args.required("contract")?);
             let state = path(args.required("state-dir")?);
-            let approval = args.optional("approval").map(path);
             args.finish()?;
-            selected_exchange::run(phase, &contract, &state, approval.as_deref())
+            selected_exchange::run(phase, &contract, &state)
         }
         "serve" => {
             let host = path(args.required("host")?);
@@ -4026,46 +4020,6 @@ fn run(mut args: Args) -> Result<()> {
                 return Err("fn-namespace-lookup uses its retained operator socket".into());
             }
             fn_namespace::lookup_original(&directory)
-        }
-        #[cfg(unix)]
-        "fn-frontier-plan" => {
-            let host = path(args.required("host")?);
-            let config = path(args.required("config")?);
-            let kind = args.required("kind")?;
-            let transaction = args.required("transaction")?;
-            let directory = path(args.required("state-dir")?);
-            args.finish()?;
-            let socket = SOCKET.get().ok_or("fn-frontier-plan requires --socket")?;
-            fn_frontier::plan(
-                &host,
-                &config,
-                socket,
-                kind.to_str().ok_or("fn frontier kind must be UTF-8")?,
-                transaction
-                    .to_str()
-                    .ok_or("fn frontier transaction must be UTF-8")?,
-                &directory,
-            )
-        }
-        #[cfg(unix)]
-        "fn-frontier-advance" => {
-            let directory = path(args.required("state-dir")?);
-            let key = path(args.required("key")?);
-            let approval = path(args.required("approval")?);
-            args.finish()?;
-            if SOCKET.get().is_some() {
-                return Err("fn-frontier-advance uses its retained operator socket".into());
-            }
-            fn_frontier::advance(&directory, &key, &approval)
-        }
-        #[cfg(unix)]
-        "fn-frontier-lookup" => {
-            let directory = path(args.required("state-dir")?);
-            args.finish()?;
-            if SOCKET.get().is_some() {
-                return Err("fn-frontier-lookup uses its retained operator socket".into());
-            }
-            fn_frontier::lookup_original(&directory)
         }
         "submit" => {
             let host = path(args.required("host")?);

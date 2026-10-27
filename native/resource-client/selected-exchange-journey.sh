@@ -392,7 +392,7 @@ jq -n --arg host "$HOST" --arg src "$A/deployment/pinned-config.json" \
   --arg post "$FN/post-config.json" --arg fnx "$FNX" --arg core "$FN_CORE" \
   --arg scope "$FN/scope.json" --arg control "$FN/control.sock" \
   --arg rcap "$RECIPIENT_CAP" --arg auth "$AUTHORITY_ROOT" --arg troot "$TARGET_ROOT" \
-  --arg socket "$B/public/mini.sock" --arg gateway "$B/sponsor.key" \
+  --arg socket "$B/public/mini.sock" \
   --arg qintent "$ROOT/verify-intent.json" \
   --arg mid "<m9-$(od -An -tx4 -N8 /dev/urandom | tr -d ' ')@mini.invalid>" \
   '{type:"minidregg-selected-exchange-v1",releaseProfile:"public-peerable-v2",
@@ -405,8 +405,8 @@ jq -n --arg host "$HOST" --arg src "$A/deployment/pinned-config.json" \
     date:"Wed, 30 Sep 2026 06:00:00 +0000",subject:"Selected note from Store A",
     privatePostConfig:$post,fnBinary:$fnx,fnRuntimeImage:$core,fnScope:$scope,
     fnControl:$control,recipientCapability:$rcap,recipientAuthorityRoot:$auth,
-    recipientTargetRoot:$troot,recipientSocket:$socket,recipientOperatorSocket:$socket,
-    gatewayKey:$gateway,recipientQueryIntent:$qintent,recipientQueryKey:$owner}' \
+    recipientTargetRoot:$troot,recipientSocket:$socket,
+    recipientQueryIntent:$qintent,recipientQueryKey:$owner}' \
   >"$ROOT/contract.json"
 jq -n --arg s "$SOURCE_SUBJECT" --arg t "$INBOX" --arg c "$RECIPIENT_CAP" \
   --arg nonce "$(od -An -tu8 -N8 /dev/urandom | tr -d ' ')" \
