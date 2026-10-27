@@ -13,7 +13,10 @@
 # Nothing is installed outside OUT; uv's cache lives under OUT.build and is
 # removed at the end.
 set -euo pipefail
-HERMES_AGENT_COMMIT=${HERMES_AGENT_COMMIT-a12c3417c82d9495869962e320b4e73a907e849d}
+# 6d8a8beb: the commit that ran in the gated worker on 2026-09-26
+# (deploy/grain-host/HERMES-LINUX-2026-09-26.md); Python >=3.11,<3.14, so
+# Debian 13's python3 3.13 serves it. Later commits lock to Python >=3.14.
+HERMES_AGENT_COMMIT=${HERMES_AGENT_COMMIT-6d8a8bebf70b09554deda5a0fcd95facbbde7b07}
 UV=${UV:-uv}
 [[ $# == 4 ]] || { echo 'usage: build-runtime-root SOURCE OUT GRAIN_RUNTIME GRAIN_PROVIDER_BRIDGE' >&2; exit 64; }
 src=$(realpath -e -- "$1"); out=$2; runtime=$(realpath -e -- "$3"); bridge=$(realpath -e -- "$4")
