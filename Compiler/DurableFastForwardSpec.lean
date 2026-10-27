@@ -28,6 +28,13 @@ roots read from the tags). The reader's tamper guarantee for the prefix rests on
 prefix tag is a KMAC under the Store key, verified chained from the seed's chain, and the
 recomputed chain must equal the MAC'd `body.chain`.
 
+A session is built from an open by `ofOpened`, which may refuse: `Loaded`'s resume proof is over
+the whole image, so the build decides, over the decoded records and without executing any, that
+the checkpoint state is admissible for the whole log and that no suffix record carries a prefix
+nullifier or transaction id (then the executing part's prefix-free replay is the protocol's resume:
+preflight reads the consumed set only at the intent's own nullifiers). `reopens` says the build
+succeeds on a Store's own entries, so a refusing `ofOpened` is not a vacuous instance.
+
 What changes, said once: the open trusts the MAC'd checkpoint for the prefix's World as v3 already
 trusts it for the prefix's state. A fold that diverges from the genesis replay under the same key
 and semantics is caught by `store audit` (item 5), never at open.
@@ -149,7 +156,8 @@ abbrev FastForward (α : Type) := MacKey → Seed → Option (List UInt8) → Li
   Nat → Except String α
 
 /-- The executing part of an open: the World and the state at the head, from the checkpoint and the
-suffix. It has no prefix in its type, so it cannot execute a prefix record. -/
+suffix (the suffix replayed with no prefix nullifier or transaction id known: the session build
+decides the suffix carries none). It has no prefix in its type, so it cannot execute a prefix record. -/
 abbrev FastForwardState (σ : Type) := MacKey → Seed → Option (List UInt8) → List Entry → Nat →
   Except String σ
 
@@ -290,7 +298,7 @@ light session; a seal at ANY height through the one `bodyOf` of the session's vi
 cadence, the on-demand head seal, the clean-shutdown seal: item 6); a reopen through `ff` of THIS
 Store's own entries from genesis or from one of its own sealed checkpoints, served as a full
 session (`ofOpened`). Its inhabitant is every Store a Host run produced (`Spec.inhabited`). -/
-inductive Wrote (impl : Impl rootBytes) (ofOpened : Opened impl → impl.Loaded4) (key : MacKey) :
+inductive Wrote (impl : Impl rootBytes) (ofOpened : Opened impl → Except String impl.Loaded4) (key : MacKey) :
     Written → Session impl → Prop
   | genesis (seed : Seed) : Wrote impl ofOpened key ⟨seed, [], []⟩ (.inl (impl.genesis seed))
   | append {store loaded loaded'} (record : IntentRecord) :
@@ -308,20 +316,22 @@ inductive Wrote (impl : Impl rootBytes) (ofOpened : Opened impl → impl.Loaded4
         { store with checkpoints :=
             (store.records.length, impl.bodyOf key (impl.sessionView session)) :: store.checkpoints }
         session
-  | reopenGenesis {store session opened} (entries : List Entry) :
+  | reopenGenesis {store session opened loaded} (entries : List Entry) :
       Wrote impl ofOpened key store session → OwnEntries logStart key store.seed entries store.records →
       impl.ff logStart key store.seed none [] entries entries.length = .ok opened →
-      Wrote impl ofOpened key store (.inl (ofOpened opened))
-  | reopenCheckpoint {store session opened} (entries : List Entry) (height : Nat) (body : Body4) :
+      ofOpened opened = .ok loaded →
+      Wrote impl ofOpened key store (.inl loaded)
+  | reopenCheckpoint {store session opened loaded} (entries : List Entry) (height : Nat) (body : Body4) :
       Wrote impl ofOpened key store session → OwnEntries logStart key store.seed entries store.records →
       (height, body) ∈ store.checkpoints → height ≠ 0 →
       impl.ff logStart key store.seed (some (impl.seal4 key body)) (entries.take height)
         (entries.drop height) entries.length = .ok opened →
-      Wrote impl ofOpened key store (.inl (ofOpened opened))
+      ofOpened opened = .ok loaded →
+      Wrote impl ofOpened key store (.inl loaded)
 
 /-! ## The laws -/
 
-structure Spec (impl : Impl rootBytes) (ofOpened : Opened impl → impl.Loaded4) : Prop where
+structure Spec (impl : Impl rootBytes) (ofOpened : Opened impl → Except String impl.Loaded4) : Prop where
   -- ### 1. The MAC gate
   /-- The MAC input is an injective encoding of everything the body carries (no field outside it). -/
   macInjective : ∀ carried, impl.macInputDecode (impl.macInput carried) = some carried
@@ -369,7 +379,20 @@ structure Spec (impl : Impl rootBytes) (ofOpened : Opened impl → impl.Loaded4)
       (impl.stateHead state).snapshot rootBytes (pre ++ suf) = snapshot ∧
       impl.stateWorld state = worldAt rootBytes ⟨seed, pre ++ suf⟩
   /-- A reopened session serves the open's view. -/
-  viewOpened : ∀ opened, impl.view (ofOpened opened) = Opened.view logStart opened
+  viewOpened : ∀ opened loaded, ofOpened opened = .ok loaded → impl.view loaded = Opened.view logStart opened
+  /-- The session build succeeds on a Store's own entries, from genesis or an honest checkpoint
+  (the hypotheses of `exact`): its admissibility and disjointness checks refuse only what no
+  replay accepts. -/
+  reopens : ∀ key seed (entries : List Entry) (pre suf : List IntentRecord) checkpoint snapshot opened,
+    OwnEntries logStart key seed entries (pre ++ suf) →
+    replaySnapshot rootBytes ⟨seed, pre ++ suf⟩ = some snapshot →
+    (match checkpoint with
+      | none => pre = []
+      | some bytes => ∃ body, impl.open4 key bytes = .ok body ∧
+          Body4.Honest rootBytes logStart semanticsId ⟨seed, pre⟩ body ∧ pre ≠ []) →
+    impl.ff logStart key seed checkpoint (entries.take pre.length) (entries.drop pre.length)
+      entries.length = .ok opened →
+    ∃ loaded, ofOpened opened = .ok loaded
   /-- `representsCheck` from `Derived`: the session's check decides the snapshot's representation
   by the carried World, with no log. -/
   representsFromDerived : ∀ loaded, impl.representsCheck4 loaded = true ↔
@@ -384,13 +407,15 @@ structure Spec (impl : Impl rootBytes) (ofOpened : Opened impl → impl.Loaded4)
     View.Honest rootBytes logStart store.image (impl.sessionView session) ∧
     ∀ height body, (height, body) ∈ store.checkpoints →
       Body4.Honest rootBytes logStart semanticsId ⟨store.seed, store.records.take height⟩ body
-  /-- Inhabitation: an append, a seal at height 1 and a reopen from that checkpoint succeed. -/
-  inhabited : ∃ (key : MacKey) (seed : Seed) (record : IntentRecord) (loaded1 : impl.Loaded4)
+  /-- Inhabitation: an append, a seal at height 1, a reopen from that checkpoint and the session
+  build succeed. -/
+  inhabited : ∃ (key : MacKey) (seed : Seed) (record : IntentRecord) (loaded1 loaded2 : impl.Loaded4)
       (entries : List Entry) (opened : Opened impl),
     impl.step (impl.genesis seed) record = some loaded1 ∧
     OwnEntries logStart key seed entries [record] ∧
     impl.ff logStart key seed (some (impl.seal4 key (impl.bodyOf key (impl.view loaded1))))
-      entries [] 1 = .ok opened
+      entries [] 1 = .ok opened ∧
+    ofOpened opened = .ok loaded2
   -- ### 2'. Every cut height, under the backup rule
   /-- A Store this Host wrote, cut at ANY height (below the newest checkpoint included), opens by
   the backup rule to the replay's value at the cut: a tail rollback opens as the genesis replay
