@@ -10,6 +10,7 @@ mod application_tools;
 mod concierge;
 mod hermes_room;
 mod room_task;
+mod sandbox_tools;
 mod room_resident;
 mod resident_context;
 mod quiescence;
@@ -109,6 +110,10 @@ struct Config {
     dispatch_task: Option<DispatchTask>,
     #[serde(default)]
     provider_task: Option<ProviderTask>,
+    /// Upstream Hermes's file, terminal and Python tools inside the worker:
+    /// the operator's ceiling and the class bounds (docs/HERMES-TOOLS-2026-10-27.md).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sandbox: Option<sandbox_tools::Sandbox>,
     /// A command must be selected by its configured name. Its arguments are
     /// fixed by the operator, so a remote connection cannot inject paths or
     /// gain a new executable through this interface.
@@ -2878,6 +2883,12 @@ fn validate(c: &Config) -> Result<()> {
     validate_with_workspace(c, None)
 }
 fn validate_with_workspace(c: &Config, prospective_workspace: Option<&[u8]>) -> Result<()> {
+    if let Some(sandbox) = &c.sandbox {
+        sandbox.validate()?;
+        if c.tool_task.as_ref().and_then(|t| t.room.as_ref()).is_none() {
+            return Err("sandbox tools are granted per room: sandbox requires toolTask.room".into());
+        }
+    }
     for (name, p) in [
         ("mini", &c.mini),
         ("host", &c.host),
@@ -3505,6 +3516,8 @@ struct Runtime {
     /// named code, e.g. `provider-refused:member-day-ceiling`): nothing was
     /// reserved or sent for them.
     prompt_provider_refusals: Vec<String>,
+    /// The sandbox toolsets granted to the running prompt's worker.
+    prompt_sandbox: Vec<&'static str>,
     /// The prompt allocated by the current `hermes_session`, and the decision
     /// reached at its boundary; written as one typed record when it ends.
     prompt_decision: Option<(u64, Option<prompt_outcome::Outcome>)>,
@@ -6629,6 +6642,7 @@ impl Runtime {
             prompt_active: false,
             prompt_member: None,
             prompt_provider_refusals: Vec::new(),
+            prompt_sandbox: Vec::new(),
             prompt_decision: None,
             foreground_operation: None,
             output: None,
@@ -14675,6 +14689,12 @@ impl Runtime {
             self.save()?;
         }
         let unit = self.worker_unit(id, &spec);
+        // Sandbox tools need the scoped launcher's bounds and only a
+        // resident's prompt carries the room's grant.
+        self.prompt_sandbox = match (&self.config.sandbox, &unit, invocation.resident_identity()) {
+            (Some(sandbox), Some(_), Some(_)) => sandbox.grant(invocation.prompt()),
+            _ => Vec::new(),
+        };
         if let Some(unit) = &unit {
             Self::prove_launcher_gate(&spec.program)?;
             systemd_manager::verify_launcher(&self.config.task, &spec.program)?;
@@ -14697,9 +14717,13 @@ impl Runtime {
         } else {
             broker_path.clone()
         };
+        if let (Some(sandbox), false) = (&self.config.sandbox, self.prompt_sandbox.is_empty()) {
+            sandbox_tools::require_workspace_volume(&workspace, sandbox.scratch_mib)?;
+        }
         let mut command = Command::new(&spec.program);
         command
             .args(&spec.args)
+            .args(sandbox_tools::worker_argument(&self.prompt_sandbox))
             .current_dir(&self.config.cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -14708,6 +14732,9 @@ impl Runtime {
             command.env("HERMES_HOME", &hermes_home);
         }
         self.worker_env(&mut command, &spec, &unit, Some(&broker_path))?;
+        if let (Some(sandbox), false) = (&self.config.sandbox, self.prompt_sandbox.is_empty()) {
+            sandbox.environment(&mut command);
+        }
         unsafe {
             command.pre_exec(|| {
                 libc::umask(0o077);
@@ -14843,7 +14870,7 @@ impl Runtime {
             acp_send(&mut child_stdin, 2, method, params)?;
             let response =
                 self.acp_response(2, &rx, input, &mut child_stdin, &display_tx, &broker, None)?;
-            if self.room_tools_restricted() { room_task::require_acp_catalogue(&response)?; }
+            if self.room_tools_restricted() { room_task::require_acp_catalogue(&response, &sandbox_tools::names(&self.prompt_sandbox))?; }
             if let Some(previous) = &existing_session {
                 if !response.is_object() {
                     return Err("Hermes did not reload the retained session".into());
@@ -19215,6 +19242,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
             capability: "71".into(),
             query_capability: "74".into(),
             policy_control_capability: Some("72".into()),
+            sandbox: None,
             foreground_tool: None,
             dispatch_task: None,
             tool_task: Some(ToolTask {
