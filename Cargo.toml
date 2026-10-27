@@ -32,4 +32,8 @@ members = [
 exclude = [
   # research crate leaving for degg-research (DEMO-PREFIX R5); own [workspace] and Cargo.lock pin its aws-lc/ring stack
   "native/private-backend",
+  # the Oracle appliance's standalone packer (deploy/oracle/README.md); its own [workspace] and Cargo.lock
+  "deploy/oracle/pack",
+  # the Oracle attachment adversarial review harness; a standalone tool with its own [workspace] and Cargo.lock
+  "deploy/oracle/attachment-review",
 ]
