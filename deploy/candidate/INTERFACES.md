@@ -124,10 +124,13 @@ friend bundle and any cross-compiled clients. Every output records:
 The actual flags objects are nonempty: Rust records its remaps, release profile,
 locked resolution and incremental setting; native records its builder and entry
 modules. Native build manifests separately bind the compiled closure. The tree
-id comes from the archive commit in the packaging repository, never the current
-checkout's HEAD. The packager requires builder toolchain/flag evidence, reads
-pins from the source archive, and writes the same output identities into
-`provenance.json`. Packaging must run in a repository containing that commit.
+id is the git tree of the archive's own files, written in a throw-away repository,
+so packaging needs no checkout (build.sh `--source-archive` runs in an extracted
+tree). When the packager runs in a repository that holds the commit, that
+repository's `COMMIT^{tree}` must equal it, or the archive is refused as not
+`git archive COMMIT`. It is never the current checkout's HEAD. The packager
+requires builder toolchain/flag evidence, reads pins from the source archive,
+and writes the same output identities into `provenance.json`.
 
 `run.sh` requires v2, verifies the pinned provenance and its complete output map,
 and hashes **every** output before any `init`, `serve`, `start`, or `sponsor`
