@@ -1125,7 +1125,8 @@ fn resume_held_ack_route(
     let prior_ack = field(&state, "ack")?.to_owned();
     let prior_frame_path = pending.join(&prior_ack).join("reply.frame");
     let prior_frame = fs::read(&prior_frame_path).map_err(|e| e.to_string())?;
-    if prior_frame.first() != Some(&255)
+    // Retry-safe only under the Host's proven no-append answer (NO_RECORD, 253).
+    if prior_frame.first() != Some(&crate::RESPONSE_NO_RECORD)
         || prior_frame.len() < 2
         || pending.join(&prior_ack).join("ack.json").exists()
     {

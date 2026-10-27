@@ -91,35 +91,39 @@ pub(crate) fn outcome_is_stale_root(outcome: &Value) -> bool {
         && outcome.get("reason").and_then(Value::as_str) == Some("stale-root")
 }
 
-/// Whether a recorded Host decision is the Host's own `stale-root` refusal,
-/// read from the Host's own decoding. An undecoded frame is not one.
-pub(crate) fn is_stale_root(decision: Option<&HostDecision>) -> bool {
+/// The Host's decoded outcome of a DECIDED no-effect answer: an operation's own answer, or a
+/// `NO_RECORD` (253) frame. A `HOST_OUTCOME` (255) frame is undecided whatever it decodes to, and
+/// an undecoded frame decides nothing; neither may re-plan or author anything new.
+fn decided(decision: Option<&HostDecision>) -> Option<(&str, &Value)> {
     match decision {
-        Some(HostDecision::RefusedFrame {
-            decoded: Some(outcome),
-            ..
-        }) => outcome_is_stale_root(outcome),
-        Some(HostDecision::Outcome(outcome)) => outcome_is_stale_root(outcome),
-        _ => false,
+        Some(HostDecision::Outcome(outcome)) => Some(("", outcome)),
+        Some(HostDecision::Frame { command, byte, decoded: Some(outcome), .. }) if *byte == crate::RESPONSE_NO_RECORD => {
+            Some((command.as_str(), outcome))
+        }
+        _ => None,
     }
 }
 
-/// Only a decoded, final submit refusal can authorize a new append command.
-/// A prepare/query refusal, lost reply or uncertain outcome cannot do so.
+/// Whether a recorded Host decision is the Host's own `stale-root` refusal, decided with no
+/// record (`decided`).
+pub(crate) fn is_stale_root(decision: Option<&HostDecision>) -> bool {
+    decided(decision).is_some_and(|(_, outcome)| outcome_is_stale_root(outcome))
+}
+
+/// Only a decided, final submit refusal can authorize a new append command.
+/// A prepare/query refusal, lost reply or undecided outcome cannot do so.
 pub(crate) fn is_final_admission_refusal(decision: Option<&HostDecision>) -> bool {
-    let outcome = match decision {
-        Some(HostDecision::Outcome(value)) => value,
-        Some(HostDecision::RefusedFrame { command, decoded: Some(value), .. })
-            if command == "submit" => value,
-        _ => return false,
-    };
+    let Some((command, outcome)) = decided(decision) else { return false };
+    if !(command.is_empty() || command == "submit") {
+        return false;
+    }
     outcome["type"] == "refused" && outcome["phase"] == "61646d697373696f6e"
 }
 
 /// The native controller rejected this exact invocation target before any
 /// call was assembled. Match the Host's decoded typed detail exactly.
 pub(crate) fn is_prepare_stale_target(decision: Option<&HostDecision>) -> bool {
-    let Some(HostDecision::RefusedFrame { command, decoded:Some(value), .. }) = decision else { return false };
+    let Some((command, value)) = decided(decision) else { return false };
     command == "prepare" && value["type"] == "refused" && value["reason"] == "operation-rejected"
         && value["phase"] == "70726570617265"
         && value["detail"] == crate::hex(b"invocation preparation: Minidregg.Kernel.DeclaredResourceController.Reject.staleTarget")
@@ -314,9 +318,13 @@ mod tests {
         let value = json!({"type":"refused","reason":"undisclosed","phase":"61646d697373696f6e"});
         assert!(is_final_admission_refusal(Some(&HostDecision::Outcome(value.clone()))));
         for command in ["prepare", "query", "submit"] {
-            let frame = HostDecision::RefusedFrame { command:command.into(), byte:255,
+            let frame = HostDecision::Frame { command:command.into(), byte:crate::RESPONSE_NO_RECORD,
                 encoded:vec![1], decoded:Some(value.clone()) };
             assert_eq!(is_final_admission_refusal(Some(&frame)), command == "submit");
+            // The same decoding under the undecided envelope authorizes nothing.
+            let envelope = HostDecision::Frame { command:command.into(), byte:crate::RESPONSE_HOST_OUTCOME,
+                encoded:vec![1], decoded:Some(value.clone()) };
+            assert!(!is_final_admission_refusal(Some(&envelope)));
         }
         for kind in ["uncertain", "unavailable", "contention", "absent", "confirmed"] {
             let mut other = value.clone(); other["type"] = json!(kind);
@@ -325,7 +333,7 @@ mod tests {
         let mut other_phase = value; other_phase["phase"] = json!(hex("observation"));
         assert!(!is_final_admission_refusal(Some(&HostDecision::Outcome(other_phase))));
         assert!(!is_final_admission_refusal(None));
-        assert!(!is_final_admission_refusal(Some(&HostDecision::RefusedFrame {
+        assert!(!is_final_admission_refusal(Some(&HostDecision::Frame {
             command:"submit".into(), byte:255, encoded:vec![1], decoded:None })));
     }
 
@@ -333,10 +341,13 @@ mod tests {
     fn append_prepare_recovery_matches_exact_native_stale_target_only() {
         let value = json!({"type":"refused","reason":"operation-rejected","phase":hex("prepare"),
             "detail":hex("invocation preparation: Minidregg.Kernel.DeclaredResourceController.Reject.staleTarget")});
-        let frame = |command:&str, value:Value| HostDecision::RefusedFrame {
-            command:command.into(), byte:255, encoded:vec![1], decoded:Some(value) };
+        let frame = |command:&str, value:Value| HostDecision::Frame {
+            command:command.into(), byte:crate::RESPONSE_NO_RECORD, encoded:vec![1], decoded:Some(value) };
         assert!(is_prepare_stale_target(Some(&frame("prepare", value.clone()))));
+        assert!(!is_prepare_stale_target(Some(&HostDecision::Frame { command:"prepare".into(),
+            byte:crate::RESPONSE_HOST_OUTCOME, encoded:vec![1], decoded:Some(value.clone()) })));
         assert!(!is_prepare_stale_target(Some(&frame("submit", value.clone()))));
+        // An operation's own answer is decided, but it is no prepare refusal frame.
         assert!(!is_prepare_stale_target(Some(&HostDecision::Outcome(value.clone()))));
         for (key, replacement) in [("type", "uncertain"), ("reason", "undisclosed"), ("phase", "61646d697373696f6e"),
             ("detail", "another staleTarget suffix")] {
@@ -344,7 +355,7 @@ mod tests {
             assert!(!is_prepare_stale_target(Some(&frame("prepare", other))));
         }
         assert!(!is_prepare_stale_target(None));
-        assert!(!is_prepare_stale_target(Some(&HostDecision::RefusedFrame {
+        assert!(!is_prepare_stale_target(Some(&HostDecision::Frame {
             command:"prepare".into(), byte:255, encoded:vec![1], decoded:None })));
     }
 
@@ -372,9 +383,9 @@ mod tests {
     }
 
     fn refused(reason: &str) -> HostDecision {
-        HostDecision::RefusedFrame {
+        HostDecision::Frame {
             command: "prepare".into(),
-            byte: 255,
+            byte: crate::RESPONSE_NO_RECORD,
             encoded: vec![0x44],
             decoded: Some(json!({"type":"refused","reason":reason,
                 "phase":hex("observation"),"detail":hex("x")})),
@@ -459,6 +470,24 @@ mod tests {
         set_max(DEFAULT_MAX);
     }
 
+    /// The same decoded `stale-root` re-plans under `NO_RECORD` (253) and never under the
+    /// undecided envelope `HOST_OUTCOME` (255).
+    #[test]
+    fn only_a_no_record_stale_root_re_plans() {
+        let _guard = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let mut envelope = refused("stale-root");
+        if let HostDecision::Frame { byte, .. } = &mut envelope {
+            *byte = crate::RESPONSE_HOST_OUTCOME;
+        }
+        assert!(is_stale_root(Some(&refused("stale-root"))));
+        assert!(!is_stale_root(Some(&envelope)));
+        let (result, calls, retired) = run(5, vec![Some(envelope)]);
+        assert!(result.is_err());
+        assert_eq!((calls, retired), (1, 0));
+        let _ = take_host_decision();
+        set_max(DEFAULT_MAX);
+    }
+
     #[test]
     fn replan_never_retries_an_uncertain_or_undecoded_outcome() {
         let _guard = LOCK.lock().unwrap_or_else(|p| p.into_inner());
@@ -471,7 +500,7 @@ mod tests {
         }
         // A refusal frame the Host did not decode, and a client error with no
         // Host decision at all (a lost reply), are not the race.
-        let undecoded = HostDecision::RefusedFrame {
+        let undecoded = HostDecision::Frame {
             command: "submit".into(),
             byte: 255,
             encoded: vec![1],

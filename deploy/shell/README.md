@@ -147,13 +147,12 @@ line whose first word says who decided:
 | 0 | | done |
 | 1 | `error:` | the client stopped; the Host was not asked or did not answer |
 | 2 | `usage:` | the line did not parse |
-| 3 | `refused:` / `charged:` | the Host refused (its outcome decoded by the Host's own `inspect outcome`, the frame kept in `HOME/refusals/`), the socket never forwarded the request (reply byte 254), or the Host admitted a charged failure (only the price posted) |
-| 4 | `undecided:` | the Host answered uncertain, contention, unavailable or absent, or a 255 frame it could not decode: the effect is unknown; `lookup ID` asks again, and nothing is repeated |
+| 3 | `refused:` / `charged:` | the Host answered with no record (reply byte 253: decided before any append, so nothing happened; its outcome decoded by the Host's own `inspect outcome`, the frame kept in `HOME/refusals/`), the socket never forwarded the request (reply byte 254), or the Host admitted a charged failure (only the price posted) |
+| 4 | `undecided:` | the Host answered under its outcome envelope (reply byte 255, whatever it decodes to), or uncertain, contention, unavailable or absent as an answer: the effect is unknown; `lookup ID` asks again, and nothing is repeated |
 
-A refusal is recognised only from the Host's DECODED outcome type `refused`,
-recorded by the client where the Host answered, never from the reply byte alone
-(the Host also answers 255 for `unavailable` and for a failed handler) and never
-from error text. `pay` and `topup` keep a record per request: a rerun after a lost
+A refusal is recognised only from the Host's no-record marker (253), recorded by
+the client where the Host answered: never from a 255 frame, whatever it decodes
+to, and never from error text. `pay` and `topup` keep a record per request: a rerun after a lost
 reply looks the payment up instead of paying again; `again` pays once more.
 
 ## Known limit

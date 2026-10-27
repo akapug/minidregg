@@ -1101,7 +1101,7 @@ fn connect_unix_deadline(path: &Path, deadline: Instant) -> io::Result<UnixStrea
 // request; only exact bytes distinguish it from an uncertain outcome.
 fn response_operation_matches(operation: u8, reply: &[u8]) -> bool {
     match reply.split_first() {
-        Some((&tag, _)) if tag == operation || tag == 255 => true,
+        Some((&tag, _)) if tag == operation || crate::is_outcome_frame(tag) => true,
         Some((&34, _)) if operation == 164 => true,
         Some((&164, payload)) if operation == 34 => {
             payload == b"DREGG/APPLICATION/DISPATCH-NO-RECORD-REFUSAL/v1"

@@ -74,7 +74,7 @@ fn signed_view_bytes(
             Ok(Ok(bytes))
         }
         Err(error) => match take_host_decision() {
-            Some(HostDecision::RefusedFrame { encoded, .. }) => Ok(Err(encoded)),
+            Some(HostDecision::Frame { encoded, .. }) => Ok(Err(encoded)),
             _ => Err(error),
         },
     }
@@ -261,9 +261,10 @@ fn turn(root: &Path, workspace: &Value, what: &str, json_out: bool) -> Result<()
             // The Host refused: hand the frame back as the Host's decision, so
             // the shell ends `refused` (exit 3) and retains it like any other.
             if let Ok(encoded) = fs::read(attempt.join("refusal.frame")) {
-                note_host_decision(HostDecision::RefusedFrame {
+                note_host_decision(HostDecision::Frame {
                     command: "dry-run".into(),
-                    byte: 255,
+                    // `host_decided` keeps a frame only for a decided refusal: NO_RECORD.
+                    byte: crate::RESPONSE_NO_RECORD,
                     encoded,
                     decoded: None,
                 });
@@ -320,7 +321,7 @@ fn refusals(root: &Path, extra: Option<&Path>) -> Vec<(SystemTime, String, PathB
         .iter()
         .filter_map(|entry| fs::read(&entry.2).ok())
         .map(|mut bytes| {
-            if bytes.first() == Some(&255) {
+            if bytes.first().is_some_and(|b| crate::is_outcome_frame(*b)) {
                 bytes.remove(0);
             }
             bytes
@@ -365,7 +366,7 @@ fn why(root: &Path, workspace: &Value, attempt: Option<&str>, extra: Option<&Pat
     };
     let mut frame = fs::read(frame_path).map_err(|error| error.to_string())?;
     if frame_path.file_name().and_then(|f| f.to_str()) == Some("pre-submit-refusal.frame")
-        && frame.first() == Some(&255)
+        && frame.first().is_some_and(|b| crate::is_outcome_frame(*b))
     {
         frame.remove(0);
     }

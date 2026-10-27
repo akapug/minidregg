@@ -45,7 +45,7 @@ impl Source for Connection {
 fn reply(frame: &[u8], opcode: u8) -> Result<Vec<u8>> {
     match frame {
         [actual, body @ ..] if *actual == opcode && !body.is_empty() => Ok(body.to_vec()),
-        [254 | 255, ..] => Err(format!(
+        [crate::RESPONSE_HOST_OUTCOME | crate::RESPONSE_NO_RECORD | crate::RESPONSE_NEVER_FORWARDED, ..] => Err(format!(
             "Host refused adopt-next-key op{opcode}; retained attempt is unchanged"
         )),
         _ => Err(format!("invalid adoption op{opcode} response")),

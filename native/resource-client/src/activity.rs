@@ -58,20 +58,20 @@ fn ws(root: PathBuf) -> Result<Ws> {
     })
 }
 
-/// One Host frame. For submit (212) and lookup (213) a 255 reply IS the Host's encoded outcome:
-/// it is returned for the local codec to decode, never read as a refusal by its byte (Lean also
-/// answers 255 for `unavailable` and thrown handlers; review §4.7, Q1). 254 is certain: never
-/// forwarded. Elsewhere (authoring, planning, assembly: no state change) a 255 stops the turn.
+/// One Host frame. For submit (212) and lookup (213) a marker reply (`NO_RECORD` 253 or
+/// `HOST_OUTCOME` 255) IS the Host's encoded outcome: it is returned for the local codec to decode;
+/// the decoded type is reported, never a refusal read from the byte. 254 is certain: never
+/// forwarded. Elsewhere (authoring, planning, assembly: no state change) a marker stops the turn.
 fn invoke(ws: &Ws, operation: u8, payload: &[u8]) -> Result<Vec<u8>> {
     let frame = session_invoke(&ws.host, &ws.socket, &ws.config, operation, payload)?;
     match frame.split_first() {
         Some((actual, body)) if *actual == operation && !body.is_empty() => Ok(body.to_vec()),
-        Some((255, body)) if matches!(operation, 212 | 213) && !body.is_empty() => Ok(body.to_vec()),
+        Some((byte, body)) if crate::is_outcome_frame(*byte) && matches!(operation, 212 | 213) && !body.is_empty() => Ok(body.to_vec()),
         Some((254, body)) => Err(format!(
             "never forwarded: op{operation}: {}",
             String::from_utf8_lossy(&body[body.len().saturating_sub(600)..]).split_whitespace().collect::<Vec<_>>().join(" ")
         )),
-        Some((255, body)) => Err(format!(
+        Some((byte, body)) if crate::is_outcome_frame(*byte) => Err(format!(
             "refused: op{operation}: {}",
             String::from_utf8_lossy(&body[body.len().saturating_sub(600)..])
                 .split_whitespace()

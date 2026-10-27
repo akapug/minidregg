@@ -13,7 +13,7 @@ use std::process::{Child, Command, Stdio};
 
 use serde_json::Value;
 
-use crate::host_operations::{CALL_ASSEMBLE, INSPECT, OBSERVATION_ASSEMBLE, RESPONSE_HOST_REFUSAL};
+use crate::host_operations::{CALL_ASSEMBLE, INSPECT, OBSERVATION_ASSEMBLE, RESPONSE_HOST_OUTCOME, RESPONSE_NO_RECORD};
 use crate::{Error, Result};
 
 /// `FnEvidenceCodec.maxHostFrameBytes`: the bound of every local frame.
@@ -145,9 +145,11 @@ pub fn binding(executable: &Path, settings_bytes: &[u8]) -> Result<[u8; 32]> {
 /// How a codec frame failed.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CodecError {
-    /// The Host image refused the frame (255). `encoded` is the refusal frame's body; `decoded`
-    /// is the same child's own `inspect outcome` of it, when it could decode it.
-    Refused { encoded: Vec<u8>, decoded: Option<Value> },
+    /// The Host image answered the frame with an outcome marker instead of its own byte
+    /// (`marker`: `NO_RECORD` 253 or `HOST_OUTCOME` 255; frames 7–11 never append, so either way
+    /// nothing changed). `encoded` is the frame's body; `decoded` is the same child's own `inspect
+    /// outcome` of it, when it could decode it.
+    Refused { marker: u8, encoded: Vec<u8>, decoded: Option<Value> },
     /// No decision: the child could not be started, died, answered out of turn, or the settings
     /// changed under it.
     Failed(String),
@@ -213,7 +215,7 @@ impl Codec {
         if answer == operation {
             return Ok(body);
         }
-        if answer != RESPONSE_HOST_REFUSAL {
+        if answer != RESPONSE_NO_RECORD && answer != RESPONSE_HOST_OUTCOME {
             self.slot = None;
             return Err(CodecError::Failed(format!("local native codec answered frame {answer} to frame {operation}")));
         }
@@ -223,13 +225,13 @@ impl Codec {
         // report the refusal undecoded.
         let decoded = match kind("outcome", &body).and_then(|request| session.exchange(INSPECT, &request)) {
             Ok((INSPECT, json)) => serde_json::from_slice::<Value>(&json).ok(),
-            Ok((RESPONSE_HOST_REFUSAL, _)) => None,
+            Ok((RESPONSE_NO_RECORD | RESPONSE_HOST_OUTCOME, _)) => None,
             _ => {
                 self.slot = None;
                 None
             }
         };
-        Err(CodecError::Refused { encoded: body, decoded })
+        Err(CodecError::Refused { marker: answer, encoded: body, decoded })
     }
 
     /// Op 7: canonical bytes of the authoring source of `kind_name`.
@@ -364,7 +366,7 @@ mod tests {
         let refusing = codec_stub(&other);
         let mut codec = Codec::new();
         match codec.frame(&refusing, &other.join("settings.json"), 7, b"intent") {
-            Err(CodecError::Refused { encoded, decoded: Some(v) }) => {
+            Err(CodecError::Refused { encoded, decoded: Some(v), .. }) => {
                 assert_eq!(encoded, vec![0xff, 0x00]);
                 assert_eq!(v["reason"], "malformed");
             }

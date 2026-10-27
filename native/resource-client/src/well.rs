@@ -86,7 +86,7 @@ fn invoke(
     let reply = session_invoke(host, socket, config, operation, payload)?;
     match reply.split_first() {
         Some((&code, body)) if code == operation => Ok(body.to_vec()),
-        Some((255, body)) => Err(format!(
+        Some((byte, body)) if crate::is_outcome_frame(*byte) => Err(format!(
             "host refused {label}; encoded refusal: {}",
             hex(body)
         )),
@@ -107,28 +107,53 @@ fn decoded(host: &Path, config: &Path, attempt: &Path) -> Result<Option<Value>> 
     serde_json::from_slice(&fs::read(&json).map_err(|e| e.to_string())?).map(Some).map_err(|e| e.to_string())
 }
 
+/// How an answer was framed, retained as `outcome.class` beside it: `answer` (op 125's own byte),
+/// `no-record` (`NO_RECORD` 253: decided before any append) or `undecided` (`HOST_OUTCOME` 255,
+/// whatever it decodes to).
+fn class_of(code: u8) -> &'static str {
+    if code == crate::RESPONSE_NO_RECORD { "no-record" } else if code == crate::RESPONSE_HOST_OUTCOME { "undecided" } else { "answer" }
+}
+
+/// Whether a retained attempt is decided (a further command is the member's decision): an
+/// `answer` that confirmed or refused, or a `no-record`. An `undecided` class, or none, is not.
+fn decided(attempt: &Path, kind: Option<&str>) -> bool {
+    match fs::read_to_string(attempt.join("outcome.class")).as_deref() {
+        Ok("no-record") => true,
+        Ok("answer") => matches!(kind, Some("confirmed" | "refused")),
+        _ => false,
+    }
+}
+
 /// Submit (op 125) the attempt's retained exact ingress and report the Host's decoded outcome.
-/// A 255 frame is retained as the outcome too: it is decoded, never read as a refusal by byte.
+/// A marker frame is retained as the outcome too and decoded; its class is the marker's.
 fn submit_ingress(host: &Path, socket: &Path, config: &Path, attempt: &Path, report: Value) -> Result<()> {
     let ingress = fs::read(attempt.join("ingress.bin")).map_err(|e| e.to_string())?;
     let bin = attempt.join("outcome.bin");
     let _ = fs::remove_file(attempt.join("outcome.json"));
+    let _ = fs::remove_file(attempt.join("outcome.class"));
     let reply = session_invoke(host, socket, config, 125, &ingress)?;
-    match reply.split_first() {
-        Some((&code, body)) if code == 125 || code == 255 => {
+    let class = match reply.split_first() {
+        Some((&code, body)) if code == 125 || crate::is_outcome_frame(code) => {
             if bin.exists() {
                 fs::remove_file(&bin).map_err(|e| e.to_string())?;
             }
-            retain(&bin, body)?
+            retain(&bin, body)?;
+            retain(&attempt.join("outcome.class"), class_of(code).as_bytes())?;
+            class_of(code)
         }
         _ => return Err(format!("host returned an invalid frame for well submit; the exact ingress is retained: \
             `mini well --action resubmit --attempt {}`", attempt.display())),
-    }
+    };
     let outcome = decoded(host, config, attempt)?.ok_or("well outcome was not retained")?;
     println!("{}", merge(report, json!({"attempt":attempt,"outcome":outcome})));
-    match outcome.get("type").and_then(Value::as_str) {
-        Some("confirmed") if crate::charged_line(&outcome).is_none() => Ok(()),
-        Some("refused") => {
+    match (class, outcome.get("type").and_then(Value::as_str)) {
+        ("answer", Some("confirmed")) if crate::charged_line(&outcome).is_none() => Ok(()),
+        ("no-record", _) => {
+            crate::note_host_decision(crate::HostDecision::Frame { command: "well submit".into(),
+                byte: crate::RESPONSE_NO_RECORD, encoded: fs::read(&bin).map_err(|e| e.to_string())?, decoded: Some(outcome) });
+            Err("the Host answered this well command with no record: nothing happened".into())
+        }
+        ("answer", Some("refused")) => {
             crate::note_host_decision(crate::HostDecision::Outcome(outcome));
             Err("the Host refused this well command".into())
         }
@@ -203,7 +228,7 @@ fn command(root: &Path, mut args: Args, op: &str) -> Result<()> {
                          a decided one is followed only by your decision: --again",
                         latest.display(), latest.display()));
                 }
-                if again && latest.join("ingress.bin").is_file() && !matches!(kind.as_deref(), Some("confirmed" | "refused")) {
+                if again && latest.join("ingress.bin").is_file() && !decided(&latest, kind.as_deref()) {
                     return Err(format!("undecided: the previous well {op} at {} may have been admitted; resubmit it exactly \
                         (`mini well --action resubmit --dir WS --attempt {}`) before another", latest.display(), latest.display()));
                 }

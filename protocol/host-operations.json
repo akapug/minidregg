@@ -2364,7 +2364,7 @@
     },
     {
       "code": 255,
-      "symbol": "HOST_REFUSAL",
+      "symbol": "HOST_OUTCOME",
       "purpose": "Host outcome envelope for an outcome the Host has NOT proven to be no-append: uncertain, unavailable, contention, and a handler that threw after dispatch on an append operation (answered uncertain). Since lane/lean-critical never a proven refusal: those answer under NO_RECORD (253)",
       "request_reserved": true
     }

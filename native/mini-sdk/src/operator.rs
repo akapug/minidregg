@@ -54,19 +54,21 @@ pub const SSH_PREFIX: &str = "ssh:";
 
 /// Operator-socket operations the SDK drives (`main.rs` `socket_process`).
 pub mod op {
-    pub const PREPARE: u8 = 1;
-    pub const SUBMIT: u8 = 2;
-    pub const LOOKUP: u8 = 3;
-    pub const CHALLENGE: u8 = 4;
-    pub const QUERY: u8 = 5;
+    pub use crate::host_operations::{
+        AUTHORIZED_PREPARE as PREPARE, AUTHORIZED_QUERY as QUERY, LOOKUP, OBSERVATION_CHALLENGE as CHALLENGE, SUBMIT,
+    };
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Reply {
     /// The Host answered `op` with this body.
     Answer(Vec<u8>),
-    /// The Host refused; the body is its encoded outcome (decode with `inspect outcome`).
-    Refused(Vec<u8>),
+    /// `NO_RECORD` (253): the Host decided before any append (refused, contention or unavailable;
+    /// never uncertain); a fresh attempt is safe. The body is its encoded outcome.
+    NoRecord(Vec<u8>),
+    /// `HOST_OUTCOME` (255): an outcome the Host has not proven no-append, so UNDECIDED whatever
+    /// it decodes to: look the exact call up. The body is its encoded outcome.
+    Outcome(Vec<u8>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -555,11 +557,16 @@ impl Default for SshPool {
 
 /// Classify a reply frame for `operation`.
 pub fn classify_reply(operation: u8, mut reply: Vec<u8>) -> std::result::Result<Reply, Failure> {
+    use crate::host_operations::{RESPONSE_HOST_OUTCOME, RESPONSE_NEVER_FORWARDED, RESPONSE_NO_RECORD};
     match reply.first().copied() {
-        Some(254) => Err(Failure::Unsent(format!("socket rejected request: {}", String::from_utf8_lossy(&reply[1..])))),
-        Some(255) => {
+        Some(RESPONSE_NEVER_FORWARDED) => Err(Failure::Unsent(format!("socket rejected request: {}", String::from_utf8_lossy(&reply[1..])))),
+        Some(RESPONSE_NO_RECORD) => {
             reply.remove(0);
-            Ok(Reply::Refused(reply))
+            Ok(Reply::NoRecord(reply))
+        }
+        Some(RESPONSE_HOST_OUTCOME) => {
+            reply.remove(0);
+            Ok(Reply::Outcome(reply))
         }
         Some(tag) if tag == operation => {
             reply.remove(0);
@@ -587,7 +594,8 @@ mod tests {
     #[test]
     fn replies_classify_into_answer_refusal_unsent_uncertain() {
         assert_eq!(classify_reply(2, vec![2, 9]), Ok(Reply::Answer(vec![9])));
-        assert_eq!(classify_reply(2, vec![255, 9]), Ok(Reply::Refused(vec![9])));
+        assert_eq!(classify_reply(2, vec![255, 9]), Ok(Reply::Outcome(vec![9])));
+        assert_eq!(classify_reply(2, vec![253, 9]), Ok(Reply::NoRecord(vec![9])));
         assert!(matches!(classify_reply(2, vec![254, b'b']), Err(Failure::Unsent(_))));
         assert!(matches!(classify_reply(2, vec![3]), Err(Failure::Uncertain(_))));
     }
@@ -701,7 +709,7 @@ mod tests {
     #[test]
     fn an_ssh_refusal_and_a_socket_rejection_classify_like_the_unix_socket() {
         let (op, _) = standin("serve-refuse");
-        assert_eq!(op.call(2, b"c"), Ok(Reply::Refused(b"no".to_vec())));
+        assert_eq!(op.call(2, b"c"), Ok(Reply::Outcome(b"no".to_vec())));
         let (op, _) = standin("serve-reject");
         assert!(matches!(op.call(2, b"c"), Err(Failure::Unsent(d)) if d.contains("socket rejected request")));
     }

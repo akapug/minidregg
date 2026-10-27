@@ -320,7 +320,7 @@ def generated(data):
     lines += ["", "// Operator plans checked against the local consent provider (frame 224) before signing."]
     lines += ["pub const CONSENT_PLANS: &[u8] = &[" + ", ".join(p for p in data["consent_plans"]) + "];"]
     lines += ["", "// Active operations whose receiver never appends to the durable log (effect: none).",
-              "// A reply under RESPONSE_HOST_REFUSAL to any operation is undecided; to one of these it still only ever means undecided.",
+              "// A reply under RESPONSE_HOST_OUTCOME to any operation is undecided; to one of these it still only ever means undecided.",
               f"pub const NO_APPEND_OPERATIONS: &[u8] = &[{', '.join(map(str, no_append(data)))}];"]
     return "\n".join(lines) + "\n"
 

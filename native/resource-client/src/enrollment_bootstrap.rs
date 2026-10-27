@@ -395,7 +395,7 @@ fn host_call(
     let response = host
         .call(operation, payload, deadline)
         .map_err(|_| HttpError(503, "hostUnavailable"))?;
-    if response.first() == Some(&255) {
+    if response.first().is_some_and(|b| crate::is_outcome_frame(*b)) {
         return Err(HttpError(422, "hostRefused"));
     }
     if response.first() != Some(&(operation as u8)) {

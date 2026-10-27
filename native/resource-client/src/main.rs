@@ -228,11 +228,12 @@ pub(crate) fn take_command_ending() -> Option<CommandEnding> {
 /// from a client error without reading error prose.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum HostDecision {
-    /// The Host session reply carried a refusal byte; `encoded` is the rest of
-    /// the frame (an outcome encoded by the Host's own codec). `decoded` is the
-    /// Host's own `inspect outcome` of that frame over the same session, when
-    /// it could be asked; the client never decodes the frame itself.
-    RefusedFrame {
+    /// The Host session reply carried an outcome marker (`byte`: `NO_RECORD` 253 or
+    /// `HOST_OUTCOME` 255, see [`is_outcome_frame`]; 254 when a caller records a never-forwarded
+    /// reply); `encoded` is the rest of the frame (an outcome encoded by the Host's own codec).
+    /// `decoded` is the Host's own `inspect outcome` of that frame over the same session, when it
+    /// could be asked; the client never decodes the frame itself.
+    Frame {
         command: String,
         byte: u8,
         encoded: Vec<u8>,
@@ -246,23 +247,40 @@ impl HostDecision {
     /// The Host's own decoding of its answer, when there is one.
     pub(crate) fn outcome(&self) -> Option<&Value> {
         match self {
-            HostDecision::RefusedFrame { decoded, .. } => decoded.as_ref(),
+            HostDecision::Frame { decoded, .. } => decoded.as_ref(),
             HostDecision::Outcome(outcome) => Some(outcome),
         }
     }
 
-    /// Whether the Host DECIDED a refusal: its own decoded outcome has type `refused`. The 255
-    /// byte alone never says so. Lean answers 255 for refusals and also for `.unavailable "host
-    /// session reopening"` and for any handler exception (`Host/Main.lean` `serveFrame`), and op 125
-    /// answers 255 for `uncertain` and `contention`; an undecoded frame decides nothing either. Each
-    /// of those is undecided: the exact call may have been admitted, so nothing licenses a second
-    /// operation. Open (Lean lane): can a handler commit and then answer 255 (review Q1,
-    /// `docs/review/2026-10-26-native-crates/resource-client.md` §8.1)? Until the Host answers
-    /// proven no-append outcomes with its positive no-record frame, a decoded `refused` is the
-    /// only refusal the client reports.
+    /// Whether the Host DECIDED that the request left nothing behind (the refusal class).
+    ///
+    /// - A frame under `NO_RECORD` (253) is that decision by construction: the Host answers it
+    ///   only for an outcome a receiver decided before any append (`refused`, `contention` or
+    ///   `unavailable`, never `uncertain`; `Host/RequestRefusal.lean`), so a fresh attempt is safe.
+    /// - A frame under `HOST_OUTCOME` (255) is NEVER a refusal, whatever it decodes to: it is the
+    ///   envelope of an outcome the Host has not proven no-append (`uncertain`, `unavailable`,
+    ///   `contention`, a handler that threw after dispatch). It is undecided: the exact retained
+    ///   call is looked up, and nothing licenses a second operation.
+    /// - A decoded `refused` that came back as an operation's own answer (not a marker frame) is
+    ///   the receiver's decision too.
+    ///
+    /// Q1 (can a handler commit and then answer?) is answered on the Host side by this split: a
+    /// handler that throws after dispatch on an append operation answers under 255.
     pub(crate) fn is_refusal(&self) -> bool {
-        self.outcome().and_then(|o| o.get("type")).and_then(Value::as_str) == Some("refused")
+        match self {
+            HostDecision::Frame { byte, .. } => *byte == RESPONSE_NO_RECORD,
+            HostDecision::Outcome(outcome) => outcome.get("type").and_then(Value::as_str) == Some("refused"),
+        }
     }
+}
+
+/// The registry's reply markers, by name (`protocol/host-operations.json`, generated).
+pub(crate) use mini_sdk::host_operations::{RESPONSE_HOST_OUTCOME, RESPONSE_NEVER_FORWARDED, RESPONSE_NO_RECORD};
+
+/// Whether a reply's first byte carries a Host outcome to decode: `NO_RECORD` (253, proven
+/// no-append: the refusal class) or `HOST_OUTCOME` (255, undecided).
+pub(crate) fn is_outcome_frame(byte: u8) -> bool {
+    byte == RESPONSE_NO_RECORD || byte == RESPONSE_HOST_OUTCOME
 }
 
 /// The Host's decoded outcome type, or `undecoded`.
@@ -460,12 +478,13 @@ fn refusal_hint(detail: &str) -> &'static str {
 /// own line (exit 3: decided, and not done).
 pub(crate) fn host_ending(decision: &HostDecision) -> Option<(u8, String)> {
     if decision.is_refusal() {
-        let outcome = decision.outcome()?;
-        let line = refusal_line(outcome)?;
-        return Some((EXIT_REFUSED, match decision {
-            HostDecision::RefusedFrame { command, byte, .. } => format!(
-                "{line}{}\n  Host refused {command}, reply byte {byte}", bad_signature_explanation(outcome)),
-            HostDecision::Outcome(_) => format!("{line}{}", bad_signature_explanation(outcome)),
+        return Some((EXIT_REFUSED, match (decision, decision.outcome()) {
+            (HostDecision::Frame { command, byte, .. }, outcome) => format!(
+                "{}{}\n  Host refused {command} with no record, reply byte {byte}",
+                no_record_line(outcome),
+                outcome.map(bad_signature_explanation).unwrap_or_default()),
+            (HostDecision::Outcome(outcome), _) => format!("{}{}",
+                refusal_line(outcome).unwrap_or_else(|| "refused: unnamed".into()), bad_signature_explanation(outcome)),
         }));
     }
     if let Some(line) = decision.outcome().and_then(charged_line) {
@@ -476,7 +495,7 @@ pub(crate) fn host_ending(decision: &HostDecision) -> Option<(u8, String)> {
     }
     let kind = outcome_type(decision.outcome());
     Some((EXIT_UNDECIDED, match decision {
-        HostDecision::RefusedFrame { command, byte, .. } => format!(
+        HostDecision::Frame { command, byte, .. } => format!(
             "undecided: Host answered {command} with reply byte {byte} and outcome {kind}; the effect is unknown, \
              so do not repeat the operation: look up the exact retained call"),
         HostDecision::Outcome(_) => format!(
@@ -484,9 +503,20 @@ pub(crate) fn host_ending(decision: &HostDecision) -> Option<(u8, String)> {
     }))
 }
 
+/// The line for a `NO_RECORD` (253) frame: the Host decided before any append, so nothing
+/// happened and a fresh attempt is safe. A decoded `refused` names its reason; `contention` and
+/// `unavailable` say so.
+pub(crate) fn no_record_line(outcome: Option<&Value>) -> String {
+    match outcome {
+        Some(outcome) if outcome_type(Some(outcome)) == "refused" => refusal_line(outcome).unwrap_or_else(|| "refused: unnamed".into()),
+        outcome => format!("refused: no record: the Host answered {} before any append; nothing happened, a fresh attempt is safe",
+            outcome_type(outcome)),
+    }
+}
+
 /// The registry's never-forwarded marker (254).
 pub(crate) fn host_operations_never_forwarded() -> u8 {
-    mini_sdk::host_operations::RESPONSE_NEVER_FORWARDED
+    RESPONSE_NEVER_FORWARDED
 }
 
 /// Exit code for a request whose effect is unknown (`mini retry --mode lookup` asks again).
@@ -1364,19 +1394,19 @@ fn socket_process(
         }
     };
     let reply = session_invoke(host, socket, config, operation, &payload)?;
-    if reply[0] == 255 {
+    if is_outcome_frame(reply[0]) {
         // Ask the same Host session to decode its own frame (op 8, `inspect
         // outcome`). A failed decode leaves the decision undecoded; it is
-        // never reconstructed here.
+        // never reconstructed here. The class is the marker's (`is_refusal`).
         let decoded = kind_payload(OsStr::new("outcome"), reply[1..].to_vec())
             .and_then(|request| session_invoke(host, socket, config, 8, &request))
             .ok()
             .filter(|inspected| inspected.first() == Some(&8))
             .and_then(|inspected| serde_json::from_slice::<Value>(&inspected[1..]).ok());
-        let line = decoded.as_ref().and_then(refusal_line);
-        let decision = HostDecision::RefusedFrame {
+        let line = Some(no_record_line(decoded.as_ref()));
+        let decision = HostDecision::Frame {
             command: command.to_owned(),
-            byte: 255,
+            byte: reply[0],
             encoded: reply[1..].to_vec(),
             decoded,
         };
@@ -1837,11 +1867,14 @@ impl mini_sdk::flow::Local for CliHost<'_> {
 }
 
 impl mini_sdk::flow::Operator for CliHost<'_> {
-    fn request(&mut self, request: mini_sdk::flow::Request, inputs: &[&Path], output: &Path) -> mini_sdk::Result<()> {
+    /// The transport turns a marker frame into an error it has already classified and noted
+    /// (`socket_process`, `HostDecision::is_refusal`), so what comes back here is an answer.
+    fn request(&mut self, request: mini_sdk::flow::Request, inputs: &[&Path], output: &Path) -> mini_sdk::Result<mini_sdk::flow::Answered> {
         let mut arguments = vec![Path::new(request.verb())];
         arguments.extend_from_slice(inputs);
         arguments.push(output);
-        Ok(host_files(self.host, self.config, &arguments)?)
+        host_files(self.host, self.config, &arguments)?;
+        Ok(mini_sdk::flow::Answered::Answer)
     }
 }
 
@@ -1990,7 +2023,7 @@ fn submit_once(
     if prepare_only {
         return Ok(());
     }
-    let outcome = flow.transmit(
+    let (outcome, _answered) = flow.transmit(
         mini_sdk::flow::Request::Submit,
         &directory.join("outcome.bin"),
         &directory.join("outcome.json"),
@@ -2009,7 +2042,7 @@ pub(crate) fn host_decided<T>(result: Result<T>) -> Result<std::result::Result<T
         // Only a decoded refusal is the Host's refusal; an undecided 255 frame stays an error
         // (`HostDecision::is_refusal`), so no caller reads it as "refused, try another way".
         Err(error) => match take_host_decision() {
-            Some(decision @ HostDecision::RefusedFrame { .. }) if decision.is_refusal() => Ok(Err(
+            Some(decision @ HostDecision::Frame { .. }) if decision.is_refusal() => Ok(Err(
                 decision.outcome().and_then(refusal_line).unwrap_or_else(|| "refused: unnamed".into()))),
             _ => Err(error),
         },
@@ -2024,7 +2057,7 @@ pub(crate) fn host_decided_keeping<T>(
 ) -> Result<std::result::Result<T, String>> {
     if result.is_err() {
         if let Some(decision) = take_host_decision() {
-            if let HostDecision::RefusedFrame { encoded, .. } = &decision {
+            if let HostDecision::Frame { encoded, .. } = &decision {
                 if !path.exists() {
                     create_private(path, encoded)?;
                 }
@@ -2642,7 +2675,7 @@ fn consumer_poll(host: &Path, config: &Path, directory: &Path, route: ConsumerRo
     let retained_config = private_consumer_attempt(host, config, directory, route.poll_command)?;
     let frame = session_invoke(host, socket, &retained_config, route.poll_opcode, &[])?;
     write_new(&directory.join("reply.frame"), &frame)?;
-    if frame[0] == 255 {
+    if is_outcome_frame(frame[0]) {
         return Err(format!(
             "host refused {}; complete encoded reply retained in {}",
             route.poll_command,
@@ -2799,7 +2832,7 @@ fn consumer_ack(
     write_new(&directory.join("transaction-id.txt"), bytes)?;
     let frame = session_invoke(host, socket, &retained_config, route.ack_opcode, bytes)?;
     write_new(&directory.join("reply.frame"), &frame)?;
-    if frame[0] == 255 {
+    if is_outcome_frame(frame[0]) {
         return Err(format!(
             "host refused {}; complete encoded reply retained in {}",
             route.ack_command,
@@ -2878,7 +2911,7 @@ fn origin_outbox_prepare(
     sync_directory_ancestors(directory)?;
     let frame = session_invoke(host, socket, &retained_config, 16, &bytes)?;
     write_new(&directory.join("reply.frame"), &frame)?;
-    if frame[0] == 255 {
+    if is_outcome_frame(frame[0]) {
         return Err("Host refused origin outbox preparation; complete frame retained".into());
     }
     let value: Value = serde_json::from_slice(&frame[1..])
@@ -2919,7 +2952,7 @@ fn origin_outbox_export(
     sync_directory_ancestors(directory)?;
     let frame = session_invoke(host, socket, &retained_config, 18, transaction.as_bytes())?;
     write_new(&directory.join("reply.frame"), &frame)?;
-    if frame[0] == 255 {
+    if is_outcome_frame(frame[0]) {
         return Err("Host refused origin outbox export; complete frame retained".into());
     }
     let value: Value = serde_json::from_slice(&frame[1..])
@@ -3052,7 +3085,7 @@ fn continuity(
     let payload = provider_continuity::request_payload(&call_bytes, &outcome_bytes, None, false)?;
     let frame = session_invoke(host, socket, &retained_config, 17, &payload)?;
     write_new(&directory.join("reply.frame"), &frame)?;
-    if frame[0] == 255 {
+    if is_outcome_frame(frame[0]) {
         return Err("Host refused provider continuity; complete frame retained".into());
     }
     let value: Value = serde_json::from_slice(&frame[1..])
@@ -4786,15 +4819,24 @@ mod tests {
             refusal_line(&revoked).unwrap(),
             "refused: revoked: the grant is revoked (phase observation)"
         );
-        let decision = HostDecision::RefusedFrame {
+        let decision = HostDecision::Frame {
             command: "query".into(),
-            byte: 255,
+            byte: RESPONSE_NO_RECORD,
             encoded: vec![1],
-            decoded: Some(revoked),
+            decoded: Some(revoked.clone()),
         };
         let (code, line) = host_ending(&decision).unwrap();
         assert_eq!(code, EXIT_REFUSED);
-        assert!(line.starts_with("refused: revoked: the grant is revoked (phase observation)\n"));
+        assert!(line.starts_with("refused: revoked: the grant is revoked (phase observation)\n"), "{line}");
+        // The same decoding under the undecided envelope (255) is no refusal.
+        let envelope = HostDecision::Frame { command: "query".into(), byte: RESPONSE_HOST_OUTCOME, encoded: vec![1], decoded: Some(revoked) };
+        assert_eq!(host_ending(&envelope).unwrap().0, EXIT_UNDECIDED);
+        // NO_RECORD with a contention decoding: decided before any append, so a refusal-class line.
+        let contended = HostDecision::Frame { command: "submit".into(), byte: RESPONSE_NO_RECORD, encoded: vec![1],
+            decoded: Some(json!({"type":"contention"})) };
+        let (code, line) = host_ending(&contended).unwrap();
+        assert_eq!(code, EXIT_REFUSED);
+        assert!(line.starts_with("refused: no record: the Host answered contention before any append"), "{line}");
         // Prose that names a reason is not a reason.
         let nested = json!({"type":"refused","reason":"operation-rejected","phase":hex(b"prepare"),
             "detail":hex(b"invocation preparation: A.Reject.scalar\n  (B.Reject.pageMutation\n    (C.RejectReason.overflow))")});
@@ -4808,7 +4850,7 @@ mod tests {
         assert!(refusal_line(&prose)
             .unwrap()
             .starts_with("refused: unnamed: revoked"));
-        let undecoded = HostDecision::RefusedFrame {
+        let undecoded = HostDecision::Frame {
             command: "query".into(),
             byte: 255,
             encoded: vec![1],
@@ -4820,7 +4862,7 @@ mod tests {
         assert_eq!(code, EXIT_UNDECIDED);
         assert!(line.starts_with("undecided: Host answered query with reply byte 255 and outcome undecoded"), "{line}");
         for kind in ["uncertain", "unavailable", "contention", "absent"] {
-            let frame = HostDecision::RefusedFrame { command: "submit".into(), byte: 255, encoded: vec![1],
+            let frame = HostDecision::Frame { command: "submit".into(), byte: 255, encoded: vec![1],
                 decoded: Some(json!({"type": kind})) };
             assert!(!frame.is_refusal());
             let (code, line) = host_ending(&frame).unwrap();
@@ -4842,12 +4884,15 @@ mod tests {
     /// frame stays an error, so no caller reads it as "refused, so another way is safe".
     #[test]
     fn host_decided_reads_only_a_decoded_refusal_as_a_refusal() {
-        note_host_decision(HostDecision::RefusedFrame { command: "submit".into(), byte: 255, encoded: vec![1],
+        note_host_decision(HostDecision::Frame { command: "submit".into(), byte: 255, encoded: vec![1],
             decoded: Some(json!({"type":"unavailable"})) });
         assert_eq!(host_decided::<()>(Err("lost".into())), Err("lost".into()));
-        note_host_decision(HostDecision::RefusedFrame { command: "submit".into(), byte: 255, encoded: vec![1], decoded: None });
+        note_host_decision(HostDecision::Frame { command: "submit".into(), byte: 255, encoded: vec![1], decoded: None });
         assert_eq!(host_decided::<()>(Err("lost".into())), Err("lost".into()));
-        note_host_decision(HostDecision::RefusedFrame { command: "submit".into(), byte: 255, encoded: vec![1],
+        note_host_decision(HostDecision::Frame { command: "submit".into(), byte: RESPONSE_HOST_OUTCOME, encoded: vec![1],
+            decoded: Some(json!({"type":"refused","reason":"revoked","phase":hex(b"x"),"detail":hex(b"gone")})) });
+        assert_eq!(host_decided::<()>(Err("lost".into())), Err("lost".into()), "a decoded refusal under 255 is undecided");
+        note_host_decision(HostDecision::Frame { command: "submit".into(), byte: RESPONSE_NO_RECORD, encoded: vec![1],
             decoded: Some(json!({"type":"refused","reason":"revoked","phase":hex(b"x"),"detail":hex(b"gone")})) });
         assert_eq!(host_decided::<()>(Err("lost".into())), Ok(Err("refused: revoked: gone (phase x)".into())));
         let message = undecided_frame_message("submit", "uncertain", Some(Path::new("/w/attempts/a/outcome.bin")), &[7]);
