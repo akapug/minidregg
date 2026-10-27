@@ -196,10 +196,12 @@ export-consent.
 
 **Abuse limits** (infra's review, edge/demo/ABUSE-LIMITS.md): beside the gateway's 64 connections,
 a member holds at most 4 body requests at once; a fifth is refused with a 429 page that says so
-(`90f7f959`, `limits.rs`, tested: the fifth refused while another member proceeds). One export
-per member per 10 minutes: inside the window `/export` names when the next is allowed and the
-last archive's sha256 (written beside it by `mini export-world` and kept after the download), and
-a second POST is a 429 (`54ec93a3`, tested).
+(`90f7f959`, `limits.rs`, tested: the fifth refused while another member proceeds). One export per member per 10 minutes, the shell's mechanism on both faces: `mini export-world`
+claims HOME/exports/.last-export (the unix second the last export began, locked while one runs;
+a failed export puts the previous start back), and /export asks the same rule first without
+claiming (`world_export::may_export`), so a refusal is a 429 page in the shell's own words (one
+running, inside the window naming when the last began and when the next may, an unreadable file)
+with the last archive's sha256 (NAME.sha256, written beside it and kept after the download).
 
 **Box verification** (dregg-build, the round-2 candidate, the long-lived world `wf-jrun3`, at
 `a0f9c246`): door tests 9 + 8 green under node; JWF 43/48 with export end to end (start, ready,

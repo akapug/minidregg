@@ -63,21 +63,48 @@ pub(crate) fn claim_export(home: &Path, now: u64) -> Result<ExportClaim> {
     }
     let mut previous = Vec::new();
     file.read_to_end(&mut previous).map_err(|e| format!("{}: {e}", path.display()))?;
-    if !previous.is_empty() {
-        let text = std::str::from_utf8(&previous).ok().map(str::trim_end);
-        let last: u64 = text.and_then(mini_sdk::decimal::parse).ok_or_else(|| format!(
-            "{}: not a unix second; the export cooldown cannot be read", path.display()))?;
-        let next = last.saturating_add(EXPORT_COOLDOWN_S);
-        if now < next {
-            return Err(format!("export world: one export per {} minutes; the last began {}, the next may begin from {}",
-                EXPORT_COOLDOWN_S / 60, crate::web::subscribe::utc(last), crate::web::subscribe::utc(next)));
-        }
-    }
+    cooled(&path, &previous, now)?;
     file.set_len(0).map_err(|e| e.to_string())?;
     file.seek(std::io::SeekFrom::Start(0)).map_err(|e| e.to_string())?;
     file.write_all(format!("{now}\n").as_bytes()).map_err(|e| e.to_string())?;
     file.sync_all().map_err(|e| e.to_string())?;
     Ok(ExportClaim { file, previous })
+}
+
+/// The cooldown rule on the file's bytes: empty, or a unix second at least EXPORT_COOLDOWN_S ago.
+fn cooled(path: &Path, previous: &[u8], now: u64) -> Result<()> {
+    if previous.is_empty() {
+        return Ok(());
+    }
+    let text = std::str::from_utf8(previous).ok().map(str::trim_end);
+    let last: u64 = text.and_then(mini_sdk::decimal::parse).ok_or_else(|| format!(
+        "{}: not a unix second; the export cooldown cannot be read", path.display()))?;
+    let next = last.saturating_add(EXPORT_COOLDOWN_S);
+    if now < next {
+        return Err(format!("export world: one export per {} minutes; the last began {}, the next may begin from {}",
+            EXPORT_COOLDOWN_S / 60, crate::web::subscribe::utc(last), crate::web::subscribe::utc(next)));
+    }
+    Ok(())
+}
+
+/// Whether [`claim_export`] would succeed at `now`, without claiming: the web body asks before it
+/// starts `mini export-world` (which claims for itself), so a refusal is a page, not a log line.
+/// The same three refusals, by the same words.
+pub(crate) fn may_export(home: &Path, now: u64) -> Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+    use std::os::unix::io::AsRawFd;
+    let path = home.join("exports").join(LAST_EXPORT);
+    let file = match fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC).open(&path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    };
+    // SAFETY: flock on a descriptor this function owns; a shared probe released at once.
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) } != 0 {
+        return Err("export world: an export is already running for this member; wait for it to finish".into());
+    }
+    let previous = fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    cooled(&path, &previous, now)
 }
 
 pub(crate) fn run(mut args: Args) -> Result<()> {
