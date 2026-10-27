@@ -4866,6 +4866,15 @@ fn birth(
             .ok_or("historical create lookup did not confirm installed birth")?;
         return Ok((source, receipt, reservation));
     }
+    // Thin consent (`Kernel.NativeThinConsent.checkPlanThin`) displays invocations and
+    // delegations; a birth's plan (factory, authority, allocation and source slots) is derived by
+    // the planner from the Store's pins, height and authority snapshot, which thin consent does not
+    // read. Named here, before anything is signed, instead of the provider's "no served target
+    // views" (JP2 row 19). A re-run of an already bound attempt answers above without consent.
+    if crate::client_consent::thin_mode() {
+        return Err("thin consent signs invocations and delegations only; a birth (create) is planned \
+            against the Store and needs the full consent provider (MINI_THIN_CONSENT unset); nothing signed".into());
+    }
     eprintln!("workspace birth attempt: {}", attempt.display());
     // A Host `stale-root` between the signed observation and prepare (or a
     // signed plan the state moved under) is re-planned inside `submit`: the

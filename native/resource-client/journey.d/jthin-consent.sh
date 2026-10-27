@@ -50,12 +50,19 @@ row() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >>"$ROWS"; }
 fail() { row "$1" "$2" "$3" FAIL; echo "$1: $5" >&2; exit 1; }
 
 # say WHO LINE [MODE]: one shell line; with MODE, under thin consent through the proxy.
+# MINI_CONSENT_RESIDENT=0 on every thin line: the proxy reads THIN_PROXY_MODE (and the other
+# THIN_PROXY_* inputs) from ITS environment at start, and a row's mode differs from the last row's.
+# The resident consent provider keeps ONE child per binding (executable identity + settings bytes;
+# the environment is not in the binding) for every `mini` process of this user, so through it the
+# capture row would reach a proxy started under `pass` (journeys-r2b: fb-capture "the capturing
+# proxy let t3b through", proxy.log carrying the resident's 233/229 pattern). The proxy must be this
+# process's own child; the real provider reads no environment, so the product path is unaffected.
 say() {
   local who=$1 line=$2 mode=${3:-}
   N=$((N+1)); OUT=$D/log/$N.out; ERR=$D/log/$N.err
   printf '%s\t%s\n' "${mode:-full}" "$line" >"$D/log/$N.line"
   if [ -n "$mode" ]; then
-    if env MINI_THIN_CONSENT=1 MINI_LOCAL_HOST="$HOST" MINI_CONSENT_HOST="$PROXY" MINI_CONSENT_CONFIG="$CONFIG" \
+    if env MINI_THIN_CONSENT=1 MINI_CONSENT_RESIDENT=0 MINI_LOCAL_HOST="$HOST" MINI_CONSENT_HOST="$PROXY" MINI_CONSENT_CONFIG="$CONFIG" \
         THIN_PROXY_REAL="$REAL" THIN_PROXY_MODE="$mode" THIN_PROXY_LOG="$D/proxy.log" \
         THIN_PROXY_OTHER_INTENT="${OTHER_INTENT:-}" \
         "$SHELL_BIN" shell --socket "$SOCKET" --host "$HOST" --config "$CONFIG" \
@@ -138,7 +145,7 @@ check t2-shown-is-committed test "$(shown_root "$T2")" = "$(proposal_root t2c)"
 ok s1-propose-show alice 'instance show tc-one'
 ok s1-propose alice 'instance set s1 tc-one open 0 1'
 S1=$D/s1-attempt
-env MINI_THIN_CONSENT=1 MINI_LOCAL_HOST="$HOST" MINI_CONSENT_HOST="$PROXY" MINI_CONSENT_CONFIG="$CONFIG" \
+env MINI_THIN_CONSENT=1 MINI_CONSENT_RESIDENT=0 MINI_LOCAL_HOST="$HOST" MINI_CONSENT_HOST="$PROXY" MINI_CONSENT_CONFIG="$CONFIG" \
   THIN_PROXY_REAL="$REAL" THIN_PROXY_MODE=pass THIN_PROXY_LOG="$D/proxy.log" \
   "$MINI" workspace --action submit --dir "$SPONSOR_WS" --intent "$SPONSOR_WS/proposals/s1/intent.json" \
   --attempt "$SPONSOR_WS/attempts/s1-sealed" --prepare-only true >"$D/log/s1-prepare.out" 2>"$D/log/s1-prepare.err" \
@@ -177,7 +184,7 @@ printf '{"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":[{
 # N1: its observe grant is narrowed to field 401, so the view the Host serves is
 # not the cell: refused servedRootMismatch before anything is signed.
 : >"$D/proxy-n1.log"
-rc=0; env MINI_THIN_CONSENT=1 MINI_LOCAL_HOST="$HOST" MINI_CONSENT_HOST="$PROXY" MINI_CONSENT_CONFIG="$CONFIG" \
+rc=0; env MINI_THIN_CONSENT=1 MINI_CONSENT_RESIDENT=0 MINI_LOCAL_HOST="$HOST" MINI_CONSENT_HOST="$PROXY" MINI_CONSENT_CONFIG="$CONFIG" \
   THIN_PROXY_REAL="$REAL" THIN_PROXY_MODE=pass THIN_PROXY_LOG="$D/proxy-n1.log" \
   "$MINI" workspace --action submit --dir "$NEWCOMER_WS" --intent "$NEWCOMER_WS/proposals/n1/intent.json" \
   --attempt "$NEWCOMER_WS/attempts/n1" >"$D/log/n1-submit.out" 2>"$D/log/n1-submit.err" || rc=$?
@@ -190,7 +197,7 @@ row n1-narrowed servedRootMismatch "$rc" PASS
 jq --arg t "$(jq -r .target "$SPONSOR_WS/refs/tc-one.json")" '.purpose.draft.command.targets[0].target=$t' \
   "$NEWCOMER_WS/proposals/n1/intent.json" >"$D/req/n2-intent.json"
 : >"$D/proxy-n2.log"
-rc=0; env MINI_THIN_CONSENT=1 MINI_LOCAL_HOST="$HOST" MINI_CONSENT_HOST="$PROXY" MINI_CONSENT_CONFIG="$CONFIG" \
+rc=0; env MINI_THIN_CONSENT=1 MINI_CONSENT_RESIDENT=0 MINI_LOCAL_HOST="$HOST" MINI_CONSENT_HOST="$PROXY" MINI_CONSENT_CONFIG="$CONFIG" \
   THIN_PROXY_REAL="$REAL" THIN_PROXY_MODE=pass THIN_PROXY_LOG="$D/proxy-n2.log" \
   "$MINI" workspace --action submit --dir "$NEWCOMER_WS" --intent "$D/req/n2-intent.json" \
   --attempt "$NEWCOMER_WS/attempts/n2" >"$D/log/n2-submit.out" 2>"$D/log/n2-submit.err" || rc=$?
