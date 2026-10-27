@@ -107,7 +107,7 @@ jq --argjson bytes "$(stat -c '%s' "$spk")" '
   {selected_profile:(.importProfile // "standard-v1"),
    deadline_seconds:(if .importProfile=="operator-appliance-v1" then 1800 else 120 end),
    signed_spk_bytes:$bytes,mini_raw_admission_cap_bytes:268435456}'   "$GRAINS_ROOT/broker/config.json" >"$run/import-profile.json"
-sha256sum "$spk" "$inventory" "$0" "$repo/deploy/oracle/acceptance/world.sh" "$repo/deploy/oracle/acceptance/report.py" "$repo/scripts/oracle-stop-inspection-probe.py" \
+sha256sum "$spk" "$inventory" "$0" "$repo/deploy/oracle/acceptance/world.sh" "$repo/deploy/oracle/acceptance/report.py" "$repo/scripts/oracle-stop-inspection-probe.py" "$repo/scripts/oracle-agent-authority-probe.py" \
   "$repo/scripts/oracle-agent-lifetime-journey.sh" "$repo/deploy/oracle/acceptance/agent-allocation.json" "$repo/deploy/oracle/acceptance/agent.py" \
   "$repo/deploy/oracle/acceptance/agent-cases.json" "$installer" "$repo/deploy/spk-host/controller-world.py" >"$run/input-sha256.txt"
 cp "$inventory" "$run/inventory.json"
@@ -129,6 +129,7 @@ world_controller_prepare
 phase start-a
 world_controller_activate "$run/world/evidence/start-a.stdout" initial
 world_controller_probe initial probe
+world_authority_probe
 phase floor-a enroll-a get-a
 # This HTTP route invokes the current Mini request admission on every call.
 # A process/socket existing is not counted as admission or query success.

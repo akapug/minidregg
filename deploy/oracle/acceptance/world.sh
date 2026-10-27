@@ -138,6 +138,27 @@ world_controller_probe() {
     >"$run/agent-lifetime/$directory.stdout" 2>"$run/agent-lifetime/$directory.stderr"
 }
 
+world_authority_probe() {
+  local matched=$run/agent-lifetime/probe/discover-core-query.lifetime-attempt.json attempt_id
+  attempt_id=$(python3 - "$matched" <<'PYATTEMPT'
+import json, pathlib, sys
+value = json.loads(pathlib.Path(sys.argv[1]).read_bytes())['lifetimeSettlement']['dispatchAttemptId']
+if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value < 2**64:
+    raise SystemExit('native dispatch attempt ID absent or invalid')
+print(value)
+PYATTEMPT
+)
+  timeout 120 sudo -n -- "$installer" controller-reserve-export "$store" "$helper" "$attempt_id" \
+    >"$run/agent-lifetime/authority-reserve-export.json"
+  timeout 600 python3 "$repo/scripts/oracle-agent-authority-probe.py" \
+    --host "$BIN/minidregg-host" --config "$config" \
+    --operator-socket "$run/world/sock/operator/host.sock" \
+    --public-socket "$run/world/sock/participant/host.sock" \
+    --controller-export "$run/agent-lifetime/authority-reserve-export.json" \
+    --application-attempt "$matched" --out "$run/agent-lifetime/authority" --deadline 180 \
+    >"$run/agent-lifetime/authority.stdout" 2>"$run/agent-lifetime/authority.stderr"
+}
+
 world_prepare() {
   local base=$1 own=$2 run=$3 repo=$4 op_name start count registry bwrap deployment host
   [[ $(id -u) != 0 ]] || fail 'run as the operator, not root'
@@ -261,8 +282,8 @@ world_cleanup() {
     if [[ ${controller_created:-0} == 1 ]]; then
       world_controller_stop cleanup >>"$run/cleanup.log" 2>&1 || cleanup_result=1
       if [[ ${controller_staged:-0} == 1 ]]; then
-        timeout 120 sudo -n -- "$installer" controller-export "$store" "$helper" \
-          >"$run/agent-lifetime/controller-final-export.json" 2>>"$run/cleanup.log" || cleanup_result=1
+        timeout 120 sudo -n -- "$installer" controller-journal "$store" "$helper" \
+          >"$run/agent-lifetime/controller-final-journal.json" 2>>"$run/cleanup.log" || cleanup_result=1
       fi
       if [[ $result == 0 && $cleanup_result == 0 ]]; then
         timeout 120 sudo -n -- "$installer" controller-remove "$store" "$helper" \
