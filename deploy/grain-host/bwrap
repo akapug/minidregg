@@ -102,7 +102,7 @@ runtime_max_sec=${MINI_GRAIN_RUNTIME_MAX_SEC:-600}
 # Sandbox tools (docs/HERMES-TOOLS-2026-10-27.md): a resident granted upstream
 # Hermes's file, terminal or Python tools gets a per-worker /scratch tmpfs of
 # MINI_GRAIN_SCRATCH_MIB, the grain class's memory, task and CPU bounds, no
-# single file larger than the scratch, a bounded /tmp, and a CPU record the
+# single file larger than the scratch, a 16 MiB /tmp, and a CPU record the
 # gate writes outside the sandbox. Absent, the worker is exactly as before.
 scratch_mib=${MINI_GRAIN_SCRATCH_MIB:-}
 memory_max=${MINI_GRAIN_MEMORY_MAX:-2G}
@@ -146,7 +146,7 @@ if [[ -n $scratch_mib ]]; then
   # A shell runs in here: no nested user namespaces, no capabilities, no
   # controlling terminal (docs/HERMES-TOOLS-2026-10-27.md §2).
   sandbox+=(--disable-userns --cap-drop ALL --new-session
-    --size 67108864 --tmpfs /tmp --size $(( 10#$scratch_mib * 1048576 )) --tmpfs /scratch)
+    --size 16777216 --tmpfs /tmp --size $(( 10#$scratch_mib * 1048576 )) --tmpfs /scratch)
 else
   sandbox+=(--tmpfs /tmp)
 fi

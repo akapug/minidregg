@@ -480,6 +480,17 @@ the resident tools `mini_pending_awaits` / `mini_answer_await`. A member announc
 `await OBJECT TRANSACTION` in the room; that is the allowance. The kernel decides who may answer
 (notDecider) and refuses a second answer. Row: J14_AWAIT=1.
 
+**The Oracle through Hermes:**
+- Room field `hermes/tools` bit 8 grants the oracle.
+- A restricted resident is offered `mini_oracle_discover` and `mini_oracle_call` (never the raw
+  `mini_application_api`) when the operator's toolTask binds an Oracle lifetime route
+  (docs/oracle-agent-tools.md).
+- Every call goes through Mini's application dispatch and purse settlement. In a room without the
+  bit, the call is refused `oracle-not-granted` before any dispatch.
+- The answer comes back as Hermes's paid reply. Row: J14_ORACLE=1, with J14_ORACLE_TOOLTASK naming
+  the route fragment issued for this world's Hermes task. Issuing that fragment inside J14's world
+  (codex's `issue-grant` / `prepare-route` against the J14 controller) is the open seam.
+
 **Running J14 on dregg-build.** `/build/lanes/hermes-tier-run/tools-run.sh RUN_DIR` builds the
 lane binaries into `/build/lanes/hermes-tier-target` (CARGO_BUILD_JOBS=4), rebuilds the runtime
 root with `build-runtime-root` from `/build/lanes/hermes-live-run/hermes-agent` (6d8a8beb) against
@@ -498,6 +509,26 @@ to a candidate whose host carries bc88a5ab, and add `J14_AWAIT=1` for the bridge
 - writes go in `ROOM_WRITE_TOOLS`, `validate_room_write` and `write_with_reply_guard`;
 - each write is paid (one `hermes/turn`) and journaled as a `room_attempt` before it runs, and its
   exact lookup is `RoomTools::lookup`.
+
+**Owed (first):**
+- **A system uid for each resident.** Today install-hermes defaults to SVC=mini-core, so both
+  residents run as the operator uid that owns the Store, and their files belong to the operator
+  (demo-vm 602b8fa, ABUSE-LIMITS gap 9). install-hermes must:
+  - create `mini-h-INSTANCE` (`mini-h-hermes`, `mini-h-glm`) and run the resident, its controller
+    and its workers as that user;
+  - give the user linger (its own systemd user manager) and the demo's user@ drop-in for bwrap user
+    namespaces;
+  - add only the groups that open the operator socket and the key broker's client socket.
+
+  The run sheet passes SVC=mini-h-INSTANCE. Infra's per-uid ext4 quota (about 32 MiB) then covers
+  everything that uid owns under the instance directory: homes, keys, journals, `/workspace`.
+  Measure what a resident actually uses (Hermes's `.hermes` with `state.db`, the room workspace and
+  journals after a J14 run) before raising 32 MiB. Send infra (aed5ecf506cf840af) the final user and
+  group names.
+- **Sandbox sizes are now small**: scratch S 16, M 64, L 128 MiB, `/tmp` 16 MiB,
+  `LimitFSIZE` = scratch. The controller refuses a prompt while `/workspace` exceeds the scratch
+  size. Check against the measurement above that Hermes's own state fits that threshold on S; if it
+  does not, the threshold needs its own figure.
 
 **Owed:**
 - Run J14_TOOLS and J14_AWAIT on a candidate carrying bc88a5ab and this lane.

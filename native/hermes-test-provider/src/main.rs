@@ -1005,6 +1005,53 @@ fn await_reply_for(request: &Value, log: &Path) -> Option<Result<(Value, &'stati
     Some(Ok((json!({"role":"assistant","content":format!("await answers: {}", results.join("; "))}), "stop", "await-done".into())))
 }
 
+/// Asking the Oracle through Hermes: when the selected request starts `oracle:`, discover a
+/// live operation for the question, call it with `{text: QUESTION}`, and reply with what came
+/// back (an answer, or the refusal by name). Each tool result is kept in `LOG.oracle.jsonl`.
+fn oracle_reply_for(request: &Value, log: &Path) -> Option<Result<(Value, &'static str, String), String>> {
+    let messages = request.get("messages")?.as_array()?;
+    let user = messages.iter().rposition(|m| m.get("role").and_then(Value::as_str) == Some("user"))?;
+    let text: String = match &messages[user]["content"] {
+        Value::String(text) => text.clone(),
+        Value::Array(parts) => parts.iter().filter_map(|p| p.get("text").and_then(Value::as_str)).collect(),
+        _ => return None,
+    };
+    let brief: Value = serde_json::from_str(text.rsplit_once("Assignment: ").map_or(text.as_str(), |(_, r)| r).trim()).ok()?;
+    let ask = brief["selectedRequest"]["text"].as_str().unwrap_or("");
+    let question = ask.split_once("oracle:")?.1.trim().to_owned();
+    let discover = room_tool(request, "mini_oracle_discover")?;
+    let invoke = room_tool(request, "mini_oracle_call")?;
+    let application = request["tools"].as_array()?.iter()
+        .find(|t| t.pointer("/function/name").and_then(Value::as_str) == Some(discover.as_str()))
+        .and_then(|t| t.pointer("/function/parameters/properties/application/enum/0").and_then(Value::as_str))?.to_owned();
+    let current = &messages[user..];
+    let issued: Vec<String> = current.iter()
+        .filter(|m| m.get("role").and_then(Value::as_str) == Some("assistant"))
+        .flat_map(|m| m.get("tool_calls").and_then(Value::as_array).cloned().unwrap_or_default())
+        .filter_map(|c| c.get("id").and_then(Value::as_str).map(str::to_owned)).collect();
+    let calls = |list: Vec<Value>, stage: &str| Some(Ok((json!({"role":"assistant","content":null,"tool_calls":list}), "tool_calls", stage.to_owned())));
+    let content = |id: &str| tool_result(current, id).and_then(|m| m.get("content")).map(|c| c.to_string()).unwrap_or_default();
+    if !issued.iter().any(|id| id == "or-discover") {
+        return calls(vec![call(discover, "or-discover", json!({"application":application,"query":question,
+            "availability":"live_direct","limit":5}))], "oracle-discover");
+    }
+    if !issued.iter().any(|id| id == "or-call") {
+        let found = content("or-discover");
+        let _ = log_event(&log.with_extension("oracle.jsonl"), &json!({"id":"or-discover","content":found}).to_string());
+        // The first operation id the discovery names; an unparsed listing falls back to the
+        // appliance's general answer operation.
+        let operation = found.split("operation_id").nth(1)
+            .and_then(|rest| rest.split('"').map(|t| t.trim_matches(|c| c == '\\' || c == ':' || c == ' '))
+                .find(|t| !t.is_empty() && t.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))))
+            .unwrap_or("specialist.general-v1.answer").to_owned();
+        return calls(vec![call(invoke, "or-call", json!({"application":application,"requestId":"j14-oracle-1",
+            "conversationId":"j14-oracle","operationId":operation,"arguments":{"text":question}}))], "oracle-call");
+    }
+    let answer = content("or-call");
+    let _ = log_event(&log.with_extension("oracle.jsonl"), &json!({"id":"or-call","content":answer}).to_string());
+    Some(Ok((json!({"role":"assistant","content":format!("oracle: {}", clip(&answer, 1500))}), "stop", "oracle-done".into())))
+}
+
 fn room_reply_for(request: &Value) -> Result<(Value, &'static str, String), String> {
     let model = request.get("model").and_then(Value::as_str).ok_or("model absent")?;
     if model != MODEL {
@@ -1427,7 +1474,7 @@ fn serve_one(mut stream: TcpStream, log: &Path, mode: Mode, receipt_path: Option
             let shown = json!({"brief":request.pointer("/messages/0/content"),
                 "tools":request["tools"].as_array().into_iter().flatten().filter_map(|t| t.pointer("/function/name").cloned()).collect::<Vec<_>>()});
             let _ = log_event(&log.with_extension("shown.jsonl"), &shown.to_string());
-            match sandbox_reply_for(&request, log).or_else(|| await_reply_for(&request, log)) {
+            match sandbox_reply_for(&request, log).or_else(|| await_reply_for(&request, log)).or_else(|| oracle_reply_for(&request, log)) {
                 Some(reply) => reply,
                 None => room_reply_for(&request),
             }

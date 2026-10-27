@@ -36,8 +36,8 @@ pid, ipc, uts and cgroup namespace, `--clearenv`, read-only `/usr` and
 
 | Bound | Before | With sandbox tools |
 |---|---|---|
-| Scratch | none | `--size N --tmpfs /scratch`, N = `sandbox.scratchMib` (S 512, M 1024, L 2048: the class `volume_mib`); gone when the unit exits |
-| `/tmp` | unbounded tmpfs | 64 MiB tmpfs |
+| Scratch | none | `--size N --tmpfs /scratch`, N = `sandbox.scratchMib` (S 16, M 64, L 128 MiB); gone when the unit exits |
+| `/tmp` | unbounded tmpfs | 16 MiB tmpfs |
 | Memory | `MemoryMax=2G` fixed | `MINI_GRAIN_MEMORY_MAX` = class `memory_max` (S 512M, M 1G, L 2G); tmpfs pages count against it |
 | Tasks | `TasksMax=128` fixed | `MINI_GRAIN_TASKS_MAX` = class `tasks_max`, capped at 1024 |
 | CPU | none | `CPUWeight` = class `cpu_weight`; `CPUQuota` = `sandbox.cpuQuotaPercent` (default 100: one core) |
@@ -65,7 +65,7 @@ itself, not anything inside the process. The worker's entire filesystem is what
   --ro-bind RUNTIME_ROOT /agent --bind WORKSPACE /workspace
   --chdir /workspace --setenv HOME /workspace --setenv PATH /usr/bin:/bin
   --disable-userns --cap-drop ALL --new-session              # sandbox tools only
-  --size 67108864 --tmpfs /tmp --size SCRATCH --tmpfs /scratch   # sandbox tools only
+  --size 16777216 --tmpfs /tmp --size SCRATCH --tmpfs /scratch   # sandbox tools only
   --dir /run --ro-bind PROVIDER_GATEWAY_SOCKET /run/mini-provider.sock
   --ro-bind MCP_BROKER_SOCKET /run/mini-grain.sock
   --unshare-net
@@ -133,21 +133,27 @@ limit is refused by the gateway, which pins `max_tokens` and the row's caps.
 The ACP final text is still checked against the provider's settled final, so
 editing `state.db` cannot forge a reply.
 
-**The one honest gap: `/workspace` has no total quota.** It must persist,
-because Hermes's retained session lives there. `LimitFSIZE` bounds each file,
-and the class memory, task and wall bounds limit the write rate, but there is
-no total bound. The controller measures `/workspace` (allocated blocks) before
-every launch and refuses the prompt by name (`workspace-over-class-volume`)
-when it exceeds the class volume, so one run can overshoot by at most what it
-writes inside its own bounds and never compounds. A hard quota is an
-installation fact: on the demo box, `/var/lib/mini/hermes` on a filesystem with
-project quotas and one project per task directory (an infra item). The code
-needs nothing more.
+**`/workspace` stays writable, and why.** Hermes itself needs it: its home holds the generated
+`config.yaml`, the retained session database (`state.db`, needed to resume a session) and its
+caches. The tool processes run in the same sandbox under the same uid, so the OS cannot stop a
+shell or a Python script from writing there. What bounds it:
+- **File tools:** the patched `write_file` and `patch` refuse any path that does not resolve
+  under `/scratch` or `/tmp` ("Refusing to write outside /scratch"; the guard is in
+  `hermes-agent/mini-tool-catalogue.patch`). The terminal runs in `/scratch` by default.
+- **Terminal and Python:** they are not confined in process. Their writes to `/workspace` are
+  bounded by `LimitFSIZE` (one file ≤ the scratch size) and by the controller's refusal of a prompt
+  while `/workspace` holds more than the scratch size (`workspace-over-class-volume`).
+- **Hard bound:** a per-uid ext4 user quota (about 32 MiB) over everything the resident's uid owns
+  under its install directory. This needs each resident to have its own system uid (owed: install
+  as `mini-h-INSTANCE`, not the operator's `mini-core`).
+
+Anything durable leaves through a Mini tool (a doc line, a say, a publication), never by sitting
+in `/workspace`.
 
 ## 3. The grant: who decides which tools
 
 - **Operator ceiling:** `controller.json` → `"sandbox": {"tools": ["file",
-  "terminal", "code_execution"], "scratchMib": 1024, "memoryMax": "1G",
+  "terminal", "code_execution"], "scratchMib": 64, "memoryMax": "1G",
   "tasksMax": 512, "cpuWeight": 100, "cpuQuotaPercent": 100,
   "toolCallSeconds": 120, "computeSecondsPerTurn": 10}`. It is absent by
   default, which means no sandbox tools. `grain-runtime create` fills it from
