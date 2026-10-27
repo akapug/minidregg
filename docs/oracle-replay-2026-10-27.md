@@ -81,7 +81,11 @@ starting the bounded cold comparison. It requires identical response bytes and
 checks malformed input, a changed claim and required public-socket denial,
 then requires the original valid inspection to succeed again. Public denial
 uses a valid configuration and Host-image envelope, so a malformed envelope
-cannot substitute for the routing check. It records times and source/config
+cannot substitute for the routing check. Malformed pair lengths and public
+routing must return the exact transport refusal, `0xfe` followed by
+`operation unavailable on selected socket`. Altered and canonical mismatched
+claims must reach the source and return `0xff`. Busy, wrong-peer and mismatched
+configuration refusals cannot satisfy these checks. It records times and source/config
 hashes after each measurement. If the cold comparison reaches its deadline,
 the report remains failed while preserving completed resident checks and their
 times. Run it against an isolated qualification
@@ -96,9 +100,28 @@ is optional only so the initial warm-up can run before a second claim exists.
 Retain both reports and the accepted append evidence. Never replace a retained
 Store's pinned executable to perform this comparison.
 
+Once a separate same-Host cold comparison has qualified, `--resident-only`
+performs all resident and refusal controls without launching the cold CLI. Its
+report says `mode: resident-only` and `cold_comparison: not-performed`; a passing
+resident report makes no cold-equivalence claim. The fresh appliance journey
+uses this mode at both new STOP boundaries, retaining its distinct configuration
+and Store scope alongside the separate benchmark.
+
 Source registry and diff checks pass. On the isolated Linux snapshot, the three
 STOP inspection Rust tests and one resource-client operator/public routing test
 pass. The final combined `Host.Main` Lean compile passed in the isolated bounded
-driver (101.8 seconds); native linking and receiving qualification are separate
-checks. Receiving comparisons and measured speedup remain pending; removing
-cold subprocess calls alone is not a measured latency result.
+driver (101.8 seconds). On an isolated copied Store, cold inspection took 425.061
+seconds, the first resident inspection took 421.513 seconds, and its warm repeat
+took 0.414 seconds. All returned the same 89,310 JSON bytes. This measures removal
+of repeated history walks; it does not measure cold-open acceleration or total
+STOP duration.
+
+The first probe retained a failed receipt because it incorrectly expected a
+source refusal for malformed pair framing. A continuation on the same untouched
+resident checked the precise transport refusal, canonical wrong claim, public
+denial and valid output after all refusals. It compared those bytes to the saved
+cold result, checked identical Host/config/input hashes and unchanged source and
+copied Store/anchor hashes, and performed no second cold walk. The continuation
+receipt SHA-256 is
+`8b8551dececa57f1797939be7d94d7b67169e55fc8d004a71632fb87781c12ff`.
+Fresh appliance STOP and append-refresh qualification remain separate work.
