@@ -155,31 +155,18 @@ try:
         w.check('purse-is-one-deposit', s['purse'] == 3 * AW.PRICE, s['purse'])
 
     with w.group('bend-demo-sized-member'):
-        # the seed's shape: a member holding a demo-sized balance (10,000) publishes (a fee of a few credits)
-        # and is told, by name and with the amounts, that the run costs more than the account holds
-        phome = w.root / 'poor-home'
-        (phome / 'requests').mkdir(parents=True, mode=0o700)
-        (phome / 'requests' / 'PoorTally.obend').write_text((w.repo / 'world/activity/Tally.obend').read_text() + '# the demo-sized member\n')
-        (phome / 'requests' / 'PoorTally.obend').chmod(0o600)
-
-        def pshell(label, line):
-            r = w.sh(label, w.mini, 'shell', '--socket', w.sock, '--host', w.host, '--config', w.config, '--workspace', w.second,
-                     '--home', phome, '--line', line, ok=(0, 1, 2, 3, 4))
-            return r.returncode, r.stdout.decode(errors='replace').strip(), r.stderr.decode(errors='replace').strip()
-        (w.second / 'refs').mkdir(mode=0o700, exist_ok=True)
-        w.sh('poor-account', w.mini, 'workspace', '--action', 'import', '--dir', w.second, '--name', 'account', '--kind', 'account',
+        # the seed's shape: an account holding a demo-sized balance (10,000) is told, by name and with the amounts,
+        # that the run costs more than it holds, before anything is signed (the account is named with --account;
+        # the check reads the balance and signs nothing, so the signer's ownership never comes into it)
+        w.sh('poor-account', w.mini, 'workspace', '--action', 'import', '--dir', w.sponsor, '--name', 'poor-account', '--kind', 'account',
              '--target', w.SECOND, '--observe-capability', w.SECOND_SPEND, '--operation-capability', w.SECOND_SPEND)
-        rc, out, err = pshell('poor-publish', 'bend publish poor @PoorTally.obend --entry tally')
-        w.check('poor-publish-admitted', rc == 0 and out.startswith('admitted: bend publish poor'), {'rc': rc, 'out': out[:200], 'err': err[-300:]})
-        rc, out, err = pshell('poor-create', 'create poor-cell content open')
-        w.check('poor-cell-made', rc == 0, {'rc': rc, 'err': err[-300:]})
         held = w.balance(w.view('poor-balance', {'accounts': [w.SECOND]}), w.SECOND)
         before = int(w.view('poor-height', {})['height'])
-        rc, out, err = pshell('poor-run', 'bend run poor poor-cell')
+        rc, out, err = shell('poor-run', 'bend run tally counter --account poor-account')
         m = re.search(r'costs (\d+) .* holds (\d+);', err)
         w.check('demo-sized-run-refused-by-name-with-the-amounts',
-                rc == 3 and err.startswith('refused: unfunded: run poor on poor-cell costs') and m is not None and int(m.group(2)) == held and int(m.group(1)) > held
-                and int(m.group(1)) == 4 * AW.PRICE, {'rc': rc, 'err': err[-400:], 'held': held, 'price': AW.PRICE})
+                rc == 3 and err.startswith('refused: unfunded: run tally on counter costs') and m is not None and int(m.group(2)) == held
+                and int(m.group(1)) == 4 * AW.PRICE and held < 4 * AW.PRICE, {'rc': rc, 'err': err[-400:], 'held': held, 'price': AW.PRICE})
         w.check('nothing-submitted-by-the-unfunded-run', int(w.view('poor-height-after', {})['height']) == before, 'height unchanged')
 
     with w.group('bend-refusal'):
