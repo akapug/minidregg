@@ -1,6 +1,7 @@
 #!/bin/sh
 # Native two-participant application birth gate. No hosted model or app process runs.
 set -eu
+. "$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)/native/resource-client/journey.d/lib/evidence.sh"
 
 if [ "$#" -ne 2 ]; then
   echo "usage: $0 SOURCE_MATCHED_MINIDREGG_HOST NEW_PRIVATE_EVIDENCE_DIRECTORY" >&2
@@ -25,7 +26,7 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 2; }
 mkdir -m 700 "$EVIDENCE"
 EVIDENCE=$(CDPATH='' cd -- "$EVIDENCE" && pwd)
 umask 077
-shasum -a 256 "$0" "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY" \
+sha256 "$0" "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY" \
   >"$EVIDENCE/input-sha256.txt"
 
 decimal() {
@@ -234,17 +235,17 @@ query app-second 9 6100 302 "$EVIDENCE/second.key" 16009 resource
 FIRST_ROOT=$(jq -er '.cell.root' "$EVIDENCE/app-first/view.json")
 SECOND_ROOT=$(jq -er '.cell.root' "$EVIDENCE/app-second/view.json")
 [ "$FIRST_ROOT" = "$SECOND_ROOT" ]
-"$STORE_BINARY" read-to "$EVIDENCE/store" "$EVIDENCE/before-denied-image.bin"
+durable_image "$EVIDENCE/store" "$EVIDENCE/before-denied-image.bin"
 deny_query second-cannot-read-first 9 6208 201 "$EVIDENCE/second.key" 17009
 deny_query first-cannot-read-second 8 6209 211 "$EVIDENCE/first.key" 17008
-"$STORE_BINARY" read-to "$EVIDENCE/store" "$EVIDENCE/after-denied-image.bin"
+durable_image "$EVIDENCE/store" "$EVIDENCE/after-denied-image.bin"
 cmp "$EVIDENCE/before-denied-image.bin" "$EVIDENCE/after-denied-image.bin"
 
 # Restart the pinned Host session, recover the original exact signed call by
 # lookup, and show that no second birth or debit was installed.
 query factory-before-reopen 7 10 54 "$EVIDENCE/owner.key" 18001 resource
 BEFORE_BOUNDARY=$(decimal "$EVIDENCE/factory-before-reopen/challenge.json" worldRoot)
-"$STORE_BINARY" read-to "$EVIDENCE/store" "$EVIDENCE/before-reopen-image.bin"
+durable_image "$EVIDENCE/store" "$EVIDENCE/before-reopen-image.bin"
 stop_session
 start_session session-reopen
 "$MINI" retry --attempt "$EVIDENCE/session-first-attempt" --mode lookup \
@@ -262,7 +263,7 @@ query app-first-reopen 8 6100 301 "$EVIDENCE/first.key" 18008 resource
 query app-second-reopen 9 6100 302 "$EVIDENCE/second.key" 18009 resource
 [ "$(jq -er '.cell.root' "$EVIDENCE/app-first-reopen/view.json")" = "$FIRST_ROOT" ]
 [ "$(jq -er '.cell.root' "$EVIDENCE/app-second-reopen/view.json")" = "$FIRST_ROOT" ]
-"$STORE_BINARY" read-to "$EVIDENCE/store" "$EVIDENCE/after-reopen-image.bin"
+durable_image "$EVIDENCE/store" "$EVIDENCE/after-reopen-image.bin"
 cmp "$EVIDENCE/before-reopen-image.bin" "$EVIDENCE/after-reopen-image.bin"
 
 jq -n --arg app "6100" --arg first "6208" --arg second "6209" \
