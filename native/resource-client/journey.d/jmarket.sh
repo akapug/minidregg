@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# JMKT (SEALED-MARKET; PRIVACY §3.4, MUD §2.7/§2.8): a sealed-bid market through `mini shell`, on
+# JMKT (SEALED-MARKET; MUD §2.7/§2.8): a sealed-bid market through `mini shell`, on
 # this journey's live Store. Supersedes KHQ (journey.d/jhasheq.sh, the single-value K-HASHEQ probe).
 #
 # alice opens market `fish` (supply 8) with a close height and a reveal end; bob bids twice and carol
