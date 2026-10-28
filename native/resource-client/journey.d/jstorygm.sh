@@ -165,4 +165,28 @@ check story "the second invite wrote nothing (no new outcome)" test "$(outcomes)
 check story "the second invite reprints the same invitation" test "$(sed -n "s/^story join $S //p" "$OUT" | head -1)" = "$INV1"
 check story "and says it is already invited" grep -q 'already invited' "$OUT"
 fails story sponsor "story invite $S 424242 gm" 2 "not $S's GM"
+
+# An enrolment whose submit marker was written and whose process then died before the Host took the ingress
+# (the demo-dry dryguest4 wedge: every retry looked the same absent ingress up forever). The marker is forged
+# the way the dead process left it; a later `enroll lookup` retires the attempt, and the same name enrols.
+L=late
+mkdir -p -m 700 "$H/$L"
+ok setup "$L" "keygen mini.key"
+operator setup "CUSTODY: copy $L's secret into the sponsor home" install_private 0600 "$H/$L/keys/mini.key" "$H/sponsor/keys/$L.key"
+LPLAN="enroll plan $L $L.key $(xxd -p -c 256 "$H/$L/keys/mini.key.next.pub") $(xxd -p -c 256 "$H/$L/keys/mini.key.next.cosign")"
+ok setup sponsor "$LPLAN"
+ok setup sponsor "enroll seal $L"
+EDIR=$H/sponsor/enroll/$L
+check setup "the sealed attempt exists" test -s "$EDIR/ingress.bin"
+printf '{"format":"minidregg-participant-enrollment-custody-v1","ingressSha256":"%s","operation":88,"status":"may-have-submitted"}\n' \
+  "$(sha256sum "$EDIR/ingress.bin" | cut -d' ' -f1)" >"$EDIR/submit-marker.json"
+say sponsor "enroll lookup $L"
+check setup "a later lookup of an ingress the Host never took retires the attempt by name" grep -q 'absent from the Host' "$ERR"
+check setup "and leaves the refused-no-record record, not the marker, to plan from" test -e "$EDIR/submit-refused.json" -o -e "$EDIR/replanned"
+ok setup sponsor "$LPLAN"
+ok setup sponsor "enroll seal $L"
+ok setup sponsor "enroll submit $L"
+ok setup sponsor "enroll lookup $L"
+check setup "the retried name is enrolled as its own subject" test -n "$(jq -r '.subject // empty' "$OUT")"
+operator setup "CUSTODY: remove the copy" rm -f "$H/sponsor/keys/$L.key"
 finish
