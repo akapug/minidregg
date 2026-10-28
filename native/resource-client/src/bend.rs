@@ -47,9 +47,9 @@ const TICK_RATE: u128 = 1;
 const REPLAY_RATE: u128 = 6;
 const CORE_RATE: u128 = 2;
 /// The source ticks a bend's birth declares (`activity_world.TICKS`) and the multiple of its price the
-/// default deposit reserves: the pair of envelopes the first await escrows (resume and timeout, `activity_world.BEND_PURSE_PRICES`). A larger purse is `--deposit N`; a program that awaits again needs one.
+/// default deposit reserves: the pair of envelopes the first await escrows (resume and timeout: the Host quoted 63,392 for the pair at 30,443 a price, so 2 prices fall short) and one more price (`activity_world.BEND_PURSE_PRICES`). A larger purse is `--deposit N`; a program that awaits again needs one.
 const TICKS: u128 = 300;
-const DEPOSIT_PRICES: u128 = 2;
+const DEPOSIT_PRICES: u128 = 3;
 /// The declared state type `{total: Nat}` (the checker's type JSON) `Tally` and its siblings keep.
 const TOTAL_STATE: &str = r#"{"tag":"field","name":"total","member":{"tag":"natural"},"tail":{"tag":"emptyRow"}}"#;
 

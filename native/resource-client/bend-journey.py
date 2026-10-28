@@ -13,7 +13,7 @@ the activity route (Host ops 7 author / 210 plan / 211 assemble / 212 submit / 2
   bend-run       `bend run tally counter`: the object is created pinning Tally and born under a full
                  envelope; the Host's outcome line names height, world root and receipt; the object's
                  declared state read back through the VIEW (not the shell's line) is Tally's `{total: 0}`;
-                 the activity's purse holds the deposit the line states, which is two envelope prices (the first await's pair) as
+                 the activity's purse holds the deposit the line states, which is three envelope prices (the first await's pair and slack) as
                  activity_world prices them; the member's account paid at least that
   bend-show      `bend show counter`: the public view agrees with the view this driver reads
   bend-refusal   `bend publish bad @Bad.obend` with a malformed source: refused (exit 3) by the Host's
@@ -89,7 +89,7 @@ try:
             height_n, root, tx, event, state, purse, deposit, was, now, charge = m.groups()
             w.check('run-is-admitted-after-the-publish', int(height_n) > published_at, {'publish': published_at, 'run': height_n})
             w.check('line-state-is-the-tallys', state == '{total=0}', state)
-            w.check('deposit-is-the-first-awaits-pair', int(deposit) == AW.BEND_PURSE_PRICES * BPRICE, {'line': deposit, 'world': AW.BEND_PURSE_PRICES * BPRICE})
+            w.check('deposit-is-the-first-await-and-slack', int(deposit) == AW.BEND_PURSE_PRICES * BPRICE, {'line': deposit, 'world': AW.BEND_PURSE_PRICES * BPRICE})
             w.check('purse-holds-the-deposit', 0 < int(purse) <= int(deposit), {'purse': purse, 'deposit': deposit})
             w.check('account-paid-at-least-the-deposit', int(charge) >= int(deposit) and int(was) - int(now) == int(charge),
                     {'was': was, 'now': now, 'charge': charge, 'deposit': deposit})
