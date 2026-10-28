@@ -840,15 +840,22 @@ class Journey:
                 {'source':str(outbox/'handoff.json'),'destination':'requests/handoff.json'}])
         self.inbox=read(dispatched)['inbox'];self.prompts=0
 
+    def attachment_phase(self,contract,name,*extra):
+        helper=REPO/'scripts/application-attachment.py'
+        retained=Path(read(contract)['paths']['outputDir'])/'attachment.json'
+        if retained.exists():
+            pins=read(retained);helper=Path(pins['files']['orchestrator'])
+            if not helper.is_absolute() or sha(helper)!=pins['sha256']['orchestrator']:
+                raise ValueError('retained attachment orchestrator differs')
+        return self.run('attachment-'+name,['python3',helper,contract,name,*extra],timeout=3600)
+
     def attach(self):
         grain=Path(self.c['controllerRoot'])
         self.controller_run('grain-runtime',['hermes-room','resident-init',grain/'controller.json',grain/'state/resident'])
         contract=self.root/'attachment-input.json';write(contract,inputs.attachment(self.c));self.contract=contract
-        def phase(name,*extra):
-            return self.run('attachment-'+name,['python3',REPO/'scripts/application-attachment.py',contract,name,*extra],timeout=3600)
         # The CLI returns its retained result path, whose JSON is the phase result.
         def result(path):return read(path.read_text().strip())
-        prepared=result(phase('prepare-config'))
+        prepared=result(self.attachment_phase(contract,'prepare-config'))
         self.fixed('controller-config',prepared['stage'])
         exported=self.controller_config()
         # Preserve the original exported filename selected in the pinned input;
@@ -866,15 +873,22 @@ class Journey:
     def finish_attachment(self,contract,prepared):
         """Continue from an installed prepared config without repeating its delegations."""
         self.contract=contract
-        def phase(name,*extra):
-            return self.run('attachment-'+name,['python3',REPO/'scripts/application-attachment.py',contract,name,*extra],timeout=3600)
-        def result(path):return read(path.read_text().strip())
         self.start_controller()
         request=secrets.token_hex(16);args=self.root/'session-arguments.json';write(args,prepared['nextTool']['arguments'])
         write(self.root/'session-request.json',{'requestId':request,'tool':prepared['nextTool']['name'],'arguments':str(args)})
         session=self.fixed('controller-tool',request,prepared['nextTool']['name'],args)
+        self.finish_session_attachment(contract,session,request)
+
+    def finish_session_attachment(self,contract,session,request):
+        """Join the exact completed session, including explicit native recovery."""
+        self.contract=contract
+        def phase(name,*extra):return self.attachment_phase(contract,name,*extra)
+        def result(path):return read(path.read_text().strip())
         value=read(session)
-        if value.get('type')!='tool-complete' or value.get('isError') is not False:raise ValueError('session tool not complete; retain request ID for native tool-result')
+        if value.get('requestId')!=request:raise ValueError('session result belongs to another request')
+        if (value.get('type')!='tool-complete' or value.get('isError') is not False
+                or not isinstance(value.get('result'),dict) or value['result'].get('isError') is not False):
+            raise ValueError('session tool not complete; retain request ID for native tool-result')
         retained=self.fixed('controller-tool-result',request)
         if session.read_bytes()!=retained.read_bytes():raise ValueError('session retained result differs')
         self.fixed('controller-tool-ack',request)

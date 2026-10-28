@@ -97,6 +97,9 @@ struct Config {
     /// Operator budget for cold startup/recovery and idle attachment only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     startup_timeout_seconds: Option<u64>,
+    /// Opt in only with a qualified Mini/consent/proxy supporting full readiness.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    consent_full_readiness: Option<bool>,
     control_socket: PathBuf,
     custody_key: PathBuf,
     state_dir: PathBuf,
@@ -992,6 +995,14 @@ fn managed_worker_policy_source(owner: &str, workers: &[String], generation: &st
     } else {
         json!({"owner":owner,"workerSubjects":workers,"workerGeneration":generation})
     }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConsentFullReadiness {
+    #[serde(rename = "type")]
+    kind: String,
+    ready: bool,
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -7447,6 +7458,9 @@ impl Runtime {
         Ok(deadline::NATIVE_CALL)
     }
     fn command_output(&self, program: &Path, args: &[&str]) -> Result<()> {
+        self.command_capture(program, args).map(|_| ())
+    }
+    fn command_capture(&self, program: &Path, args: &[&str]) -> Result<std::process::Output> {
         self.custody_exit_reaped.store(false, Ordering::SeqCst);
         let output = deadline::output(Command::new(program).args(args), self.native_work_limit()?).map_err(|e| {
             // At the deadline deadline::wait killed the child's whole process
@@ -7467,7 +7481,7 @@ impl Runtime {
                 String::from_utf8_lossy(&output.stderr).trim()
             ));
         }
-        Ok(())
+        Ok(output)
     }
     fn work_output(
         &self,
@@ -13100,6 +13114,26 @@ impl Runtime {
             || !self.journal.unresolved_external.is_empty())
     }
 
+    fn prepare_full_consent(&self) -> Result<Option<ConsentFullReadiness>> {
+        if self.config.consent_full_readiness != Some(true) {
+            return Ok(None);
+        }
+        let output = self.command_capture(&self.config.mini, &[
+            "consent-full-ready",
+            "--host", self.config.host.to_str().ok_or("host path UTF-8")?,
+            "--config", self.config.host_config.to_str().ok_or("config path UTF-8")?,
+        ])?;
+        if output.stdout.len() > 1024 {
+            return Err("full-consent readiness reply exceeds 1024 bytes".into());
+        }
+        let receipt: ConsentFullReadiness = serde_json::from_slice(&output.stdout)
+            .map_err(|e| format!("full-consent readiness reply: {e}"))?;
+        if receipt.kind != "mini-consent-full-readiness-v1" || !receipt.ready {
+            return Err("full-consent provider did not confirm readiness".into());
+        }
+        Ok(Some(receipt))
+    }
+
     /// Explicit operator readiness, before any tool request is submitted.
     /// This may perform ordinary native recovery/soft attachment; success
     /// requires both a clean controller and a fresh signed idle task view.
@@ -13116,6 +13150,7 @@ impl Runtime {
         self.with_startup_budget(Some(outer), |rt| {
             if !rt.idle_task_ready() { rt.attach(true)?; }
             if !rt.idle_task_ready() { return Err("controller is not reconciled and idle".into()); }
+            let consent = rt.prepare_full_consent()?;
             let signed = rt.query()?;
             let expected_status = match rt.journal.connection {
                 Connection::Hard => "1",
@@ -13129,7 +13164,7 @@ impl Runtime {
             Ok(json!({"type":"mini-grain-idle-readiness-v1", "ready":true,
                 "task":rt.config.task, "connection":rt.journal.connection,
                 "startupTimeoutSeconds":deadline::startup_limit(rt.config.startup_timeout_seconds)?.as_secs(),
-                "signedTask":signed}))
+                "signedTask":signed, "fullConsent":consent}))
         })
     }
 
@@ -19647,6 +19682,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
             host_config: root.join("host-config.json"),
             host_socket: None,
             startup_timeout_seconds: None,
+            consent_full_readiness: None,
             control_socket: state.join("control.sock"),
             custody_key: root.join("parent.key"),
             state_dir: state.clone(),
