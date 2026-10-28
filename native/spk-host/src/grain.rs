@@ -19,6 +19,7 @@
 //! only through the registered fixed-verb one-shot helper.
 
 use crate::broker::{self, Request};
+use crate::io_context::IoContext;
 use crate::dispatch_native::{private_dir, PrivateOperator};
 use crate::lifecycle_selector::{self, LifecycleSelector};
 use crate::materialize::{verify_installed_spk, ImportProfile};
@@ -107,7 +108,7 @@ fn derived_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
         ".{}.tmp",
         path.file_name().and_then(|n| n.to_str()).unwrap_or("derived")
     ));
-    let _ = fs::remove_file(&temp);
+    let _ = fs::remove_file(&temp).ctx("remove", &temp);
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -117,14 +118,14 @@ fn derived_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
     file.write_all(bytes)?;
     file.sync_all()?;
     fs::rename(&temp, path)?;
-    File::open(parent)?.sync_all()
+    File::open(parent).ctx("open", parent)?.sync_all()
 }
 
 fn private_directory(path: &Path) -> io::Result<()> {
     match DirBuilder::new().mode(0o700).create(path) {
         Ok(()) => {
             if let Some(parent) = path.parent() {
-                File::open(parent)?.sync_all()?;
+                File::open(parent).ctx("open", parent)?.sync_all()?;
             }
         }
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
@@ -133,8 +134,11 @@ fn private_directory(path: &Path) -> io::Result<()> {
     private_dir(path)
 }
 
+#[cfg(test)]
+pub(crate) fn read_bounded_for_test(path: &Path) -> io::Result<String> { file_sha256(path) }
+
 fn file_sha256(path: &Path) -> io::Result<String> {
-    let mut file = File::open(path)?;
+    let mut file = File::open(path).ctx("open", path)?;
     let mut digest = Sha256::new();
     let mut chunk = [0u8; 64 * 1024];
     loop {
@@ -170,7 +174,7 @@ fn copy_package_bounded(path: &Path, output: &mut impl Write, maximum: u64) -> i
 }
 
 fn pinned_executable(path: &Path, sha: &str) -> io::Result<()> {
-    let meta = fs::symlink_metadata(path)?;
+    let meta = fs::symlink_metadata(path).ctx("inspect", path)?;
     if !path.is_absolute()
         || !meta.is_file()
         || !(crate::os::root_owner(meta.uid()) || meta.uid()==unsafe{libc::geteuid()})
@@ -485,7 +489,7 @@ fn stage_package(host: &Host, spk: &Path) -> io::Result<(String, PathBuf, PathBu
     let copy = dir.join("package.spk");
     if !exists(&copy)? {
         let mut random = [0u8; 8];
-        File::open("/dev/urandom")?.read_exact(&mut random)?;
+        File::open("/dev/urandom").ctx("open", "/dev/urandom")?.read_exact(&mut random)?;
         let temp = dir.join(format!(".package-{}.tmp", random.iter().map(|b| format!("{b:02x}")).collect::<String>()));
         let mut staged = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temp)?;
         let copied = (|| -> io::Result<()> {
@@ -494,9 +498,9 @@ fn stage_package(host: &Host, spk: &Path) -> io::Result<(String, PathBuf, PathBu
             }
             staged.sync_all()?;
             fs::rename(&temp, &copy)?;
-            File::open(&dir)?.sync_all()
+            File::open(&dir).ctx("open", &dir)?.sync_all()
         })();
-        if copied.is_err() { let _ = fs::remove_file(&temp); }
+        if copied.is_err() { let _ = fs::remove_file(&temp).ctx("remove", &temp); }
         copied?;
     }
     if copy_package_bounded(&copy, &mut io::sink(), maximum)? != raw_sha256 {
@@ -507,7 +511,7 @@ fn stage_package(host: &Host, spk: &Path) -> io::Result<(String, PathBuf, PathBu
     if !exists(&result)? {
         if exists(&attempt)? {
             let mut random = [0u8; 8];
-            File::open("/dev/urandom")?.read_exact(&mut random)?;
+            File::open("/dev/urandom").ctx("open", "/dev/urandom")?.read_exact(&mut random)?;
             let aside = dir.join(format!(
                 "qualification-interrupted-{}",
                 random.iter().map(|b| format!("{b:02x}")).collect::<String>()
@@ -529,7 +533,7 @@ fn stage_package(host: &Host, spk: &Path) -> io::Result<(String, PathBuf, PathBu
         }
         let bytes = serde_json::to_vec(&qualification_config)?;
         if exists(&config)? {
-            fs::remove_file(&config)?;
+            fs::remove_file(&config).ctx("remove", &config)?;
         }
         derived_file(&config, &bytes)?;
         crate::launch_descriptor_native::qualify_launch(&config)?;
@@ -859,7 +863,7 @@ fn decimal_u64(value: Option<&Value>) -> Option<u64> {
 
 fn scan_runs(app_dir: &Path) -> io::Result<Vec<Run>> {
     let mut runs = Vec::new();
-    for entry in fs::read_dir(app_dir)? {
+    for entry in fs::read_dir(app_dir).ctx("list", app_dir)? {
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().into_owned();
         let Some(generation) = name
@@ -1040,7 +1044,7 @@ fn routes(app_dir: &Path, app: &str) -> io::Result<Vec<Value>> {
     if !exists(&root)? {
         return Ok(routes);
     }
-    let mut names: Vec<_> = fs::read_dir(&root)?
+    let mut names: Vec<_> = fs::read_dir(&root).ctx("list", &root)?
         .map(|entry| entry.map(|e| e.path()))
         .collect::<io::Result<_>>()?;
     names.sort();
@@ -1122,7 +1126,7 @@ fn start_inner(host: &Host, app: &str, prepare_only: bool) -> io::Result<Value> 
         let descriptor = dir.join("descriptor-attempt");
         if exists(&descriptor)? {
             let mut random = [0u8; 8];
-            File::open("/dev/urandom")?.read_exact(&mut random)?;
+            File::open("/dev/urandom").ctx("open", "/dev/urandom")?.read_exact(&mut random)?;
             fs::rename(
                 &descriptor,
                 dir.join(format!(
@@ -1130,7 +1134,7 @@ fn start_inner(host: &Host, app: &str, prepare_only: bool) -> io::Result<Value> 
                     random.iter().map(|b| format!("{b:02x}")).collect::<String>()
                 )),
             )?;
-            File::open(&dir)?.sync_all()?;
+            File::open(&dir).ctx("open", &dir)?.sync_all()?;
         }
     }
     let latest = runs
@@ -1459,7 +1463,7 @@ fn export(host: &Host, app: &str, out: &Path) -> io::Result<Value> {
             "volumeMib":placement.volume_mib,
             "stopGeneration":latest.generation.to_string(),
         }),
-        &fs::read(&receipt)?,
+        &fs::read(&receipt).ctx("read", &receipt)?,
         &host.profile.completion_custodian_seed,
     )
 }
