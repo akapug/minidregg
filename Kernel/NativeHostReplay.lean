@@ -85,6 +85,16 @@ open Minidregg.Kernel.NativeHost
 set_option autoImplicit false
 attribute [local irreducible] NativeHost.Config.profile CanonicalRuntimeProfile.Profile.compilerProfile
 
+/-- The pay ambient prices from the opened image's platform record: the pins' creation
+tariff (the record's, `pinnedTariff`) and the factory template under the record. Without a
+record the genesis terms stand in and every pay plan refuses `platformUnavailable`
+(`PayEnrolReceiver.AmbientCurrent`), so the stand-in prices nothing. -/
+def _root_.Minidregg.Kernel.NativeHost.payEnrolAmbient (config : Config) (opened : Opened config) : PayEnrolReceiver.Ambient :=
+  ⟨config.federation, logicalHeight config opened.durable, opened.pins.tariff,
+    match ResourceBirthPolicyController.Concrete.platformRecordAt config.deployment opened.durable with
+    | some record => ResourceBirthPolicyController.Concrete.templateAt config.profile.template record
+    | none => config.profile.template⟩
+
 /-- An issue certificate is retained only after the replay walk has admitted
 its original command, matched its complete durable record, and validated the
 next physical image. The index records where that step entered the history. -/
@@ -1211,7 +1221,7 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
         config.profile ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
       NativeAdmission config opened (ParticipantFactoryProvisioningReceiver.intent accepted)
   | fleetTurn {ingress : FleetTurn.DecodedIngress}
-      (accepted : FleetTurnReceiver.AcceptedTurn config.deployment config.profile config.tariff
+      (accepted : FleetTurnReceiver.AcceptedTurn config.deployment config.profile opened.pins.tariff
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
       NativeAdmission config opened (FleetTurnReceiver.intent accepted)
   | payBook {ingress : PayBookReceiver.DecodedIngress}
@@ -1228,7 +1238,7 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       NativeAdmission config opened (PayAssignmentReceiver.intent accepted)
   | realmWell {ingress : RealmWellReceiver.DecodedIngress}
       (accepted : RealmWellReceiver.AcceptedWell config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset⟩
+        ⟨config.federation, logicalHeight config opened.durable, opened.pins.tariff.asset⟩
         opened.durable ingress) :
       NativeAdmission config opened (RealmWellReceiver.intent accepted)
   | clockTick {ingress : ClockTickReceiver.DecodedIngress}
@@ -1245,21 +1255,21 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
   | payEnrol {ingress : PayEnrolReceiver.DecodedIngress}
       (admission : ((PayEnrolReceiver.payEnrolFamily config.deployment config.profile).liveReceiver
         (receivingLaws config) config.signature).Admitted
-        ⟨config.federation, logicalHeight config opened.durable, config.tariff⟩ opened.durable ingress) :
+        (payEnrolAmbient config opened) opened.durable ingress) :
       NativeAdmission config opened
         (((PayEnrolReceiver.payEnrolFamily config.deployment config.profile).liveReceiver
           (receivingLaws config) config.signature).intent admission.accepted)
   | payEnrolV2 {ingress : PayEnrolReceiver.DecodedIngress}
       (admission : ((PayEnrolV2Receiver.payEnrolV2Family config.deployment config.profile).liveReceiver
         (receivingLaws config) config.signature).Admitted
-        ⟨⟨config.federation, logicalHeight config opened.durable, config.tariff⟩, config.expectedSeed⟩
+        ⟨payEnrolAmbient config opened, config.expectedSeed⟩
         opened.durable ingress) :
       NativeAdmission config opened
         (((PayEnrolV2Receiver.payEnrolV2Family config.deployment config.profile).liveReceiver
           (receivingLaws config) config.signature).intent admission.accepted)
   | payClaim {ingress : PayClaimCommand.DecodedIngress}
       (accepted : PayClaimReceiver.AcceptedClaim config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable, config.tariff⟩ opened.durable ingress) :
+        (payEnrolAmbient config opened) opened.durable ingress) :
       NativeAdmission config opened (PayClaimReceiver.intent accepted)
   | payRefill {ingress : PurseRefillReceiver.DecodedIngress}
       (accepted : PurseRefillReceiver.AcceptedRefill config.deployment config.profile
@@ -1271,12 +1281,12 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       NativeAdmission config opened (JobMoneyReceiver.intent accepted)
   | activity {ingress : ObjectiveActivityReceiver.DecodedIngress}
       (verdict : ObjectiveActivityReceiver.Verdict config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset, config.tariff.collector, {}⟩
+        ⟨config.federation, logicalHeight config opened.durable, opened.pins.tariff.asset, opened.pins.tariff.collector, {}⟩
         opened.durable ingress) :
       NativeAdmission config opened verdict.intent
   | seat {ingress : SeatReceiver.DecodedIngress}
       (accepted : SeatReceiver.Accepted config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset, config.tariff.collector, {}⟩
+        ⟨config.federation, logicalHeight config opened.durable, opened.pins.tariff.asset, opened.pins.tariff.collector, {}⟩
         opened.durable ingress) :
       NativeAdmission config opened (SeatReceiver.intent accepted)
   | certify {ingress : CertifyReceiver.DecodedIngress}
@@ -1406,12 +1416,12 @@ kernel's, each with the intent it commits. -/
 inductive KernelTurn (config : Config) (opened : Opened config) (intent : DataIntent rootBytes) : Type
   | activity (ingress : ObjectiveActivityReceiver.DecodedIngress)
       (verdict : ObjectiveActivityReceiver.Verdict config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset, config.tariff.collector, {}⟩
+        ⟨config.federation, logicalHeight config opened.durable, opened.pins.tariff.asset, opened.pins.tariff.collector, {}⟩
         opened.durable ingress)
       (exact : intent = verdict.intent)
   | seat (ingress : SeatReceiver.DecodedIngress)
       (accepted : SeatReceiver.Accepted config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset, config.tariff.collector, {}⟩
+        ⟨config.federation, logicalHeight config opened.durable, opened.pins.tariff.asset, opened.pins.tariff.collector, {}⟩
         opened.durable ingress)
       (exact : intent = SeatReceiver.intent accepted)
 
@@ -2405,7 +2415,7 @@ private def derive (config : Config) (opened : Opened config)
     | .error detail => return .error detail
     | .ok reserved => return .ok (Derived.ofJointReserve reserved)
   if let some ingress := FleetTurn.decodeIngress bytes then
-    match ← FleetTurnReceiver.admitDecodedNative config.deployment config.profile config.tariff
+    match ← FleetTurnReceiver.admitDecodedNative config.deployment config.profile opened.pins.tariff
         ⟨config.federation, height⟩ opened.durable config.signature ingress with
     | .error reason => return .error s!"fleet turn refused: {repr reason}"
     | .ok accepted =>
@@ -2462,7 +2472,7 @@ private def derive (config : Config) (opened : Opened config)
           .payAssignment accepted, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := RealmWellReceiver.decodeIngress bytes then
     match ← RealmWellReceiver.admitDecodedNative config.deployment config.profile
-        ⟨config.federation, height, config.tariff.asset⟩ opened.durable config.signature ingress with
+        ⟨config.federation, height, opened.pins.tariff.asset⟩ opened.durable config.signature ingress with
     | .error reason => return .error s!"realm well command refused: {repr reason}"
     | .ok accepted =>
         return .ok ⟨RealmWellReceiver.intent accepted,
@@ -2485,7 +2495,7 @@ private def derive (config : Config) (opened : Opened config)
           .payObservation admission, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := PayClaimCommand.decodeIngress bytes then
     match ← PayClaimReceiver.admitDecodedNative config.deployment config.profile
-        ⟨config.federation, height, config.tariff⟩ config.expectedSeed opened.durable config.signature ingress with
+        (payEnrolAmbient config opened) config.expectedSeed opened.durable config.signature ingress with
     | .error reason => return .error s!"paid claim refused: {repr reason}"
     | .ok accepted =>
         return .ok ⟨PayClaimReceiver.intent accepted,
@@ -2494,7 +2504,7 @@ private def derive (config : Config) (opened : Opened config)
     if (PayEnrolV2Receiver.parsedMemo ingress.command.observation).isSome then
       match ← (PayEnrolV2Receiver.payEnrolV2Family config.deployment config.profile).admitNative
           config.profile.compilerProfile config.deployment config.signature
-          ⟨⟨config.federation, height, config.tariff⟩, config.expectedSeed⟩ opened.durable ingress with
+          ⟨payEnrolAmbient config opened, config.expectedSeed⟩ opened.durable ingress with
       | .error reason => return .error s!"v2 paid enrollment refused: {repr reason}"
       | .ok admission =>
           return .ok ⟨((PayEnrolV2Receiver.payEnrolV2Family config.deployment config.profile).liveReceiver
@@ -2502,7 +2512,7 @@ private def derive (config : Config) (opened : Opened config)
             .payEnrolV2 admission, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
     match ← (PayEnrolReceiver.payEnrolFamily config.deployment config.profile).admitNative
         config.profile.compilerProfile config.deployment config.signature
-        ⟨config.federation, height, config.tariff⟩ opened.durable ingress with
+        (payEnrolAmbient config opened) opened.durable ingress with
     | .error reason => return .error s!"pay enrolment refused: {repr reason}"
     | .ok admission =>
         return .ok ⟨((PayEnrolReceiver.payEnrolFamily config.deployment config.profile).liveReceiver
@@ -2524,7 +2534,7 @@ private def derive (config : Config) (opened : Opened config)
           .jobMoney accepted, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := ObjectiveActivityReceiver.decodeIngress bytes then
     match ← ObjectiveActivityReceiver.admitDecodedNative config.deployment config.profile
-        ⟨config.federation, height, config.tariff.asset, config.tariff.collector, {}⟩ opened.durable
+        ⟨config.federation, height, opened.pins.tariff.asset, opened.pins.tariff.collector, {}⟩ opened.durable
         config.signature ingress with
     | .error reason => return .error s!"activity turn refused: {repr reason}"
     | .ok verdict =>
@@ -2533,7 +2543,7 @@ private def derive (config : Config) (opened : Opened config)
           some (.activity ingress verdict rfl), none, none, none, none⟩
   if let some ingress := SeatReceiver.decodeIngress bytes then
     match ← SeatReceiver.admitDecodedNative config.deployment config.profile
-        ⟨config.federation, height, config.tariff.asset, config.tariff.collector, {}⟩ opened.durable
+        ⟨config.federation, height, opened.pins.tariff.asset, opened.pins.tariff.collector, {}⟩ opened.durable
         config.signature ingress with
     | .error reason => return .error s!"seat turn refused: {repr reason}"
     | .ok accepted =>

@@ -1468,12 +1468,12 @@ def fleetFinalize (config : Config) (opened : Opened config) (draft : FleetTurn.
         (FleetTurn.streamDigest config.deployment.domain draft.payer publication.topic)
       { publication with sequence := head.nextSeq }
     else publication
-  { draft with fee := config.tariff.base, publication := publication }
+  { draft with fee := opened.pins.tariff.base, publication := publication }
 
 def fleetPlanLoaded (config : Config) (opened : Opened config) (command : FleetTurn.Command) :
     Except String FleetTurn.SigningPlan := do
   let ambient : FleetTurn.Ambient := ⟨config.federation, logicalHeight config opened.durable⟩
-  let prepared ← (FleetTurn.prepare config.deployment config.profile config.tariff ambient
+  let prepared ← (FleetTurn.prepare config.deployment config.profile opened.pins.tariff ambient
     opened.durable command).mapError (fun reason => s!"fleet turn preparation: {repr reason}")
   let selected ← (CredentialSignatureAdmission.signingHeader prepared.authority.snapshot
     (FleetTurn.marker config.deployment.domain config.profile.semantics command)
@@ -1530,7 +1530,7 @@ def fleetSubmitLoaded (config : Config) (opened : Opened config)
     (bytes : List UInt8)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) :
     IO Outcome := do
-  match ← FleetTurnReceiver.receiveLoaded config.deployment config.profile config.tariff
+  match ← FleetTurnReceiver.receiveLoaded config.deployment config.profile opened.pins.tariff
       ⟨config.federation, logicalHeight config opened.durable⟩ config.signature
       config.transport opened.durable bytes with
   | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
@@ -2123,7 +2123,7 @@ def payViewLoaded (config : Config) (opened : Opened config) : Except String Pay
 receipt as `replayed`). The well ledger is the operator-local CLI `well-ledger`. -/
 
 def wellAmbient (config : Config) (opened : Opened config) : RealmWellReceiver.Ambient :=
-  ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset⟩
+  ⟨config.federation, logicalHeight config opened.durable, opened.pins.tariff.asset⟩
 
 /-- The header the subject signs over this opened image. It discloses no
 decision; a signer key the authority cell does not hold is refused. -/
@@ -2195,7 +2195,7 @@ def wellLedgerLoaded (config : Config) (opened : Opened config) : Except String 
     let holdersSum := (holders.map Prod.snd).sum
     ({ asset, realm, well := logical.balance asset asset, holders, holdersSum,
        total := logical.balance asset asset + holdersSum } : WellLedgerRow)
-  let credit := config.tariff.asset
+  let credit := opened.pins.tariff.asset
   pure ⟨book.payload.root, credit, logical.balance credit credit, logical.totalAsset credit, wells⟩
 
 def wellLedger (config : Config) : IO (Except String WellLedger) := do
@@ -2309,15 +2309,6 @@ P6's.)  The plan asks the Receiver's verifier about the memo's two possession
 signatures (`PayEnrolReceiver.observations`), because the decision the observer
 signs depends on both bits. -/
 
-/-- The pay ambient prices from the opened image's platform record: the pins' creation
-tariff (the record's, `pinnedTariff`) and the factory template under the record. Without a
-record the genesis terms stand in and every pay plan refuses `platformUnavailable`
-(`PayEnrolReceiver.AmbientCurrent`), so the stand-in prices nothing. -/
-def payEnrolAmbient (config : Config) (opened : Opened config) : PayEnrolReceiver.Ambient :=
-  ⟨config.federation, logicalHeight config opened.durable, opened.pins.tariff,
-    match ResourceBirthPolicyController.Concrete.platformRecordAt config.deployment opened.durable with
-    | some record => ResourceBirthPolicyController.Concrete.templateAt config.profile.template record
-    | none => config.profile.template⟩
 
 def payEnrolPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
     IO (Except String PayCellDomain.SigningPlan) := do
@@ -2515,7 +2506,7 @@ a memo, so it changes no decision: `ObjectiveActivity.LoadMemo.replay_eq`). -/
 def activityAmbient (config : Config) (opened : Opened config) (held : ObjectiveActivity.LoadMemo) :
     ObjectiveKernelConfig.Ambient :=
   { federation := config.federation, height := logicalHeight config opened.durable,
-    asset := config.tariff.asset, collector := config.tariff.collector, held }
+    asset := opened.pins.tariff.asset, collector := opened.pins.tariff.collector, held }
 
 def activityPlanLoaded (config : Config) (opened : Opened config) (held : ObjectiveActivity.LoadMemo)
     (commandBytes : List UInt8) : Except String ObjectiveActivityReceiver.SigningPlan := do
@@ -2643,7 +2634,7 @@ nothing the view does not. -/
 
 def seatAmbient (config : Config) (opened : Opened config) : ObjectiveKernelConfig.Ambient :=
   { federation := config.federation, height := logicalHeight config opened.durable,
-    asset := config.tariff.asset, collector := config.tariff.collector }
+    asset := opened.pins.tariff.asset, collector := opened.pins.tariff.collector }
 
 def seatPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
     Except String SeatReceiver.SigningPlan := do
