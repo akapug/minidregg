@@ -47,6 +47,9 @@
 #     INSTANCE=glm BASE=9871000 MODEL=glm-5.3-flash ROOM=subscribers TIER=1 POOL_ROW=zai-glm \
 #       HERMES_ROOT=OUT install-hermes preflight route subjects room concierge runtime create handoff summon controller dispatch resident
 set -euo pipefail
+# Custody files are owner-private whatever the calling shell's umask; explicit
+# modes come from install -m.
+umask 077
 OPERATOR=${OPERATOR:-mini-core}
 # The archived candidate by its real path: the registration compares the
 # controller's mini/host paths with the root-pinned image.
