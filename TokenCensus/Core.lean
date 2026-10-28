@@ -45,7 +45,15 @@ that way compiles).
 6. **Restricted minting functions.**  A `restrict | function | modules | note` row
    names a public function that mints a token (a genesis head, an identity from an
    open) and the only modules that may call it; any other value-carrying caller
-   fails the build.
+   fails the build.  A caller is a constant whose value uses the function at a
+   computational position: not inside a type, a type former or a proof, and not as a
+   parameter of the type a projection, a recursor or `casesOn`, or a matcher takes apart, nor as
+   an inferred index (an implicit argument fixed by the type of a later explicit one, the `V` of
+   `Receiver.intent (R : Receiver J V)`) (there it only names which instance of the type family
+   the value already has, and whoever built that value chose it; under
+   the module system every file elaborates its own `match_N`, so a match on
+   `Receiver.Outcome … (receiverVerifier o)` mentions the function in its parameters
+   without calling it).
 
 `#assert_token_census_plants` is the instrument's self-test (check 4 and check 6's
 plants): for every private constructor a forgery is planted in a scratch environment
@@ -355,6 +363,75 @@ def loadCensus (table : Name) : CommandElabM (Array Row × Array Restriction) :=
   | .ok parsed => pure parsed
   | .error message => throwError message
 
+/-- How many leading arguments of `head` are parameters of the type it takes apart: a structure
+projection's, a recursor's or `casesOn`'s inductive parameters, a matcher's parameters. -/
+def eliminatorParams (head : Name) : MetaM Nat := do
+  let env ← getEnv
+  if let some info := env.getProjectionFnInfo? head then return info.numParams
+  if let some info ← getMatcherInfo? head then return info.numParams
+  match env.find? head with
+  | some (.recInfo info) => return info.numParams
+  | _ =>
+      if isCasesOnRecursor env head then
+        if let some (.inductInfo info) := env.find? head.getPrefix then return info.numParams
+      return 0
+
+/-- The argument positions of `head` (among its first `count`) that are inferred indices: an
+implicit or instance binder that occurs in the type of a later EXPLICIT binder and not in `head`'s
+result, and `head` is not a constructor.  Such an argument is fixed by the type of the value passed
+there (a `Receiver J V`'s `V` in `Receiver.intent`), so it names which member of the family that value
+already is; whoever built the value chose it, and the building site is checked on its own (a
+constructor's or a smart constructor's index is never skipped: `TokenCensus/SelfTest.lean` plants
+both a builder, which must be flagged, and a pure consumer, which must not). -/
+def inferredIndices (head : Name) (count : Nat) : MetaM (Array Nat) := do
+  let some info := (← getEnv).find? head | return #[]
+  -- A constructor BUILDS the value: its parameters are what the builder chooses.
+  if info matches .ctorInfo _ then return #[]
+  forallTelescope info.type fun xs result => do
+    let mut out := #[]
+    for i in [0:min count xs.size] do
+      let decl ← xs[i]!.fvarId!.getDecl
+      if decl.binderInfo.isExplicit then continue
+      -- a function that returns a value of the family (a smart constructor) chooses its index too:
+      -- only a CONSUMER, whose result does not mention the index, merely reads it off its argument
+      if result.containsFVar xs[i]!.fvarId! then continue
+      for j in [i+1:xs.size] do
+        let later ← xs[j]!.fvarId!.getDecl
+        if later.binderInfo.isExplicit && later.type.containsFVar xs[i]!.fvarId! then
+          out := out.push i
+          break
+    return out
+
+/-- Does `function` occur in `e` at a computational position: not inside a type, a type former
+or a proof, and not as a parameter of the type an eliminator takes apart (`eliminatorParams`)? -/
+partial def usesInTerm (function : Name) (e : Expr) : MetaM Bool := do
+  unless (e.find? (·.isConstOf function)).isSome do return false
+  if ← isProof e then return false
+  if ← isTypeFormer e then return false
+  match e with
+  | .const name _ => return name == function
+  | .app .. => e.withApp fun fn args => do
+      if ← usesInTerm function fn then return true
+      let skip ← match fn with
+        | .const head _ => eliminatorParams head
+        | _ => pure 0
+      let indices ← match fn with
+        | .const head _ => inferredIndices head args.size
+        | _ => pure #[]
+      let mut i := skip
+      while i < args.size do
+        unless indices.contains i do
+          if ← usesInTerm function args[i]! then return true
+        i := i + 1
+      return false
+  | .lam .. => lambdaTelescope e fun _ body => usesInTerm function body
+  | .letE name type value body _ => do
+      if ← usesInTerm function value then return true
+      withLetDecl name type value fun x => usesInTerm function (body.instantiate1 x)
+  | .mdata _ body => usesInTerm function body
+  | .proj _ _ body => usesInTerm function body
+  | _ => return false
+
 /-- Is `name` a value-carrying caller of `function` outside `allowed`? -/
 def restrictedCall (function : Name) (allowed : List Name) (name : Name) (info : ConstantInfo) :
     MetaM Bool := do
@@ -362,7 +439,9 @@ def restrictedCall (function : Name) (allowed : List Name) (name : Name) (info :
   unless info.getUsedConstantsAsSet.contains function do return false
   if info matches .thmInfo _ then return false
   if ← isProp info.type then return false
-  return !allowed.contains (moduleOf (← getEnv) name)
+  if allowed.contains (moduleOf (← getEnv) name) then return false
+  let some value := info.value? | return false
+  usesInTerm function value
 
 /-- Checks 1, 2, 3, 5 and 6 over the current environment.  With `scope := some root` the
 constants checked are those of the modules under `root` only (checks 1, 5, 6, and check 2 for the
@@ -535,6 +614,20 @@ elab "#assert_token_census_plants " table:ident : command => do
           restrictedCall restriction.function allowed forge (← getConstInfo forge)
         unless detected do
           faults := faults.push s!"restricted {restriction.function}: a planted call was NOT detected"
+        -- teeth the other way: a value naming the function only inside a binder's type calls nothing
+        let flagged ← perConstant <| withoutModifyingEnv do
+          let fnInfo ← getConstInfo restriction.function
+          let fnConst := mkConst restriction.function (fnInfo.levelParams.map mkLevelParam)
+          let unit := mkConst ``Unit
+          let mention := mkApp (mkLambda `f .default fnInfo.type unit) fnConst
+          let forge := `Minidregg.TokenCensus.plantedTypeMention ++ restriction.function
+          addDecl <| .defnDecl
+            { name := forge, levelParams := fnInfo.levelParams, type := mkForall `x .default mention unit
+              value := mkLambda `x .default mention (mkConst ``Unit.unit)
+              hints := .opaque, safety := .safe }
+          restrictedCall restriction.function allowed forge (← getConstInfo forge)
+        if flagged then
+          faults := faults.push s!"restricted {restriction.function}: a planted type-only mention WAS flagged"
     let mut planted := 0
     for (name, user, _) in present do
       let info ← getConstInfo name
