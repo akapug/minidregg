@@ -261,10 +261,13 @@ try:
             w.check('commit-performed-at-birth', source_of(v) == {'kind': 'performed', 'verdict': 'settled', 'reason': None}
                     and World.total_of(v) == 5, {'source': source_of(v), 'state': v.get('state')})
             second0 = bal(v, w.SECOND)
-            # FundsAgree's kernel check: a delivery whose submitter account is the purse itself is refused by name
-            # (its added envelope would be paid from the purse the transfer is judged against)
+            # A delivery naming the activity's own purse as the account that pays its added envelope is refused.
+            # The receiver refuses it first, `notAccountOwner` (a payer is admitted only for its owner, and no
+            # member owns a purse); the kernel's `Delivery.purseApart` (`payerInvalid`) is the proved second line
+            # behind it. The sponsor signs with a spend capability it really holds, on its own account.
             w.turn('deliver-from-the-purse-refused', w.sponsor, {'kind': 'deliver', 'record': rec,
-                   'await': World.await_of(v)['id'], 'account': rec, 'accountCapability': '0'}, 'refused', 'payerInvalid')
+                   'await': World.await_of(v)['id'], 'account': rec, 'accountCapability': str(w.SPONSOR_SPEND)},
+                   'refused', 'notAccountOwner')
             deliver('deliver-commit', v, rec)
             v1 = w.state('obj', 'after-transfer', tx)
             w.check('transfer-performed-moves-exactly-1',
