@@ -248,5 +248,10 @@ when the arm lands.
   refused `unsupportedPayload` by name; the full-peer provider covers those writes). Helpers:
   `checkOpened_of` (the converse of `checkOpened_ok`), `servedOpening_honest`, `decode_narrowed`,
   `items_none_sealed`, `visible_full`.
-* **Owed:** the closure build of the consent modules on dregg-ref, the consent binary, and JP2 on
-  a candidate (row 22 and the swapped-plan rows); jthin-consent's new N1 row on a world.
+* **Verified.** dregg-ref: `Host.ClientConsentCore Host.ClientConsentSession Kernel.NativeThinBirth`
+  built (closure-lock, rc 0, peak 3.4 GiB) and `minidregg-client-consent` linked (sha256
+  e275bca9...); after merging main 1c789dc7b, `Kernel/NativeThinConsent.lean` checks clean per file.
+  hbox, candidate e89fe7b8b with that consent provider substituted
+  (`/tank/dregg-build/claude-lanes/thin-birth/cand`, `run-jp2.sh`), main's scripts plus this
+  branch's jpriv2/jthin-consent: JP2 PASS (71 rows: row 22, swapped plan 33-37), THIN PASS.
+* **Owed:** nothing on this arm; JP2/THIN on the first candidate built from main with this branch.
