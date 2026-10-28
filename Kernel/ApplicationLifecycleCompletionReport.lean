@@ -115,18 +115,20 @@ def stopAuditCodec : LawfulCodec StopAudit :=
   /s{T}-mini.slice
   /s{T}-mini-grains.slice
   /s{T}-mini-grains-C.slice                        C = size class name, one letter (S, M, L)
-  /s{T}-mini-grains-C-a{A}.slice                   A = app, at most 18 digits
-  /mini-spk-s{T}-a{A}-g{G}.service                 G = generation, at most 18 digits
+  /s{T}-mini-grains-C-a{A}.slice                   A = app, at most 20 digits (a u64)
+  /mini-spk-s{T}-a{A}-g{G}.service                 G = generation, at most 20 digits (a u64)
 
 systemd nests a slice under its dash-prefix, so the Store tag recurs five times in the path (it
 reached 260 bytes for a four-digit app on dregg-build, 2026-10-28, against the old bound of 256).
-The sum below is 317. Every component is far under NAME_MAX (255; the longest is the 75-byte unit
+The sum below is 323: 317 for 18-digit components, plus two bytes for each of the three places a
+20-digit component recurs (the app in the app slice and the unit, the generation in the unit). A member's
+app is a participant-namespace id, which is at least 2^63, so the app is a full u64. Every component is far under NAME_MAX (255; the longest is the 75-byte unit
 file) and the whole path far under PATH_MAX (4096). It assumes the units run under the operator's
 user manager, which is how the broker places them. -/
 def controlGroupBound : Nat :=
   let uid := 10
   let tag := 16
-  let digits := 18
+  let digits := 20
   "/user.slice/user-".length + uid + ".slice/user@".length + uid + ".service".length
   + ("/s".length + tag + ".slice".length)
   + ("/s".length + tag + "-mini.slice".length)
@@ -139,7 +141,13 @@ def controlGroupBound : Nat :=
 def controlGroupWithin (group : List UInt8) : Bool :=
   !group.isEmpty && decide (group.length ≤ controlGroupBound)
 
-example : controlGroupBound = 317 := by decide
+example : controlGroupBound = 323 := by decide
+-- The widened component is exactly a u64: the largest value has 20 digits, one past it has 21.
+example : (toString (2 ^ 64 - 1)).length = 20 := by decide
+example : (toString (2 ^ 64)).length = 21 := by decide
+example : (toString 13827490942341725565).length = 20 := by decide
+-- Far inside the 4096-byte control-group cap.
+example : controlGroupBound < 4096 := by decide
 -- The 260-byte group observed on dregg-build is accepted.
 set_option maxRecDepth 4000 in
 example : controlGroupWithin (List.replicate 260 0) = true := by decide
