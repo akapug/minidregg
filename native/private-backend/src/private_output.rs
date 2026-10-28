@@ -189,8 +189,7 @@ impl PrivateOutput {
         if hash(&binding) != context {
             return Err(bad("output exact public descriptor binding"));
         }
-        let mut child = g.clone();
-        child.invocation = Nat::from_be(&context);
+        let child = g.derived(&context);
         let length = 32 + 2 + 2 + count * 16;
         let deliveries = (0..n)
             .map(|d| PrivateSend::new(me, d as u16, n, f, &child, length))

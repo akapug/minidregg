@@ -85,9 +85,7 @@ impl Profile {
         let mut b = b"DREGG.DZK.PRIVATE.INSTANCE.V1".to_vec();
         b.extend(self.context);
         b.extend(holder.to_le_bytes());
-        let mut result = g.clone();
-        result.invocation = Nat::from_be(&hash(&b));
-        result
+        g.derived(&hash(&b))
     }
 }
 fn pow(mut x: Field, mut e: usize) -> Field {
@@ -1166,5 +1164,28 @@ mod pin_helpers {
         assert_eq!(Entropy::derive(RANDOM, seed, ctx, 0, 0), [0x1d, 0x09, 0x04, 0xc0, 0x97, 0xf3, 0x11, 0xe7, 0x8f, 0xf1, 0x44, 0x75, 0x4c, 0x4d, 0xd8, 0x92, 0x3a, 0x9d, 0x2e, 0x53, 0xbd, 0x0e, 0xe5, 0x79, 0x9a, 0xf5, 0x10, 0x54, 0x02, 0x8e, 0x63, 0x1b]);
         assert_eq!(Entropy::derive(RANDOM, seed, ctx, 1, 0), [0xdc, 0xcb, 0x34, 0xf5, 0x25, 0xfd, 0x36, 0xc5, 0xfb, 0xd7, 0xd5, 0xc6, 0x5c, 0x0f, 0x65, 0x37, 0xea, 0xc7, 0xc7, 0x13, 0x75, 0xf3, 0x5b, 0xbb, 0xc2, 0x51, 0x75, 0x80, 0xfe, 0xd0, 0x58, 0x2c]);
         assert_eq!(Entropy::derive(RANDOM, seed, ctx, 3, 7), [0xa7, 0xf1, 0x75, 0x10, 0xfd, 0x55, 0xf9, 0x68, 0xfe, 0xd3, 0x63, 0xb4, 0x6c, 0xef, 0x16, 0x74, 0x0b, 0x43, 0xc0, 0x58, 0x87, 0xb9, 0xa6, 0x29, 0xd8, 0x29, 0x89, 0x82, 0x29, 0x26, 0xe9, 0x0d]);
+    }
+}
+
+#[cfg(test)]
+mod pin_child {
+    use super::*;
+    #[test]
+    fn pin_dzk_holder_generation() {
+        let g = Generation {
+            invocation: Nat::new(19),
+            command: vec![3, 4],
+            attempt: Nat::new(2),
+            generation: Nat::new(1),
+            configuration: Nat::new(5),
+        };
+        let ctx: [u8; 32] = std::array::from_fn(|i| 100 + i as u8);
+        let p = Profile { n: 4, f: 1, dealer: 0, count: 1, degree: 1, context: ctx };
+        let c = p.holder_generation(&g, 0);
+        assert_eq!(c.invocation.digits(), &[24, 223, 171, 7, 39, 30, 249, 233, 248, 165, 75, 86, 97, 182, 178, 111, 192, 91, 29, 141, 108, 168, 110, 137, 236, 180, 7, 145, 85, 142, 99, 200][..]);
+        assert_eq!((&c.command, &c.attempt, &c.generation, &c.configuration), (&g.command, &g.attempt, &g.generation, &g.configuration));
+        let c = p.holder_generation(&g, 3);
+        assert_eq!(c.invocation.digits(), &[93, 155, 216, 130, 187, 96, 145, 194, 252, 146, 107, 26, 242, 168, 94, 222, 231, 238, 239, 191, 251, 233, 15, 159, 142, 37, 232, 80, 110, 30, 95, 181][..]);
+        assert_eq!((&c.command, &c.attempt, &c.generation, &c.configuration), (&g.command, &g.attempt, &g.generation, &g.configuration));
     }
 }

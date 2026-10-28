@@ -139,6 +139,14 @@ pub struct Generation {
     pub configuration: Nat,
 }
 impl Generation {
+    /// The same generation with its invocation replaced by the Nat of `digest`
+    /// (big-endian): how every protocol names the instance it nests.
+    pub fn derived(&self, digest: &[u8; 32]) -> Generation {
+        Generation {
+            invocation: Nat::from_be(digest),
+            ..self.clone()
+        }
+    }
     pub fn put(&self, o: &mut Vec<u8>) {
         self.invocation.put(o);
         bytes(&self.command, o);
