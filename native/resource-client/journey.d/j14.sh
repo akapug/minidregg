@@ -328,7 +328,7 @@ paid_turns() { "$MINI" credit --action ledger --dir "$WS/alice" --account lab-ti
 resident_completed() { jq -r '.completed // 0' "$RSTATE/resident.json" 2>/dev/null || echo 0; }
 # The box certifies the World's head on a timer (mini-certify.timer); a node
 # runs at most the tail bound (256) heights past its last certified head, and a
-# J14 run with tools and awaits passes it. The operator certifies before each
+# J14 run with tools and awaits passes it. The operator certifies after each
 # resident pass, as the timer would.
 certify_world() { # STEP
   operator "$1" "CERTIFY: the operator certifies the World's head (the box's mini-certify timer)" \
@@ -336,13 +336,17 @@ certify_world() { # STEP
       --control "$(jq -r .factoryControllerCapability "$JOURNEY_WORLD/genesis.json")"
 }
 hermes() { # STEP WHAT: one resident pass that runs exactly one more prompt (or the dismissal)
-  certify_world "$1"
   local next=$(( $(resident_completed) + 1 ))
   jq -n --arg c "$G/controller.json" --arg i "$RINBOX" --arg s "$RSTATE" --argjson m "$next" \
     '{type:"mini-hermes-room-resident-v1",controller:$c,inbox:$i,state:$s,maxPrompts:$m,intervalSeconds:5}' >"$RCFG"
   operator "$1" "hermes resident pass: $2" env "MINI_TRACE=$SD/trace-resident.jsonl" \
     timeout "$J14_PASS_SECONDS" "$GRAIN_RUNTIME" hermes-room resident "$RCFG"
   cp "$OUT" "$SD/resident-$1.jsonl"; cp "$ERR" "$SD/resident-$1.err"
+  # After the pass, never between a member's ask and the pass that serves it:
+  # the resident's brief reads the room's recent entries above the certified
+  # head (run 6 on 7027e0ace: certifying before the pass left the tools,
+  # await and redteam briefs with no member entries and no selected request).
+  certify_world "$1"
   { echo "# hermes resident ($1): $2"; cut -c1-400 "$OUT"; tail -3 "$ERR"; } >>"$SD/transcript.txt"
 }
 tail_json() { "$SHELL_BIN" shell --socket "$SOCKET" --host "$HOST" --config "$CONFIG" --workspace "$WS/alice" \
