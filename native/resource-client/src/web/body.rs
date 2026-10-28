@@ -499,12 +499,14 @@ fn grants(site: &Site) -> Page {
              <div><label for=\"d-ref\">Reference</label><input id=\"d-ref\" name=\"ref\" type=\"text\" required pattern=\"[A-Za-z0-9/-]+\"></div>\
              <div><label for=\"d-to\">Recipient subject</label><input id=\"d-to\" name=\"recipient\" type=\"text\" required pattern=\"[0-9a-z-]+\"></div>\
              <div><label for=\"d-verbs\">Verbs (comma-separated)</label><input id=\"d-verbs\" name=\"verbs\" type=\"text\" required pattern=\"[a-z,-]+\" value=\"observe\"></div>\
-             <div><label for=\"d-max\">Max cost</label><input id=\"d-max\" name=\"max\" type=\"text\" required pattern=\"[0-9]+\" value=\"0\"></div>\
+             <div><label for=\"d-max\">Max cost</label><input id=\"d-max\" name=\"max\" type=\"text\" required pattern=\"[0-9]+\" value=\"@MAX@\"></div>\
              <button>Delegate</button></form></section>\n\
              <section><h2>Revoke</h2><form method=\"post\" action=\"/grants/revoke\" class=\"row\">\
              <div><label for=\"r-ref\">Reference</label><input id=\"r-ref\" name=\"ref\" type=\"text\" required pattern=\"[A-Za-z0-9/-]+\"></div>\
              <div><label for=\"r-to\">Recipient subject</label><input id=\"r-to\" name=\"recipient\" type=\"text\" required pattern=\"[0-9a-z-]+\"></div>\
-             <button>Revoke</button></form></section>\n",
+             <button>Revoke</button></form></section>\n"
+                .replace("@MAX@", PUBLIC_READ_MAX_COST.trim())
+                .as_str(),
         );
     }
     Page { status: 200, title: "Grants".into(), stamp: Stamp::None, body }
