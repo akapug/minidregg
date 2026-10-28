@@ -8,7 +8,8 @@ write_YetAnotherTODO() {
 }
 
 # Row evidence (lane/app-batch-2): install refused, "grain refused: invalid or oversized sandstorm-manifest"
-# (package 727e6323, a defect of the package or the manifest limit); this recipe runs once it installs.
+# (package 727e6323). Cause: its sandstorm-manifest is 1,500,456 bytes (inline SVG and PNG metadata art)
+# against a 1 MiB MAX_MANIFEST that Sandstorm does not have; the limit is now 16 MiB. Not a package defect.
 # OrgTodo 0.1.7 (package: `npm start` = node build/app.js, express, body parsed as text for every type;
 # sqlite at /var/tasks.db). POST /tasks (addTask) inserts columns (done, priority, deadline) the tasks
 # table does not have: do not use it. POST /tasks/:id is the sync path (upsertTodo) and takes the wire entry
