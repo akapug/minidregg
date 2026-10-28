@@ -550,7 +550,7 @@ TRANSPORT = Path("native/resource-client/src/transport.rs")
 
 def inputs(root, data):
     """Every path `check` reads, relative to root: the one list a copy of the tree must carry."""
-    paths = {REGISTRY, GENERATED, GENERATED_LEAN, LEAN_HEADERS, LEAN_CONSENT, HOST_MAIN, TRANSPORT}
+    paths = {REGISTRY, GENERATED, GENERATED_LEAN, LEAN_HEADERS, LEAN_CONSENT, HOST_MAIN, TRANSPORT, Path("Effects/Revival/HostedDav.lean")}
     paths.update(Path(binding["path"]) for binding in data["client_constants"])
     paths.update(f.relative_to(root) for crate in WIRE_CRATES for f in (root / "native" / crate).rglob("*.rs"))
     return paths
