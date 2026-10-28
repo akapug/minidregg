@@ -560,7 +560,7 @@ mod tests {
     #[test]
     fn agent_route_default_empty_does_not_require_an_api_package() {
         let f = Fixture::new();
-        assert!(configs(&f.0, "800", &placement(), &f.0.join("g2"))
+        assert!(configs(&f.0, "800", &placement(), &f.0.join("g2"), AgentRouteProfile::Standard)
             .unwrap()
             .is_empty());
     }
