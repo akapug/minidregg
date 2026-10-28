@@ -119,7 +119,7 @@ The wire (`protocol/host-operations.json`; the frames are answered by `Host.Clie
 |---|---|---|
 | **234** thin birth intent (new) | intent, signer, member's source JSON | the intent bytes, after the authoring check |
 | **235** thin birth plan (new) | intent, signer, plan, member's source JSON | `{headers, display}` with `display = {birth: {draft, coordinates, finalized}}` |
-| 230 / 232 | unchanged for invocations and delegations | a **birth** intent is refused by name ("a thin birth is consented with the member's source: frames 234/235"). This is the law, not a gap: without the source, the authored draft cannot be checked |
+| 230 / 232 | unchanged for invocations and delegations | a birth the thin birth arm covers (`NativeThinBirth.thinBirthIntent`: not grain-backed) is refused by name ("a thin birth is consented with the member's source: frames 234/235"). This is the law, not a gap: without the source, the authored draft cannot be checked. A grain-backed birth (a provider purse's) has no thin birth path and keeps its intent consent, the provider-route check; `thinBirthIntent_of_checked` proves every birth the arm accepts is one these frames refuse. JPAY6's discriminator row plants both sides |
 
 Client (`workspace.rs` `birth`): under `MINI_THIN_CONSENT=1` the by-name refusal goes. The client
 passes its retained `source.json` (the authoring directory's own copy, already pinned by

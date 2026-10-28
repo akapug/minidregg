@@ -130,14 +130,18 @@ theorem fixedWord_eq (k : Nat) (x : UInt64) (rest : List UInt8) :
         UInt64.toNat_div]
       rfl
 
-/-- `(Nat.digits 255 n).map UInt8.ofNat`, one big division per seven digits. -/
+/-- `(Nat.digits 255 n).map UInt8.ofNat`, one big division per seven digits. A word-sized
+natural takes the machine path straight away; the test is a shift, never a comparison
+with a literal above `2 ^ 32`, which the compiler would rebuild from its decimal string
+on every call. -/
 def digitsBytes (n : Nat) : List UInt8 :=
-  if n < chunk then smallDigits n.toUInt64
+  if n >>> 63 = 0 then smallDigits n.toUInt64
   else fixedWord 7 (n % chunk).toUInt64 (digitsBytes (n / chunk))
 termination_by n
 decreasing_by
-  have : 1 < chunk := by decide
-  exact Nat.div_lt_self (by omega) this
+  rename_i big
+  have pos : 0 < n := Nat.pos_of_ne_zero (by rintro rfl; simp at big)
+  exact Nat.div_lt_self pos (by decide)
 
 theorem toNat_toUInt64_of_lt (n : Nat) (h : n < chunk) : n.toUInt64.toNat = n := by
   rw [Nat.toUInt64, UInt64.toNat_ofNat']
@@ -149,9 +153,18 @@ theorem digitsBytes_eq (n : Nat) : digitsBytes n = (Nat.digits 255 n).map UInt8.
   induction n using Nat.strong_induction_on with
   | _ n ih =>
       rw [digitsBytes]
-      by_cases hn : n < chunk
-      · rw [if_pos hn, smallDigits_eq, toNat_toUInt64_of_lt n hn]
-      · rw [if_neg hn]
+      by_cases word : n >>> 63 = 0
+      · have small : n < 2 ^ 63 := by
+          rw [Nat.shiftRight_eq_div_pow] at word
+          exact (Nat.div_eq_zero_iff_lt (Nat.two_pow_pos 63)).mp word
+        rw [if_pos word, smallDigits_eq, Nat.toUInt64, UInt64.toNat_ofNat',
+          Nat.mod_eq_of_lt (Nat.lt_trans small (by decide))]
+      · rw [if_neg word]
+        have hn : ¬ n < chunk := by
+          intro below
+          apply word
+          rw [Nat.shiftRight_eq_div_pow]
+          exact (Nat.div_eq_zero_iff_lt (Nat.two_pow_pos 63)).mpr (Nat.lt_trans below (by decide))
         have hc : 0 < chunk := by decide
         have hq : 0 < n / chunk := Nat.div_pos (by omega) hc
         have hr : n % chunk < chunk := Nat.mod_lt _ hc

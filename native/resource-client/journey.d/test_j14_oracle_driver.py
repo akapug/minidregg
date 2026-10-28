@@ -45,6 +45,31 @@ class ReadinessTests(unittest.TestCase):
             self.assertTrue(ready.is_set(),'inode existence must not report readiness')
             worker.join(timeout=4);self.assertFalse(worker.is_alive())
 
+class AttachmentContinuationTests(unittest.TestCase):
+    def test_later_phase_uses_exact_retained_orchestrator_and_refuses_changed_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);helper=root/'retained.py';helper.write_text('# retained implementation')
+            contract=root/'input.json';driver.write(contract,{'paths':{'outputDir':str(root)}})
+            driver.write(root/'attachment.json',{'files':{'orchestrator':str(helper)},'sha256':{'orchestrator':driver.sha(helper)}})
+            j=driver.Journey.__new__(driver.Journey)
+            with patch.object(j,'run') as run:
+                j.attachment_phase(contract,'issue-grant','--input',root/'result.json')
+                self.assertEqual(run.call_args.args[1][1],helper)
+                helper.write_text('# changed')
+                with self.assertRaisesRegex(ValueError,'orchestrator differs'):j.attachment_phase(contract,'issue-grant')
+                self.assertEqual(run.call_count,1)
+
+    def test_session_error_or_other_request_never_acknowledges_or_issues_grant(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);session=root/'session.json';j=driver.Journey.__new__(driver.Journey)
+            for value in [{'requestId':'wrong','type':'tool-complete','isError':False},
+                          {'requestId':'selected','type':'tool-complete','isError':True},
+                          {'requestId':'selected','type':'tool-complete','isError':False,'result':{'isError':True,'text':'refused'}}]:
+                session.write_text(driver.json.dumps(value))
+                with patch.object(j,'fixed') as fixed,patch.object(j,'attachment_phase') as phase:
+                    with self.assertRaises(ValueError):j.finish_session_attachment(root/'input.json',session,'selected')
+                    fixed.assert_not_called();phase.assert_not_called()
+
 class CheckpointTests(unittest.TestCase):
     def test_checkpoint_restores_coordinates_but_refuses_changed_native_inputs(self):
         with tempfile.TemporaryDirectory(prefix='j14-checkpoint-',dir='/tmp') as temp:

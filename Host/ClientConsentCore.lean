@@ -476,11 +476,6 @@ def birthSource (bytes : List UInt8) : IO Json := do
   | .ok json => pure json
   | .error detail => throw (IO.userError s!"thin birth source JSON: {detail}")
 
-def isBirth (wanted : NativeObservationCodec.Intent) : Bool :=
-  match wanted.purpose with
-  | .prepare (.birth _ _) => true
-  | _ => false
-
 def thin (services : ProviderRouteConsent.Services) (config : NativeHost.Config)
     (operation : UInt8) (payload : List UInt8) : IO (List UInt8) := do
   let (intentBytes, rest) ← splitPair payload
@@ -490,7 +485,9 @@ def thin (services : ProviderRouteConsent.Services) (config : NativeHost.Config)
   let (signer, rest) ← splitPair rest
   unless signer.length == 32 do throw (IO.userError "custody signer is not an Ed25519 key")
   let semantics := config.profile.semantics
-  if (operation == 230 || operation == 232) && isBirth wanted then
+  -- Only the births the thin birth arm consents to (`NativeThinBirth.thinBirthIntent`); a grain
+  -- birth (a provider purse's) keeps its intent consent, the provider-route check above.
+  if (operation == 230 || operation == 232) && NativeThinBirth.thinBirthIntent wanted then
     throw (IO.userError "a thin birth is consented with the member's source (thin birth frames 234/235); nothing signed")
   match operation with
   | 234 =>

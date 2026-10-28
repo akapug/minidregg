@@ -97,6 +97,9 @@ struct Config {
     /// Operator budget for cold startup/recovery and idle attachment only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     startup_timeout_seconds: Option<u64>,
+    /// Opt in only with a qualified Mini/consent/proxy supporting full readiness.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    consent_full_readiness: Option<bool>,
     control_socket: PathBuf,
     custody_key: PathBuf,
     state_dir: PathBuf,
@@ -973,12 +976,33 @@ fn bounded_foreground_result(mut result: Value) -> Result<(Value, Vec<u8>)> {
     Ok((result, bytes))
 }
 
+/// Birth and later renewal must encode the same ordered role list.
+fn ordered_worker_subjects(
+    tool: Option<&str>,
+    provider: Option<&str>,
+    dispatch: Option<&str>,
+) -> Vec<String> {
+    [tool, provider, dispatch]
+        .into_iter()
+        .flatten()
+        .map(str::to_owned)
+        .collect()
+}
+
 fn managed_worker_policy_source(owner: &str, workers: &[String], generation: &str) -> Value {
     if workers.len() == 1 {
         json!({"owner":owner,"workerSubject":workers[0],"workerGeneration":generation})
     } else {
         json!({"owner":owner,"workerSubjects":workers,"workerGeneration":generation})
     }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConsentFullReadiness {
+    #[serde(rename = "type")]
+    kind: String,
+    ready: bool,
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -7434,6 +7458,9 @@ impl Runtime {
         Ok(deadline::NATIVE_CALL)
     }
     fn command_output(&self, program: &Path, args: &[&str]) -> Result<()> {
+        self.command_capture(program, args).map(|_| ())
+    }
+    fn command_capture(&self, program: &Path, args: &[&str]) -> Result<std::process::Output> {
         self.custody_exit_reaped.store(false, Ordering::SeqCst);
         let output = deadline::output(Command::new(program).args(args), self.native_work_limit()?).map_err(|e| {
             // At the deadline deadline::wait killed the child's whole process
@@ -7454,7 +7481,7 @@ impl Runtime {
                 String::from_utf8_lossy(&output.stderr).trim()
             ));
         }
-        Ok(())
+        Ok(output)
     }
     fn work_output(
         &self,
@@ -7631,25 +7658,32 @@ impl Runtime {
         self.query_policy_observation()
     }
     fn managed_worker_subjects(&self) -> Result<Vec<String>> {
-        let mut workers = Vec::new();
-        if let Some(tool) = &self.config.tool_task {
-            workers.push(tool.subject.clone());
-        }
-        if let Some(dispatch) = &self.config.dispatch_task {
-            if workers.iter().any(|subject| subject == &dispatch.subject) {
-                return Err("dispatch and tool witness subjects must be distinct".into());
+        let workers = ordered_worker_subjects(
+            self.config.tool_task.as_ref().map(|v| v.subject.as_str()),
+            self.config.provider_task.as_ref().map(|v| v.subject.as_str()),
+            self.config.dispatch_task.as_ref().map(|v| v.subject.as_str()),
+        );
+        for (i, subject) in workers.iter().enumerate() {
+            if workers[..i].contains(subject) {
+                return Err("tool, provider and dispatch witness subjects must be distinct".into());
             }
-            workers.push(dispatch.subject.clone());
-        }
-        if let Some(provider) = &self.config.provider_task {
-            if workers.iter().any(|subject| subject == &provider.subject) {
-                return Err(
-                    "provider witness subject must be distinct from tool and dispatch".into(),
-                );
-            }
-            workers.push(provider.subject.clone());
         }
         Ok(workers)
+    }
+    /// The sole historical variant is the old runtime's tool/dispatch/provider
+    /// ordering. Compare complete native-authored bytes, never unordered roles.
+    fn managed_worker_policy_orders(&self) -> Result<Vec<Vec<String>>> {
+        let canonical = self.managed_worker_subjects()?;
+        let legacy = ordered_worker_subjects(
+            self.config.tool_task.as_ref().map(|v| v.subject.as_str()),
+            self.config.dispatch_task.as_ref().map(|v| v.subject.as_str()),
+            self.config.provider_task.as_ref().map(|v| v.subject.as_str()),
+        );
+        let mut orders = vec![canonical];
+        if legacy != orders[0] {
+            orders.push(legacy);
+        }
+        Ok(orders)
     }
     fn renew_worker_policy(&mut self, attaching_from_paused: bool) -> Result<()> {
         let workers = self.managed_worker_subjects()?;
@@ -7777,6 +7811,10 @@ impl Runtime {
         status: &str,
         desired_generation: &str,
     ) -> Result<()> {
+        let orders = self.managed_worker_policy_orders()?;
+        if workers != orders[0].as_slice() {
+            return Err("managed worker roles differ from controller configuration".into());
+        }
         let predicate = view
             .get("predicate")
             .ok_or("signed policy has no predicate")?;
@@ -7801,17 +7839,20 @@ impl Runtime {
         self.author_grain_policy_bytes("predicate", &observed_source, &observed_bytes)?;
         let observed = bounded_policy_bytes(&observed_bytes)?;
         for candidate in candidates {
-            let source =
-                managed_worker_policy_source(&self.config.subject, workers, &candidate.to_string());
-            let path = dir.join(format!("managed-{candidate}.json"));
-            write_new(
-                &path,
-                &serde_json::to_vec(&source).map_err(|e| e.to_string())?,
-            )?;
-            let output = dir.join(format!("managed-{candidate}.bin"));
-            self.author_grain_policy_bytes("grain-policy", &path, &output)?;
-            if bounded_policy_bytes(&output)? == observed {
-                return Ok(());
+            for (index, order) in orders.iter().enumerate() {
+                let source =
+                    managed_worker_policy_source(&self.config.subject, order, &candidate.to_string());
+                let suffix = if index == 0 { "" } else { "-legacy-runtime" };
+                let path = dir.join(format!("managed-{candidate}{suffix}.json"));
+                write_new(
+                    &path,
+                    &serde_json::to_vec(&source).map_err(|e| e.to_string())?,
+                )?;
+                let output = dir.join(format!("managed-{candidate}{suffix}.bin"));
+                self.author_grain_policy_bytes("grain-policy", &path, &output)?;
+                if bounded_policy_bytes(&output)? == observed {
+                    return Ok(());
+                }
             }
         }
         Err("signed policy is not a supported exact managed worker law; explicit owner audit and policy upgrade required".into())
@@ -13073,6 +13114,26 @@ impl Runtime {
             || !self.journal.unresolved_external.is_empty())
     }
 
+    fn prepare_full_consent(&self) -> Result<Option<ConsentFullReadiness>> {
+        if self.config.consent_full_readiness != Some(true) {
+            return Ok(None);
+        }
+        let output = self.command_capture(&self.config.mini, &[
+            "consent-full-ready",
+            "--host", self.config.host.to_str().ok_or("host path UTF-8")?,
+            "--config", self.config.host_config.to_str().ok_or("config path UTF-8")?,
+        ])?;
+        if output.stdout.len() > 1024 {
+            return Err("full-consent readiness reply exceeds 1024 bytes".into());
+        }
+        let receipt: ConsentFullReadiness = serde_json::from_slice(&output.stdout)
+            .map_err(|e| format!("full-consent readiness reply: {e}"))?;
+        if receipt.kind != "mini-consent-full-readiness-v1" || !receipt.ready {
+            return Err("full-consent provider did not confirm readiness".into());
+        }
+        Ok(Some(receipt))
+    }
+
     /// Explicit operator readiness, before any tool request is submitted.
     /// This may perform ordinary native recovery/soft attachment; success
     /// requires both a clean controller and a fresh signed idle task view.
@@ -13089,15 +13150,21 @@ impl Runtime {
         self.with_startup_budget(Some(outer), |rt| {
             if !rt.idle_task_ready() { rt.attach(true)?; }
             if !rt.idle_task_ready() { return Err("controller is not reconciled and idle".into()); }
+            let consent = rt.prepare_full_consent()?;
             let signed = rt.query()?;
-            if signed.pointer("/grain/status").and_then(Value::as_str) != Some("1")
+            let expected_status = match rt.journal.connection {
+                Connection::Hard => "1",
+                Connection::Soft => "2",
+                _ => return Err("controller readiness is not attached".into()),
+            };
+            if signed.pointer("/grain/status").and_then(Value::as_str) != Some(expected_status)
                 || signed.pointer("/grain/reserved").and_then(Value::as_str) != Some("0") {
                 return Err("controller readiness lacks a signed idle task".into());
             }
             Ok(json!({"type":"mini-grain-idle-readiness-v1", "ready":true,
                 "task":rt.config.task, "connection":rt.journal.connection,
                 "startupTimeoutSeconds":deadline::startup_limit(rt.config.startup_timeout_seconds)?.as_secs(),
-                "signedTask":signed}))
+                "signedTask":signed, "fullConsent":consent}))
         })
     }
 
@@ -19615,6 +19682,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
             host_config: root.join("host-config.json"),
             host_socket: None,
             startup_timeout_seconds: None,
+            consent_full_readiness: None,
             control_socket: state.join("control.sock"),
             custody_key: root.join("parent.key"),
             state_dir: state.clone(),

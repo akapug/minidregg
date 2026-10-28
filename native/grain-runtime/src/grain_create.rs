@@ -397,7 +397,11 @@ impl Spec {
     }
 
     fn birth_intent(&self, genesis: &Value) -> Value {
-        let mut workers = vec![json!(self.worker_key.subject)];
+        let workers = ordered_worker_subjects(
+            Some(&self.worker_key.subject),
+            self.provider.as_ref().map(|v| v.key.subject.as_str()),
+            self.dispatch.as_ref().map(|v| v.key.subject.as_str()),
+        );
         let mut resources = vec![
             json!({"kind":"object","storage":"grain","target":self.task,"owner":self.owner.subject,
                 "ownerCapability":self.capabilities.parent_observe,"controlCapability":self.capabilities.parent_control,
@@ -407,12 +411,10 @@ impl Spec {
                 "budget":self.budgets.tool}),
         ];
         if let Some(p) = &self.provider {
-            workers.push(json!(p.key.subject));
             resources.push(json!({"kind":"object","storage":"grain","target":p.task,"owner":p.key.subject,
                 "ownerCapability":p.observe_capability,"controlCapability":p.control_capability,"budget":p.budget}));
         }
         if let Some(d) = &self.dispatch {
-            workers.push(json!(d.key.subject));
             resources.push(json!({"kind":"object","storage":"grain","target":d.task,"owner":d.key.subject,
                 "ownerCapability":d.observe_capability,"controlCapability":d.control_capability,"budget":d.budget}));
         }
@@ -977,6 +979,16 @@ esac
         assert_eq!(config["providerTask"]["parentCapability"], "8791");
         assert_eq!(config["providerTask"]["subject"], "10");
         serde_json::from_value::<Config>(config).unwrap();
+        with["dispatch"] = with_dispatch()["dispatch"].clone();
+        let both: Spec = serde_json::from_value(with.clone()).unwrap();
+        both.check_values().unwrap();
+        let config: Config = serde_json::from_value(both.controller("8790", Some("8791"), Some("8792"))).unwrap();
+        let workers = ordered_worker_subjects(
+            config.tool_task.as_ref().map(|v| v.subject.as_str()),
+            config.provider_task.as_ref().map(|v| v.subject.as_str()),
+            config.dispatch_task.as_ref().map(|v| v.subject.as_str()));
+        assert_eq!(workers, ["9", "10", "11"]);
+        assert_eq!(both.birth_intent(&json!({}))["birth"]["resources"][0]["workerSubjects"], json!(workers));
         with["provider"]["gateway"]["task"] = json!("1");
         assert!(serde_json::from_value::<Spec>(with).unwrap().check_values().unwrap_err().contains("must not set task"));
     }

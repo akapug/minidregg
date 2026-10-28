@@ -171,6 +171,7 @@ esac
         host_config: root.join("host-config.json"),
         host_socket: Some(root.join("mini.sock")),
         startup_timeout_seconds: None,
+        consent_full_readiness: None,
         control_socket: state.join("control.sock"),
         custody_key: root.join("parent.key"),
         state_dir: state.clone(),

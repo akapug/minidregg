@@ -917,6 +917,8 @@ pub(crate) struct ProcessWorld {
     pub quarantine: PathBuf,
     pub wanted: PathBuf,
     pub verdicts: PathBuf,
+    /// SHA-256 of the spk-host binary this worker drives: the ingest every verdict it writes is keyed by.
+    pub ingest_key: String,
     pub identities_root: PathBuf,
     pub domain: String,
     pub nonce_file: PathBuf,
@@ -933,8 +935,15 @@ impl ProcessWorld {
         let s = |k: &str| -> Result<String> { Ok(text(&w, k)?.to_owned()) };
         let profile = p("profile")?;
         let prof = read_json(&profile)?;
+        let spk_host = PathBuf::from(text(&prof, "spkHost")?);
+        let ingest_key = {
+            use sha2::{Digest, Sha256};
+            let binary = fs::read(&spk_host).map_err(|e| format!("ingest identity: {}: {e}", spk_host.display()))?;
+            format!("{:x}", Sha256::digest(&binary))
+        };
         Ok(Self {
-            spk_host: PathBuf::from(text(&prof, "spkHost")?),
+            spk_host,
+            ingest_key,
             mini: p("mini")?,
             host: PathBuf::from(text(&prof, "miniHost")?),
             config: PathBuf::from(text(&prof, "miniConfig")?),
@@ -959,6 +968,21 @@ impl ProcessWorld {
             role_basis: w.get("roleBasis").cloned().unwrap_or(json!({"type":"allAccess"})),
             profile,
         })
+    }
+
+    /// Say which ingest this worker is, beside the verdicts, so a reader treats another ingest's verdicts as absent.
+    pub(crate) fn publish_ingest_key(&self) -> Result<()> {
+        if !self.verdicts.is_dir() {
+            fs::DirBuilder::new().mode(0o755).recursive(true).create(&self.verdicts).map_err(|e| e.to_string())?;
+        }
+        let path = self.verdicts.join(crate::apps::INGEST_KEY_FILE);
+        if fs::read_to_string(&path).map(|t| t.trim() == self.ingest_key).unwrap_or(false) {
+            return Ok(());
+        }
+        let temp = path.with_extension("new");
+        fs::write(&temp, format!("{}\n", self.ingest_key)).map_err(|e| e.to_string())?;
+        fs::set_permissions(&temp, fs::Permissions::from_mode(0o644)).map_err(|e| e.to_string())?;
+        fs::rename(&temp, &path).map_err(|e| e.to_string())
     }
 
     fn nonce(&self) -> Result<u64> {
@@ -1323,9 +1347,12 @@ impl World for ProcessWorld {
         if !self.verdicts.is_dir() {
             fs::DirBuilder::new().mode(0o755).recursive(true).create(&self.verdicts).map_err(|e| e.to_string())?;
         }
+        self.publish_ingest_key()?;
+        let mut keyed = verdict.clone();
+        keyed["ingestKey"] = json!(self.ingest_key);
         let path = self.verdicts.join(format!("{package_id}.json"));
         let temp = path.with_extension("json.new");
-        fs::write(&temp, serde_json::to_vec_pretty(verdict).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        fs::write(&temp, serde_json::to_vec_pretty(&keyed).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
         fs::set_permissions(&temp, fs::Permissions::from_mode(0o644)).map_err(|e| e.to_string())?;
         fs::rename(&temp, &path).map_err(|e| e.to_string())
     }
@@ -1348,6 +1375,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     args.finish()?;
     private_dir(&state)?;
     let world = ProcessWorld::load(&world_path)?;
+    world.publish_ingest_key()?;
     let worker = Arc::new(Worker::open(state, Box::new(world))?);
     let members = bind(&socket, 0o660, member_group.as_deref())?;
     let edge_listener = bind(&edge, 0o660, edge_group.as_deref())?;
