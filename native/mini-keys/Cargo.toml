@@ -20,7 +20,7 @@ required-features = ["server"]
 
 [features]
 default = ["server"]
-server = ["dep:ed25519-dalek", "dep:serde"]
+server = ["dep:serde"]
 
 [dependencies]
 libc = "=0.2.189"
@@ -28,4 +28,4 @@ serde_json = { version = "=1.0.151", features = ["arbitrary_precision"] }
 ring = "=0.17.14"
 serde = { version = "=1.0.229", optional = true }
 sha2 = "=0.10.9"
-ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std", "fast", "zeroize"], optional = true }
+ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std", "fast", "zeroize"] }
