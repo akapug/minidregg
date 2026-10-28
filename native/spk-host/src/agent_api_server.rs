@@ -393,13 +393,21 @@ impl AgentApiListener {
         let Some(mut stream) = self.accept_authenticated()? else {
             return Ok(false);
         };
+        // Nothing below writes a reason to the agent beyond its reply; the resident's stderr (the
+        // operator's log) keeps every refusal, uncertainty and dropped connection by its reason.
         let frame = match agent_api_wire::read_frame(&mut stream) {
             Ok(frame) => frame,
-            Err(_) => return Ok(true),
+            Err(error) => {
+                eprintln!("spk-host: agent connection closed unread: {error}");
+                return Ok(true);
+            }
         };
         let request = match Request::parse(&frame) {
             Ok(request) => request,
-            Err(_) => return Ok(true),
+            Err(error) => {
+                eprintln!("spk-host: agent request refused unparsed: {error}");
+                return Ok(true);
+            }
         };
         let operation_id = match &request {
             Request::Dispatch { operation_id, .. } | Request::Inspect { operation_id, .. } => {
@@ -409,13 +417,25 @@ impl AgentApiListener {
         };
         let watch = match CallerWatch::start(&stream) {
             Ok(watch) => watch,
-            Err(_) => return Ok(true),
+            Err(error) => {
+                eprintln!("spk-host: agent operation {} not started: caller watch: {error}", operation_id.as_deref().unwrap_or("hello"));
+                return Ok(true);
+            }
         };
         let result = resident.handle_once(&stream, request, &watch.cancelled);
         let response = match result {
-            Ok(reply) => reply,
-            Err(_) => match operation_id {
-                Some(operation_id) => Reply::Uncertain {
+            Ok(reply) => {
+                match &reply {
+                    Reply::Refused { operation_id, code, .. } => eprintln!("spk-host: agent operation {operation_id} refused: {code}"),
+                    Reply::Uncertain { operation_id, phase, .. } => eprintln!("spk-host: agent operation {operation_id} uncertain at {phase}"),
+                    _ => {}
+                }
+                reply
+            }
+            Err(error) => match operation_id {
+                Some(operation_id) => {
+                    eprintln!("spk-host: agent operation {operation_id} failed, answered uncertain: {error}");
+                    Reply::Uncertain {
                     protocol: PROTOCOL.into(),
                     operation_id,
                     binding_sha256: resident
@@ -423,8 +443,12 @@ impl AgentApiListener {
                         .and_then(|binding| binding.fingerprint())
                         .unwrap_or_else(|_| "0".repeat(64)),
                     phase: "retained-attempt".into(),
-                },
-                None => return Ok(true),
+                    }
+                }
+                None => {
+                    eprintln!("spk-host: agent hello failed: {error}");
+                    return Ok(true);
+                }
             },
         };
         if let Ok(bytes) = serde_json::to_vec(&response) {
