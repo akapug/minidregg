@@ -643,7 +643,7 @@ theorem receiverReadsCurrent : ReceiverReadsCurrent profile deployment := by
   cases found : PlatformCellDomain.load deployment durable.snapshot with
   | none =>
       have recorded := accepted.pending.recordExact
-      simp [platformRecordAt, PlatformCellDomain.recordOn, found] at recorded
+      simp [platformRecordAt, PlatformCellDomain.recordOn_load, found] at recorded
   | some loaded =>
       refine ⟨accepted.pending.record, accepted.pending.recordExact, accepted.pending.priced,
         ?_, rfl, readGuards_platform accepted loaded found⟩

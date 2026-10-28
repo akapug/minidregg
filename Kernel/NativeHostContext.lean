@@ -489,22 +489,6 @@ structure Validated (config : Config) (durable : Durable) where
   pins : FactoryPins
   lawful : cellsLawful config durable directory.directory = true
 
-/-- The platform record the opened state holds at the deployment's platform cell, read from
-its canonical bytes. Both shapes read it the same way (`platformRecordIn_load` for the full
-shape; the served state's bytes are the full shape's under `Served.ofLoaded`). -/
-def platformRecordIn (deployment : CanonicalCellRegistry.Deployment)
-    (canonicalBytes : DurableDataIntent.CellId → List UInt8) : Option PlatformCellLayout.Platform :=
-  (PlatformCellDomain.decodeCell (canonicalBytes (PlatformCellDomain.cellIdOf deployment))).bind
-    fun cell => PlatformCellLayout.recordOf cell.logical
-
-theorem platformRecordIn_load (deployment : CanonicalCellRegistry.Deployment)
-    (physical : PlatformCellDomain.PhysicalSnapshot) :
-    platformRecordIn deployment physical.canonicalBytes =
-      (PlatformCellDomain.load deployment physical).bind
-        fun loaded => PlatformCellLayout.recordOf loaded.cell.logical := by
-  unfold platformRecordIn PlatformCellDomain.load
-  split <;> simp_all
-
 /-- The creation tariff an opened state's factory pins carry: the platform record's. Where
 the image holds no platform record, the config's genesis tariff stands in, and every
 ordinary birth on that image is refused `platformUnavailable`
@@ -618,7 +602,7 @@ def validatePartsVia (config : Config) (durable : Durable)
     Except String (Validated config durable) :=
   (validateCore config durable.image.seed durable.logStart directory? authority?
     (·.directory) (·.snapshot.logical) lawfulCheck
-    (platformRecordIn config.deployment durable.snapshot.canonicalBytes)).map fun parts =>
+    (PlatformCellDomain.recordAt config.deployment durable.snapshot.canonicalBytes)).map fun parts =>
       ⟨parts.1.1, parts.1.2.1, parts.1.2.2, (lawfulExact parts.1.1) ▸ parts.2⟩
 
 /-- `validatePartsVia` over the image's own authority load. The caller's

@@ -93,7 +93,8 @@ theorem Read.current {ground : Ground deployment} (read : Read deployment ground
       read.record.completionCustodianKey = some read.key := by
   refine ⟨?_, read.keyPinned⟩
   have exact := read.loaded.observed
-  unfold PlatformCellDomain.recordOn PlatformCellDomain.load
+  rw [PlatformCellDomain.recordOn_load]
+  unfold PlatformCellDomain.load
   split
   · rename_i decoded
     rw [exact, PlatformCellDomain.decodeCell_bytes] at decoded
@@ -129,7 +130,7 @@ theorem select_pinned (ground : Ground deployment) (record : PlatformCellLayout.
     (key : List UInt8) (recorded : PlatformCellDomain.recordOn deployment ground.view = some record)
     (pinned : record.completionCustodianKey = some key) :
     ∃ read, select deployment ground = .ok read ∧ read.record = record ∧ read.key = key := by
-  unfold PlatformCellDomain.recordOn at recorded
+  rw [PlatformCellDomain.recordOn_load] at recorded
   cases found : PlatformCellDomain.load deployment ground.view with
   | none => rw [found] at recorded; cases recorded
   | some loaded =>
