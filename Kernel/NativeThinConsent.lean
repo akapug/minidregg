@@ -375,7 +375,7 @@ served opening, and it concludes **or** a named collision of the store hash at t
 pre-state (`OpeningCollision`), taking no hash premise. -/
 
 /-- Every target's materializer is a salted store over one wire. -/
-def Target.wire (target : Target) : StoreCodec.Wire target.layout := by
+def targetWire (target : Target) : StoreCodec.Wire target.layout := by
   cases target with
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
@@ -404,13 +404,13 @@ opened entries; the member patch applies to it. Returns the displayed post. -/
 def checkOpened (deployment : Deployment) (command : Command) (target : Target)
     (view : List UInt8) : Except Refusal (Store target.layout) := do
   let (packedBytes, frame, items) ← servedOpening target view
-  unless frame = StoreCodec.frame target.wire do .error (.viewMalformed target.target)
-  unless StoreHiding.rootOfItems target.wire items = target.expectedTargetRoot do
+  unless frame = StoreCodec.frame targetWire target do .error (.viewMalformed target.target)
+  unless StoreHiding.rootOfItems targetWire target items = target.expectedTargetRoot do
     .error (.servedRootMismatch target.target)
   let some packed := CanonicalCellRegistry.cellCodec.decode packedBytes
     | .error (.viewMalformed target.target)
   let some cell := selectTarget deployment target packed | .error (.viewRole target.target)
-  unless (StoreCodec.entries target.wire cell.logical).map (StoreCodec.entryBytes target.wire) =
+  unless (StoreCodec.entries targetWire target cell.logical).map (StoreCodec.entryBytes targetWire target) =
       openedBytes items do .error (.openingMismatch target.target)
   let patch ← memberPatch command target cell.logical
   if Patch.ValidFrom cell.logical patch then .ok (Patch.run cell.logical patch)
@@ -450,9 +450,9 @@ def OpenedDisplayIsCommitStatement : Prop :=
     (packedBytes frame : List UInt8) (items : List StoreHiding.Item),
     checkOpened deployment command target view = .ok shown →
     servedOpening target view = .ok (packedBytes, frame, items) →
-    OpeningCollision target.wire items prepared.pre.logical ∨
+    OpeningCollision targetWire target items prepared.pre.logical ∨
       ∀ address, ¬ KernelOwned target address →
-        ¬ SealedIn target.wire items prepared.pre.logical address →
+        ¬ SealedIn targetWire target items prepared.pre.logical address →
         prepared.post address = shown address
 
 /-- **Teeth.** (1) A view whose opening roots to anything but the signed root is refused
@@ -462,17 +462,17 @@ def OpenedViewRefusedStatement : Prop :=
   (∀ (deployment : Deployment) (command : Command) (target : Target) (view packedBytes frame : List UInt8)
       (items : List StoreHiding.Item),
     servedOpening target view = .ok (packedBytes, frame, items) →
-    frame = StoreCodec.frame target.wire →
-    StoreHiding.rootOfItems target.wire items ≠ target.expectedTargetRoot →
+    frame = StoreCodec.frame targetWire target →
+    StoreHiding.rootOfItems targetWire target items ≠ target.expectedTargetRoot →
     checkOpened deployment command target view = .error (.servedRootMismatch target.target)) ∧
   (∀ (deployment : Deployment) (command : Command) (target : Target) (view packedBytes frame : List UInt8)
-      (items : List StoreHiding.Item) (packed : PackedCell Registry) (cell : TargetCell target),
+      (items : List StoreHiding.Item) (packed : CellRegistry.PackedCell Registry) (cell : TargetCell target),
     servedOpening target view = .ok (packedBytes, frame, items) →
-    frame = StoreCodec.frame target.wire →
-    StoreHiding.rootOfItems target.wire items = target.expectedTargetRoot →
+    frame = StoreCodec.frame targetWire target →
+    StoreHiding.rootOfItems targetWire target items = target.expectedTargetRoot →
     CanonicalCellRegistry.cellCodec.decode packedBytes = some packed →
     selectTarget deployment target packed = some cell →
-    (StoreCodec.entries target.wire cell.logical).map (StoreCodec.entryBytes target.wire) ≠
+    (StoreCodec.entries targetWire target cell.logical).map (StoreCodec.entryBytes targetWire target) ≠
       openedBytes items →
     checkOpened deployment command target view = .error (.openingMismatch target.target))
 
@@ -483,7 +483,7 @@ selected and the member patch applies to it. (Scope: declared-object scalar targ
 cells JP2 writes; every other target kind's view is built by the same `resourceView`.) -/
 def HonestScalarViewAcceptedStatement : Prop :=
   ∀ (deployment : Deployment) (command : Command) (kind : ResourceKind) (id : Nat)
-    (capability : CapabilityId) (version : Nat) (actions : List DeclaredResourceScalar.Action)
+    (capability : CapabilityId) (version : Nat) (actions : List DeclaredActionLowering.Action)
     (observe : Option CapabilityId) (audienceEpoch : Option Nat)
     (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
     (fields : Option (Finset CellField)) (payload : DeclaredEffectCell.Cell)
