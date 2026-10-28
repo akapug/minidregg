@@ -54,7 +54,7 @@ the newest built main that passed the gate; each is reported in one line, and in
 | A8 | fbb66b069 | host clean 01:02 (1842 s); regen rc=0 (644 pins, six additions, integ8/regen-A8.patch) → main 1e976af0f; consent rc=65 only because the host artifacts predate the new pins (companion check: PersistedCodecShapes.lean) |
 | full | 1e976af0f | `integ4/main-full.sh` started 01:07 (tests stage green 01:09; host stage from 01:09:25) (main-full.pid 3307367; build.pid, then gate.pid + enrol-resume.pid under integ8). Before relaunching any build, move integ8/{native-out,consent-out,artifacts,fixtures} aside (the host stage refuses existing outputs, rc=73) |
 | 1e976af0f result | — | host clean 01:36 (1635 s), consent clean 01:42 (330 s), rust rc=1 01:45: mini-private-compute (`--features demo`) 19× E0425 `custody::AnchorHandle` (un-pb-twins a078ee6b4 gated it `cfg(test)`; its users are `cfg(any(test, feature = "demo"))`). Fixed 0ce313917 |
-| full | 0ce313917 | `integ4/main-full.sh` (main-full.pid 3367606) from 01:48:50; tests green 01:50; host stage from 01:50:16. Outputs moved aside as `*.prev-<epoch>` (integ8 holds about 12 sets of them; prune when disk asks) |
+| full | 0ce313917 | CANDIDATE `/build/candidates/0ce31391790a7e2ed9f83eb1b8bb85d6556a0de3` 01:56 (host 231 s, consent 90 s, rust 61 s, pack 9 s; tests green; 23 binaries incl. mini-private-compute). enrol-resume PASS. Gate: tour 51/51 PASS; composed FAIL, a dregg-infra red (render-authorized-keys.sh called `mini enrollment-view` without the v2 Host pin; fixed by infra at dregg-infra 026d132). Composed rerun against that edge: `integ4/composed-rerun.sh TIP EDGE_REV` (pid file integ4/composed-rerun.pid; verdict line in integ8/COMMANDS.log; keep the run root short: a long one overflows the resident codec socket's SUN_LEN) |
 
 A3's tree (main 8103b29a4) holds everything since aa9366f8: pd-host-rate, oracle-lifetime-grant, oracle-grant-factory,
 lean-audit-c, un-effects 2acd8acf (effect Plan; its codec pins re-emit with this regen), un-pb-twins 134535c2,
@@ -72,13 +72,17 @@ elaboration of the fix pending NativeHostReplay.olean). L1c (lean-audit-c a281e5
 constructors with pricedAt, drops e7958d3b9's arms on merge; unbuilt, not to merge until its warm-tree build
 elaborates) seeds its dregg-ref tree from the integ8 copy; tell it when the copy lands.
 
-Next steps: the full build of 0ce313917 is running. (effects-revival checks its Statements.lean
-itself on dregg-ref /build/minidregg; nothing owed there.) When the candidate exists: report "candidate <sha> at <path>: gate <verdict>, reds
-by name" to the coordinator and L4b (ad81db6d6fd317d3a; J14_TOOLS + J14_AWAIT); then land local branch
-integration/regen-tool 32646f241 on main (the regen learns the trailing-byte version form and transitive bumps;
-ClockCell uses the registry constant; one spelling per identity; the next build checks it), and start the next full
-build from main. Every lane tip named so far is on main (hermes, hermes-b, abuse-caps, snipe-unconfigured,
-effects-revival, redteam) except lean-audit-c d4e192f35, which waits for L1c's warm-tree green sha.
+Next steps: read the composed rerun's verdict (0ce31391 against edge 026d132) and report the candidate's gate
+to the coordinator. Point gate-cut3.sh's EDGE default at dregg-infra-026d132 (it pins d18ddda now). Then start the
+next full build from main. It carries the regen tool (430e3fe96: the trailing-byte and version-constant bumps, and
+the refusal of a composed identity's literal twin, which `--twins` runs without Lean; ClockCell.wireName is now the
+registry constant, so the clock wire's fingerprint moves and the regen bumps it once), the census check after the
+pins (0b78be9cd), lane-build `rust-check` (28dc877e8, wired before mini-kernels in /build/lanes/integration-build.sh,
+105 s cold), and effects-revival c7d98374 (Effects.lean imports Statements.lean). The held local branch
+integration/regen-tool is superseded: do not merge it. Transitive bumps through registry constants are an open
+design question: the census excludes PersistedCodecTags constants from fingerprints, so a codec that references a
+bumped identity by its constant does not move. Making them count re-pins every fingerprint once.
+lean-audit-c d4e192f35 waits for L1c's warm-tree green sha.
 
 Red routing: lean-audit-c reds go to L1c (acf52d65283ef4ebc) directly; Hermes to L4b (ad81db6d6fd317d3a); L13 a1618140607ac439b; un-stream-continuity reds
 (ApplicationStreamContinuityFresh pole proofs, NativeHostReplay.lean:3816) to the deputy a308118209b4a48ea; all
