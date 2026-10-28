@@ -240,10 +240,9 @@
               "maxLength": 2048
             },
             "etag": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
             },
             "calendarData": {
               "type": "string",
@@ -432,10 +431,12 @@
       },
       "assert": [
         {
-          "containsText": "SUMMARY:Typed calendar event"
+          "containsText": "SUMMARY:Typed calendar event",
+          "path": []
         },
         {
-          "containsText": "DTSTART:20261101T120000Z"
+          "containsText": "DTSTART:20261101T120000Z",
+          "path": []
         }
       ]
     },
@@ -495,10 +496,12 @@
       },
       "assert": [
         {
-          "containsText": "SUMMARY:Revised calendar event"
+          "containsText": "SUMMARY:Revised calendar event",
+          "path": []
         },
         {
-          "containsText": "DTEND:20261101T140000Z"
+          "containsText": "DTEND:20261101T140000Z",
+          "path": []
         }
       ]
     }

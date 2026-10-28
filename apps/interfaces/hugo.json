@@ -1,0 +1,196 @@
+{
+  "format": "mini-app-interface-v1",
+  "name": "hugo",
+  "interfaceVersion": 1,
+  "appId": "ksyud8q9h7rx9u001jn38216xe75a200avh7tg267wss6pq9zfkh",
+  "packageId": "7df1f202df51679cc84ed85e03d6d6c7",
+  "appVersion": "0.104.2~2022-10-04",
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 16384,
+    "replyBytes": 1048576,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "$defs": {},
+  "operations": {
+    "source.write": {
+      "description": "Replace a source file in this grain site tree. No compare-and-swap exists; browser changes can be overwritten. Does not publish by itself.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "format": "relative-path",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 8192
+          }
+        },
+        "required": [
+          "path",
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "PUT",
+        "path": [
+          "admin/api/v1/fs/",
+          {
+            "arg": "path",
+            "encoding": "path"
+          }
+        ],
+        "decode": "status",
+        "status": [
+          200,
+          201,
+          204
+        ],
+        "headers": {
+          "content-type": "text/plain; charset=utf-8"
+        },
+        "text": {
+          "arg": "text"
+        }
+      }
+    },
+    "source.read": {
+      "description": "Read a text source file in the same grain site tree. Binary files need a binary operation; this operation validates UTF8.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "format": "relative-path",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string",
+        "maxLength": 1048576
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "admin/api/v1/fs/",
+          {
+            "arg": "path",
+            "encoding": "path"
+          }
+        ],
+        "decode": "text",
+        "status": [
+          200
+        ]
+      }
+    },
+    "site.publish": {
+      "description": "Commit the entire working site and run package post-receive build. GET is mutating in this package; native admission must treat this as a write. The response is not independent proof of public page bytes. Uncertain completion must not be retried.",
+      "input": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "additionalProperties": false
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "commit"
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ]
+      }
+    }
+  },
+  "qualification": [
+    {
+      "id": "write",
+      "op": "source.write",
+      "args": {
+        "path": {
+          "concat": [
+            "content/",
+            {
+              "context": "runId"
+            },
+            ".md"
+          ]
+        },
+        "text": "---\ntitle: Typed page\ndraft: false\n---\nTyped site source\n"
+      }
+    },
+    {
+      "id": "read",
+      "op": "source.read",
+      "args": {
+        "path": {
+          "concat": [
+            "content/",
+            {
+              "context": "runId"
+            },
+            ".md"
+          ]
+        }
+      },
+      "assert": [
+        {
+          "path": [],
+          "equals": "---\ntitle: Typed page\ndraft: false\n---\nTyped site source\n"
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "kind": "member-route"
+  },
+  "sources": [
+    "https://github.com/johnbintz/hugo-sandstorm",
+    "package:7df1f202df51679cc84ed85e03d6d6c7/opt/app/server.js",
+    "scripts/spk-platform/market-writes/b4.sh:40"
+  ]
+}

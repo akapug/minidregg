@@ -85,3 +85,60 @@ Etherpad multipart bytes and EtherCalc sheet identity. This is not live evidence
 An isolated hbox world is starting with candidate `b26630168b63024c9c46311745fa0b25fa09c13f`
 under the shared creation lock. Live browser route, native agent receiver and
 Hermes results remain NOT_RUN until recorded explicitly here.
+
+## Second batch source findings
+
+`hugo.json` declares source-file replacement/readback and explicit `site.publish`.
+The package's `/commit` route mutates despite using GET: it commits the entire
+working tree and runs the publishing build. The declaration labels it a write.
+Source qualification does not automatically publish and does not assert public
+site bytes; a public-origin observer remains a separate receiving row.
+Pinned `opt/app/server.js` SHA-256:
+`c92c9e6887428b5b983da6d5443e40aaa9e00078781fb46506859039b53c6328`.
+
+`wordpress.json` declares explicit initialization, routed member identity, and
+draft post create/edit/readback. Package 4.9.8 has no modern `rest-nonce` AJAX
+action. The old recipe's HTML `wpApiSettings` extraction is not reused.
+The package's Sandstorm `auto_login` authenticates from signed routed identity
+and maps its current permissions only when no WordPress user is already logged
+in. Core `rest_cookie_check_errors` accepts an authenticated noncookie method
+without a REST nonce; valid app auth cookies instead require a nonce. Therefore
+this declaration requires route-only cookies (`auth.appCookies=omit`) on every
+request. This is a source-backed hypothesis awaiting live qualification, not a
+claim of successful REST auth. It also avoids a retained app cookie skipping
+current signed role mapping. Post IDs belong to the grain; edits have no atomic
+revision precondition in this declaration and may overwrite concurrent edits.
+
+`sandcal.json` exports iCalendar only. Version 0.9.3 is upstream tag commit
+`c449c3261bde9c9f0b1361b5ffa0ba3812af69c9`; `LibMain.hs` checks editor permission
+and a member/route-bound HMAC before every mutation. `View.Import` and UI
+renderers expose that MAC through rendered UI; no semantic token endpoint is
+present in the route algebra. Named blocker: `sandcal-semantic-csrf-endpoint-absent`.
+The old recipe guesses POST `/import`; tagged source actually uses `/import.ics`.
+No HTML token extraction or invented CalDAV endpoint is added.
+
+`hedgedoc.json` exposes persisted Markdown downloads only. Named package defect:
+`hedgedoc-iconv-encodings-absent`. In exact package
+`ff642cdb65178a6a2dff96ca15dd7028`, all bundled iconv-lite copies contain library
+files but no `encodings` subtree. `iconv-lite/lib/index.js` line 65 calls
+`require('../encodings')` when decoding HTTP bodies. This independently supports
+the prior live missing-module finding. Socket OT avoids HTTP body parsing, but
+prior close-frame evidence is not a diagnosis that OT cannot work. A bounded
+socket.io/OT binding, persisted readback and actual native admission are still
+outstanding for that alternative; no unsupported-global-write claim is made.
+
+Permanote 0.1.4 has no declaration claiming note integration. Exact packaged
+`opt/app/views.py` renders notes, edit forms, archives, tag lists and search as
+HTML. Its sole JSON data response is an image-upload filename; `app.py` only
+allows jpg/jpeg/png/gif/webp attachments. Substituting image upload for notebook
+editing would miss the intended task. Named blocker:
+`permanote-semantic-note-read-endpoint-absent`. A repaired package exposing
+structured note reads is required before note write/readback can qualify under
+the no-scraping contract. Source SHA-256 for `views.py`:
+`644c01b90e77ee5f9f15ffe78f08d258924085a43419937efd485c210350714c`;
+`app.py`: `9c1bf130700b72dcdaaeb0b4aed7e2ae936e79d3d318a8e6b9cf829ce159f7d7`.
+
+Six focused wiki/document/site/calendar fixtures pass on the Mac after shared
+contract `c84d4f305`. The calendar fixture tests ETag refusal without retry and
+checks that ignored time filters are absent from the declaration. All
+second-batch live browser/native/Hermes rows remain NOT_RUN.

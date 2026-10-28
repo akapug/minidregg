@@ -508,7 +508,8 @@
     }
   ],
   "auth": {
-    "kind": "member-route"
+    "kind": "member-route",
+    "appCookies": "retain"
   },
   "sources": [
     "https://github.com/zenhack/mediawiki-sandstorm",
