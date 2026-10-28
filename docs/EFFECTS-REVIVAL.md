@@ -356,9 +356,10 @@ Engine/Statements split).
    `ResourceTransaction.prepareTarget` (post packed, refusals named) equals the content
    handler's dispatch followed by `genericChecks`, which reads only the pre/post cells, the
    policy source and the audience, never the payload (its signature shows it).  Acceptance,
-   acceptance up to a generic refusal, and refusal by name are corollaries.  Proof owed; it
-   needs `ContentAgreement` and `ContentComplete`.  At the migration commit
-   `prepareTarget`'s registered branch calls `dispatch`, and this is that commit's gate.
+   acceptance up to a generic refusal, and refusal by name are corollaries.  **PROVED**
+   (`prepareFactors`, `Effects/Revival/PrepareProofs.lean`, pinned).  Today's `prepareTarget`
+   already factors through the registry dispatch.  So when the migration commit makes its
+   registered branch call `dispatch`, this theorem shows the rewiring preserves behaviour.
 4. **Registry extension** (gap 3).  Stated now (Engine §6): `Extends`, `ExtensionPreserves`
    (every byte string under an old code dispatches exactly as before: decode, header,
    selection, interpretation, execution, refusals), `SafeExtension` (the explicit policy for
@@ -428,7 +429,7 @@ Engine/Statements split).
    `contentPrefixAgreement`, `contentPrefixAccepts`, `contentPrefixTeeth` (ContentProofs),
    `twoLevelsSatisfiable`, `twoLevelsPremise`, `twoLevelsTeeth`
    (`Effects/Revival/ActivityProofs.lean`, imported by Effects.lean).
-9. `HostKeystone`, `PrepareFactors` and `HostLegacyCensus` land with the migration commit (§5 step 1), with the
+9. `HostKeystone` and `HostLegacyCensus` land with the migration commit (`PrepareFactors` is proved, item 3) (§5 step 1), with the
    platform lane (L1).
 
 **Not done, not this lane's:**
