@@ -16,7 +16,7 @@ un-verify (Generic Simplex gate), un-bend (bend verb + lost reply), un-world (Ta
 - World apps native on candidate 0ce31391 (un-effects-rows; commons split into app + scenarios, policy bound kept): effect 19/19, dues 17/17, bounty 21/21, play 27/27, ballot 27/27, story 25/25, commons 20/20; cohort gates ballot 37/37, dues 49/49, commons 64/64. README native lines + evidence at 20f28ac31 (docs only, sent to the integrator a34bdb948f1cf4796).
 
 ## In flight
-- lane/un-shared-names (Sonnet a852f5df40229de24): 179494a88 on main (room bind reads room pointer, index and target in ONE batched signed view; jtemplates background writer + split tenancy; seed errtail_ and 600 s story limits). The rebased e4acc9df0 (only jtemplates.sh, strictly stronger rows: exact-ID bindings, one exact backlink) went to the integrator. All 13 jtemplates reds are explained: 12 stale expectations (90562d76c, 1a9ce0663, 433d5bc38, 37ffc2706), and backlinks=0 was the regression 621aded18 fixes. The faerie runs the row on the candidate carrying 25cfb86bd + 621aded18.
+- lane/un-shared-names (Sonnet a852f5df40229de24): DONE. 179494a88 and e4acc9df0 on main; f0894a415 (stale label rows 79/82) sent to the integrator. jtemplates (KTPL) 196/196 on 2d8b7ed54 incl. the background writer and dana's split tenancy (/build/t/uns-run5/steps/KTPL/jtemplates.tsv on dregg-build). Room bind reads room pointer, index and target in ONE batched signed view; bounded replan only on a changed room pointer, named.
 
 ## Waiting on others
 - Codec pin re-emit (ACTIVITY-RECORD v9): the integrator's full build runs the regen once (its state file).
@@ -53,7 +53,10 @@ fn out; private-backend stays; Effects/ registry is Phase 3 (EFFECTS.md); dues a
 - Box hygiene: hbox staging (candidate copies, worlds, grain installs) under /tank, never / (85% used); each faerie deletes its own staging dirs when its run ends.
 
 ## Coordinator status
-Candidate 2d8b7ed54 (/build/candidates/2d8b7ed544100acfaeb9ff2f9b597c31b8cb81e6, READY 05:48) carries 25cfb86bd, 621aded18, e4acc9df0, b3/b5/b7/b8, un-tale-welcome. Runs on it (fresh worlds, one at a time from now): b3 a85d12892ea6de3ca, b5 a0ef59eabda7075b4, b7 abf203f357754001b, b8 a13f0bc9626b1320a, jtemplates a852f5df40229de24 (run4 on dregg-build). japps co-edit (a4e312352a7091f59) is parked with world w2 kept as evidence; it reruns once on the 76758dba6 candidate.
+Candidate 2d8b7ed54 (/build/candidates/2d8b7ed544100acfaeb9ff2f9b597c31b8cb81e6, READY 05:48) carries 25cfb86bd, 621aded18, e4acc9df0, b3/b5/b7/b8, un-tale-welcome. Runs on it (fresh worlds, one at a time from now): b3 a85d12892ea6de3ca, b5 a0ef59eabda7075b4, b7 abf203f357754001b, b8 a13f0bc9626b1320a, jtemplates a852f5df40229de24 (green, 196/196). japps co-edit (a4e312352a7091f59) is parked with world w2 kept as evidence; it reruns once on the 76758dba6 candidate.
+
+## Rows validator (a373556d56d56744d)
+Its hbox worlds: /tank/rows-2d8b7ed5-apps/w-{featured,b1,b2,b4,b6,rt,fixups}. Mine: b3 /tank/lanes/app-market-b3, b5 /tank/rows-b5, b7 and b8 under /tank; japps /build/lanes/un-stream-continuity-runs/w*, jtemplates /build/t/uns-run* (dregg-build). Verdicts go to it for ROWS-OWED section 0.
 
 ## Next three
 1. Read the six runs on 2d8b7ed54 and the validator's batch tables; fix reds (recipes or spk-host); add every app green on lifecycle + write to FEATURED in apps.rs; tell the coordinator when DDP can rerun.
