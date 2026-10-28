@@ -25,11 +25,31 @@ Every resource-invocation law reads it: `slots` projects `clock/now`,
 `clock/day` (`now / 86400`) and `clock/slot` into the law's state
 (`DeclaredResourceController.now_slot_exact`).
 
-Wire: `DREGG/CLOCK/v4` (v3 predates the platform cell kind, v2 the Book's floors section), with immutable `maxStepSeconds : Nat` at its own namespace.
+Wire: `PersistedCodecTags.clock_v4`, `DREGG/CLOCK/v{clockWireVersion}` (the version lives only there), with immutable `maxStepSeconds : Nat` at its own namespace.
 The old clock cell shape refuses; re-genesis seeds `now` from explicit params.
 -/
-import Compiler.StoreCodec
-import Theory.AxiomPin
+module
+
+public import Compiler.PersistedCodecTags
+public import Compiler.StoreCodec
+public import Theory.AxiomPin
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ClockCell
 
@@ -153,7 +173,7 @@ def valueStream : (space : Namespace) → StreamCodec (Namespace.Value space)
   | .clock => clockStream
   | .maxStepSeconds => StreamCodec.nat
 
-def wireName : String := "DREGG/CLOCK/v4"
+def wireName : String := Minidregg.Compiler.PersistedCodecTags.clock_v4
 
 def wire : Wire layout where
   name := wireName
@@ -166,7 +186,7 @@ def wire : Wire layout where
     | .clock => "unit"
     | .maxStepSeconds => "unit"
   valueCodecId
-    | .clock => "DREGG/CLOCK/NOW-SLOT/v3"
+    | .clock => "DREGG/CLOCK/NOW-SLOT/v5"
     | .maxStepSeconds => "positive-nat/max-step-seconds/v1"
 
 def materializer : Materializer layout Digest := StoreCodec.materializer wire

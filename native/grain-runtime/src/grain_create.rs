@@ -188,9 +188,16 @@ fn directory(path: &Path, what: &str) -> Result<()> {
 
 impl Spec {
     /// Refuse every missing or malformed input before anything is signed.
-    fn check(&self) -> Result<()> {
+    fn check(&self, phase: &Phase) -> Result<()> {
         self.check_values()?;
-        self.check_paths()
+        self.check_paths(phase)
+    }
+
+    /// The birth is signed by the operator's sponsor; a resident running as
+    /// its own uid never holds that key, so once the birth is confirmed the
+    /// sponsor key is no longer asked for.
+    fn birth_confirmed(&self) -> Result<bool> {
+        confirmed(&self.root.join("create/birth/outcome.json"))
     }
 
     /// Values only: no filesystem access.
@@ -267,13 +274,14 @@ impl Spec {
         Ok(())
     }
 
-    fn check_paths(&self) -> Result<()> {
+    fn check_paths(&self, phase: &Phase) -> Result<()> {
         executable(&self.mini, "mini")?;
         executable(&self.host, "host")?;
         readable(&self.host_config, "hostConfig")?;
         absolute(&self.host_socket, "hostSocket")?;
-        if !fs::metadata(&self.host_socket).map(|m| m.file_type().is_socket()).unwrap_or(false) {
-            return Err(format!("hostSocket is not a live socket: {}", self.host_socket.display()));
+        let live = match phase { Phase::Birth { socket } => socket, Phase::Whole => &self.host_socket };
+        if !fs::metadata(live).map(|m| m.file_type().is_socket()).unwrap_or(false) {
+            return Err(format!("the Host socket is not a live socket: {}", live.display()));
         }
         readable(&self.genesis, "genesis")?;
         directory(&self.namespace_root, "namespaceRoot")?;
@@ -283,7 +291,13 @@ impl Spec {
         if self.root.join("state/control.sock").as_os_str().len() >= 100 {
             return Err("root is too long for the controller's Unix sockets".into());
         }
-        private_key(&self.sponsor.key, "sponsor.key")?;
+        if matches!(phase, Phase::Birth { .. }) || !self.birth_confirmed()? {
+            private_key(&self.sponsor.key, "sponsor.key")?;
+        }
+        if matches!(phase, Phase::Birth { .. }) {
+            // The operator's part: everything else belongs to the resident.
+            return Ok(());
+        }
         private_key(&self.owner.key, "owner.key")?;
         private_key(&self.worker_key.key, "workerKey.key")?;
         if let Some(p) = &self.provider {
@@ -409,6 +423,10 @@ fn confirmed(outcome: &Path) -> Result<bool> {
 /// Resolve one signed step. A fresh attempt directory runs `submit`; an
 /// existing one without a confirmed outcome is only ever looked up.
 fn signed_step(spec: &Spec, attempt: &Path, what: &str, submit: impl FnOnce() -> Result<()>) -> Result<()> {
+    signed_step_on(spec, &spec.host_socket, attempt, what, submit)
+}
+
+fn signed_step_on(spec: &Spec, socket: &Path, attempt: &Path, what: &str, submit: impl FnOnce() -> Result<()>) -> Result<()> {
     let outcome = attempt.join("outcome.json");
     if !attempt.exists() {
         // A submitter may exit nonzero after the reply was lost; the outcome
@@ -424,7 +442,7 @@ fn signed_step(spec: &Spec, attempt: &Path, what: &str, submit: impl FnOnce() ->
         return Err(format!("{what}: no signed call was retained at {}; nothing was submitted, remove only that attempt directory after inspecting it", attempt.display()));
     }
     run(Command::new(&spec.mini).arg("retry").arg("--attempt").arg(attempt).args(["--mode", "lookup"])
-        .arg("--socket").arg(&spec.host_socket), &format!("{what} lookup"))?;
+        .arg("--socket").arg(socket), &format!("{what} lookup"))?;
     if confirmed(&outcome)? {
         return Ok(());
     }
@@ -483,13 +501,27 @@ fn delegate_witness(spec: &Spec, work: &Path, owner_ws: &Path, id: &str, recipie
     Ok(child)
 }
 
+/// Who runs this create. `Whole` is the ordinary single-account create (and
+/// the resident's part once the birth is confirmed). `Birth` is the
+/// operator's part for a resident under its own uid: only the sponsor-signed
+/// birth, through the operator's own socket; root then gives ROOT to the
+/// resident, which runs `Whole` through its own operator route.
+pub(crate) enum Phase { Whole, Birth { socket: PathBuf } }
+
 pub(crate) fn create(spec_path: &Path) -> Result<Value> {
+    create_phase(spec_path, Phase::Whole)
+}
+
+pub(crate) fn create_phase(spec_path: &Path, phase: Phase) -> Result<Value> {
     let spec_bytes = fs::read(spec_path).map_err(|e| format!("spec {}: {e}", spec_path.display()))?;
     let spec: Spec = serde_json::from_slice(&spec_bytes).map_err(|e| format!("spec: {e}"))?;
-    spec.check()?;
+    spec.check(&phase)?;
     let spec_sha = sha256_bytes(&spec_bytes)?;
     let work = spec.root.join("create");
-    if spec.root.exists() {
+    // An existing EMPTY root is a fresh one: root pre-creates it for the
+    // operator's birth phase in a directory the operator may not write.
+    let empty_root = fs::read_dir(&spec.root).is_ok_and(|mut d| d.next().is_none());
+    if spec.root.exists() && !empty_root {
         let recorded = fs::read_to_string(work.join("spec.sha256")).map_err(|_| {
             format!("root {} exists and is not a create of this spec; refusing to overwrite retained state", spec.root.display())
         })?;
@@ -497,7 +529,9 @@ pub(crate) fn create(spec_path: &Path) -> Result<Value> {
             return Err("root was created from a different spec; refusing".into());
         }
     } else {
-        fs::DirBuilder::new().mode(0o700).create(&spec.root).map_err(|e| format!("root: {e}"))?;
+        if !empty_root {
+            fs::DirBuilder::new().mode(0o700).create(&spec.root).map_err(|e| format!("root: {e}"))?;
+        }
         fs::DirBuilder::new().mode(0o700).create(&work).map_err(|e| format!("root/create: {e}"))?;
         write_private_new(&work.join("spec.json"), &spec_bytes)?;
         write_private_new(&work.join("spec.sha256"), format!("{spec_sha}\n").as_bytes())?;
@@ -511,12 +545,19 @@ pub(crate) fn create(spec_path: &Path) -> Result<Value> {
         write_private_new(&intent_path, &serde_json::to_vec(&spec.birth_intent(&genesis)).map_err(|e| e.to_string())?)?;
     }
     let birth = work.join("birth");
-    signed_step(&spec, &birth, "grain birth", || {
+    let birth_socket = match &phase { Phase::Birth { socket } => socket.clone(), Phase::Whole => spec.host_socket.clone() };
+    signed_step_on(&spec, &birth_socket, &birth, "grain birth", || {
         run(Command::new(&spec.mini).arg("submit").arg("--host").arg(&spec.host)
-            .arg("--config").arg(&spec.host_config).arg("--socket").arg(&spec.host_socket)
+            .arg("--config").arg(&spec.host_config).arg("--socket").arg(&birth_socket)
             .arg("--intent").arg(&intent_path).args(["--intent-kind", "birth-intent"])
             .arg("--key").arg(&spec.sponsor.key).arg("--dir").arg(&birth), "mini submit birth").map(|_| ())
     })?;
+
+    if matches!(phase, Phase::Birth { .. }) {
+        return Ok(json!({"type":"mini-grain-birth-v1","task":spec.task,"root":spec.root,
+            "birthOutcome":birth.join("outcome.json"),
+            "next":"give ROOT to the resident account, then run `grain-runtime create SPEC` as the resident"}));
+    }
 
     // 2. The owner delegates the worker its parent witness.
     let owner_ws = work.join("owner-workspace");
@@ -571,10 +612,12 @@ pub(crate) fn create(spec_path: &Path) -> Result<Value> {
 }
 
 pub(crate) fn client(args: &[std::ffi::OsString]) -> Result<()> {
-    let [spec] = args else {
-        return Err("usage: grain-runtime create /absolute/spec.json".into());
+    let result = match args {
+        [spec] => create(Path::new(spec))?,
+        [spec, flag, socket] if flag == "--birth-socket" =>
+            create_phase(Path::new(spec), Phase::Birth { socket: PathBuf::from(socket) })?,
+        _ => return Err("usage: grain-runtime create /absolute/spec.json [--birth-socket OPERATOR-SOCKET]".into()),
     };
-    let result = create(Path::new(spec))?;
     println!("{result}");
     Ok(())
 }

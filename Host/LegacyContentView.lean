@@ -1,9 +1,13 @@
 /- Read-only views of explicit legacy content carried into the current store.
 Callers first obtain an authorized current content view. References remain
 legacy atom references; they never become fabricated range-history openings. -/
-import Compiler.LegacyContentCarry
-import Kernel.DocumentHistory
-import Lean
+module
+
+public import Compiler.LegacyContentCarry
+public import Kernel.DocumentHistory
+public import Lean
+
+@[expose] public section
 
 namespace Minidregg.Host.LegacyContentView
 open Lean

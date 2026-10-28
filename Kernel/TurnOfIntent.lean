@@ -53,14 +53,33 @@ preflight establishes, `World.step` accepts the derived turn, the post cells
 are the decoded post images (`postCell`), and the system cell is the turn's
 system patch.  `Kernel.HostRefinesWorld` lifts it to the deployed `Loaded`.
 -/
-import Kernel.World
-import Kernel.DurableDataIntent
-import Kernel.DurableReceiver
-import Theory.StoreNormalize
-import Compiler.StoreCodec
-import Mathlib.Logic.Encodable.Basic
-import Mathlib.Data.Nat.Pairing
-import Theory.AssertAxioms
+module
+
+public import Kernel.World
+public import Kernel.DurableDataIntent
+public import Kernel.DurableReceiver
+public import Theory.StoreNormalize
+public import Compiler.StoreCodec
+public import Mathlib.Logic.Encodable.Basic
+public import Mathlib.Data.Nat.Pairing
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.TurnOfIntent
 

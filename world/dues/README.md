@@ -2,7 +2,7 @@
 
 `StandingDues.obend` + `preview-cohort.json` (49 rows). Evidence class: **executed in the
 effect-free preview** (`tests/objective-bend-source/check-preview.ts`); **not admitted natively**.
-Native: re-expressed on the activity kernel's protocol (one `Opening` input, `resumed {outcome, view}`, `await` and `transfer` Plans: the kernel pays from the activity's purse at the yield); native admission runs `scripts/world-native-admit.sh dues --route activity --scenario dues` on a candidate carrying the effect Plan. Attempts: `docs/evidence/2026-10-27-world-native/`.
+Native: admitted on the activity route on candidate 0ce31391, scenario `dues` of `native/resource-client/world-activity-admit.py`, 17/17 rows (every refusal row confirms its refusal); run `scripts/world-native-admit.sh dues --route activity --scenario dues --method world/dues/StandingDues.obend --entry dues`. Evidence: `docs/evidence/2026-10-27-world-native/dues/` (`verdicts.txt`, `results.json`).
 
 ## What it does
 A payer owes a room `amount` every `period` heights from `start`, for `periods` periods.

@@ -3,8 +3,12 @@ the ONE decoder of the responses a yielded activity is resumed with, and the
 ONE printer of extracted Plans. Consumers: Host/ObjectiveBendPreview (the
 clear preview's turns) and Compiler/ObjectiveBendEmitCRun (the C backend's
 differential, which resumes both machines with the same decoded responses). -/
-import Lean.Data.Json
-import Theory.ObjectiveBendDemandData
+module
+
+public import Lean.Data.Json
+public import Theory.ObjectiveBendDemandData
+
+@[expose] public section
 
 namespace Minidregg.Compiler.ObjectiveBendDataWire
 open Lean (Json toJson)

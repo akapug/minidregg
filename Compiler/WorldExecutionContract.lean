@@ -1,6 +1,11 @@
 /- Pure source-owned after-core execution identities. Actual consumers import
 these constants; the runtime profile commits them without importing receivers. -/
-import Init
+module
+
+public import Init
+
+@[expose] public section
+
 namespace Minidregg.Compiler.WorldExecutionContract
 def methodTableMeaning : String := "dregg/world/method-table/v1"
 def methodTableFrame : List UInt8 := "DREGG/WORLD/METHODS".toUTF8.toList ++ [1]

@@ -2,52 +2,17 @@
 //! authenticated received frames, source request events and recursive outboxes
 //! commit before visibility. Honest crash storage only, no rollback/release authority.
 use crate::{
-    asks::PhaseMessage,
-    codec::{bad, bytes, Generation, Nat, Reader},
-    consensus_wire::Cursor,
+    codec::{bad, bytes, Generation, Nat},
+    consensus_wire::{get_phase, put_phase, Cursor},
     private_send_store,
     reconstruction::Field,
     sh2t_id::{Body, Message, Send, Sh2tId},
     transition_journal::{Journal, Machine},
 };
 use std::{
-    fs::File,
-    io::{Read, Result},
+    io::Result,
     path::Path,
 };
-pub(crate) fn count(c: &mut Cursor) -> Result<usize> {
-    let mut b = vec![];
-    loop {
-        let v = c.byte()?;
-        b.push(v);
-        if v == 255 {
-            break;
-        }
-    }
-    let mut r = Reader::new(&b)?;
-    let n = r.count()?;
-    r.finish()?;
-    Ok(n)
-}
-pub(crate) fn put_phase(p: &PhaseMessage, b: &mut Vec<u8>) {
-    let (t, v) = match p {
-        PhaseMessage::Init(v) => (0, v),
-        PhaseMessage::Echo(v) => (1, v),
-        PhaseMessage::Ready(v) => (2, v),
-    };
-    b.push(t);
-    bytes(v, b);
-}
-pub(crate) fn phase(c: &mut Cursor) -> Result<PhaseMessage> {
-    let tag = c.byte()?;
-    let b = c.bytes()?;
-    match tag {
-        0 => Ok(PhaseMessage::Init(b)),
-        1 => Ok(PhaseMessage::Echo(b)),
-        2 => Ok(PhaseMessage::Ready(b)),
-        _ => Err(bad("Sh2t phase")),
-    }
-}
 pub(crate) fn put_fields(v: &[Field], b: &mut Vec<u8>) {
     Nat::new(v.len() as u64).put(b);
     for x in v {
@@ -55,7 +20,7 @@ pub(crate) fn put_fields(v: &[Field], b: &mut Vec<u8>) {
     }
 }
 pub(crate) fn fields(c: &mut Cursor) -> Result<Vec<Field>> {
-    let n = count(c)?;
+    let n = c.count()?;
     if n > 128 {
         return Err(bad("Sh2t point vector capacity"));
     }
@@ -135,33 +100,33 @@ pub fn decode_message(b: &[u8]) -> Result<Message> {
     }
     let context = c.fixed32()?;
     let body = match c.byte()? {
-        0 => Body::Commitment(phase(&mut c)?),
+        0 => Body::Commitment(get_phase(&mut c)?),
         1 => Body::Private {
             holder: c.u16()?,
             message: private_send_store::decode_message(&c.bytes()?)?,
         },
-        2 => Body::Termination(phase(&mut c)?),
+        2 => Body::Termination(get_phase(&mut c)?),
         3 => Body::Complaint {
             holder: c.u16()?,
-            phase: phase(&mut c)?,
+            phase: get_phase(&mut c)?,
         },
         4 => Body::OpenRequest {
             holder: c.u16()?,
             requester: c.u16()?,
-            phase: phase(&mut c)?,
+            phase: get_phase(&mut c)?,
         },
         5 => Body::ReconRequest {
-            group: count(&mut c)?,
+            group: c.count()?,
             receiver: c.u16()?,
             requester: c.u16()?,
-            phase: phase(&mut c)?,
+            phase: get_phase(&mut c)?,
         },
         6 => Body::AgreementAccusation {
             holder: c.u16()?,
-            phase: phase(&mut c)?,
+            phase: get_phase(&mut c)?,
         },
         7 => Body::Point {
-            group: count(&mut c)?,
+            group: c.count()?,
             receiver: c.u16()?,
             values: fields(&mut c)?,
             masks: fields(&mut c)?,
@@ -176,36 +141,10 @@ pub fn decode_message(b: &[u8]) -> Result<Message> {
     Ok(m)
 }
 fn outbox(ps: &[Send]) -> Vec<u8> {
-    let mut b = vec![];
-    Nat::new(ps.len() as u64).put(&mut b);
-    for p in ps {
-        b.extend(p.to.to_le_bytes());
-        bytes(&encode_message(&p.message), &mut b);
-    }
-    b
+    crate::consensus_wire::put_outbox(ps, encode_message)
 }
 pub(crate) fn parse_outbox(b: &[u8], n: usize) -> Result<Vec<Send>> {
-    let mut c = Cursor::new(b)?;
-    let len = count(&mut c)?;
-    if len > crate::codec::MAX / 40 {
-        return Err(bad("Sh2t outbox capacity"));
-    }
-    let mut ps = vec![];
-    for _ in 0..len {
-        let to = c.u16()?;
-        if to as usize >= n {
-            return Err(bad("Sh2t outbox recipient"));
-        }
-        ps.push(Send {
-            to,
-            message: decode_message(&c.bytes()?)?,
-        });
-    }
-    c.finish()?;
-    if outbox(&ps) != b {
-        return Err(bad("Sh2t outbox canonical"));
-    }
-    Ok(ps)
+    crate::consensus_wire::get_outbox(b, n, crate::codec::MAX / 40, "Sh2t", decode_message, encode_message)
 }
 /// Tag 5: commit the dealing seed and inputs durably, publishing nothing.
 pub(crate) fn commit_event(seed: [u8; 32], polys: &[Vec<Field>]) -> Vec<u8> {
@@ -233,7 +172,7 @@ impl Machine for Sh2tMachine {
         let out = match c.byte()? {
             5 => {
                 let seed = c.fixed32()?;
-                let n = count(&mut c)?;
+                let n = c.count()?;
                 if n != self.state.count() {
                     return Err(bad("Sh2t event polynomial count"));
                 }
@@ -275,7 +214,7 @@ impl Machine for Sh2tMachine {
                 self.state.receive(sender, m)?
             }
             3 => {
-                let group = count(&mut c)?;
+                let group = c.count()?;
                 let receiver = c.u16()?;
                 c.finish()?;
                 self.state.request_private_reconstruction(group, receiver)?
@@ -352,7 +291,7 @@ impl Store {
             }
         } else {
             let mut seed = [0; 32];
-            File::open("/dev/urandom")?.read_exact(&mut seed)?;
+            crate::entropy::os_fill(&mut seed)?;
             self.apply(&commit_event(seed, polys))?;
         }
         self.apply(&EMIT_EVENT)
@@ -566,5 +505,43 @@ mod tests {
         assert!(fresh.request_accusation(0).is_err());
         assert!(fresh.request_private_reconstruction(0, 0).is_err());
         assert_eq!(fs::metadata(root.join("fresh")).unwrap().len(), len);
+    }
+}
+
+#[cfg(test)]
+mod pin_wire {
+    use super::*;
+    use crate::asks::PhaseMessage as PinPhase;
+    fn pin_sends() -> Vec<Send> {
+        vec![
+            Send { to: 1, message: Message { context: [7; 32], body: Body::Termination(PinPhase::Echo(vec![1])) } },
+            Send { to: 3, message: Message { context: [7; 32], body: Body::Termination(PinPhase::Ready(vec![1])) } },
+        ]
+    }
+    /// Outbox wire: Nat count, then per packet u16 LE recipient and the
+    /// length-prefixed message wire; canonical, bounded, recipient-checked.
+    #[test]
+    fn pin_outbox_wire() {
+        let ps = pin_sends();
+        let b = outbox(&ps);
+        let mut want = vec![2, 255];
+        for s in &ps {
+            want.extend(s.to.to_le_bytes());
+            let m = encode_message(&s.message);
+            crate::codec::Nat::new(m.len() as u64).put(&mut want);
+            want.extend(m);
+        }
+        assert_eq!(&b[..4], &[2, 255, 1, 0]);
+        assert_eq!(b, want);
+        assert_eq!(parse_outbox(&b, 4).unwrap(), ps);
+        assert!(parse_outbox(&b, 3).is_err(), "recipient 3 is outside n = 3");
+        let mut trailing = b.clone();
+        trailing.push(0);
+        let b = trailing;
+        assert!(parse_outbox(&b, 4).is_err(), "trailing bytes refuse");
+        let mut huge = vec![];
+        crate::codec::Nat::new(crate::codec::MAX as u64).put(&mut huge);
+        let b = huge;
+        assert!(parse_outbox(&b, 4).is_err(), "an absurd count refuses");
     }
 }

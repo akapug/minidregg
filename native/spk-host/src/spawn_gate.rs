@@ -9,6 +9,7 @@ use crate::sandbox::{
     open_protected_directory, IMAGE_FD, MAX_BWRAP_ARGS, MAX_BWRAP_ARG_BYTES, RPC_FD, SECCOMP_FD,
     VAR_FD, PUBLIC_DATA_FD,
 };
+use crate::io_context::IoContext;
 use sha2::{Digest, Sha256};
 use std::ffi::{CString, OsStr};
 use std::fs::File;
@@ -453,7 +454,7 @@ impl Drop for BoundedChild {
 fn spawn_inner(spec: &SpawnSpec, test_mode: bool) -> io::Result<BoundedChild> {
     validate(spec, test_mode)?;
     let executable = pinned_executable(spec)?;
-    let dev_null = File::open("/dev/null")?;
+    let dev_null = File::open("/dev/null").ctx("open", &"/dev/null")?;
     let dev_null = duplicate_high(dev_null.as_raw_fd())?;
     let mut pipe = [0_i32; 2];
     if unsafe { libc::pipe2(pipe.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {

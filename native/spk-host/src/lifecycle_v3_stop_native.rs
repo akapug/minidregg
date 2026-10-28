@@ -2,6 +2,7 @@
 //! A sealed fresh op26 claim may fence the running incarnation. Recovery can
 //! only resume its exact retained attempt from an already-Fenced journal row.
 
+use crate::io_context::IoContext;
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
 use crate::hostd::{Journal, Phase, Record, StopIdentity, UnitStopAudit};
 use crate::lifecycle_v3_native::{decimal, framed_payload, hex, lowercase_hex, unhex};
@@ -280,7 +281,7 @@ impl StopTarget {
         let mut file = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-            .open(path)?;
+            .open(&path).ctx("open", &path)?;
         let before = file.metadata()?;
         if !before.is_file()
             || before.uid() != unsafe { libc::geteuid() }
@@ -446,7 +447,7 @@ pub(crate) fn resume_fenced_exact(
     let retained_committed =
         read_private_artifact(&attempt_dir.join("committed-v3.bin"), MAX_FRAME)?;
     let original_frame = read_private_artifact(&attempt_dir.join("op26-frame.bin"), MAX_FRAME)?;
-    if framed_payload(&original_frame, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, COMMITTED_TAG)? != retained_committed {
+    if framed_payload("lifecycle claim submit", &original_frame, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, COMMITTED_TAG)? != retained_committed {
         return Err(invalid("STOP recovery original op26 frame differs"));
     }
     let requested: Value = serde_json::from_slice(&read_private_artifact(

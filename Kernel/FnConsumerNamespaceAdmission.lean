@@ -1,8 +1,12 @@
 /- Live event20 registration requires a native-verified, same-walk Mini history.
 The lower conditional check alone cannot authorize a registration or select a
 legacy predecessor; the private Replay.Verified projection supplies both. -/
-import Kernel.FnConsumerNamespaceAdmissionAt
-import Kernel.NativeHostReplay
+module
+
+public import Kernel.FnConsumerNamespaceAdmissionAt
+public import Kernel.NativeHostReplay
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnConsumerNamespaceAdmission
 

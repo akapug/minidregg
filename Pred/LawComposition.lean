@@ -13,8 +13,27 @@ There is no C3 or method-order rule. Identical resolved keys are evaluated once;
 different authenticated revisions are distinct conjuncts. A predecessor-chain
 edge used to authenticate old bytes is not a semantic dependency edge.
 -/
-import Pred.Core
-import Theory.TypedAuthorization
+module
+
+public import Pred.Core
+public import Theory.TypedAuthorization
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Theory.LawComposition
 

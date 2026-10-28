@@ -312,7 +312,7 @@ impl Worker {
         }
         self.internal(mini_sdk::host_operations::CONSENT_STORE_RECHECK, &[])?;
         let answer = self.exchange(frame)?;
-        if answer.first() != frame.first() && answer.first() != Some(&255) {
+        if answer.first() != frame.first() && answer.first() != Some(&mini_sdk::consent::CONSENT_REFUSAL) {
             self.failed = true;
             return Err("unexpected consent verifier response".into());
         }
@@ -452,6 +452,7 @@ pub(crate) fn serve(
     settings: [u8; 32],
     controller: u32,
     anchors: &Path,
+    idle: Duration,
 ) -> Result<()> {
     if controller == 0 || controller == mini_sdk::private::euid() {
         return Err("consent requires distinct non-root controller UID".into());
@@ -475,9 +476,27 @@ pub(crate) fn serve(
     let worker = Arc::new(Mutex::new(Worker::start(
         executable, config, &pins, anchors,
     )?));
+    // Idle exit, as the member-side consent resident has (`mini_sdk::consent::RESIDENT_IDLE_S`):
+    // with no connection open and none for `idle`, the service ends and its verifier with it.
+    // Socket activation starts it again on the next connection, from the retained frontier
+    // (`Worker::retain` after every admission), so one worker per hosted member holds memory
+    // only while that member signs.
+    listener.set_nonblocking(true).map_err(|e| e.to_string())?;
     let active = Arc::new(AtomicUsize::new(0));
-    for connection in listener.incoming() {
-        let stream = connection.map_err(|e| e.to_string())?;
+    let last = Arc::new(Mutex::new(Instant::now()));
+    loop {
+        let stream = match listener.accept() {
+            Ok((stream, _)) => stream,
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                let quiet = last.lock().map(|t| t.elapsed()).unwrap_or_default();
+                if active.load(Ordering::Acquire) == 0 && quiet > idle {
+                    return Ok(());
+                }
+                std::thread::sleep(Duration::from_millis(20));
+                continue;
+            }
+            Err(e) => return Err(e.to_string()),
+        };
         if transport::peer_uid(&stream)? != controller {
             continue;
         }
@@ -485,15 +504,20 @@ pub(crate) fn serve(
             active.fetch_sub(1, Ordering::AcqRel);
             continue;
         }
-        let (worker, active, pins) = (worker.clone(), active.clone(), pins.clone());
+        if let Ok(mut t) = last.lock() {
+            *t = Instant::now();
+        }
+        let (worker, active, last, pins) = (worker.clone(), active.clone(), last.clone(), pins.clone());
         std::thread::spawn(move || {
             if let Err(e) = serve_connection(stream, &pins, &worker) {
                 eprintln!("mini consent connection: {e}")
             }
+            if let Ok(mut t) = last.lock() {
+                *t = Instant::now();
+            }
             active.fetch_sub(1, Ordering::AcqRel);
         });
     }
-    Ok(())
 }
 
 #[cfg(test)]

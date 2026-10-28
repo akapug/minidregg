@@ -19,6 +19,7 @@ file's.
 | `social/member.shell` | `room welcome $ROOM $MEMBER --template social`: the invite (observe, place, append), and `$ROOM/stream-$MEMBER`, born owned by the founder (a birth into a room is owned by its creator; its law refuses every writer but `$MEMBER`, the founder included) (PLACE §2.3 (a)) | `room template show social member` |
 | `story/template.shell` | `$ROOM`, `$ROOM/index`, `$ROOM/chapters` (note), `$ROOM/scenes` (stream), `$ROOM/cast` (draft), the map's links, chapters → cast | `room template show story` |
 
-The map's links to a stream are `external mini:object/ID` links (the
-hyperdocument `LinkTarget` has no resource constructor); `doc show` renders
-them by the reader's own reference name, and `doc backlinks` finds them.
+A map's link to any cell — a stream as much as a content document — is a
+`document` target naming it: every cell answers the link index's document key
+(`targetKeys`), so `doc links` names the target by the reader's own reference
+and `doc backlinks` of the target finds the map.

@@ -154,8 +154,8 @@ theorem rootedChains_append (s : Digest) (restA restB : List Digest) (ta tb : Li
 
 /-- **The tags split at a checkpoint**: every tag verifies from the start chain IFF the tags below
 the split verify from it and the tags after verify from the chain where the first part ends, at
-its height. -/
-/-- (HOT-PATH §2(h): the open verifies the prefix's tags in its gate and the suffix's in its executing
+its height.
+(HOT-PATH §2(h): the open verifies the prefix's tags in its gate and the suffix's in its executing
 part; `OwnEntries` verifies them all at once.) -/
 theorem verifyTags_append (key : MacKey) (height : Nat) (start : Digest) (a b : List (List UInt8))
     (ta tb : List (List UInt8)) (len : ta.length = a.length) :

@@ -2,9 +2,28 @@
 the canonical bytes of the event the turn retains.
 Transport frames, keys, old values, reads and frees are not value writes.
 The complete turn encoding separately binds every guard and effect. -/
-import Kernel.DeployedBridge
-import Kernel.WorldRoot
-import Compiler.DurableReceiverCodec
+module
+
+public import Kernel.DeployedBridge
+public import Kernel.WorldRoot
+public import Compiler.DurableReceiverCodec
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.DeployedHistory
 
@@ -133,7 +152,7 @@ theorem objective_post_bytes (payload : ObjectiveActivityCell.Payload) :
     (ObjectiveActivityCell.spec.wireFrame ++
       (ProtectedCell.wirePayloadStream ObjectiveActivityCell.spec).encode
         (1, some payload)))).length = _
-  have frameLength : "DREGG/OBJECTIVE/ACTIVITY-CELL/v3".toByteArray.toList.length = 32 := by decide +kernel
+  have frameLength : "DREGG/OBJECTIVE/ACTIVITY-CELL/v5".toByteArray.toList.length = 32 := by decide +kernel
   have versionLength : (StreamCodec.nat.encode 1).length = 2 := rfl
   simp [ProtectedCell.wirePayloadStream, StreamCodec.product, StreamCodec.option,
     ObjectiveActivityCell.spec, ObjectiveActivityCell.payloadStream, frameLength, versionLength,

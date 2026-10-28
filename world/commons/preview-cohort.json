@@ -17,6 +17,22 @@
       "module": "0"
      }
     ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
+     }
+    ]
    }
   ],
   "entry": "reservesExactBudgetAndCapacity",
@@ -40,6 +56,22 @@
       "alias": "Order",
       "path": "./NatOrder.obend",
       "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
      }
     ]
    }
@@ -66,6 +98,22 @@
       "module": "0"
      }
     ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
+     }
+    ]
    }
   ],
   "entry": "escrowPayer",
@@ -88,6 +136,22 @@
       "alias": "Order",
       "path": "./NatOrder.obend",
       "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
      }
     ]
    }
@@ -114,6 +178,22 @@
       "module": "0"
      }
     ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
+     }
+    ]
    }
   ],
   "entry": "capacityBeforeReserve",
@@ -136,6 +216,22 @@
       "alias": "Order",
       "path": "./NatOrder.obend",
       "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
      }
     ]
    }
@@ -162,6 +258,22 @@
       "module": "0"
      }
     ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
+     }
+    ]
    }
   ],
   "entry": "reserveEffectCount",
@@ -184,6 +296,22 @@
       "alias": "Order",
       "path": "./NatOrder.obend",
       "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
      }
     ]
    }
@@ -211,6 +339,22 @@
       "module": "0"
      }
     ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
+     }
+    ]
    }
   ],
   "entry": "expiredUnstartedCannotDispatch",
@@ -234,6 +378,22 @@
       "alias": "Order",
       "path": "./NatOrder.obend",
       "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
      }
     ]
    }
@@ -261,6 +421,22 @@
       "module": "0"
      }
     ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
+     }
+    ]
    }
   ],
   "entry": "completionIsNotPayment",
@@ -284,6 +460,22 @@
       "alias": "Order",
       "path": "./NatOrder.obend",
       "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
      }
     ]
    }
@@ -311,6 +503,22 @@
       "module": "0"
      }
     ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
+     }
+    ]
    }
   ],
   "entry": "completionEffectCount",
@@ -333,6 +541,22 @@
       "alias": "Order",
       "path": "./NatOrder.obend",
       "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
      }
     ]
    }
@@ -360,6 +584,22 @@
       "module": "0"
      }
     ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
+     }
+    ]
    }
   ],
   "entry": "payoutAmount",
@@ -382,6 +622,22 @@
       "alias": "Order",
       "path": "./NatOrder.obend",
       "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
      }
     ]
    }
@@ -408,6 +664,22 @@
       "module": "0"
      }
     ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
+     }
+    ]
    }
   ],
   "entry": "payoutTo",
@@ -432,6 +704,22 @@
       "module": "0"
      }
     ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
+     }
+    ]
    }
   ],
   "entry": "capacityAfterRelease",
@@ -454,6 +742,22 @@
       "alias": "Order",
       "path": "./NatOrder.obend",
       "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
      }
     ]
    }
@@ -481,6 +785,22 @@
       "module": "0"
      }
     ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
+     }
+    ]
    }
   ],
   "entry": "failedStatusRetainsUncertainty",
@@ -504,6 +824,22 @@
       "alias": "Order",
       "path": "./NatOrder.obend",
       "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
      }
     ]
    }
@@ -531,6 +867,22 @@
       "module": "0"
      }
     ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
+     }
+    ]
    }
   ],
   "entry": "uncertainCannotRedispatch",
@@ -554,6 +906,22 @@
       "alias": "Order",
       "path": "./NatOrder.obend",
       "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
      }
     ]
    }
@@ -581,6 +949,22 @@
       "module": "0"
      }
     ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
+     }
+    ]
    }
   ],
   "entry": "finishedCannotPayTwice",
@@ -604,6 +988,22 @@
       "alias": "Order",
       "path": "./NatOrder.obend",
       "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
      }
     ]
    }
@@ -631,6 +1031,22 @@
       "module": "0"
      }
     ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
+     }
+    ]
    }
   ],
   "entry": "uncertaintyKeepsActivity",
@@ -654,6 +1070,22 @@
       "alias": "Order",
       "path": "./NatOrder.obend",
       "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
      }
     ]
    }
@@ -681,6 +1113,22 @@
       "module": "0"
      }
     ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
+     }
+    ]
    }
   ],
   "entry": "deliveredCannotBeDeliveredAgain",
@@ -704,6 +1152,22 @@
       "alias": "Order",
       "path": "./NatOrder.obend",
       "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
      }
     ]
    }
@@ -731,6 +1195,22 @@
       "module": "0"
      }
     ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
+     }
+    ]
    }
   ],
   "entry": "completionForOtherRecipientRefused",
@@ -754,6 +1234,22 @@
       "alias": "Order",
       "path": "./NatOrder.obend",
       "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
      }
     ]
    }
@@ -781,6 +1277,22 @@
       "module": "0"
      }
     ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
+     }
+    ]
    }
   ],
   "entry": "completionRetainedFromUncertain",
@@ -804,6 +1316,22 @@
       "alias": "Order",
       "path": "./NatOrder.obend",
       "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
      }
     ]
    }
@@ -831,6 +1359,22 @@
       "module": "0"
      }
     ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
+     }
+    ]
    }
   ],
   "entry": "reviewByOtherReviewerRefused",
@@ -854,6 +1398,22 @@
       "alias": "Order",
       "path": "./NatOrder.obend",
       "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
      }
     ]
    }
@@ -881,6 +1441,22 @@
       "module": "0"
      }
     ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
+     }
+    ]
    }
   ],
   "entry": "reviewAgainstOtherHomeRefused",
@@ -904,6 +1480,22 @@
       "alias": "Order",
       "path": "./NatOrder.obend",
       "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
      }
     ]
    }
@@ -931,6 +1523,22 @@
       "module": "0"
      }
     ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
+     }
+    ]
    }
   ],
   "entry": "reserveRefusedForCapacity",
@@ -954,6 +1562,22 @@
       "alias": "Order",
       "path": "./NatOrder.obend",
       "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
      }
     ]
    }
@@ -981,6 +1605,22 @@
       "module": "0"
      }
     ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
+     }
+    ]
    }
   ],
   "entry": "reserveRefusedWhenOfferExpired",
@@ -1004,6 +1644,22 @@
       "alias": "Order",
       "path": "./NatOrder.obend",
       "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
      }
     ]
    }
@@ -1031,6 +1687,22 @@
       "module": "0"
      }
     ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
+     }
+    ]
    }
   ],
   "entry": "reserveRefusedForOtherIdentity",
@@ -1054,6 +1726,22 @@
       "alias": "Order",
       "path": "./NatOrder.obend",
       "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
      }
     ]
    }
@@ -1081,6 +1769,22 @@
       "module": "0"
      }
     ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
+     }
+    ]
    }
   ],
   "entry": "reserveRefusedAboveSponsorCap",
@@ -1104,6 +1808,22 @@
       "alias": "Order",
       "path": "./NatOrder.obend",
       "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
      }
     ]
    }
@@ -1131,6 +1851,22 @@
       "module": "0"
      }
     ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
+     }
+    ]
    }
   ],
   "entry": "reserveRefusedForThinFunds",
@@ -1154,6 +1890,22 @@
       "alias": "Order",
       "path": "./NatOrder.obend",
       "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
      }
     ]
    }
@@ -1181,6 +1933,22 @@
       "module": "0"
      }
     ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
+     }
+    ]
    }
   ],
   "entry": "cancelRefundsEscrow",
@@ -1204,6 +1972,22 @@
       "alias": "Order",
       "path": "./NatOrder.obend",
       "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
      }
     ]
    }
@@ -1231,6 +2015,22 @@
       "module": "0"
      }
     ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
+     }
+    ]
    }
   ],
   "entry": "strangerMayCancelAfterDeadline",
@@ -1254,6 +2054,22 @@
       "alias": "Order",
       "path": "./NatOrder.obend",
       "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
      }
     ]
    }
@@ -1281,6 +2097,22 @@
       "module": "0"
      }
     ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
+     }
+    ]
    }
   ],
   "entry": "transitionEqSeesCapacity",
@@ -1304,6 +2136,22 @@
       "alias": "Order",
       "path": "./NatOrder.obend",
       "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
      }
     ]
    }
@@ -1331,6 +2179,22 @@
       "module": "0"
      }
     ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
+     }
+    ]
    }
   ],
   "entry": "stateEqSeesPhase",
@@ -1354,6 +2218,22 @@
       "alias": "Order",
       "path": "./NatOrder.obend",
       "module": "0"
+     }
+    ]
+   },
+   {
+    "name": "CommonsScenarios",
+    "source": "CommonsScenarios.obend",
+    "imports": [
+     {
+      "alias": "Order",
+      "path": "./NatOrder.obend",
+      "module": "0"
+     },
+     {
+      "alias": "C",
+      "path": "./ResidentServiceCommons.obend",
+      "module": "1"
      }
     ]
    }

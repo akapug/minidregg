@@ -2,10 +2,14 @@
 Read-only custody view of the exact event27 request and detached signing plan.
 This projection is not a grant receipt or a permission to dispatch an agent.
 -/
-import Host.ApplicationAgentLifetimeGrantAuthoring
-import Kernel.ApplicationAgentLifetimeGrantLookup
-import Kernel.ApplicationAgentLifetimeDispatchReserveContext
-import Lean.Data.Json
+module
+
+public import Host.ApplicationAgentLifetimeGrantAuthoring
+public import Kernel.ApplicationAgentLifetimeGrantLookup
+public import Kernel.ApplicationAgentLifetimeDispatchReserveContext
+public import Lean.Data.Json
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationAgentLifetimeGrantInspection
 

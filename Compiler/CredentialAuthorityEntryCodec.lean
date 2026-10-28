@@ -8,11 +8,30 @@ not through a noncomputable choice of enumeration. Naturals use the shared
 compact prefix codec. Whole-page canonical decoding is enforced by the page
 materializer, including rejection of aliases accepted by primitive codecs.
 -/
-import Compiler.TypedAuthorizationRequestCodec
-import Compiler.FiniteDependentMapCodec
-import Compiler.CredentialSigningKeyCodec
-import Theory.CredentialAuthorityState
-import Mathlib.Data.Finset.Sort
+module
+
+public import Compiler.TypedAuthorizationRequestCodec
+public import Compiler.FiniteDependentMapCodec
+public import Compiler.CredentialSigningKeyCodec
+public import Theory.CredentialAuthorityState
+public import Mathlib.Data.Finset.Sort
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.CredentialAuthorityEntryCodec
 

@@ -692,6 +692,24 @@ fn workspace_host_pin(host: &Path) -> Option<String> {
     WORKSPACE_HOST_PIN.get().filter(|(path, _)| path == host).map(|(_, sha)| sha.clone())
 }
 
+/// The op-8 inspect kinds that read the admitted history (`object-audience`,
+/// `object-audience-roster`): the Host session answers these frames from its
+/// walked history, and the storeless codec refuses them
+/// (`Host.Main.sessionInspectKind`). They travel the same `u16(len) ‖ kind ‖
+/// source` framing as codec frames, addressed to the session itself.
+#[cfg(unix)]
+fn session_inspect_kind(operation: u8, payload: &[u8]) -> bool {
+    if operation != mini_sdk::host_operations::INSPECT {
+        return false;
+    }
+    let Some(header) = payload.get(..2).and_then(|bytes| <[u8; 2]>::try_from(bytes).ok()) else {
+        return false;
+    };
+    let width = usize::from(u16::from_le_bytes(header));
+    let kind = payload.get(2..2 + width).and_then(|bytes| std::str::from_utf8(bytes).ok());
+    matches!(kind, Some("object-audience") | Some("object-audience-roster"))
+}
+
 #[cfg(unix)]
 fn session_invoke(
     host: &Path,
@@ -700,7 +718,7 @@ fn session_invoke(
     operation: u8,
     payload: &[u8],
 ) -> Result<Vec<u8>> {
-    if (7..=11).contains(&operation) {
+    if (7..=11).contains(&operation) && !session_inspect_kind(operation, payload) {
         return client_consent::codec_frame(host, config, operation, payload);
     }
     let selected_sha = host_image_sha256(host)?;
@@ -874,11 +892,19 @@ usage:
   mini selected-release-lookup --attempt ATTEMPT [--socket SOCKET]
   mini export-evidence --host HOST --config CONFIG.json --call CALL.bin --output PACKAGE.bin
   mini verify-evidence --host HOST --config INDEPENDENT-PIN.json --package PACKAGE.bin --output RESULT.json
+  mini export-world --workspace WORKSPACE --home SESSION-HOME --out NEW-ARCHIVE     the member's world, taken with them (one per member per cooldown)
   mini serve --host HOST --config CONFIG.json --socket PRIVATE-DIR/mini.sock
   mini operator-status --socket PRIVATE --host HOST --config CONFIG.json
   mini drain-operator --socket PRIVATE --host HOST --config CONFIG.json --instance ID --pid PID --timeout-seconds 600
+  mini serve-resident-operator-proxy --socket RESIDENT-PRIVATE/mini.sock --upstream PRIVATE --config CONFIG.json --resident-uid UID
+                         requires two systemd-activated listeners (mini.sock, mini.control); the resident's host
+                         operations and the status action only; resident clients pin MINI_OPERATOR_PEER_UID
   mini serve-agent-operator-proxy --socket CONTROLLER-PRIVATE-SOCKET --upstream PRIVATE --config CONFIG.json --controller-uid UID
                          requires one systemd-activated listener; controller clients pin --operator-peer-uid
+  mini serve-controller-consent --socket CLIENT-PRIVATE-SOCKET --consent PROVIDER --config CONFIG.json --anchors PRIVATE-DIR --consent-sha256 HEX --config-sha256 HEX --controller-uid UID [--idle-seconds 600]
+                         delegated full consent for one client UID that cannot read the Store (a controller, a
+                         split-tenancy member); requires one systemd-activated listener; ends after --idle-seconds
+                         with no connection; clients pin MINI_CONSENT_SOCKET/_PEER_UID/_SHA256/_CONFIG_SHA256
   mini serve-public-proxy --socket PUBLIC --upstream PRIVATE --config CONFIG.json [--socket-gid GID | --controller-uid UID]
                          --socket-gid: the public socket's directory may be group GID, mode 0710/0750
                          (never group-writable, never other-accessible); the socket becomes 0660 GID
@@ -956,7 +982,17 @@ impl Args {
         // `mini pay ACTION ...` (PAY.md §5 spells the verbs this way) is `mini pay --action ACTION ...`.
         if command == OsStr::new("pay") || command == OsStr::new("store") || command == OsStr::new("apps") {
             if let Some(action) = raw.next_if(|next| !next.to_string_lossy().starts_with("--")) {
+                // `mini apps share a4501 bob`: the grammar leaf's positionals are the flags
+                // `--grain a4501 --to bob` (the same words the shell takes).
+                let leaf = (command == OsStr::new("apps")).then(|| action.to_str()).flatten()
+                    .and_then(|name| shell_grammar::leaf(&shell_grammar::APPS, &["apps", name]));
                 values.push((OsString::from("--action"), action));
+                for argument in leaf.map(|l| l.args).unwrap_or(&[]) {
+                    match raw.next_if(|next| !next.to_string_lossy().starts_with("--")) {
+                        Some(value) => values.push((OsString::from(format!("--{}", apps::positional_flag(argument.name))), value)),
+                        None => break,
+                    }
+                }
             }
         }
         while let Some(flag) = raw.next() {
@@ -1306,8 +1342,13 @@ fn local_process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<Out
         .output()
         .map_err(|error| format!("cannot run {}: {error}", host.display()))?;
     if !output.status.success() {
-        // Pure codec verbs never reach here (`process` sends them to the codec child), so no
-        // failing exit is a decision: the status stays uncertain.
+        // A decided refusal arrives as exit 3 with the Host's outcome frame on stdout, and is
+        // handled as the socket route handles it. Pure codec verbs never reach here (`process`
+        // sends them to the codec child); any other failing exit is not a decision, so the
+        // status stays uncertain.
+        if let Some(decided) = local_outcome_frame(host, config, arguments, &output) {
+            return decided;
+        }
         return Err(format!(
             "{} exited {}; request status uncertain: {}",
             host.display(),
@@ -1316,6 +1357,71 @@ fn local_process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<Out
         ));
     }
     Ok(output)
+}
+
+/// One Host outcome frame (marker byte 253 or 255, then the encoded Outcome), from either
+/// route: the socket session's reply, or the one-shot Host's stdout when it exits 3 (a decided
+/// refusal of a Store-reading verb). The decision is noted as the Host's (a refusal exits 3),
+/// a prepare refusal is retained for `why` (`prepare_refusal::retain`), and the returned
+/// message names the refusal, or says the effect is undecided. Never "uncertain" for a frame.
+fn host_outcome_frame(
+    command: &str,
+    arguments: &[&OsStr],
+    payload: &[u8],
+    config: &Path,
+    reply: &[u8],
+    decoded: Option<Value>,
+) -> Result<String> {
+    let line = Some(no_record_line(decoded.as_ref()));
+    let decision = HostDecision::Frame {
+        command: command.to_owned(),
+        byte: reply[0],
+        encoded: reply[1..].to_vec(),
+        decoded,
+    };
+    let refusal = decision.is_refusal();
+    let kind = outcome_type(decision.outcome()).to_owned();
+    note_host_decision(decision);
+    let destination = match command {
+        "prepare" | "submit" | "lookup" | "query" | "query-batch" => arguments.get(2).map(Path::new),
+        _ => None,
+    };
+    if command == "prepare" {
+        let destination = Path::new(arguments.get(2).ok_or("prepare has no destination")?);
+        prepare_refusal::retain(destination, payload, config, reply)?;
+    }
+    if command == "query" || command == "query-batch" {
+        let destination = Path::new(arguments.get(2).ok_or("query has no destination")?);
+        query_refusal::retain(destination, payload, config, reply)?;
+    }
+    if !refusal {
+        return Ok(undecided_frame_message(command, &kind, destination, &reply[1..]));
+    }
+    Ok(refused_frame_message(command, &reply[1..], line))
+}
+
+/// The one-shot Host's decided refusal of `prepare`: exit 3 with its outcome frame on stdout
+/// (`Host.Main`, the `prepare` verb). The frame is decoded by the Host's own codec (`inspect
+/// outcome`) and handled exactly as the socket route handles it. Anything else is not a frame.
+fn local_outcome_frame(host: &Path, config: &Path, arguments: &[&OsStr], output: &Output) -> Option<Result<Output>> {
+    let command = arguments.first().and_then(|word| word.to_str())?;
+    if output.status.code() != Some(3) || command != "prepare" || arguments.len() != 3 {
+        return None;
+    }
+    let reply = &output.stdout;
+    if reply.len() < 2 || reply.len() > transport::HOST_MAX_FRAME + 1 || !is_outcome_frame(reply[0]) {
+        return None;
+    }
+    let payload = match fsio::read_bounded_or_empty(Path::new(arguments[1]), transport::HOST_MAX_FRAME) {
+        Ok(payload) => payload,
+        Err(error) => return Some(Err(error)),
+    };
+    let decoded = mini_sdk::local::kind("outcome", &reply[1..])
+        .ok()
+        .and_then(|request| client_consent::codec_frame(host, config, mini_sdk::host_operations::INSPECT, &request).ok())
+        .filter(|inspected| inspected.first() == Some(&mini_sdk::host_operations::INSPECT))
+        .and_then(|inspected| serde_json::from_slice::<Value>(&inspected[1..]).ok());
+    Some(host_outcome_frame(command, arguments, &payload, config, reply, decoded).and_then(Err))
 }
 
 /// A 255 frame whose decoded outcome is not a refusal (or that the Host could not decode): the
@@ -1415,27 +1521,7 @@ fn socket_process(
             .ok()
             .filter(|inspected| inspected.first() == Some(&8))
             .and_then(|inspected| serde_json::from_slice::<Value>(&inspected[1..]).ok());
-        let line = Some(no_record_line(decoded.as_ref()));
-        let decision = HostDecision::Frame {
-            command: command.to_owned(),
-            byte: reply[0],
-            encoded: reply[1..].to_vec(),
-            decoded,
-        };
-        let refusal = decision.is_refusal();
-        let kind = outcome_type(decision.outcome()).to_owned();
-        note_host_decision(decision);
-        if command == "prepare" {
-            let destination = Path::new(arguments[2]);
-            prepare_refusal::retain(destination, &payload, config, &reply)?;
-        }
-        if command == "query" || command == "query-batch" {
-            query_refusal::retain(Path::new(arguments[2]), &payload, config, &reply)?;
-        }
-        if !refusal {
-            return Err(undecided_frame_message(command, &kind, destination.map(Path::new), &reply[1..]));
-        }
-        return Err(refused_frame_message(command, &reply[1..], line));
+        return Err(host_outcome_frame(command, arguments, &payload, config, &reply, decoded)?);
     }
     if let Some(destination) = destination {
         write_new(Path::new(destination), &reply[1..])?;
@@ -2629,12 +2715,11 @@ fn enrollment_view(socket: &Path, config: &Path, host_sha256: &str) -> Result<()
 
 fn run(mut args: Args) -> Result<()> {
     #[cfg(unix)]
-    if let Some(uid) = args.optional("operator-peer-uid") {
-        let command = args.command.to_string_lossy();
-        if !(command.starts_with("agent-reserve-") || command.starts_with("agent-lifetime-reserve-")
-            || command.starts_with("agent-lifetime-paid-") || command == "agent-payer-sign") {
-            return Err("--operator-peer-uid is restricted to agent reserve/payer commands".into());
-        }
+    // The listener creator of an activated operator route (a resident's or an
+    // agent controller's: systemd, uid 0) is pinned explicitly, by flag or by
+    // the root-owned unit's MINI_OPERATOR_PEER_UID, which every child `mini`
+    // of a controller inherits. Never inferred from the path's owner.
+    if let Some(uid) = args.optional("operator-peer-uid").or_else(|| std::env::var_os("MINI_OPERATOR_PEER_UID")) {
         let uid = uid.to_str().and_then(|n| n.parse::<u32>().ok()).ok_or("operator peer UID must be a u32 decimal")?;
         operator_peer::configure(uid)?;
     }
@@ -2834,6 +2919,16 @@ fn run(mut args: Args) -> Result<()> {
             public_proxy::serve(socket, &upstream, &config, group, controller)
         }
         #[cfg(target_os = "linux")]
+        "serve-resident-operator-proxy" => {
+            let upstream = path(args.required("upstream")?);
+            let config = path(args.required("config")?);
+            let uid = args.required("resident-uid")?.to_str().and_then(|n| n.parse::<u32>().ok())
+                .ok_or("resident UID must be a decimal u32")?;
+            args.finish()?;
+            let socket = SOCKET.get().ok_or("serve-resident-operator-proxy requires --socket")?;
+            public_proxy::serve_resident_activated(socket, &upstream, &config, uid)
+        }
+        #[cfg(target_os = "linux")]
         "serve-agent-operator-proxy" => {
             let upstream = path(args.required("upstream")?);
             let config = path(args.required("config")?);
@@ -2851,9 +2946,15 @@ fn run(mut args: Args) -> Result<()> {
             let image = consent_proxy::digest(args.required("consent-sha256")?.to_str().ok_or("consent digest must be UTF-8")?)?;
             let settings = consent_proxy::digest(args.required("config-sha256")?.to_str().ok_or("config digest must be UTF-8")?)?;
             let uid = args.required("controller-uid")?.to_str().and_then(|n|n.parse::<u32>().ok()).ok_or("controller UID must be a decimal u32")?;
+            // Seconds with no connection before the service ends (socket activation restarts it).
+            let idle = match args.optional("idle-seconds") {
+                Some(v) => v.to_str().and_then(|n| n.parse::<u64>().ok()).filter(|n| *n > 0)
+                    .ok_or("idle seconds must be a positive decimal")?,
+                None => mini_sdk::consent::RESIDENT_IDLE_S,
+            };
             args.finish()?;
             let socket = SOCKET.get().ok_or("serve-controller-consent requires --socket")?;
-            consent_proxy::serve(socket,&consent,&config,image,settings,uid,&anchors)
+            consent_proxy::serve(socket,&consent,&config,image,settings,uid,&anchors,std::time::Duration::from_secs(idle))
         }
         #[cfg(unix)]
         "operator-status" | "drain-operator" => {
@@ -3757,6 +3858,18 @@ pub(crate) fn swap_exit_status(value: u8) -> u8 {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn apps_positionals_are_the_grammar_leafs_flags() {
+        let flags = |words: &[&str]| Args::parse_from(words.iter().map(OsString::from)).unwrap().values.into_iter()
+            .map(|(k, v)| format!("{}={}", k.to_string_lossy(), v.to_string_lossy())).collect::<Vec<_>>();
+        assert_eq!(flags(&["apps", "share", "a4501", "bob"]), ["--action=share", "--grain=a4501", "--to=bob"]);
+        assert_eq!(flags(&["apps", "search", "slides", "--json"]), ["--action=search", "--term=slides", "--json=yes"]);
+        assert_eq!(flags(&["apps", "search", "--term", "slides"]), ["--action=search", "--term=slides"]);
+        assert_eq!(flags(&["apps", "renew", "a4501"]), ["--action=renew", "--grain=a4501"]);
+        assert_eq!(flags(&["apps", "list"]), ["--action=list"]);
+        assert_eq!(flags(&["apps", "revoke-identity", "a4501", "tok"]), ["--action=revoke-identity", "--grain=a4501", "--token=tok"]);
+    }
     use super::*;
 
     #[test]
@@ -3788,6 +3901,23 @@ mod tests {
             }
         }
         assert!(hidden.is_empty(), "commands the dispatcher runs that USAGE never names: {hidden:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn object_audience_inspects_are_session_frames_not_codec_frames() {
+        let frame = |kind: &str| mini_sdk::local::kind(kind, b"source").unwrap();
+        let inspect = mini_sdk::host_operations::INSPECT;
+        assert!(session_inspect_kind(inspect, &frame("object-audience")));
+        assert!(session_inspect_kind(inspect, &frame("object-audience-roster")));
+        // The kinds the storeless codec still answers stay codec frames.
+        assert!(!session_inspect_kind(inspect, &frame("object-roster-inspect")));
+        assert!(!session_inspect_kind(inspect, &frame("outcome")));
+        // No other opcode is redirected, whatever its payload.
+        assert!(!session_inspect_kind(mini_sdk::host_operations::AUTHOR, &frame("object-audience")));
+        // A truncated kind header is not a session frame.
+        assert!(!session_inspect_kind(inspect, &[1]));
+        assert!(!session_inspect_kind(inspect, &[]));
     }
 
     #[test]

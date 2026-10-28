@@ -54,7 +54,26 @@ The turn is ONE intent: the inboxes and slots it read and writes (each a lawful
 queue step of what it held), the decided slot, the delivered call tree's state
 writes, and the Book, guarded on every object it read, spending the message's
 claim (`messageClaim`): a message is delivered once. -/
-import Kernel.ObjectiveCall
+module
+
+public import Kernel.ObjectiveCall
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ObjectiveSend
 open Minidregg.Theory Minidregg.Compiler

@@ -31,9 +31,28 @@ The one induction lives here, once (`fold_unique`, §4).
 
 Imports Mathlib only (Compiler may import Mathlib + Theory + Compiler).
 -/
-import Mathlib.Data.PFunctor.Univariate.Basic
-import Mathlib.Data.Countable.Defs
-import Theory.AxiomPin
+module
+
+public import Mathlib.Data.PFunctor.Univariate.Basic
+public import Mathlib.Data.Countable.Defs
+public import Theory.AxiomPin
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler
 

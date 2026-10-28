@@ -4,6 +4,7 @@
 # This does not invoke SPK ingestion or submit Mini events.
 set -eu
 umask 077
+. "$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)/native/resource-client/journey.d/lib/evidence.sh"
 
 if [ "$#" -ne 11 ]; then
   echo "usage: $0 PREPARED_ROOT QUALIFIED_HOST OPERATOR_SOCKET APP_UID IMAGE_DIR NEW_INSTALL_JOURNAL OPERATOR_CONFIG OPERATOR_CONFIG_SHA256 BASE_REBOUND_CONFIG BASE_REBOUND_SHA256 NEW_PREPARE_STEP" >&2
@@ -239,13 +240,6 @@ UPGRADE="$PREPARE_STEP/host-upgrade"
   echo "Host upgrade attempt already exists" >&2; exit 2;
 }
 mkdir -m 700 "$UPGRADE"
-# The Store's durable image (seed + every log record) under its own anchor
-# identity, which the Host prints (`describe`.storeAnchorIdentity). The Store keeps
-# a durable log; the legacy single-blob `read-to` refuses on it.
-durable_image() {
-  "$STORE_BINARY" --anchor-identity "$("$HOST" "$CONFIG" describe | jq -er .storeAnchorIdentity)" \
-    durable-read "$1" 1 1 "$2"
-}
 durable_image "$STORE_ROOT" "$UPGRADE/store-before.bin"
 "$BASE_HOST" "$BASE_REBOUND_CONFIG" describe >"$UPGRADE/base-description.json"
 "$HOST" "$CONFIG" describe >"$UPGRADE/successor-description.json"

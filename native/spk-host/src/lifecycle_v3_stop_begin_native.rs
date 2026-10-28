@@ -17,7 +17,7 @@ use std::path::Path;
 const MAX_FRAME: usize = 12_102_760;
 const STOP_PLAN_TAG: &[u8] = b"DREGG/APPLICATION/LAUNCH-STOP-OPERATOR-PLAN/v2";
 const BEGIN_TAG: &[u8] = b"DREGG/APPLICATION/LIFECYCLE-BEGIN-INGRESS/v3";
-const OUTCOME_TAG: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v7";
+const OUTCOME_TAG: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v8";
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
@@ -196,7 +196,7 @@ pub(crate) fn submit_once(
     write_new(parent, "lifecycle-stop-begin-v3-active.json", &active_bytes)?;
     let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_BEGIN_PLAN, &fixed.selector.framed(&request)?)?;
     write_new(attempt_dir, "op66-frame.bin", &reply)?;
-    let plan = framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_PLAN, STOP_PLAN_TAG)?.to_vec();
+    let plan = framed_payload("launch begin plan", &reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_PLAN, STOP_PLAN_TAG)?.to_vec();
     let plan_path = write_new(attempt_dir, "stop-plan-v2.bin", &plan)?;
     let inspected = operator.tool(
         "inspect",
@@ -225,7 +225,7 @@ pub(crate) fn submit_once(
     write_new(attempt_dir, "op67-requested.bin", &pair)?;
     let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_BEGIN_ASSEMBLE, &pair)?;
     write_new(attempt_dir, "op67-frame.bin", &reply)?;
-    let ingress = framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_ASSEMBLE, BEGIN_TAG)?.to_vec();
+    let ingress = framed_payload("launch begin assemble", &reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_ASSEMBLE, BEGIN_TAG)?.to_vec();
     write_new(attempt_dir, "begin-v3.bin", &ingress)?;
     let base = view
         .get("basePlan")
@@ -243,7 +243,7 @@ pub(crate) fn submit_once(
     )?;
     let reply = operator.invoke(crate::host_operations::APPLICATION_LIFECYCLE_BEGIN_SUBMIT, &ingress)?;
     write_new(attempt_dir, "op22-frame.bin", &reply)?;
-    let outcome = framed_payload(&reply, crate::host_operations::APPLICATION_LIFECYCLE_BEGIN_SUBMIT, OUTCOME_TAG)?;
+    let outcome = framed_payload("lifecycle begin submit", &reply, crate::host_operations::APPLICATION_LIFECYCLE_BEGIN_SUBMIT, OUTCOME_TAG)?;
     let outcome_path = write_new(attempt_dir, "op22-outcome.bin", outcome)?;
     let result = operator.tool(
         "inspect",

@@ -26,8 +26,27 @@ operation's prefix produced, so a family patch is valid exactly at the pre-cell
 it was generated from, and replaying it against any other value at a written
 address is refused by `Patch.ValidFrom`.
 -/
-import Theory.CredentialAuthorityState
-import Theory.CredentialLineageAdmission
+module
+
+public import Theory.CredentialAuthorityState
+public import Theory.CredentialLineageAdmission
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Theory.CredentialAuthorityEffects
 

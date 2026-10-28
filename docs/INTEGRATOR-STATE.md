@@ -49,11 +49,61 @@ the newest built main that passed the gate; each is reported in one line, and in
 | 14 A4 | 26fcdd889 | host rc=1 at 21:55 (38 s): only Kernel.PlatformInstallReceiver (admitsObserved_decides, decide instances after c0b2d6ab1); fixed cacefcba8 |
 | 14 A5 | cacefcba8 | host rc=1 at 21:58 (41 s): only Kernel.NativeHostReplay:3823 (extendExact: exactCandidate sets headTag since e0916a53f, advance does not; #guard_msgs 4827/4829 follow). Fixed by the deputy, a8eb2c50e (post image = successor up to its head tag; FnSelectedHistoricalStep's admitted_record gains ∃ headTag; reds there go to the deputy) |
 | 14 A6 | a8eb2c50e | host rc=1 at 22:09 (294 s): only Host.Main:2048 (claimOf: the intent subject is a SubjectId; the rate table is keyed by Nat); fixed 43023f83f |
-| 14 A7 | 969929026 | host stage CLEAN at 22:22 (534 s); regen rc=2 (seed v5 owed), A7b by hand rc=1 (DurableCheckpointCodec.lean:370/387/412 unsolved goals), A7c (seed proofs version-generic; integ4/regen-A7c.pid) running since 22:32. Was: `integ4/cut14g.sh` (pid file cut14g.pid; logs host-A7.log, regen-A7.log); adds un-nhr-tag 753271d7 (validateLoaded_headTag), hermes 6634b3bd (Oracle through Hermes, smaller sandboxes; 4319cca50) and PR #17 oracle-grant-factory f3865eae8 (merge 969929026; GitHub marks it merged) |
+| 14 A7 | 969929026 | host stage CLEAN at 22:22 (534 s). Regen: A7 rc=2 (seed v5), A7b rc=1 (seed proofs), A7c rc=2 (ADMITTED-INPUT-CONTEXT trailing byte, bumped by hand), A7d rc=2 (DREGG/CLOCK: literal twin in ClockCell vs the registry constant), A7e rc=0 at 23:50 (938 s, peak 20.2 GB, 638 pins). Its diff is main da4a7645e (integ8/regen-A7e.patch); the tool changes are held on local branch integration/regen-tool 21077e063 for after the candidate |
+| full | da4a7645e | `integ4/main-full.sh da4a7645e` (pid file integ4/main-full.pid; build.pid, then gate.pid + enrol-resume.pid under integ8) started 23:53: host clean 00:24:47 (1670 s); consent rc=1 at 00:28 (PersistedCodecTagCensus: the platform install receiver's six identities unregistered). Fixed fbb66b069 |
+| A8 | fbb66b069 | host clean 01:02 (1842 s); regen rc=0 (644 pins, six additions, integ8/regen-A8.patch) → main 1e976af0f; consent rc=65 only because the host artifacts predate the new pins (companion check: PersistedCodecShapes.lean) |
+| full | 1e976af0f | `integ4/main-full.sh` started 01:07 (tests stage green 01:09; host stage from 01:09:25) (main-full.pid 3307367; build.pid, then gate.pid + enrol-resume.pid under integ8). Before relaunching any build, move integ8/{native-out,consent-out,artifacts,fixtures} aside (the host stage refuses existing outputs, rc=73) |
+| 1e976af0f result | — | host clean 01:36 (1635 s), consent clean 01:42 (330 s), rust rc=1 01:45: mini-private-compute (`--features demo`) 19× E0425 `custody::AnchorHandle` (un-pb-twins a078ee6b4 gated it `cfg(test)`; its users are `cfg(any(test, feature = "demo"))`). Fixed 0ce313917 |
+| full | 0ce313917 | CANDIDATE `/build/candidates/0ce31391790a7e2ed9f83eb1b8bb85d6556a0de3` 01:56 (host 231 s, consent 90 s, rust 61 s, pack 9 s; tests green; 23 binaries incl. mini-private-compute). enrol-resume PASS. Gate: tour 51/51 PASS; composed FAIL, a dregg-infra red (render-authorized-keys.sh called `mini enrollment-view` without the v2 Host pin; fixed by infra at dregg-infra 026d132). Composed rerun against that edge: `integ4/composed-rerun.sh TIP EDGE_REV` (pid file integ4/composed-rerun.pid; verdict line in integ8/COMMANDS.log; keep the run root short: a long one overflows the resident codec socket's SUN_LEN) |
+| 0ce31391 composed rerun | edge 026d132 | FAIL 02:22: world up, rooms/churn/documents pass; apps input refused at scripts/spk-platform/same-store-profile.py:29 "broker must belong to selected grains root" (the Python harness still allowed only the global /run socket or <grains>/broker.sock; spk-host has required <grains>/runtime-<store>/broker.sock since 5d23a2394). Fixed bea8928a5 (ws-continuity-fixture.broker_endpoint, the one spelling). The composed run takes its scripts from the candidate's source.tar, so the fix is proven only by the next candidate's gate |
+| full | 1af366fe9 | `integ4/main-full.sh` started 02:25 (main-full.pid 3433976; the launcher subshell 3433959 is its parent; build.pid, then gate.pid + enrol-resume.pid under integ8); tests stage green 02:26; host stage from 02:26:38. Carries the regen tool, rust-check, effects-revival, hermes-b b740e6f0, grain-bare-prepare 746b182d, abuse-caps, snipe-unconfigured, red-jserve-envelope ffe1623f, rows-ledger 0a05ab6b and the broker fix |
+| 1af366fe9 result | — | host clean 02:59 (1995 s); consent rc=1 03:04: census, 37 structural moves plus DREGG/CLOCK/v5 owner-less (430e3fe96's twin deletion; the census counted owners by literal only, nine more pins were already fingerprint 7). Fixed f8c17f0f5 (a registry-constant reference is ownership) |
+| bd37686c0 | — | follow-on host stage rc=1 in 3 s: registry check, literal op 68 at native/spk-host/src/lifecycle_v3_native.rs:728 (7b3564733's test). Fixed f1ecba539 |
+| A9 | f8c17f0f5 | host clean 03:14 (397 s); regen rc=2 03:18: the bare prefixes DREGG/NATIVE-HOST/LOG-TAG and DREGG/OBJECTIVE-BEND/ADMITTED-INPUT-CONTEXT moved in the same round their children were bumped (the tool judged them before the build that births the new name; LOG-TAG was also not declared `prefix_`). Fixed a62cab510 (deferred to the next round; selftest case) |
+| A10 | a62cab510 | host clean 03:54 (1984 s); regen rc=1 04:01: Compiler/DurableCheckpointCodec.lean:530 `native_decide` false, seedEpoch_spentMap_refused spelled "this Host DREGG/NATIVE-HOST/LOG-TAG/v4" beside logTagLabel and the regen bumped the tag to v5. Fixed on main a5f0e8c89 (the theorems interpolate logTagLabel and StoreEpoch.current.accumulator). Partial diff integ8/regen-A10.patch |
+| A11 | c99af001d | host clean 04:31 (1663 s); regen rc=0 05:27 (3328 s, two rounds, 644 pins; SEAT/TX, SEAT/TX/PUBLISH, SYSTEM to v5); consent rc=65 only the companion check on host artifacts older than the pins. Diff is main 2d8b7ed54 |
+| full | 2d8b7ed54 | `integ4/main-full.sh` started 05:29 (main-full.pid 3664533; build.pid, then gate.pid + enrol-resume.pid under integ8). Carries everything in the A11 next-steps list below |
+| housekeeping | — | 05:3x: the integ8 `*.prev-*` output dirs from tonight's reruns deleted (listed with sizes in COMMANDS.log, ~2.3 GB); the newest of each kind kept |
+| 2d8b7ed54 gate | — | CANDIDATE /build/candidates/2d8b7ed544100acfaeb9ff2f9b597c31b8cb81e6 05:48 (host 632 s, consent 128 s, rust 141 s); enrol-resume PASS; tour 51/51 PASS; composed FAIL (first run without inputs; rerun edge 026d132 06:07: documents:protected "owner Host differs", scripts/protected-document-same-store.py:46: bindings named /build/candidates/<sha>, workspaces the world-installed copy, same bytes). Fixed 7027e0ace (composed-inputs uses the installed manifest after a digest check) |
+| full | 7027e0ace | started 06:10 after stopping 296e4c1c0 by main-full.pid/build.pid in its tests stage. Carries un-ns-owner 125927331 + 29d3152d3 (f0afc5ae7), un-stream-continuity a971a649d and the fix. No Lean since 2d8b7ed54: the next candidate keeps the 2d8b7ed54 genesis |
+| 7027e0ace progress | — | tests green 06:12, host 06:12-06:18 (no Lean change), consent from 06:18; on READY its chain runs gate + enrol-resume (proves the composed fix) |
+| 7027e0ace | — | CANDIDATE /build/candidates/7027e0ace4bf5763dd1d78b47380dfe4ceb15b57 06:21; enrol-resume PASS; gate (gate.pid, gate-7027e0ac/{tour,composed}.log) running from 06:22. 2d8b7ed54's verdict sent to the coordinator 06:2x |
+| 7027e0ace gate | — | FAIL 06:39: tour 51/51 PASS, enrol-resume PASS; composed rooms/churn/documents pass (the manifest fix holds), apps stopped "[Errno 2] ... '<run>/inputs/evidence'" (composed-inputs.sh named the selection's evidence dir, never made it; same-store-inputs.py:122 protected_parent lstat()s it). Fixed 129c04e38 |
+| 76758dba6 | — | CANDIDATE /build/candidates/76758dba687cde9447bc45d77931bb7d57527e56 06:41 (host 741 s, consent 346 s; no pin move, keeps the 2d8b7ed54 genesis; un-ns-owner 507d6ce78). Gate: gate-cut3 (candidate harness; its composed will red on the evidence dir) plus `integ4/composed-harness.sh TIP 455f59d57` (pid file integ4/composed-harness.pid; main's harness; writes gate-76758dba/jdeploy3-gate-v2-h455f59d57.json with harnessCommit). Named to the deputy, L4b and infra; verdict pending |
+| next | — | `integ4/next-main.sh` (pid file integ4/next-main.pid) waits for the 76758dba6 chain (main-full.pid), moves outputs aside, launches main-full.sh at main's tip then (it carries thin-birth eda65ced8, so a Lean build; pins may move: run the regen if the census reds). main-full.sh now gates with gate-cut4.sh |
+| 76758dba6 gate | — | VOID: gate-cut3's tour died (tour-run2.sh/composed-full2.sh edited at 06:44 while that gate read them; never edit a script a running job uses: write a new name). composed with harness 455f59d57 FAIL at apps: refs/jd3-r0.json absent (same-store-inputs.py:239; the rooms phase makes "<op>-room"); fixed da4da558e. Rerun: `LANE=/build/lanes/integ8 TOUR_SUFFIX=-g2 HARNESS=da4da558e NO_NIGHTLY=1 gate-cut4.sh 76758dba…` (pid file integ4/gate-76758dba-g2.pid; results integ8/gate-76758dba-g2/) |
+| full | e89fe7b8b | `main-full.sh` (main-full.pid) from next-main.sh at 06:58; tests green 07:03; host stage from 07:03 (thin-birth Lean; run the regen if the census reds). Main since: un-journey-repeat-suffix 1adf59543, the room fix da4da558e, web-parity 0d7af4da9 |
+| e89fe7b8b progress | — | host clean 07:15:41 (725 s), consent from 07:15:41; main since: un-bend-seed 98409f5ff (deputy; seed.sh makes lobby-tally first). 07:18 housekeeping: 16 older integ8 *.prev-* dirs removed (listed with sizes in COMMANDS.log), newest of each kind kept |
+| e89fe7b8b | — | CANDIDATE /build/candidates/e89fe7b8ba8c477d1538ed6ee1f0e7aeac70c97f 07:22 (consent 209 s, rust 212 s; no pin move, keeps the 2d8b7ed54 genesis; carries thin-birth, 25cfb86bd, 507d6ce78, a8376ce8f). Named to the coordinator, deputy, L4b, infra. Gate (gate-cut4, harness 5da1711bc; integ8/gate.pid) running beside gate-76758dba-g2. Owed on it: `journey.sh --only JP2` (thin birth) |
+| next | — | `integ4/next-main2.sh` (pid file integ4/next-main2.pid) waits for the e89fe7b8b chain (main-full.pid), moves outputs aside, launches main-full2.sh (gate-cut5, private runner) at main tip then (carries un-bend-seed, web-parity) |
+
+| aae3e2e37 | — | CANDIDATE /build/candidates/aae3e2e372b045dd43493183144db08212d51659 07:49 (from next-main2.sh; host 392 s, consent 117 s, rust 68 s; keeps the 2d8b7ed54 genesis). Gate gate-cut5, harness 3deedcb6f (integ8/gate.pid), no row-requires: the five 588855a71 JWF rows may red, expected. Named to coordinator, deputy, L4b, infra 08:0x |
+| e89fe7b8b composed iteration | — | coordinator 10-28: iterate composed against e89fe7b8b's binaries with main's harness, fix each harness red in place, rerun only the failing phase, until rooms/churn/documents/apps/connector/residents/restart pass; then record the verdict as candidate + final harness sha; a product red is named, not fixed. Driver `integ4/citer.sh` (pid file integ4/citer.pid; standing world /build/ci-e89, log/citer.log, composed/gate-<n>.json; `citer.sh gate RUN HARNESS` resumes from composed's retained ledger) |
+| e89fe7b8b composed iteration result | — | rooms/churn/documents pass on /build/ci-e89; apps:sheet harness reds fixed on main: 385ce0a1a (management seed alias), 81d0b3f44 (profile in evidence/profile), d1dc4153e (spkHost custody = broker.rs pinned_root_executable), 4b37017fd (broker runs the manifest's spkHost), 5874ceee6 (scripts/spk-platform/workroom-ready.sh: parent attach+reserve, tool attach), db3f58d94 (factory capabilities from refs/factory.json). /build/ci-e89 is down (its residents 4089401/02/08/09/18 lacked PID files: named to the coordinator). Fresh run `integ4/citer-b.sh` (pid file citer-b.pid) on /build/ci-e89b port 22610, harness db3f58d94. Resuming a citer gate after an input fix: a failed step that recorded no ledger step may have its source pins cleared (keep state.json.before-*); an adapter source change needs `same-store-app.py adopt-adapter INPUT REASON`; a world whose attach already admitted ops cannot take a changed grant: bring up a fresh world |
+| full | 7e8a09b7e | 08:24 on the coordinator's go: `integ4/main-full2.sh` (main-full.pid; build.pid, then gate.pid + enrol-resume.pid under integ8; gates with gate-cut6.sh). Carries bf5ead3fa and 11 Lean files since aae3e2e37 (Kernel/ResourceTransaction among them): run the regen if the census reds. /build had 60 GB free; hard stop for new builds below 50 GB. On READY name it to the coordinator, the deputy, L4b and infra (ae95a4eac63b0715e). citer-b (citer-b.pid) keeps running on /build/ci-e89b. Disk table sent; deletion waits for ember |
+| citer-b result | — | 08:41, harness db3f58d94, world /build/ci-e89b: rooms/churn/documents pass; apps:sheet stopped at `spk-host grain install` ("grain refused: No such file or directory"). The scratch world (dregg-infra jworld-scratch.sh 026d132) runs one public `mini serve`; NODE/operator/mini.sock (serve-operator, production's store-entry.sh) never exists. Infra's red; named to the coordinator. Harness now refuses it by name: ef71955a2. ci-e89b taken down by `citer.sh down`; 11 resident/broker processes survived without PID files (4151500, 4151510, 4155671, 4155704 families; broker 4151838), named to the coordinator, not stopped |
+| 7e8a09b7e result | — | host stage OOM-killed 08:57 (1735 s; Kernel.PayEnrolReceiver 882 s at 15.5 GB, rc 137; Kernel.PayObservationReceiver 15.6 GB; box 29/30 GB under the old 28G cap). The seat table already weights both at 19.4 GB, so the table was not low; the cap was. No candidate |
+| citer-b cause | — | apps:sheet "grain refused: No such file or directory": grain-host.json `.miniOperatorSocket` (node/operator/mini.sock) absent in jworld-scratch 026d132; infra's dregg-infra 7d2c765 serves it. gate-cut6.sh now defaults EDGE_REV=7d2c765 (copy at integ4/dregg-infra-7d2c765); citer2.sh = citer.sh on 7d2c765 |
+| full | 7280f9db8 | 09:0x `integ4/main-full2.sh` (main-full.pid) with SWARM_MEM_MAX=24G; = 7e8a09b7e + un-deputy 9994a748e + un-spk-ioctx 5cb33bbdf (spk-host io errors name operation and path). Tidy-up `integ4/tidy-10-28.sh` (pid file tidy-10-28.pid) ran beside it, each item logged with its size in COMMANDS.log; ci-e89b kept |
+| 7280f9db8 result | — | host stage OOM-killed 09:09:25 (502 s) at the swarm.slice level (scope peak 14.8G; slice oom_kill 15; ~3.5G of the slice is reparented tmpfs of dead scopes: /tmp/japps.*, /run/user/1000/jwf-m-*). Relaunched `main-full2.sh` at 0032ea0f0 with SWARM_MEM_MAX=18G (integration-build.sh now honours the env, default 24G); tests green 09:14:39, host from 09:14:39 (main-full.pid = launcher subshell 212608) |
+| 0032ea0f0 result | — | host stage rc=1 09:17 (163 s at 18G): everything compiled except Kernel.PayEnrolReceiver, refused by name as over the cap (table weight 19.3 GB). Coordinator cleared ~5 GB of stale tmpfs (/tmp/japps.*, /run/user/1000/jwf-m-*), the un-ns-owner w1/w2 worlds and 13 leaked fake-body.py servers. Relaunched `main-full2.sh` at f1b7add21 with SWARM_MEM_MAX=22G 09:19 (main-full.pid 228063, build.pid 228077); the host stage compiles only the Pay modules |
+| leak fix | de3b67abe | dev_flow's Procs kills each server's process group and removes scratch; JWF removes its jwf-m-* member dir on every exit (JWF_KEEP_MEMBER=1 keeps it) |
+| full | f1b7add21 | 09:14 relaunch of main-full2.sh at 22G (main-full.pid 228063; build.pid 228077); tests green 09:19; host stage from 09:19:13 (must compile Kernel.PayEnrolReceiver) |
+| f1b7add21 host | — | host stage CLEAN 09:32:38 (805 s at 22G; Kernel.PayEnrolReceiver compiled); consent from 09:32:38 |
+| main since f1b7add21 | b7e16c951 | app-market-b8 3b9280829 (Mercurial in FEATURED, 13→14; `apps_search_shows_the_featured_set_first` passes on the Mac) |
+| main since f1b7add21 | c3dcaf00f | app-market-b3 63ff068c2 (EtherDraw, Scrumblr, SwaggerEditor in FEATURED, 17; filtered apps_search 2/2 on the Mac) |
+| f1b7add21 result | — | consent rc=1 09:37 (270 s), census only (PersistedCodecTagCensus.lean:322): structure moved under DREGG/APPLICATION/DISPATCH-OBSERVATION/v6 (ApplicationDispatchAdmission.observationContext) and DREGG/GRAIN-RESOURCE-BIRTH/JOINT/v5 (GrainResourceBirthTransaction.plan), from Lean already in iter-speed's frozen 694415d5d. No candidate; default: no regen inside the conversion freeze, the conversion landing re-pins both with the epoch move. Asked the coordinator (a) wait vs (b) regen now |
+| main since f1b7add21 | 1d5902832 | rows-ledger c6cc9b4a3 and 45fc4d30a (ROWS-OWED §0 app tables); umbrellas stage 842d8fb75 |
+| umbrellas stage | 842d8fb75 | coordinator 10-28: no stage elaborated Fixtures/ObjectiveProofs/CensusChecks, so NativeDocWriteFixture sat red unseen. `lane-build.sh umbrellas` (after host, seated, `--umbrella --umbrella-only`, targets from `umbrella-targets --unshipped`) reds the candidate; integration-build.sh runs host, consent, umbrellas, rust (backup .bak-umbrellas). One-off run on integ8 at f1b7add21: `integ4/umbrellas-now.sh` (pid file integ4/umbrellas-now.pid; builder copy src/scripts/bnh-umbrella-oneoff.sh, untracked; log integ8/logs/umbrellas.log) started 09:5x |
+| f1b7add21 decision | — | no regen inside the conversion freeze: the conversion landing re-pins DISPATCH-OBSERVATION/v6 and GRAIN-RESOURCE-BIRTH/JOINT/v5 with the epoch move; the next build is the conversion candidate. Recorded fixtures (NativeDocWriteFixture, NativeAcceptedFixture) are regenerated once, from the first READY candidate carrying the conversion AND lean-audit-c + M2 (L1e: M2 moves the turn digest and the v3 frames, so a conversion-only fixture goes stale again); until then the umbrellas stage is expected red on Fixtures only |
+| conversion | b26630168 | 10:1x main fast-forwarded to lane/iter-speed b26630168 (module conversion, landing 186dd02e8, pins 73ab0797... byte-identical hbox/dregg-ref; StoreEpoch moves: FRESH GENESIS). Umbrellas one-off at f1b7add21 stopped by its PID tree (integ8/stop-umbrellas.list). `main-full2.sh b26630168` at SWARM_MEM_MAX=22G started 10:13 (main-full.pid 293722, build.pid 293739; gate-cut6 + enrol-resume after READY). Main since: thin-birth fb0acbfbe (6fd993d43, merged onto the converted main), app-market-b5 84938f78c + 0aff6334e (3a943f85e), hermes-b 20a7abafc (6b5528b20; install-hermes preflight as root). The build after this candidate carries them; name it to L4b |
+Gate harness rule (coordinator, 10-28): the tour and composed harness (scripts/, native/resource-client/*.sh|*.py, journey.d/) come from main at gate time over the candidate's source.tar and binaries (`integ4/harness-overlay.sh DEST SHA`; `HARNESS=<sha>` in tour-run2.sh and composed-full2.sh; gate-cut4.sh resolves main's tip, adds `harnessCommit` to the gate file after gate-from-runs.py, which binds only the candidate's SHA256SUMS). Infra was asked to copy harnessCommit in gate-from-runs.py itself (optional).
+Runner rule (coordinator, 10-28): launch builds with `integ4/main-full2.sh`, which gates with `gate-cut5.sh`: it copies tour-run2.sh, composed-full2.sh and harness-overlay.sh into `$G/runner` at gate start, runs only from that copy and writes `runnerSha256sums` beside `harnessCommit` in the gate file. Never edit a script a running job reads; change it under a new name.
+Merge-subject slip: 8e7940fea and 1a3240483 name the un-deputy sha in their subjects; their parents are un-story-install 733dd948f and red-authority-zero-field 108083a35. 733dd948f was a red-first test (shared_names.rs:1144), cleared by a8376ce8f (d2b639068).
 
 A3's tree (main 8103b29a4) holds everything since aa9366f8: pd-host-rate, oracle-lifetime-grant, oracle-grant-factory,
 lean-audit-c, un-effects 2acd8acf (effect Plan; its codec pins re-emit with this regen), un-pb-twins 134535c2,
-demo-seed, app-recipes (rows validator aeee8349c191e8506 runs them on the candidate; Wekan/WordPress/IPython need
+demo-seed, app-recipes (the rows validator runs them on the candidate; Wekan/WordPress/IPython need
 MINI_IMPORT_PROFILE=market-large-v1), snipe-rate-row (its report at docs/evidence/snipe-rate-row-2026-10-27.md) and
 un-web-front 0da04999 (front-page document; infra's step 9c depends on it). Also since: app-market db312c6f (30e24095f; b2.sh resolved per function against app-recipes, L13 agreed). Correction to that commit message: ExpenseOwl's positive-amount POST is reasoned from upstream, not row-proven (B2's run left GET /expenses empty); unproven until the rows validator runs it.
 After A3's tip (Rust only, in the full build): hermes 68394077 (6f4251c21; contained tools, room fields 1014/1015,
@@ -63,18 +113,24 @@ and hermes ea8a991e (e2374f120, the await bridge; any full build from main >= d3
 the coordinator at once; L4b runs J14_TOOLS and J14_AWAIT as one run against it (3315a908 refuses the v8 genesis). Unit
 mini-grain-controller@9870001 is free (it was L4's orphan). Also after A3's tip: e7958d3b9 (NativeHost.birthRejection/birthReason arms for
 f2010f574's platformUnavailable/platformStale; A3 is expected to red at Kernel.NativeHost and its dependents,
-elaboration of the fix pending NativeHostReplay.olean). L1c (lean-audit-c a281e53b8, e59846239; deletes those two
+elaboration of the fix pending NativeHostReplay.olean). L1d (formerly L1c; lean-audit-c a281e53b8, e59846239; deletes those two
 constructors with pricedAt, drops e7958d3b9's arms on merge; unbuilt, not to merge until its warm-tree build
 elaborates) seeds its dregg-ref tree from the integ8 copy; tell it when the copy lands.
 
-Next steps: when A7 ends, carry on as planned: commit regen.patch onto main (from the Mac: scp the patch, `git apply`, commit, push); start the full
-build at that sha in integ8 (a copy of main-next.sh with the tip fixed; seats 4 on a clear slice; check swarm.slice
-for co-tenants first); if the census still reds (oracle fixtures), rerun the regen there once more. When a host
-stage ends cleanly (the rerun's, if it does), name that clean host-stage tree, `/build/lanes/integ8/src`, to infra
-(aed5ecf506cf840af) and the coordinator so dregg-ref gets its warm tree. Report each candidate in one line; the coordinator spawns a rows validator for it (featured-qualify,
-batch tables, Hermes/tier, japps co-edit, codex's Oracle v7 world).
+Next steps: the full build at 2d8b7ed54 (it carries 25cfb86bd, custody-b's
+delegated consent, f79044d79 and c11b235ee (grain-runtime NO_RECORD refusals; a0d58aaef), hermes-b 5422506f, custody-b 97aab6054 (55e8a05d9; the profiled grain bootstrap twin deleted), un-tale-welcome bc6c837ba (docs), the world/ pack 1b870fbdd, red-jli-refname 81349cec2 (JLI reruns on it), un-tale-welcome 19bb968e0 (f5602a8cd; the door joins members to door.json's story), and since A11 started: un-shared-names 179494a88, app-market-b3 6f2bfd3bc, app-market-b7 d8ee43cdb (spk-rpc empty ViewInfo), un-deputy, audit-platform (main 2a15c1839), the six red-* snipers (main 7265c5fc6), app-market-b5 e1458689a, app-market-b8 bec955336, un-deputy bc0267a8e (main 3e045b32d), app-market-w11 d5b8b7ac6 (main 1b2764235), un-deputy 7a0aca783 and red-jdisclose-scalar cd79cdaa3 (main 0b1f42daa)). un-shared-names landed at e4acc9df0 (main 18f44f8db; 9eeda6092 never merged). The birth-acceptance twin is collapsed (78fe8e63d). The regen tool's literal-survivor check after A10 is on main (9e3d67e43). On READY the chain runs gate + enrol-resume;
+report "candidate <sha> at <path>: gate <verdict>, reds by name" to the coordinator (who starts a fresh rows
+validator from docs/ROWS-OWED.md section 0a with it: the old one, aeee8349c191e8506, stopped at its ceiling; never send
+it a candidate), and the sha + path to infra (ae95a4eac63b0715e; reruns the seed in the demo-dry container on the first candidate carrying 25cfb86bd, f73893fce, 52c0eae22 and 19bb968e0), L4b (ad81db6d6fd317d3a) and the deputy
+(a308118209b4a48ea, owns the app market; wants the first candidate carrying 25cfb86bd). Pending lands:
+lean-audit-c is green at 82c17c448 (L1e, tip de1375846 doc-only) but lands after the module conversion: order agreed
+between L1e and iter-speed (a0fd127abfb9aac75): (1) this candidate reported; (2) iter-speed re-derives the conversion on
+main's tip with land.py and sends its sha (one planned StoreEpoch move; the next candidate needs a fresh genesis);
+(3) L1e merges the conversion into lean-audit-c and lean-audit-c-m2 (M2 adds World.Turn.credit and the v3 frames) and
+sends a green sha; all of it rides one codec regen. The uncommitted `ownerless` census check merges 3-way onto
+iter-speed's PersistedCodecTagCensus.lean, never overwriting it. lane/thin-birth 1e0f741d3 LANDED on main eda65ced8 (after the 7027e0ace report, before the conversion; so land.py converts its Lean (Kernel/NativeThinBirth, NativeThinConsent, Host/ThinBirthConsent, ClientConsentCore, SourceAgreementJson, HostOperations) and it rides the one regen; told a0fd127abfb9aac75 and L1e. On the first built main carrying it, run `journey.sh --only JP2` (row 19 thin birth succeeds; the swapped-plan row refused birthSourceChanged). After it lands, delete dregg-ref:/build/lanes/thin-birth-scratch/ and /build/lanes/thin-birth (finished session lane), listed in COMMANDS.log first.
 
-Red routing: lean-audit-c reds go to L1c (acf52d65283ef4ebc) directly; Hermes to L4b (ad81db6d6fd317d3a); L13 a1618140607ac439b; un-stream-continuity reds
+Infra is a298031c78e86d651 (10-28; older mentions of ae95a4eac63b0715e/aed5ecf506cf840af in the table are history). Red routing: lean-audit-c and lean-audit-c-m2 are L1e's (a58f907aef8926430; L1d ad6d6eff243f32816 has stopped): its green sha comes from and its reds go to L1e directly; when the module conversion lands on main, tell L1e (it merges the conversion into lean-audit-c and sends a green sha) and L1d's old address; Hermes to L4b (ad81db6d6fd317d3a); L13 a1618140607ac439b; un-stream-continuity reds
 (ApplicationStreamContinuityFresh pole proofs, NativeHostReplay.lean:3816) to the deputy a308118209b4a48ea; all
 others through the coordinator. Expected reds, not new: the eight hand-rolled genesis writers (acceptance.sh,
 application-acceptance.sh, authority-acceptance.sh, selected-release-acceptance.sh, grain-runtime/acceptance.sh,
@@ -86,6 +142,50 @@ itself: box only). Lanes may build and run again (ember, baef327e4), but only in
 dregg-ref or hbox, never a fresh tree and never a search from / or ~. The integrator still merges, builds and
 gates main and fixes reds itself.
 
+## Rulings (do not re-ask)
+
+- thin-birth: landed after the conversion at fb0acbfbe (main 6fd993d43); its lane-check on dregg-ref was still running at landing, reds come back to ad0906325ab57d1c3. lane/thin-birth Phase-3 work lands only on a sha its owner sends after the auditor accepts.
+- Held for the conversion window (touches .lean, Effects.lean imports it): lane/effects-revival 6b5464201 (owner a26c13b24522dee35 after the a83b7949ba401cca5 hand-off; it also owes a regenerated Fixtures/NativeDocWriteFixture.lean (stale since 3315a908), regenerated from the conversion candidate after READY and landed with its Effects sha; Engine, Statements, EngineProofs). After the conversion the lane merges main, converts its Effects files and sends one sha; land that, through a box build.
+- Held for the build after the conversion candidate (one .lean file): lane/app-market-b5 84938f78c
+  (Kernel/ApplicationSpkPackageIdentity.lean, safeApiTail admits a final segment with no trailing slash; OwnTracks
+  re-qualifies on the candidate carrying it; deputy a308118209b4a48ea). Land after the conversion, re-converted if
+  its header conflicts.
+- Rehearsal (ember, 10-28): the conversion candidate ships from its gate (tour + composed on EDGE_REV 7d2c765);
+  build at 22G; candidate line and verdict to the coordinator and infra a298031c78e86d651 (infra handed off from ae95a4eac63b0715e, 10-28). un-ingest-stale-stage
+  1f9a757de is in (256a98cbd).
+- Not held, nothing coming: lane/un-ns-owner 587c5acbd is the superseded work-in-progress branch; its clean
+  form lane/un-ns-owner-clean (3a8109059, box-elaborated, plus e80f56422 and cf3c5d433) is on main (coordinator 10-28).
+- Module-conversion window: CLOSED 10-28 10:1x (b26630168 on main); .lean lands again. Held lanes told: L1e, thin-birth, effects (a26c13b24522dee35).
+- Row requirements: a row asserting behaviour newer than the oldest candidate a harness may judge gets a line in scripts/gates/row-requires.tsv in the same commit (5 JWF rows → 588855a71, 9b36d6d37).
+- Pay weights stay at 19.3 GB in the seat table (coordinator 10-28: never lower a weight to a kill-time peak); a
+  host stage that must compile a Pay module runs at SWARM_MEM_MAX=22G on a slice cleared of leftovers.
+- Memory on dregg-build (coordinator 10-28): every build runs with SWARM_MEM_MAX=24G (exported in
+  /build/lanes/integration-build.sh; swarm-build's default and swarm.slice MemoryMax are 24G too, infra 08:58), so
+  the OS and sshd keep ~6 GB. Kernel.PayEnrolReceiver and PayObservationReceiver (15.5-19.4 GB) take all four seats;
+  iter-speed (a0fd127abfb9aac75) splits them after the codec seam.
+- Disk (ember, 10-28): plenty free; the 60 GB pause line is dropped. The only rule is the hard stop: if /build on
+  dregg-build falls under 50 GB free, pause new builds and tell the coordinator. Never delete others' files.
+- Tidy-up (ember approved 10-28): delete exactly the "can go" rows of the disk table, each logged with its size in
+  integ8/COMMANDS.log first, after checking no live process uses it: integ4's src, test-target, rust-target and two
+  artifacts.prev (keep its scripts, logs, PID files; citer-b's PID file intact); /build/lanes/integration;
+  integ-ref-target, integ-ref-fence, integ-ref-hermes, integ4r, integ-9f14, integ-drivers; /build/ci-e89 (ci-e89b
+  stays until citer-b is gone); /build/er-*; candidates 0ce31391, 7027e0ace, 3315a908, 23861533, 203ed84c, a94bed71,
+  a972c742, 6236826f, 45f45d15 and its -reference-dregg-ref copy. Keep integ8, candidates 2d8b7ed54, 76758dba6,
+  e89fe7b8b, aae3e2e37, and red-jdisclose-scalar.
+- Context: write the continuation (this file, rewritten whole) by about 580k tokens; distill or hand off at about 600k (COORDINATION 3a6aafdca).
+- Intent.credit (L1d item 5, ops 244-247) persists in IntentRecord: durable log frame v3 and
+  `DREGG.DURABLE.IMAGE` v3, shipped with the module conversion's re-genesis so the StoreEpoch moves once. Pending
+  the auditor's acceptance; L1d (ad6d6eff243f32816) coordinates the order with the integrator and the iter-speed
+  successor (a0fd127abfb9aac75).
+- closure.pid on dregg-ref (empty for jobs started before lanes joined group `closure`) is infra's
+  (a298031c78e86d651), not the integrator's.
+- Transitive bumps through registry constants: closed, no. Nesting already propagates through the regen's round
+  loop; both stops were spelling forms, now handled.
+- Owner-less pins: the census refuses a registered DREGG identity no definition spells or names, landed once
+  A9/A10's pins show none left (the Mac worktree's uncommitted `ownerless` check; through a box build only).
+- The module conversion's census change (option A, structure-not-name for compiler auxiliaries) is the one planned
+  re-pin; it lands from a0fd127abfb9aac75 after the next candidate is reported.
+
 ## Cut 9's red, and its cause
 
 `lane-build.sh consent` failed at `Compiler/PersistedCodecTagCensus.lean:300` ("registry-only
@@ -96,6 +196,8 @@ shared with other trees (link count 8-11), and Lake rewrites a trace in place. F
 only `.lake/packages`; Lake's artifact cache restores the build dir as fresh inodes.
 
 ## Named reds outstanding
+
+- Uncommitted in the Mac worktree: Compiler/PersistedCodecTagCensus.lean `ownerless` (the census refuses a registered DREGG identity no definition spells or names). Unelaborated; land it only through a box build after the candidate.
 
 - None open on main beyond A3's outcome (un-pb-twins landed at 134535c2 via 36ce6bd3d).
 - A lane's "proved" is a claim until the integrator's build elaborates it: lean-audit-c's three proofs never
@@ -109,3 +211,11 @@ only `.lake/packages`; Lake's artifact cache restores the build dir as fresh ino
 - install-user-world's companion pin is recomputed from the merged controller-world.py whenever both sides moved.
 - Named-file commits, `git commit -F` from `scratchpad/integration/<unique>.txt`; never git stash.
 - Filtered tests only (the tests stage of integration-build.sh lists the per-lane filters).
+
+- Umbrellas stage (coordinator 10-28): non-fatal for the conversion candidate (b26630168) ONLY. A red writes
+  integ8/UMBRELLAS-RED and is named in the candidate report (integration-build.sh; backup .bak-umbrella-nonfatal).
+  It becomes BLOCKING again (restore exit 10 for umbrellas) in the first build after NativeDocWriteFixture and
+  NativeAcceptedFixture are regenerated from the conversion(+M2) candidate by the effects lane (a26c13b24522dee35)
+  and L1e (a58f907aef8926430).
+- Mac shared target: four codex astra workers build on /Users/ember/dev/minidregg-lanes/target-integ (and hbox);
+  if their cargo runs contend with the integrator's Mac checks, tell the coordinator.

@@ -1,0 +1,90 @@
+# Batch B5 (files and media) writes. Reasoned from each package's OWN source, unpacked from the fetched
+# .spk (no live probe; the no-probing rule). Sources are named per function. Packages: FileDrop 1.0.6
+# d13f6723, Kiwix 0.1.0 eace6915, Groove Basin 1.5.1 209d45cd, Tube 1.1.13 cbba85a4.
+b5_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# FileDrop 1.0.6 (zombiezen/filedrop: a Go server, -datadir=/filedrop, with the Angular client in
+# filedrop/client/bundle.js). Routes read from that bundle's filedrop.Files service: GET /file/ answers
+# {"entries":[{"name":...}]}, PUT /file/<name> uploads the raw body (Content-Type application/octet-stream)
+# and needs the `write` permission (the owner's role has it, bridge-config permissions read/write/delete),
+# GET /file/<name> downloads. Role 0 is "viewer" (read only): the run answered 403 "Insufficient Sandstorm
+# permissions", so the table gives the owner role 1, "editor" (b5.tsv). The write is one PUT read back twice: the listing and the bytes.
+write_FileDrop() {
+  local put; put=$(req PUT /file/featured.txt -H 'Content-Type: application/octet-stream' --data-binary 'written by a resident')
+  [[ $put =~ ^20 ]] || { echo "0 PUT /file/featured.txt $put: $(head -c 120 "$body" | tr -d '\n')"; return; }
+  local list; list=$(req GET /file/)
+  [[ $list == 200 ]] && jq -e '.entries | map(.name) | index("featured.txt")' "$body" >/dev/null || { echo "0 GET /file/ $list does not list featured.txt"; return; }
+  local got; got=$(req GET /file/featured.txt)
+  [[ $got == 200 ]] && grep -q 'written by a resident' "$body" && echo "1 PUT /file/featured.txt $put; GET /file/ $list lists it; GET /file/featured.txt $got"
+}
+
+# Kiwix 0.1.0 (orblivion/KiwixSandstorm: nginx on 8000 in front of kiwix-serve on 8080 and a Flask/uwsgi
+# uploader). service-config/nginx.conf sends / and /upload* to the uploader and everything else to
+# kiwix-serve; launcher.sh and kiwix-run/kiwix-delayed.sh start kiwix-serve only once /var/data/kiwix.zim
+# exists. zim_uploader/uploader/app.py: POST /upload takes multipart `file` (a name ending .zim) plus the
+# form field `contentRange` ("bytes 0-N/TOTAL", read unguarded), needs `uploader` in
+# X-Sandstorm-Permissions, and on the last chunk renames the upload to kiwix.zim. Kiwix has no write of
+# its own (it is a reader), so the write is that upload and the read is the served article:
+# kiwix-serve names the book "kiwix", so GET /kiwix/A/Hello. b5-mkzim.py builds the smallest valid ZIM
+# (one article, 650 bytes). LIMIT: the page's own uploader chunks at 10 MiB (main.js maxChunkSize), over
+# the 8 MiB request bound, so real ZIMs through the page need the above-8-MiB body (APP-MARKET 2b);
+# this recipe sends the one small chunk. nginx's client_max_body_size is 50M and the Flask limit 15 MiB.
+write_Kiwix() {
+  local zim="$out/bodies/featured.zim" n
+  n=$(python3 -I "$b5_here/b5-mkzim.py" "$zim" 'served by a resident') || { echo "0 b5-mkzim.py failed"; return; }
+  local up; up=$(req POST /upload -F "contentRange=bytes 0-$((n - 1))/$n" -F "file=@$zim;filename=featured.zim;type=application/octet-stream")
+  [[ $up == 200 ]] && ! grep -q '"error"' "$body" || { echo "0 POST /upload $up: $(head -c 160 "$body" | tr -d '\n')"; return; }
+  local i got=000
+  for i in $(seq 1 40); do
+    got=$(req GET /kiwix/A/Hello)
+    [[ $got == 200 ]] && grep -q 'served by a resident' "$body" && { echo "1 POST /upload $up (ZIM $n bytes); kiwix-serve GET /kiwix/A/Hello $got (poll $i)"; return; }
+    sleep 3
+  done
+  echo "0 upload $up accepted but GET /kiwix/A/Hello stayed $got (kiwix-serve did not serve the ZIM)"
+}
+
+# Groove Basin 2016.06.25 (dwrensha/groovebasin as packaged: lib/server.js, lib/player_server.js,
+# lib/web_socket_api_client.js, config.json, start.sh). HTTP authorisation is the `token` COOKIE of a
+# live websocket client (createHasPermMiddleware), and the websocket is plain JSON text frames
+# {name,args} on any path. So the write is b5-gb.py: connect, read `token`, subscribe `library`, POST
+# /upload (multipart, the `size` field before the audio part, `add` permission from the owner's role) with
+# the token cookie, then read the track back from the `library` subscription and its bytes from
+# GET /library/<file>. Role 0 is "controller" (no `add`): the run answered 403 "not authorized", so the
+# table gives the owner role 2, "administrator" (b5.tsv). The upload is a 0.5 s WAV with RIFF INFO tags (about 8 KB), under the 8 MiB bound.
+# LIMITS: real albums are over 8 MiB per request (APP-MARKET 2b); GET /stream.mp3 is an endless
+# response the 8 MiB response bound cannot carry, so listening is not exercised. The websocket needs the
+# entrance's websocket support (BROWSER-WEBSOCKETS.md), which the rt batch already relies on.
+write_GrooveBasin() {
+  local res; res=$(python3 -I "$b5_here/b5-gb.py" "$dir" 2>&1 | tail -1)
+  [[ $res == *'"ok": true'* ]] && echo "1 websocket token + POST /upload; library subscription and GET /library/<file> hold it: ${res:0:140}" \
+    || echo "0 ${res:0:200}"
+}
+
+# Tube 1.1.13 (prologic/tube as packaged: /opt/app/tube, .sandstorm/launcher.sh, .sandstorm/config.json:
+# port 8000, videos in /var/videos, uploads in /var/uploads, max_upload_size 100 MB, ffmpeg in
+# /usr/bin). Routes read from the binary's route table and templates: POST /upload (the upload form posts
+# multipart fields video_file, video_title, video_description; the server transcodes with ffmpeg
+# -vcodec h264 -acodec aac, cuts a thumbnail with -vframes 1, and moves the result into the library),
+# GET / redirects (303) to /v/<random id> once the library has a video (run evidence, 76758dba6), so the read-back follows it; /v/<id> plays, /t/<id> is the thumbnail, /feed.xml the RSS. The page is
+# searched for the title and for the file name. b5-tube-clip.py writes a real 2.6 KB clip (ffmpeg needs a decodable stream). LIMITS: a real video
+# is over the 8 MiB request bound (APP-MARKET 2b: the above-8-MiB body codec is not built); playback of
+# /v/<id>.mp4 uses Range reads, fine for this clip.
+# Run evidence (76758dba6): the upload was accepted (200) and the library had the video at once.
+write_Tube() {
+  local clip="$out/bodies/featured-by-a-resident.mp4"
+  python3 -I "$b5_here/b5-tube-clip.py" "$clip" || { echo "0 b5-tube-clip.py failed"; return; }
+  local up; up=$(req POST /upload -F "video_title=featured by a resident" -F "video_description=uploaded by a resident" \
+    -F "video_file=@$clip;filename=featured-by-a-resident.mp4;type=video/mp4")
+  [[ $up =~ ^(200|302|303)$ ]] || { echo "0 POST /upload $up: $(head -c 160 "$body" | tr -d '\n')"; return; }
+  local i got=000 loc
+  for i in $(seq 1 30); do
+    got=$(req GET /)
+    if [[ $got == 303 ]]; then  # with a video in the library, GET / redirects to /v/<random id>
+      loc=$(grep -i '^location:' "$body.headers" | tr -d '\r' | awk '{print $2}'); loc=${loc%\?}
+      got=$(req GET "$loc")
+    fi
+    [[ $got == 200 ]] && grep -qE 'featured-by-a-resident|featured by a resident' "$body" && { echo "1 POST /upload $up; GET / -> ${loc:-/} $got shows it (poll $i)"; return; }
+    sleep 3
+  done
+  echo "0 POST /upload $up but GET / ${loc:-} $got never showed the video"
+}

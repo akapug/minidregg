@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+. "$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)/native/resource-client/journey.d/lib/evidence.sh"
 
 if [ "$#" -ne 2 ]; then
   echo "usage: $0 MINIDREGG_HOST NEW_EVIDENCE_DIRECTORY" >&2
@@ -12,6 +13,8 @@ HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 REPO=$(CDPATH='' cd -- "$HERE/../.." && pwd)
 . "$REPO/native/resource-client/journey.d/lib/genesis-params.sh"
 resolve_params_sh "$REPO" || exit 2
+. "$REPO/native/resource-client/journey.d/lib/wire.sh"
+NO_RECORD=$(response_marker "$REPO" NO_RECORD)
 MINI=${MINI:-"$HERE/target/debug/mini"}
 STORE_BINARY=${STORE_BINARY:-"$REPO/native/hyperdocument-link-sqlite-store/target/debug/minidregg-link-sqlite-store"}
 SIGNATURE_BINARY=${SIGNATURE_BINARY:-"$REPO/native/credential-signature-verifier/target/debug/minidregg-credential-signature-verifier"}
@@ -32,7 +35,7 @@ if [ -e "$EVIDENCE" ]; then
 fi
 mkdir "$EVIDENCE"
 EVIDENCE=$(CDPATH='' cd -- "$EVIDENCE" && pwd)
-SCRIPT_SHA256=$(shasum -a 256 "$0" | awk '{print $1}')
+SCRIPT_SHA256=$(sha256 "$0" | awk '{print $1}')
 
 decimal() {
   jq -er --arg field "$2" '.[$field] |
@@ -201,6 +204,12 @@ AUTHORITY_ROOT=$(jq -er '.authorityRoot |
   select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
   "$EVIDENCE/alice-before-delegate/challenge.json")
 BEFORE_DENIAL=$(challenge_decimal "$EVIDENCE/alice-before-delegate/challenge.json" worldRoot)
+# A fresh declared cell holds its declaration and no field: K-FIELD-CLOSURE
+# retired the born-holding-field-1 seed, and the declaration renders as its own
+# member, never among entries.
+jq -e '(.cell.entries | length) == 0 and
+  ((.cell.declaration // []) | sort) == ["0","2"]' \
+  "$EVIDENCE/alice-before-delegate/view.json" >/dev/null
 
 # A valid Alice signer and owner grant cannot mutate under the installed law.
 cat >"$EVIDENCE/alice-denied-intent.json" <<EOF
@@ -213,25 +222,40 @@ cat >"$EVIDENCE/alice-denied-intent.json" <<EOF
     "value":"1"}]}}]}}},
  "grants":[{"kind":"object","target":"600","capability":"61"}]}
 EOF
-if "$MINI" submit --host "$HOST" --config "$CONFIG" \
+# The installed law is judged at plan time, on the signed observation (law 10:
+# `NativeHost.invokeRefusal`), so the Host refuses at PREPARE, before anything is signed for
+# submission, and names the law: a NO_RECORD (253) frame the client keeps as
+# pre-submit-refusal.frame (model: scripts/grain-birth/birth-acceptance.sh, worker bare birth).
+status=0
+"$MINI" submit --host "$HOST" --config "$CONFIG" \
   --intent "$EVIDENCE/alice-denied-intent.json" --key "$EVIDENCE/alice.key" \
   --dir "$EVIDENCE/alice-denied-attempt" >"$EVIDENCE/alice-denied.stdout" \
-  2>"$EVIDENCE/alice-denied.stderr"; then
-  echo "Alice mutation unexpectedly passed the installed rule" >&2
-  exit 1
-fi
-test -s "$EVIDENCE/alice-denied-attempt/call.bin"
-refusal "$EVIDENCE/alice-denied-attempt/outcome.json"
-test -f "$EVIDENCE/alice-denied-attempt/signed-observation.bin"
+  2>"$EVIDENCE/alice-denied.stderr" || status=$?
+[ "$status" -eq 3 ] || {
+  echo "Alice mutation: expected a prepare refusal (exit 3), got exit $status" >&2; exit 1; }
+AD="$EVIDENCE/alice-denied-attempt"
+test -f "$AD/signed-observation.bin"
+test ! -e "$AD/plan.bin"
+test ! -e "$AD/call.bin"
+test ! -e "$AD/outcome.json"
+jq -e '.type == "minidregg-pre-submit-refusal-v1" and .stage == "prepare" and
+  .operation == 1' "$AD/pre-submit-refusal.json" >/dev/null
+[ "$(head -c 1 "$AD/pre-submit-refusal.frame" | od -An -tu1 | tr -d ' ')" = "$NO_RECORD" ] || {
+  echo "Alice mutation: prepare refusal is not a NO_RECORD (253) frame" >&2; exit 1; }
+tail -c +2 "$AD/pre-submit-refusal.frame" >"$AD/prepare-refusal.bin"
+"$HOST" "$CONFIG" inspect outcome "$AD/prepare-refusal.bin" "$AD/prepare-refusal.json" \
+  >"$AD/prepare-refusal.inspect.out" 2>&1
+# Decoded by the Host itself: law-denied by the installed rule, whose only write clause is subject 8's.
+jq -e '.type == "refused" and .reason == "law-denied" and .effect == "no-record" and
+  (.leaf | type == "object") and
+  (.explain | type == "string" and contains("verb == write") and contains("subject == 8"))' \
+  "$AD/prepare-refusal.json" >/dev/null
 query_resource alice-after-denial 7 61 "$EVIDENCE/alice.key" 30008
 test "$(challenge_decimal "$EVIDENCE/alice-after-denial/challenge.json" worldRoot)" = "$BEFORE_DENIAL"
 test "$(challenge_decimal "$EVIDENCE/alice-after-denial/challenge.json" height)" = 12
 test "$(jq -er '.cell.root' "$EVIDENCE/alice-after-denial/view.json")" = "$TARGET_ROOT"
-jq -e '(.cell.entries | length) == 1 and
-  .cell.entries[0].key.type == "object" and
-  .cell.entries[0].key.resource == "600" and
-  .cell.entries[0].key.field == "1" and
-  .cell.entries[0].value == "0"' \
+jq -e '(.cell.entries | length) == 0 and
+  ((.cell.declaration // []) | sort) == ["0","2"]' \
   "$EVIDENCE/alice-after-denial/view.json" >/dev/null
 
 cat >"$EVIDENCE/delegate-intent.json" <<EOF
@@ -360,11 +384,12 @@ test "$FINAL_BEFORE_BOUNDARY" = "$(decimal "$EVIDENCE/revoke-attempt/outcome.jso
 FINAL_TARGET_ROOT=$(jq -er '.cell.root | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
   "$EVIDENCE/alice-before-retry/view.json")
 test "$FINAL_TARGET_ROOT" = "$POST_BOB_ROOT"
-jq -e '(.cell.entries | length) == 2 and
-  ([.cell.entries[] | select(.key.type == "object" and .key.resource == "600" and
-    .key.field == "0" and .value == "1")] | length) == 1 and
-  ([.cell.entries[] | select(.key.type == "object" and .key.resource == "600" and
-    .key.field == "1" and .value == "0")] | length) == 1' \
+jq -e '(.cell.entries | length) == 1 and
+  .cell.entries[0].key.type == "object" and
+  .cell.entries[0].key.resource == "600" and
+  .cell.entries[0].key.field == "0" and
+  .cell.entries[0].value == "1" and
+  ((.cell.declaration // []) | sort) == ["0","2"]' \
   "$EVIDENCE/alice-before-retry/view.json" >/dev/null
 FINAL_AUTHORITY_ROOT=$(jq -er '.authorityRoot |
   select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
@@ -391,10 +416,10 @@ test ! -e "$EVIDENCE/bob-after-revoke-invoke/outcome.json"
 
 # Historical retry is allowed to return the original receipt, but must leave
 # the current boundary and height unchanged after the later revocation.
-CALL_HASH_BEFORE=$(shasum -a 256 "$EVIDENCE/bob-write-attempt/call.bin" | awk '{print $1}')
+CALL_HASH_BEFORE=$(sha256 "$EVIDENCE/bob-write-attempt/call.bin" | awk '{print $1}')
 "$MINI" retry --attempt "$EVIDENCE/bob-write-attempt" --mode submit \
   >"$EVIDENCE/bob-retry.stdout"
-CALL_HASH_AFTER=$(shasum -a 256 "$EVIDENCE/bob-write-attempt/call.bin" | awk '{print $1}')
+CALL_HASH_AFTER=$(sha256 "$EVIDENCE/bob-write-attempt/call.bin" | awk '{print $1}')
 test "$CALL_HASH_BEFORE" = "$CALL_HASH_AFTER"
 receipt "$EVIDENCE/bob-write-attempt/retry-0001.json" replayed
 for field in transactionId eventId acceptedCount worldRoot; do
@@ -405,11 +430,12 @@ done
 query_resource alice-final 7 61 "$EVIDENCE/alice.key" 30025
 test "$(challenge_decimal "$EVIDENCE/alice-final/challenge.json" worldRoot)" = "$FINAL_BEFORE_BOUNDARY"
 test "$(challenge_decimal "$EVIDENCE/alice-final/challenge.json" height)" = "$FINAL_BEFORE_HEIGHT"
-jq -e '(.cell.entries | length) == 2 and
-  ([.cell.entries[] | select(.key.type == "object" and .key.resource == "600" and
-    .key.field == "0" and .value == "1")] | length) == 1 and
-  ([.cell.entries[] | select(.key.type == "object" and .key.resource == "600" and
-    .key.field == "1" and .value == "0")] | length) == 1' \
+jq -e '(.cell.entries | length) == 1 and
+  .cell.entries[0].key.type == "object" and
+  .cell.entries[0].key.resource == "600" and
+  .cell.entries[0].key.field == "0" and
+  .cell.entries[0].value == "1" and
+  ((.cell.declaration // []) | sort) == ["0","2"]' \
   "$EVIDENCE/alice-final/view.json" >/dev/null
 
 birth_id=$(decimal "$EVIDENCE/birth-attempt/outcome.json" transactionId)

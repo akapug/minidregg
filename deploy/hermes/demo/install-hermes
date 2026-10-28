@@ -15,7 +15,8 @@
 #              founder and Hermes
 #   room       the founder's room, its index and the hermes/turn price
 #   runtime    the bwrap launcher and the Hermes runtime root
-#   create     grain-runtime create: Hermes's grain and controller.json
+#   create     grain-runtime create: the operator signs the birth (--birth-socket),
+#              root gives the root to the RESIDENT, which creates the rest
 #   handoff    register Hermes's task for the room; the registry the summon reads
 #   summon     the founder summons Hermes as librarian with a budget
 #   controller controller.json names the summoned account; register; start
@@ -27,7 +28,7 @@
 #              (continuous: one pass per intervalSeconds)
 #
 # Inputs (environment; defaults are the box layout of dregg-infra edge/mini):
-#   SVC (mini-core)  CAND (/var/lib/mini/candidate/current)  NODE (/var/lib/mini/store/node)
+#   OPERATOR (mini-core)  RESIDENT (mini-h-INSTANCE)  CAND (/var/lib/mini/candidate/current)  NODE (/var/lib/mini/store/node)
 #   HERMES_ROOT      a runtime root from deploy/hermes/build-runtime-root (required at `runtime`)
 #   ROOM (hermes-lab)  BUDGET (1000)  PRICE (10)  FOUNDER_FUNDING (5000)
 #   POOL_ROW         the provider-table row to pin (default: the pool row listing MODEL)
@@ -44,9 +45,9 @@
 #
 #   The subscriber tier (deploy/hermes/README.md "The subscriber tier"):
 #     INSTANCE=glm BASE=9871000 MODEL=glm-5.3-flash ROOM=subscribers TIER=1 POOL_ROW=zai-glm \
-#       HERMES_ROOT=OUT install-hermes preflight subjects room concierge runtime create handoff summon controller dispatch resident
+#       HERMES_ROOT=OUT install-hermes preflight route subjects room concierge runtime create handoff summon controller dispatch resident
 set -euo pipefail
-SVC=${SVC:-mini-core}
+OPERATOR=${OPERATOR:-mini-core}
 # The archived candidate by its real path: the registration compares the
 # controller's mini/host paths with the root-pinned image.
 CAND=${CAND:-$(readlink -f /var/lib/mini/candidate/current)}
@@ -61,12 +62,19 @@ case $BASE in *[!0-9]*|'') echo "install-hermes: BASE must be a decimal" >&2; ex
 TIER=${TIER:-} WEEK=${WEEK:-4000} PERIOD=${PERIOD:-43200}
 PARENT_T=$((BASE + 1)) TOOL_T=$((BASE + 2)) PURSE_T=$((BASE + 3))
 GATEWAY_PORT=$((18761 + (BASE - 9870000) / 1000))
-V=/var/lib/mini/$INSTANCE          # under the registration's allowed write roots
-G=$V/g                            # controller cwd; controller.json lives here
+RESIDENT=${RESIDENT:-mini-h-$INSTANCE}
+V=/var/lib/mini/$INSTANCE          # root 0755, under the registration's allowed write roots
+G=$V/g                            # RESIDENT: controller cwd; controller.json lives here
 S=$G/state                        # stateDir (room workspace/home/resident state are direct children)
-H=$V/homes                        # subject homes (keys), private to SVC
-WS=$V/workspaces                  # subject workspaces
-RECORD=$V/install                 # per-step records (outputs this script reads back)
+H=$V/homes                        # RESIDENT: hermes, hhost, hprov (keys)
+WS=$V/workspaces                  # RESIDENT: hermes's workspace
+OPV=$V/operator                   # OPERATOR 0700: founder, concierge, sponsor scratch, records
+HO=$OPV/homes WO=$OPV/workspaces
+RECORD=$OPV/install               # per-step records (outputs this script reads back)
+RUN=$V/run                        # RESIDENT 0700: the resident's operator route (activated)
+RSOCKET=$RUN/mini.sock
+SPEC=$V/grain-spec.json           # root 0644: read by both accounts (paths only, no secrets)
+ROUTE_UNIT=mini-resident-operator-$INSTANCE
 MINI=$CAND/bin/mini HOST=$CAND/bin/minidregg-host GRAIN=$CAND/bin/grain-runtime
 BRIDGE=$CAND/bin/grain-provider-bridge LAUNCH_GATE=$CAND/bin/launch-gate
 CONFIG=$NODE/deployment/pinned-config.json
@@ -78,15 +86,23 @@ here=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(CDPATH='' cd -- "$here/../../.." && pwd)
 
 die() { echo "install-hermes: $*" >&2; exit 1; }
-as_svc() { runuser -u "$SVC" -- "$@"; }
-sh_line() { # WHO LINE: one shell line in WHO's workspace and home, as SVC
+as_op() { runuser -u "$OPERATOR" -- "$@"; }
+# The resident pins its route's listener creator (systemd, uid 0); every
+# child `mini` of its commands inherits the pin.
+as_res() { runuser -u "$RESIDENT" -- env MINI_OPERATOR_PEER_UID=0 "$@"; }
+resident_subject() { case $1 in hermes|hhost|hprov) return 0 ;; *) return 1 ;; esac; }
+as_owner() { local who=$1; shift; if resident_subject "$who"; then as_res "$@"; else as_op "$@"; fi; }
+home_of() { if resident_subject "$1"; then echo "$H/$1"; else echo "$HO/$1"; fi; }
+ws_of() { if [ "$1" = sponsor ]; then echo "$SPONSOR_WS"; elif resident_subject "$1"; then echo "$WS/$1"; else echo "$WO/$1"; fi; }
+socket_of() { if resident_subject "$1"; then echo "$RSOCKET"; else echo "$SOCKET"; fi; }
+owner_of() { if resident_subject "$1"; then echo "$RESIDENT"; else echo "$OPERATOR"; fi; }
+sh_line() { # WHO LINE: one shell line in WHO's workspace and home, as WHO's account
   local who=$1; shift
-  as_svc "$MINI" shell --socket "$SOCKET" --host "$HOST" --config "$CONFIG" \
-    --workspace "$(ws_of "$who")" --home "$H/$who" --line "$1"
+  as_owner "$who" "$MINI" shell --socket "$(socket_of "$who")" --host "$HOST" --config "$CONFIG" \
+    --workspace "$(ws_of "$who")" --home "$(home_of "$who")" --line "$1"
 }
-ws_of() { if [ "$1" = sponsor ]; then echo "$SPONSOR_WS"; else echo "$WS/$1"; fi; }
 done_step() { [ -e "$RECORD/$1.done" ]; }
-mark() { as_svc touch "$RECORD/$1.done"; echo "install-hermes: $1 done"; }
+mark() { as_op touch "$RECORD/$1.done"; echo "install-hermes: $1 done"; }
 subject() { jq -r .subject "$RECORD/subject-$1.json"; }
 
 step_preflight() {
@@ -94,7 +110,7 @@ step_preflight() {
   for x in "$MINI" "$HOST" "$GRAIN" "$BRIDGE" "$LAUNCH_GATE" "$CONFIG" "$PARAMS" "$PTABLE" "$KEYS_CLIENT"; do
     [ -e "$x" ] || die "missing $x"; done
   [ -S "$SOCKET" ] || die "no operator socket $SOCKET (mini serve-operator)"
-  as_svc "$MINI" operator-status --socket "$SOCKET" --host "$HOST" --config "$CONFIG" >/dev/null \
+  as_op "$MINI" operator-status --socket "$SOCKET" --host "$HOST" --config "$CONFIG" >/dev/null \
     || die "the operator socket does not answer operator-status"
   jq -e --argjson p "$PURSE_T" --arg m "$MODEL" \
     '.providerServices // [] | any(.providerResourceId == $p and .tariff.model == $m)' "$CONFIG" >/dev/null \
@@ -106,35 +122,105 @@ step_preflight() {
   # the broker refuses a call above the row's per-call cap.
   jq -e --arg r "$POOL_ROW" '.providers[] | select(.name == $r) | (.caps.perCall | tonumber) >= 1024' "$PTABLE" >/dev/null \
     || die "pool row $POOL_ROW caps.perCall is below the controller's maxOutputTokens 1024"
-  as_svc "$GRAIN" provider-table check "$PTABLE" >/dev/null || die "grain-runtime refuses $PTABLE"
+  # As root: the table is root-owned and grain-runtime trusts its own euid as owner (production loads with owner 0).
+  "$GRAIN" provider-table check "$PTABLE" >/dev/null || die "grain-runtime refuses $PTABLE"
   [ "$("$GRAIN" --controller-manager-protocol)" = mini-controller-manager-v1 ] || die "grain-runtime lacks the controller-manager contract"
   ! grep -rqs '^RestrictSUIDSGID=yes' /etc/systemd/system/mini-grain-controller@.service /etc/systemd/system/mini-grain-controller@.service.d \
       /etc/systemd/system/mini-grain-resident@.service /etc/systemd/system/mini-grain-resident@.service.d \
     || die "a Hermes unit sets RestrictSUIDSGID=yes (bwrap 0.12 dies with ENOSYS on openat2)"
-  install -d -o "$SVC" -g "$SVC" -m 0700 "$V" "$H" "$WS" "$RECORD"
-  printf '%s\n' "$POOL_ROW" | as_svc tee "$RECORD/pool-row" >/dev/null
+  # The resident's account: a system user with a same-named group, no login,
+  # its own systemd user manager (linger: it starts its workers there), and
+  # exactly one supplementary group, the key broker's socket group (the
+  # broker answers it as a provider by uid; members are matched by primary
+  # gid, so this never makes it a member). The operator socket is reached
+  # only through the resident's own route (step `route`).
+  local broker_group
+  broker_group=$(jq -r '.socketGroup // empty' /etc/mini/keys/broker.json)
+  [ -n "$broker_group" ] || die "/etc/mini/keys/broker.json names no socketGroup (split tenancy)"
+  broker_group=$(getent group "$broker_group" | cut -d: -f1)
+  getent group "$RESIDENT" >/dev/null || groupadd --system "$RESIDENT"
+  id "$RESIDENT" >/dev/null 2>&1 || useradd --system --gid "$RESIDENT" --home-dir "$V" --no-create-home \
+    --shell /usr/sbin/nologin "$RESIDENT"
+  passwd -l "$RESIDENT" >/dev/null 2>&1 || true
+  usermod -G "$broker_group" "$RESIDENT"
+  [ "$(id -nG "$RESIDENT" | tr ' ' '\n' | sort | tr '\n' ' ')" = "$(printf '%s\n' "$RESIDENT" "$broker_group" | sort | tr '\n' ' ')" ] \
+    || die "$RESIDENT must hold exactly its own group and $broker_group ($(id -nG "$RESIDENT"))"
+  [ "$(id -u "$RESIDENT")" != "$(id -u "$OPERATOR")" ] || die "the resident must not be the operator"
+  loginctl enable-linger "$RESIDENT"
+  # Ownership: the instance root and the runtime root are root's; the
+  # operator's part is the operator's; everything else is the resident's.
+  install -d -o root -g root -m 0755 "$V"
+  install -d -o "$OPERATOR" -g "$OPERATOR" -m 0700 "$OPV" "$HO" "$WO" "$RECORD"
+  install -d -o "$RESIDENT" -g "$RESIDENT" -m 0700 "$H" "$WS" "$RUN"
+  printf '%s\n' "$POOL_ROW" | as_op tee "$RECORD/pool-row" >/dev/null
   mark preflight
 }
 
-enroll() { # NAME: keygen in its home; the sponsor plans, seals and submits its enrollment
-  local f=$1
-  install -d -o "$SVC" -g "$SVC" -m 0700 "$H/$f"
-  [ -e "$H/$f/keys/mini.key" ] || sh_line "$f" "keygen mini.key" >/dev/null
-  install -d -o "$SVC" -g "$SVC" -m 0700 "$H/sponsor" "$H/sponsor/keys"
-  install -o "$SVC" -g "$SVC" -m 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/$INSTANCE-$f.key"
-  sh_line sponsor "enroll plan $INSTANCE-$f $INSTANCE-$f.key $(xxd -p -c 256 "$H/$f/keys/mini.key.next.pub") $(xxd -p -c 256 "$H/$f/keys/mini.key.next.cosign")" >/dev/null
+step_route() {
+  local ruid; ruid=$(id -u "$RESIDENT")
+  # Two listeners, in this order (fd3, fd4): Host frames and the status-only
+  # control. Created by systemd as the resident, served by the operator.
+  cat >"/etc/systemd/system/$ROUTE_UNIT.socket" <<EOF
+[Unit]
+Description=Mini operator route for the $INSTANCE resident ($RESIDENT)
+[Socket]
+ListenStream=$RSOCKET
+ListenStream=$RUN/mini.control
+SocketUser=$RESIDENT
+SocketGroup=$RESIDENT
+SocketMode=0600
+DirectoryMode=0700
+RemoveOnStop=yes
+Accept=no
+[Install]
+WantedBy=sockets.target
+EOF
+  cat >"/etc/systemd/system/$ROUTE_UNIT.service" <<EOF
+[Unit]
+Description=Mini operator route for the $INSTANCE resident ($RESIDENT): its Host operations and status only
+Requires=$ROUTE_UNIT.socket
+After=$ROUTE_UNIT.socket
+[Service]
+User=$OPERATOR
+Group=$OPERATOR
+ExecStart=$MINI serve-resident-operator-proxy --socket $RSOCKET --upstream $SOCKET --config $CONFIG --resident-uid $ruid
+Restart=on-failure
+RestartSec=2s
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+LockPersonality=yes
+EOF
+  systemctl daemon-reload
+  systemctl enable --now "$ROUTE_UNIT.socket"
+  as_res "$MINI" operator-status --socket "$RSOCKET" --host "$HOST" --config "$CONFIG" >/dev/null \
+    || die "the resident's route does not answer operator-status (journalctl -u $ROUTE_UNIT)"
+  mark route
+}
+
+enroll() { # NAME: keygen in its home (its owner's account); the sponsor plans, seals and submits its enrollment
+  local f=$1 home; home=$(home_of "$1")
+  install -d -o "$(owner_of "$f")" -g "$(owner_of "$f")" -m 0700 "$home"
+  [ -e "$home/keys/mini.key" ] || sh_line "$f" "keygen mini.key" >/dev/null
+  install -d -o "$OPERATOR" -g "$OPERATOR" -m 0700 "$HO/sponsor" "$HO/sponsor/keys"
+  install -o "$OPERATOR" -g "$OPERATOR" -m 0600 "$home/keys/mini.key" "$HO/sponsor/keys/$INSTANCE-$f.key"
+  sh_line sponsor "enroll plan $INSTANCE-$f $INSTANCE-$f.key $(xxd -p -c 256 "$home/keys/mini.key.next.pub") $(xxd -p -c 256 "$home/keys/mini.key.next.cosign")" >/dev/null
   sh_line sponsor "enroll seal $INSTANCE-$f" >/dev/null
-  sh_line sponsor "enroll submit $INSTANCE-$f" | as_svc tee "$RECORD/subject-$f.json" >/dev/null
-  rm -f "$H/sponsor/keys/$INSTANCE-$f.key"
+  sh_line sponsor "enroll submit $INSTANCE-$f" | as_op tee "$RECORD/subject-$f.json" >/dev/null
+  rm -f "$HO/sponsor/keys/$INSTANCE-$f.key"
   [ -n "$(subject "$f")" ] && [ "$(subject "$f")" != null ] || die "enrollment of $f returned no subject"
 }
 provision() { # NAME FUNDING: an account owned by NAME, its birth context, its workspace
-  local f=$1 funding=$2 permit=$RECORD/permit-all.json
-  printf '%s\n' '{"type":"all","predicates":[]}' | as_svc tee "$permit" >/dev/null
-  as_svc "$MINI" workspace --action provision --dir "$SPONSOR_WS" --name "$INSTANCE-$f" --holder "$(subject "$f")" \
+  local f=$1 funding=$2 permit=$RECORD/permit-all.json home; home=$(home_of "$1")
+  printf '%s\n' '{"type":"all","predicates":[]}' | as_op tee "$permit" >/dev/null
+  as_op "$MINI" workspace --action provision --dir "$SPONSOR_WS" --name "$INSTANCE-$f" --holder "$(subject "$f")" \
     --funding "$funding" --account-predicate "$permit" --factory-ref factory >/dev/null
-  install -d -o "$SVC" -g "$SVC" -m 0700 "$H/$f/provision"
-  install -o "$SVC" -g "$SVC" -m 0600 "$SPONSOR_WS/provisions/$INSTANCE-$f/birth-context.json" "$H/$f/provision/birth-context.json"
+  install -d -o "$(owner_of "$f")" -g "$(owner_of "$f")" -m 0700 "$home/provision"
+  install -o "$(owner_of "$f")" -g "$(owner_of "$f")" -m 0600 "$SPONSOR_WS/provisions/$INSTANCE-$f/birth-context.json" "$home/provision/birth-context.json"
   sh_line "$f" "init mini.key $(subject "$f")" >/dev/null
 }
 step_subjects() {
@@ -169,34 +255,34 @@ step_room() {
 step_concierge() {
   [ -n "$TIER" ] || die "concierge is a TIER step"
   local C; C=$(subject con)
-  install -d -o "$SVC" -g "$SVC" -m 0700 "$H/con/programs" "$H/con/inbox" "$H/con/outbox"
+  install -d -o "$OPERATOR" -g "$OPERATOR" -m 0700 "$HO/con/programs" "$HO/con/inbox" "$HO/con/outbox"
   # The founder's grants to the concierge, and the program its room wrote.
   local f
-  for f in "$H/founder/outbox/$C"/*.json; do
-    [ -e "$f" ] && install -o "$SVC" -g "$SVC" -m 0600 "$f" "$H/con/inbox/"
+  for f in "$HO/founder/outbox/$C"/*.json; do
+    [ -e "$f" ] && install -o "$OPERATOR" -g "$OPERATOR" -m 0600 "$f" "$HO/con/inbox/"
   done
-  install -o "$SVC" -g "$SVC" -m 0600 "$H/founder/concierge/$ROOM.json" "$H/con/programs/$ROOM.json"
+  install -o "$OPERATOR" -g "$OPERATOR" -m 0600 "$HO/founder/concierge/$ROOM.json" "$HO/con/programs/$ROOM.json"
   # The roster: each paying subject gets a stream and a roster row from the
   # founder (operator custody, the same account), and its window reference in
   # MEMBER_HOMES/SUBJECT/requests/ROOM-invite.json when that home exists.
-  jq -n --arg mini "$MINI" --arg ws "$WS/con" --arg p "$H/con/programs/$ROOM.json" --arg i "$H/con/inbox" \
-    --arg o "$H/con/outbox" --arg j "$H/con/journal-$ROOM.jsonl" --arg room "$ROOM" --arg host "$HOST" \
-    --arg cfg "$CONFIG" --arg sock "$SOCKET" --arg fws "$WS/founder" --arg fh "$H/founder" --arg mh "${MEMBER_HOMES:-}" \
+  jq -n --arg mini "$MINI" --arg ws "$WO/con" --arg p "$HO/con/programs/$ROOM.json" --arg i "$HO/con/inbox" \
+    --arg o "$HO/con/outbox" --arg j "$HO/con/journal-$ROOM.jsonl" --arg room "$ROOM" --arg host "$HOST" \
+    --arg cfg "$CONFIG" --arg sock "$SOCKET" --arg fws "$WO/founder" --arg fh "$HO/founder" --arg mh "${MEMBER_HOMES:-}" \
     '{type:"minidregg-concierge-controller-v1",mini:$mini,workspace:$ws,program:$p,inbox:$i,outbox:$o,journal:$j,
       roster:({room:$room,host:$host,config:$cfg,socket:$sock,workspace:$fws,home:$fh}
         + (if $mh == "" then {} else {memberHomes:$mh} end))}' \
-    | as_svc tee "$V/concierge-$ROOM.json" >/dev/null
-  as_svc "$GRAIN" concierge step "$V/concierge-$ROOM.json" | as_svc tee "$RECORD/concierge-first-pass.json" >/dev/null
+    | as_op tee "$OPV/concierge-$ROOM.json" >/dev/null
+  as_op "$GRAIN" concierge step "$OPV/concierge-$ROOM.json" | as_op tee "$RECORD/concierge-first-pass.json" >/dev/null
   # One pass a minute; each pass decides only from the till's signed ledger.
   cat >"/etc/systemd/system/mini-concierge-$ROOM.service" <<EOF
 [Unit]
 Description=Mini room concierge for $ROOM (one pass)
 [Service]
 Type=oneshot
-User=$SVC
+User=$OPERATOR
 UMask=0077
 NoNewPrivileges=yes
-ExecStart=$GRAIN concierge step $V/concierge-$ROOM.json
+ExecStart=$GRAIN concierge step $OPV/concierge-$ROOM.json
 EOF
   cat >"/etc/systemd/system/mini-concierge-$ROOM.timer" <<EOF
 [Unit]
@@ -219,14 +305,14 @@ step_runtime() {
   # another candidate is rebound first (no rebuild).
   [ "$(jq -r .grainRuntimeSha256 "$HERMES_ROOT/pins.json")" = "$(sha256sum "$GRAIN" | cut -d' ' -f1)" ] \
     || die "HERMES_ROOT was built for another candidate: $REPO/deploy/hermes/build-runtime-root --rebind $HERMES_ROOT $CAND"
-  install -d -m 0755 "$V/runtime-root"; install -d -o "$SVC" -g "$SVC" -m 0700 "$V/launcher" "$V/worker-work" \
+  install -d -m 0755 "$V/runtime-root"; install -d -o "$RESIDENT" -g "$RESIDENT" -m 0700 "$V/launcher" "$V/worker-work" \
     "$V/worker-work/.hermes" "$V/worker-work/.cache" "$V/worker-work/.config" "$V/worker-work/.local" "$V/worker-work/.local/share"
   cp -a "$HERMES_ROOT"/. "$V/runtime-root/"
   chown -R root:root "$V/runtime-root"; chmod -R go-w "$V/runtime-root"
   local bwrap; bwrap=$(sh "$REPO/deploy/grain-host/resolve-bwrap")
-  as_svc python3 "$REPO/deploy/grain-host/materialize-bwrap.py" --physical-bwrap "$bwrap" \
+  as_res python3 "$REPO/deploy/grain-host/materialize-bwrap.py" --physical-bwrap "$bwrap" \
     --physical-sha256 "$(sha256sum "$bwrap" | cut -d' ' -f1)" --output "$V/launcher/bwrap"
-  install -o "$SVC" -g "$SVC" -m 0700 "$LAUNCH_GATE" "$V/launcher/launch-gate"
+  install -o "$RESIDENT" -g "$RESIDENT" -m 0700 "$LAUNCH_GATE" "$V/launcher/launch-gate"
   chmod 700 "$V/launcher/bwrap"
   mark runtime
 }
@@ -236,8 +322,9 @@ step_create() {
   # The pool hold covers the fee and the metered charge at the token caps.
   reserve=$(jq -r --argjson p "$PURSE_T" '.providerServices[] | select(.providerResourceId == $p) | .tariff.routes.pool
     | ((.perOp|tonumber) + (((16000 * (.inputMicroPerMillion|tonumber)) + (1024 * (.outputMicroPerMillion|tonumber)) + 999999) / 1000000 | floor)) | tostring' "$CONFIG")
-  install -d -o "$SVC" -g "$SVC" -m 0700 "$G"
-  jq -n --arg mini "$MINI" --arg host "$HOST" --arg cfg "$CONFIG" --arg sock "$SOCKET" --arg g "$genesis" \
+  # The root exists empty and the operator's, for the birth only.
+  install -d -o "$OPERATOR" -g "$OPERATOR" -m 0700 "$G"
+  jq -n --arg mini "$MINI" --arg host "$HOST" --arg cfg "$CONFIG" --arg sock "$RSOCKET" --arg g "$genesis" \
     --arg ns "$NODE/namespace" --arg root "$G" --arg sk "$NODE/keys/sponsor.key" \
     --arg hk "$H/hhost/keys/mini.key" --arg hs "$(subject hhost)" --arg tk "$H/hermes/keys/mini.key" --arg ts "$(subject hermes)" \
     --arg pk "$H/hprov/keys/mini.key" --arg ps "$(subject hprov)" --arg pt "$PARENT_T" --arg tt "$TOOL_T" --arg ut "$PURSE_T" \
@@ -263,25 +350,33 @@ step_create() {
          maxInputTokens:16000,maxOutputTokens:1024,maxRequestBytes:1048576,maxResponseBytes:8388608,timeoutSeconds:300,
          localFixtureHostNetwork:false}},
      room:{mini:$mini,host:$host,hostConfig:$cfg,socket:$sock,workspace:$ws,home:$home,room:$room,account:"unsummoned"}}' \
-    | as_svc tee "$RECORD/grain-spec.json" >/dev/null
-  as_svc "$GRAIN" create "$RECORD/grain-spec.json" | as_svc tee "$RECORD/grain-created.json"
-  install -d -o "$SVC" -g "$SVC" -m 0700 "$S/room-home" "$S/resident"
+    >"$SPEC.new"
+  install -o root -g root -m 0644 "$SPEC.new" "$SPEC"; rm -f "$SPEC.new"
+  # 1. The operator signs the birth through its own socket (the sponsor key
+  #    never leaves the operator); 2. root gives the root to the resident;
+  # 3. the resident creates the rest through its route.
+  as_op "$GRAIN" create "$SPEC" --birth-socket "$SOCKET" | as_op tee "$RECORD/grain-birth.json"
+  chown -R "$RESIDENT:$RESIDENT" "$G"
+  as_res "$GRAIN" create "$SPEC" | as_op tee "$RECORD/grain-created.json"
+  install -d -o "$RESIDENT" -g "$RESIDENT" -m 0700 "$S/room-home" "$S/resident"
   mark create
 }
 
 step_handoff() {
-  local lab; lab=$(jq -r .target "$WS/founder/refs/$ROOM.json")
-  install -d -o "$SVC" -g "$SVC" -m 0700 "$V/registrations" "$V/inbox" "$H/founder/hermes"
-  as_svc "$MINI" hermes-handoff --action registration --dir "$S/resource-workspace" --task "$PARENT_T" --room-cell "$lab" \
-    --inbox "$V/inbox" --socket "$SOCKET" | as_svc tee "$V/registrations/$PARENT_T.json" >/dev/null
-  as_svc "$MINI" hermes-handoff --action registry --registrations "$V/registrations" --socket "$SOCKET" \
-    | as_svc tee "$H/founder/hermes/registry.json" >/dev/null
+  local lab; lab=$(jq -r .target "$WO/founder/refs/$ROOM.json")
+  install -d -o "$RESIDENT" -g "$RESIDENT" -m 0700 "$V/registrations" "$V/inbox"
+  install -d -o "$OPERATOR" -g "$OPERATOR" -m 0700 "$HO/founder/hermes"
+  as_res "$MINI" hermes-handoff --action registration --dir "$S/resource-workspace" --task "$PARENT_T" --room-cell "$lab" \
+    --inbox "$V/inbox" --socket "$RSOCKET" | as_res tee "$V/registrations/$PARENT_T.json" >/dev/null
+  # The registry the founder's summon reads: made by the resident, handed to the founder by root.
+  as_res "$MINI" hermes-handoff --action registry --registrations "$V/registrations" --socket "$RSOCKET" \
+    | as_op tee "$HO/founder/hermes/registry.json" >/dev/null
   mark handoff
 }
 
 step_summon() {
-  sh_line founder "summon $ROOM as librarian --budget $BUDGET" | as_svc tee "$RECORD/summon.out"
-  sed -n 's/.*hand-off in //p' "$RECORD/summon.out" | tail -1 | as_svc tee "$RECORD/outbox" >/dev/null
+  sh_line founder "summon $ROOM as librarian --budget $BUDGET" | as_op tee "$RECORD/summon.out"
+  sed -n 's/.*hand-off in //p' "$RECORD/summon.out" | tail -1 | as_op tee "$RECORD/outbox" >/dev/null
   [ -s "$(cat "$RECORD/outbox")/handoff.json" ] || die "summon left no sealed hand-off"
   # The room names Hermes's provider purse (the page shows its route by that
   # purse's tariff model: meta-llama/... for hermes-lab, glm-5.3-flash for subscribers).
@@ -291,7 +386,7 @@ step_summon() {
 
 step_controller() {
   local acct; acct=$(jq -r .account.name "$(cat "$RECORD/outbox")/summon-$ROOM.json")
-  as_svc sh -c "jq --arg a '$acct' '.toolTask.room.account = \$a' '$G/controller.json' >'$G/controller.json.new' && chmod 600 '$G/controller.json.new' && mv '$G/controller.json.new' '$G/controller.json'"
+  as_res sh -c "jq --arg a '$acct' '.toolTask.room.account = \$a' '$G/controller.json' >'$G/controller.json.new' && chmod 600 '$G/controller.json.new' && mv '$G/controller.json.new' '$G/controller.json'"
   mini-controller-register "$PARENT_T" "$G/controller.json"
   systemctl start "mini-grain-controller@$PARENT_T.service"
   for _ in $(seq 1 600); do [ -S "$S/control.sock" ] && break; sleep 0.1; done
@@ -300,8 +395,12 @@ step_controller() {
 }
 
 step_dispatch() {
-  as_svc "$MINI" hermes-handoff --action dispatch --registration "$V/registrations/$PARENT_T.json" \
-    --bundle "$(cat "$RECORD/outbox")/handoff.json" --socket "$SOCKET"
+  # The founder's sealed bundle, copied by root to where the resident reads it.
+  local staged=$V/handoff-staged
+  rm -rf "$staged"; install -d -o "$RESIDENT" -g "$RESIDENT" -m 0700 "$staged"
+  cp -a "$(cat "$RECORD/outbox")"/. "$staged/"; chown -R "$RESIDENT:$RESIDENT" "$staged"
+  as_res "$MINI" hermes-handoff --action dispatch --registration "$V/registrations/$PARENT_T.json" \
+    --bundle "$staged/handoff.json" --socket "$RSOCKET"
   mark dispatch
 }
 
@@ -312,8 +411,8 @@ step_resident() {
   [ -n "$inbox" ] && [ -d "$inbox" ] || die "no delivered assignment inbox under $V/inbox (run dispatch)"
   jq -n --arg c "$G/controller.json" --arg i "$inbox" --arg s "$S/resident" \
     '{type:"mini-hermes-room-resident-v1",controller:$c,inbox:$i,state:$s,maxPrompts:null,intervalSeconds:60}' \
-    | as_svc tee "$G/resident.json" >/dev/null
-  as_svc chmod 600 "$G/resident.json"
+    | as_res tee "$G/resident.json" >/dev/null
+  as_res chmod 600 "$G/resident.json"
   # Adding the resident to a registration requires both units stopped.
   systemctl stop "mini-grain-controller@$PARENT_T.service"
   mini-controller-register "$PARENT_T" "$G/controller.json" "$G/resident.json"
@@ -321,10 +420,10 @@ step_resident() {
   mark resident
 }
 
-[ $# -gt 0 ] || { sed -n '2,35p' "$0"; exit 64; }
+[ $# -gt 0 ] || { sed -n '2,50p' "$0"; exit 64; }
 for step in "$@"; do
   case $step in
-    preflight|subjects|room|concierge|runtime|create|handoff|summon|controller|dispatch|resident) ;;
+    preflight|route|subjects|room|concierge|runtime|create|handoff|summon|controller|dispatch|resident) ;;
     *) die "unknown step $step" ;;
   esac
   [ "$step" = preflight ] || done_step preflight || die "run preflight first"

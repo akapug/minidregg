@@ -5,9 +5,13 @@ only exact canonical header bytes leave for custody signing. Assembly is not
 admission. The source receiver checks the native signature, `.delegateObject`
 capability, installed law, selected content and root before durable settlement.
 -/
-import Kernel.FnSelectiveReleaseSourceAuthority
-import Kernel.FnSelectiveReleaseArticle
-import Kernel.NativeHostContext
+module
+
+public import Kernel.FnSelectiveReleaseSourceAuthority
+public import Kernel.FnSelectiveReleaseArticle
+public import Kernel.NativeHostContext
+
+@[expose] public section
 
 namespace Minidregg.Host.FnSelectiveReleaseSourceAuthoring
 

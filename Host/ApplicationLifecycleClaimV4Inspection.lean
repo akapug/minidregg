@@ -4,9 +4,13 @@ Decoding this frame does not establish that it came from a fresh op26
 callback; the physical host must compare the echoed bytes with its retained
 native response.
 -/
-import Kernel.ApplicationLifecycleRetryClaimV4Projection
-import Host.ApplicationLifecycleRetryBeginV4Inspection
-import Lean.Data.Json
+module
+
+public import Kernel.ApplicationLifecycleRetryClaimV4Projection
+public import Host.ApplicationLifecycleRetryBeginV4Inspection
+public import Lean.Data.Json
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationLifecycleClaimV4Inspection
 

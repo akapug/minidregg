@@ -9,7 +9,11 @@ composite operation's markers are both checked unspent in the durable consumed
 set here and consumed there by the receiver's intent (`replayMarkers`); neither
 is written to the cell.
 -/
-import Compiler.CredentialAuthorityDomainReceiver
+module
+
+public import Compiler.CredentialAuthorityDomainReceiver
+
+@[expose] public section
 
 namespace Minidregg.Compiler.GrainResourceBirthAuthority
 

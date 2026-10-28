@@ -10,10 +10,29 @@ arbitrary caller-authored initial allowance. The one funded increase is the
 in the same turn, so one micro-unit is one credit. No field is a policy revision or grant
 revocation generation. A stopped status proves admission fencing, not that
 an external process or provider actually stopped. -/
-import Kernel.DeclaredFields
-import Kernel.ResourceTransaction
-import Pred.Core
-import Theory.AxiomPin
+module
+
+public import Kernel.DeclaredFields
+public import Kernel.ResourceTransaction
+public import Pred.Core
+public import Theory.AxiomPin
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.AgentGrain
 open Minidregg.Theory.TypedAuthorization

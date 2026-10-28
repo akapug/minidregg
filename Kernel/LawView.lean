@@ -6,8 +6,28 @@ value (§2). Extracted from the MUD sheet law (`Assurance/SheetLaw.lean` §3 and
 Kernel law (`Kernel/Job.lean`) reads it without importing Assurance; the sheet and item laws
 read it from here too.
 -/
-import Pred.Core
-import Kernel.DeclaredResourceProjection
+module
+
+public import Pred.Core
+public import Kernel.DeclaredResourceProjection
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import Std.Data.String.ToNat
+
+@[expose] public section
 
 namespace Minidregg.Kernel.LawView
 

@@ -8,9 +8,28 @@ basis id now describes the actual Lean representation rather than an arbitrary
 finite enumeration.  It still does not prove handwritten native arithmetic.
 -/
 
-import Theory.BinaryTowerCodec
-import Compiler.Tower256CshakeMerkleController
-import Compiler.MinidreggV1Artifact
+module
+
+public import Theory.BinaryTowerCodec
+public import Compiler.Tower256CshakeMerkleController
+public import Compiler.MinidreggV1Artifact
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.BinaryTower256Profile
 

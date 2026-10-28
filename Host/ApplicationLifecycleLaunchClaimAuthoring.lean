@@ -3,8 +3,27 @@ Operator-private current-image signing plan for a launch-bound v3 claim.
 The requested index names a BEGIN-v3 in the same verified replay history.
 The request never supplies an app state, resource root, grant, or header.
 -/
-import Host.ApplicationLifecycleClaimOperator
-import Kernel.ApplicationLifecycleClaimV3Core
+module
+
+public import Host.ApplicationLifecycleClaimOperator
+public import Kernel.ApplicationLifecycleClaimV3Core
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationLifecycleLaunchClaimAuthoring
 
@@ -88,7 +107,7 @@ def prepareVerified (config : Config) {target : Durable}
       beginSource.managementSubject.value == pin.managementSubject &&
       beginSource.capability == pin.appCapability do
     throw "historical BEGIN differs from fixed claim operator pin"
-  unless begin.shape && ApplicationLifecycleResidentProfile.beginMatchesV3 config.expectedSeed begin do
+  unless begin.shape && ApplicationLifecycleResidentProfile.beginMatchesV3 config.storeIdentity begin do
     throw "historical BEGIN is outside resident host profile"
   let opened := verified.opened
   let some retained := opened.durable.image.accepted[prior.index]?
@@ -195,7 +214,7 @@ private def envelope (slot : SigningSlot) (signature : List UInt8) :
 
 /-- Detached assembly does not mint current authority. Op26 refreshes the
 verified tip and admits the exact three signed incidences again. `store` is
-the assembling Host's `Config.expectedSeed`. -/
+the assembling Host's `Config.storeIdentity`. -/
 def assemble (store : Minidregg.Theory.TypedAuthorization.Digest) (plan : Plan) (signatures : List (List UInt8)) :
     Except String (List UInt8) := do
   let invocationCount := plan.invocation.slots.length

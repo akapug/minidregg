@@ -25,10 +25,29 @@ written with any of their `LOOM/…` frames refuse to decode here
 (`retired_page_frames_refused`).  The content page's cross-page `ForwardTarget`
 routing is gone with the pages: a link's target is the canonical `LinkTarget`.
 -/
-import Compiler.HyperdocumentCodec
-import Compiler.StoreCodec
-import Kernel.HyperdocumentEventLog
-import Kernel.HyperdocumentIndexSync
+module
+
+public import Compiler.HyperdocumentCodec
+public import Compiler.StoreCodec
+public import Kernel.HyperdocumentEventLog
+public import Kernel.HyperdocumentIndexSync
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.HyperdocumentCell
 

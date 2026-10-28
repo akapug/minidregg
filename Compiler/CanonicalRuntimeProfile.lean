@@ -13,25 +13,44 @@ cryptographic assumption; canonical encoding, profile construction and arithmeti
 premises are explicit here. Concrete native field/range selection lives in
 `NativeHostProfile`; this shared profile remains parameterized.
 -/
-import Compiler.CanonicalRuntimeProfileCore
-import Compiler.NativeProtocolFrames
-import Compiler.WorldExecutionContract
-import Compiler.ApplicationReceivingDomain
-import Kernel.PayReceivingContract
-import Compiler.ObjectAudienceRoster
-import Compiler.WorldKindDescriptor
-import Compiler.WorldKindCell
-import Kernel.WorldKindInstance
-import Compiler.CanonicalCellRegistry
-import Compiler.CredentialAuthorityDomain
-import Compiler.CredentialAuthorityReplay
-import Compiler.CredentialSignatureAdmission
-import Compiler.DeclaredEffectCell
-import Compiler.CredentialAuthorityCell
-import Compiler.HyperdocumentCell
-import Compiler.PolicyRecordCodec
-import Compiler.ResourceBirthCodec
-import Compiler.Evaluator
+module
+
+public import Compiler.CanonicalRuntimeProfileCore
+public import Compiler.NativeProtocolFrames
+public import Compiler.WorldExecutionContract
+public import Compiler.ApplicationReceivingDomain
+public import Kernel.PayReceivingContract
+public import Compiler.ObjectAudienceRoster
+public import Compiler.WorldKindDescriptor
+public import Compiler.WorldKindCell
+public import Kernel.WorldKindInstance
+public import Compiler.CanonicalCellRegistry
+public import Compiler.CredentialAuthorityDomain
+public import Compiler.CredentialAuthorityReplay
+public import Compiler.CredentialSignatureAdmission
+public import Compiler.DeclaredEffectCell
+public import Compiler.CredentialAuthorityCell
+public import Compiler.HyperdocumentCell
+public import Compiler.PolicyRecordCodec
+public import Compiler.ResourceBirthCodec
+public import Compiler.Evaluator
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.CanonicalRuntimeProfile
 
@@ -199,7 +218,7 @@ def sourceComponents : List (List UInt8) :=
    Kernel.ClockCell.idCustomization,
    StoreCodec.frame Kernel.SystemCell.wire,
    Kernel.SystemCell.idCustomization,
-   "DREGG.RUNTIME.TAIL-BOUND.HEAD-LE-CERTIFIED-PLUS-L.EVERY-NON-CERTIFY-RECORD/v4".toUTF8.toList,
+   "DREGG.RUNTIME.TAIL-BOUND.HEAD-LE-CERTIFIED-PLUS-L.EVERY-NON-CERTIFY-RECORD/v6".toUTF8.toList,
    StoreCodec.rootCustomization,
    StoreCodec.saltCustomization,
    StoreCodec.leafCustomization,

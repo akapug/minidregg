@@ -1,7 +1,11 @@
 /- Validate exactly the proposed policy head against a source-owned candidate
 snapshot. This check supplies no authority: the old management law must first
 admit the update. Deliberately unsatisfiable intersections remain meaningful. -/
-import Compiler.PolicyComponentResolution
+module
+
+public import Compiler.PolicyComponentResolution
+
+@[expose] public section
 
 namespace Minidregg.Compiler.CandidateLawResolution
 

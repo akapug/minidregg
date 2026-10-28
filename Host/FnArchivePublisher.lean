@@ -26,10 +26,96 @@
 fn's transport outcome is the journal's (the sender's outbox); nothing here
 writes an answer slot.
 -/
-import Kernel.FnArchiveJournal
-import Kernel.NativeHost
-import Host.FnOutcome
-import Std.Internal.Async.TCP
+module
+
+public import Kernel.FnArchiveJournal
+public import Kernel.NativeHost
+public import Host.FnOutcome
+public import Std.Internal.Async.TCP
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+import all Init.Data.String.Basic
+import all Init.Data.String.Extra
+import all Init.Data.String.FindPos
+import all Init.Data.String.Hashable
+import all Init.Data.String.Iter
+import all Init.Data.String.Iter.Basic
+import all Init.Data.String.Iter.Intercalate
+import all Init.Data.String.Iterate
+import all Init.Data.String.Iterator
+import all Init.Data.String.Legacy
+import all Init.Data.String.Lemmas
+import all Init.Data.String.Lemmas.Basic
+import all Init.Data.String.Lemmas.FindPos
+import all Init.Data.String.Lemmas.Hashable
+import all Init.Data.String.Lemmas.Intercalate
+import all Init.Data.String.Lemmas.IsEmpty
+import all Init.Data.String.Lemmas.Iter
+import all Init.Data.String.Lemmas.Iterate
+import all Init.Data.String.Lemmas.Modify
+import all Init.Data.String.Lemmas.Order
+import all Init.Data.String.Lemmas.Pattern
+import all Init.Data.String.Lemmas.Pattern.Basic
+import all Init.Data.String.Lemmas.Pattern.Char
+import all Init.Data.String.Lemmas.Pattern.Find
+import all Init.Data.String.Lemmas.Pattern.Find.Basic
+import all Init.Data.String.Lemmas.Pattern.Find.Char
+import all Init.Data.String.Lemmas.Pattern.Find.Pred
+import all Init.Data.String.Lemmas.Pattern.Find.String
+import all Init.Data.String.Lemmas.Pattern.Memcmp
+import all Init.Data.String.Lemmas.Pattern.Pred
+import all Init.Data.String.Lemmas.Pattern.Split
+import all Init.Data.String.Lemmas.Pattern.Split.Basic
+import all Init.Data.String.Lemmas.Pattern.Split.Char
+import all Init.Data.String.Lemmas.Pattern.Split.Pred
+import all Init.Data.String.Lemmas.Pattern.String
+import all Init.Data.String.Lemmas.Pattern.String.Basic
+import all Init.Data.String.Lemmas.Pattern.String.ForwardPattern
+import all Init.Data.String.Lemmas.Pattern.String.ForwardSearcher
+import all Init.Data.String.Lemmas.Pattern.TakeDrop
+import all Init.Data.String.Lemmas.Pattern.TakeDrop.Basic
+import all Init.Data.String.Lemmas.Pattern.TakeDrop.Char
+import all Init.Data.String.Lemmas.Pattern.TakeDrop.Pred
+import all Init.Data.String.Lemmas.Pattern.TakeDrop.String
+import all Init.Data.String.Lemmas.Search
+import all Init.Data.String.Lemmas.Slice
+import all Init.Data.String.Lemmas.Splits
+import all Init.Data.String.Lemmas.StringOrder
+import all Init.Data.String.Lemmas.TakeDrop
+import all Init.Data.String.Modify
+import all Init.Data.String.OrderInstances
+import all Init.Data.String.Pattern
+import all Init.Data.String.Pattern.Basic
+import all Init.Data.String.Pattern.Char
+import all Init.Data.String.Pattern.Pred
+import all Init.Data.String.Pattern.String
+import all Init.Data.String.PosRaw
+import all Init.Data.String.Search
+import all Init.Data.String.Slice
+import all Init.Data.String.Stream
+import all Init.Data.String.Subslice
+import all Init.Data.String.Substring
+import all Init.Data.String.TakeDrop
+import all Init.Data.String.Termination
+import all Init.Data.String.ToSlice
+import all Init.Prelude
+
+@[expose] public section
 
 namespace Minidregg.Host.FnArchivePublisher
 

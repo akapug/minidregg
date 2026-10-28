@@ -8,13 +8,18 @@ it until that elaborator was deleted (docs/OBJECTIVE-BEND-FRONTEND.md,
 `Compiler.ObjectiveBendFrontEndAdequacy`; "surface meaning preserved" needs a
 surface semantics, which does not exist. All recursion is fuel-bounded; running
 out of fuel is a refusal, never a guess. -/
-import Lean
-import Compiler.ObjectiveBendParse
-import Compiler.ObjectiveBendLaw
-import Std.Data.HashMap
-import Theory.ObjectiveBendOpenRecursion
-import Compiler.ObjectiveBendC4
-import Compiler.ObjectiveBendContract
+module
+
+public import Lean
+public import Compiler.ObjectiveBendParse
+public import Compiler.ObjectiveBendLaw
+public import Std.Data.HashMap
+public import Theory.ObjectiveBendOpenRecursion
+public import Compiler.ObjectiveBendC4
+public import Compiler.ObjectiveBendContract
+
+@[expose] public section
+
 namespace Minidregg.Compiler.ObjectiveBendElaborate
 open Lean
 set_option autoImplicit false

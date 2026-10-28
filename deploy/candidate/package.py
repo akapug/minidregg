@@ -114,6 +114,9 @@ SCRIPTS = {"check-tamper.sh": ("deploy/candidate/check-tamper.sh", 0o555),
            "genesis.sh": ("native/resource-client/genesis.sh", 0o555),
            "genesis-params.example.json": ("native/resource-client/genesis-params.example.json", 0o444),
            "INTERFACES.md": ("deploy/candidate/INTERFACES.md", 0o444)}
+# The example programs a member publishes (world/<app>/*.obend and their data) travel read-only
+# under world/, from the same archive: the demo seed's TALLY_SRC defaults to world/activity/Tally.obend.
+WORLD = "world/"
 HEX40 = re.compile(r"[0-9a-f]{40}")
 HEX64 = re.compile(r"[0-9a-f]{64}")
 
@@ -231,6 +234,26 @@ def extract(archive, member, target, mode):
     os.chmod(target, mode)
 
 
+def extract_tree(archive, prefix, out):
+    """Every regular file under PREFIX in the archive, at the same relative path under OUT, read-only."""
+    written = []
+    with tarfile.open(archive) as tar:
+        for info in tar.getmembers():
+            if not info.isfile() or not info.name.startswith(prefix):
+                continue
+            rel = Path(info.name)
+            if rel.is_absolute() or ".." in rel.parts:
+                die(f"{archive}: unsafe member {info.name}")
+            target = out / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(tar.extractfile(info).read())
+            os.chmod(target, 0o444)
+            written.append(info.name)
+    if not written:
+        die(f"{archive} lacks {prefix}")
+    return sorted(written)
+
+
 def roles_from_manifest(manifest, label):
     """Shipped roles of a journey-format manifest, each pinned and present."""
     pins = manifest.get("sha256", {})
@@ -332,6 +355,7 @@ def package(chosen, archive, commit, out, toolchains, origin, host_build_manifes
             abis[role] = found
     for name, (member, mode) in SCRIPTS.items():
         extract(source_tar, member, out / name, mode)
+    world_files = extract_tree(source_tar, WORLD, out)
     source_file_list(source_tar, out / "logs" / "source-files.sha256")
     floors = [a["glibcRequired"] for a in abis.values() if a["glibcRequired"]]
     provenance = {
@@ -381,6 +405,7 @@ def package(chosen, archive, commit, out, toolchains, origin, host_build_manifes
     listed = [f"bin/{ROLES[r]}" for r in sorted(chosen)] + [c["path"] for t, c in sorted(clients.items())
                                                             if c["path"] != "bin/mini"]
     listed += bundle_files + ["provenance.json", *SCRIPTS, "source.tar", "logs/source-files.sha256"]
+    listed += world_files
     with open(out / "SHA256SUMS", "w") as stream:
         for rel in listed:
             stream.write(f"{sha(out / rel)}  {rel}\n")

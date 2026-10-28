@@ -2,6 +2,7 @@
 //! supervisor. Op34's callback bytes are retained before source inspection;
 //! an uncertain write/read leaves a durable marker and cannot be repeated.
 
+use crate::io_context::IoContext;
 use crate::dispatch_author::FixedAuthoring;
 use crate::dispatch_inspection::{
     match_inspection, FixedCustody, HttpProjection, MatchedInspection,
@@ -37,7 +38,7 @@ fn invalid(reason: &'static str) -> io::Error {
 
 fn read_bounded(path: &Path, bound: usize) -> io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
-    File::open(path)?
+    File::open(&path).ctx("open", &path)?
         .take(bound as u64 + 1)
         .read_to_end(&mut bytes)?;
     if bytes.is_empty() || bytes.len() > bound {
@@ -56,15 +57,15 @@ pub(crate) fn write_new(directory: &Path, name: &str, bytes: &[u8]) -> io::Resul
         .create_new(true)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(&path)?;
+        .open(&path).ctx("open", &path)?;
     file.write_all(bytes)?;
     file.sync_all()?;
-    File::open(directory)?.sync_all()?;
+    File::open(&directory).ctx("open", &directory)?.sync_all()?;
     Ok(path)
 }
 
 pub(crate) fn private_dir(path: &Path) -> io::Result<()> {
-    let metadata = fs::symlink_metadata(path)?;
+    let metadata = fs::symlink_metadata(&path).ctx("inspect", &path)?;
     if !path.is_absolute()
         || !metadata.is_dir()
         || metadata.uid() != unsafe { libc::geteuid() }
@@ -266,7 +267,7 @@ impl std::os::fd::AsRawFd for VerifiedExecutable {
 static VERIFIED_IMAGES: std::sync::Mutex<Vec<VerifiedImage>> = std::sync::Mutex::new(Vec::new());
 
 fn image_path_metadata(path: &Path) -> io::Result<fs::Metadata> {
-    let meta = fs::symlink_metadata(path)?;
+    let meta = fs::symlink_metadata(&path).ctx("inspect", &path)?;
     if !path.is_absolute() || !meta.is_file() || meta.permissions().mode() & 0o022 != 0 {
         return Err(invalid("selected Mini Host image identity refused"));
     }
@@ -301,7 +302,7 @@ fn verified_image_hashing(
     let mut file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(path)?;
+        .open(&path).ctx("open", &path)?;
     let opened = ImageFingerprint::of(&file.metadata()?);
     if opened != named {
         return Err(invalid("selected Mini Host image changed while opened"));
@@ -379,7 +380,7 @@ impl PrivateOperator {
             .parent()
             .ok_or_else(|| invalid("operator socket lacks parent"))?;
         private_dir(parent)?;
-        let socket = fs::symlink_metadata(&self.socket)?;
+        let socket = fs::symlink_metadata(&self.socket).ctx("inspect", &self.socket)?;
         if !socket.file_type().is_socket()
             || socket.uid() != unsafe { libc::geteuid() }
             || socket.permissions().mode() & 0o077 != 0
@@ -436,7 +437,7 @@ impl PrivateOperator {
                 .parent()
                 .ok_or_else(|| invalid("helper input parent absent"))?,
         )?;
-        let meta = fs::symlink_metadata(input)?;
+        let meta = fs::symlink_metadata(&input).ctx("inspect", &input)?;
         if !meta.is_file()
             || meta.nlink() != 1
             || meta.uid() != unsafe { libc::geteuid() }
@@ -454,7 +455,7 @@ impl PrivateOperator {
                 .create_new(true)
                 .mode(0o600)
                 .custom_flags(libc::O_NOFOLLOW)
-                .open(output)?;
+                .open(&output).ctx("open", &output)?;
             process.stdout(Stdio::from(output_file));
         } else {
             if !kind.is_empty() {
@@ -597,7 +598,7 @@ fn run_pinned(mut process: Command, output: &Path, deadline: Instant) -> io::Res
         .create_new(true)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(&stderr_path)?;
+        .open(&stderr_path).ctx("open", &stderr_path)?;
     process
         .stdin(Stdio::null())
         .stderr(Stdio::from(stderr_file.try_clone()?));
@@ -632,12 +633,12 @@ fn run_pinned(mut process: Command, output: &Path, deadline: Instant) -> io::Res
     }
     stderr_file.sync_all()?;
     let mut reason = String::new();
-    File::open(&stderr_path)?
+    File::open(&stderr_path).ctx("open", &stderr_path)?
         .take(MAX_HELPER_STDERR)
         .read_to_string(&mut reason)
         .ok();
     if reason.is_empty() {
-        let _ = fs::remove_file(&stderr_path);
+        let _ = fs::remove_file(&stderr_path).ctx("remove", &stderr_path);
     }
     if !status.success() {
         let first = reason.lines().next().unwrap_or("").trim();
@@ -658,7 +659,7 @@ impl ContinuityAttemptDir {
     fn create(parent: &Path) -> io::Result<Self> {
         private_dir(parent)?;
         let mut nonce = [0u8; 32];
-        File::open("/dev/urandom")?.read_exact(&mut nonce)?;
+        File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut nonce)?;
         let path = parent.join(format!("continuity-{}", hex(&nonce)));
         DirBuilder::new().mode(0o700).create(&path)?;
         Ok(Self(path))
@@ -666,7 +667,7 @@ impl ContinuityAttemptDir {
 }
 impl Drop for ContinuityAttemptDir {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
+        let _ = fs::remove_dir_all(&self.0).ctx("remove", &self.0);
     }
 }
 
@@ -904,7 +905,7 @@ impl CommittedDispatch {
         self,
         journal: &Journal,
     ) -> io::Result<RecordedDispatch> {
-        if fs::read(&self.active_marker)? != self.active_bytes {
+        if fs::read(&self.active_marker).ctx("read", &self.active_marker)? != self.active_bytes {
             return Err(invalid("native submit marker drift"));
         }
         let record = journal
@@ -1493,7 +1494,7 @@ pub(crate) mod qualification {
         let mut file = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-            .open(path)?;
+            .open(&path).ctx("open", &path)?;
         let meta = file.metadata()?;
         if !meta.is_file()
             || meta.nlink() != 1
@@ -2306,7 +2307,7 @@ mod tests {
         // NativeHostCodec.outcomeCodec: confirmed (.inl), replayed (.inr false),
         // then receipt(transactionId=11,eventId=12,acceptedCount=13,worldRoot=14).
         // Each positive Nat/Digest is one base-255 digit followed by 255.
-        let mut outcome = b"DREGG/NATIVE-HOST/OUTCOME/v7".to_vec();
+        let mut outcome = b"DREGG/NATIVE-HOST/OUTCOME/v8".to_vec();
         outcome.extend_from_slice(&[0, 1, 0, 11, 255, 12, 255, 13, 255, 14, 255]);
         let mut historical = ((outcome.len() + 1) as u32).to_le_bytes().to_vec();
         historical.push(34);

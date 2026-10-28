@@ -19,8 +19,28 @@ the manifest registry and enforces the genesis/history and rejected-turn atomici
 conditions.  The request itself reuses `AuthorizationDeclaration`'s kind-restoring
 codec, rather than defining a second request wire format.
 -/
-import Mathlib.Logic.Encodable.Basic
-import Theory.AuthorizationDeclaration
+module
+
+public import Mathlib.Logic.Encodable.Basic
+public import Theory.AuthorizationDeclaration
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+public import Theory.DeriveEncodable
+
+@[expose] public section
 
 namespace Minidregg.Compiler.SemanticManifest
 

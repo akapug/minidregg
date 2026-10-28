@@ -31,8 +31,27 @@ post value is exactly `certifyNext` of the current head and chain
 
 Wire: the store codec with layout name `DREGG/SYSTEM/v1`.
 -/
-import Compiler.StoreCodec
-import Pred.Core
+module
+
+public import Compiler.StoreCodec
+public import Pred.Core
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.SystemCell
 
@@ -157,7 +176,7 @@ def keyStream : (space : Namespace) → StreamCodec (Namespace.Key space)
 def valueStream : (space : Namespace) → StreamCodec (Namespace.Value space)
   | .system => systemStream
 
-def wireName : String := "DREGG/SYSTEM/v3"
+def wireName : String := "DREGG/SYSTEM/v5"
 
 def wire : Wire layout where
   name := wireName
@@ -169,7 +188,7 @@ def wire : Wire layout where
   keyCodecId
     | .system => "unit"
   valueCodecId
-    | .system => "DREGG/SYSTEM/CERTIFIED-HEIGHT-DIGEST-TAIL-BOUND/v3"
+    | .system => "DREGG/SYSTEM/CERTIFIED-HEIGHT-DIGEST-TAIL-BOUND/v5"
 
 def materializer : Materializer layout Digest := StoreCodec.materializer wire
 

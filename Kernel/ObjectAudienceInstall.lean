@@ -1,9 +1,29 @@
 /- Source-owned audience phase and exact catalog preimage checks shared by the
 policy installer. It proves no package handout: fresh disclosure remains the
 all-holder exact-post admission's obligation. -/
-import Kernel.ObjectAudienceController
-import Kernel.AudienceRosterBinding
-import Compiler.ResourceTargetAdmission
+module
+
+public import Kernel.ObjectAudienceController
+public import Kernel.AudienceRosterBinding
+public import Compiler.ResourceTargetAdmission
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Kernel.ObjectAudienceInstall
 open Minidregg.Compiler
 open Minidregg.Compiler.CanonicalPolicyAdmission

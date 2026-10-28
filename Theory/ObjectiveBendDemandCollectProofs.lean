@@ -23,9 +23,29 @@ heap ends and `f` maps one end to the other.
 * Inhabitants: a typed state with a garbage cell (`garbageTyping`) and a closed program
   that yields with a garbage cell (`yieldingTerm`), whose Plan extracts to the same
   encoded Data before and after collection. -/
-import Theory.ObjectiveBendDemandCollect
-import Theory.ObjectiveBendDemandData
-import Theory.ObjectiveBendDemandTyping
+module
+
+public import Theory.ObjectiveBendDemandCollect
+public import Theory.ObjectiveBendDemandData
+public import Theory.ObjectiveBendDemandTyping
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Theory.ObjectiveBendDemandCollect
 open Minidregg.Theory.ObjectiveBendOpenRecursion
 open Minidregg.Theory.ObjectiveBendDemandMachine

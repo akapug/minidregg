@@ -12,15 +12,29 @@ one `NAME SHA256` line per file under a header line).
 A source package names the front end that lowered it (`ObjectiveSourcePackage.Package.frontEnd`);
 the receiver re-runs THIS front end on the package's sources and admits only a
 package naming this identity (`ObjectiveBendNativeAdmission.SourceSelection`). -/
-import Compiler.PersistedCodecTags
-import Compiler.ObjectiveBendParse
-import Compiler.ObjectiveBendElaborate
-import Compiler.ObjectiveBendC4
-import Compiler.ObjectiveBendContract
-import Compiler.ObjectiveBendTermWire
-import Compiler.ObjectiveBendFrontEnd
-import Compiler.ObjectiveBendLaw
-import Compiler.Sha256
+module
+
+public import Compiler.PersistedCodecTags
+public import Compiler.ObjectiveBendParse
+public import Compiler.ObjectiveBendElaborate
+public import Compiler.ObjectiveBendC4
+public import Compiler.ObjectiveBendContract
+public import Compiler.ObjectiveBendTermWire
+public import Compiler.ObjectiveBendFrontEnd
+public import Compiler.ObjectiveBendLaw
+public import Compiler.Sha256
+meta import Compiler.PersistedCodecTags
+meta import Compiler.ObjectiveBendParse
+meta import Compiler.ObjectiveBendElaborate
+meta import Compiler.ObjectiveBendC4
+meta import Compiler.ObjectiveBendContract
+meta import Compiler.ObjectiveBendTermWire
+meta import Compiler.ObjectiveBendFrontEnd
+meta import Compiler.ObjectiveBendLaw
+meta import Compiler.Sha256
+
+@[expose] public section
+
 namespace Minidregg.Compiler.ObjectiveBendFrontEndIdentity
 open Lean Elab Term
 set_option autoImplicit false

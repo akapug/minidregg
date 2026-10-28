@@ -7,7 +7,12 @@ authority, generation or custody: those belong to the kernel's activity record,
 which holds this checkpoint as one artifact. The round trip
 `decodeState (encodeState s) = some s` is the obligation this module exists for
 (ObjectiveProofs). -/
-import Theory.ObjectiveBendDemandMachine
+module
+
+public import Theory.ObjectiveBendDemandMachine
+
+@[expose] public section
+
 namespace Minidregg.Theory.ObjectiveBendCheckpoint
 open ObjectiveBendOpenRecursion ObjectiveBendDemandMachine
 set_option autoImplicit false

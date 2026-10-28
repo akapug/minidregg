@@ -15,7 +15,27 @@ relation is `Agree s t`: erasing every cached origin (`eraseState`) makes them e
   same address types (the self origin is typed at the cell's own type).
 * `settle_resume_segment`: the kernel's segment from a settled state agrees with the
   segment from the state it settled. -/
-import Theory.ObjectiveBendDemandCollectProofs
+module
+
+public import Theory.ObjectiveBendDemandCollectProofs
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Theory.ObjectiveBendDemandCollect
 open Minidregg.Theory.ObjectiveBendOpenRecursion
 open Minidregg.Theory.ObjectiveBendDemandMachine

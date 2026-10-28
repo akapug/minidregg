@@ -3,10 +3,32 @@ Operator-private current-image signing plan for one lifecycle completion.
 The fixed Pin is loaded from Host settings, never from the request frame.
 This returns exact native credential headers, not an authorization to complete.
 -/
-import Host.ApplicationLifecycleCompletionAuthoring
-import Kernel.ApplicationLifecycleCompletionAdmission
-import Kernel.NativeHostReplay
-import Kernel.NativeHost
+module
+
+public import Host.ApplicationLifecycleCompletionAuthoring
+public import Kernel.ApplicationLifecycleCompletionAdmission
+public import Kernel.NativeHostReplay
+public import Kernel.NativeHostStoreIdentity
+public import Kernel.NativeHost
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationLifecycleCompletionOperator
 
@@ -102,7 +124,7 @@ def prepareVerified (config : Config) {target : Durable}
       beginSource.packageManifest != pin.packageManifest ||
       beginSource.managementSubject.value != pin.managementSubject then
     return .error "completion subject or resource differs from operator pin"
-  if !ApplicationLifecycleResidentProfile.beginMatches config.expectedSeed begin then
+  if !ApplicationLifecycleResidentProfile.beginMatches config.storeIdentity begin then
     return .error "completion BEGIN is outside resident host profile"
   let some key := config.completionCustodianKey
     | return .error "pinned physical custodian key unavailable"
@@ -131,7 +153,7 @@ def prepareVerified (config : Config) {target : Durable}
       packageCapability := pin.packageCapability
       packageObserveCapability := pin.packageObserveCapability
       packageAtomBefore := atomBefore }
-  let .ok source ← pure <| ApplicationLifecycleCompletionAuthoring.sourcePlan config.expectedSeed
+  let .ok source ← pure <| ApplicationLifecycleCompletionAuthoring.sourcePlan config.storeIdentity
       request.beginBytes request.claimIngressBytes request.signedReportBytes current
     | return .error "completion source identities refused"
   match ← ApplicationLifecycleCompletionHistory.select config verified.reader

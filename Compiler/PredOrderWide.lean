@@ -13,9 +13,28 @@ compares `a` with `b + c`, a difference of three values. Nothing here
 short-circuits: the range premise is still checked on every order atom,
 including children of `not` and `any`, whatever their Boolean outcome.
 -/
-import Compiler.PredCompile
-import Mathlib.Data.ZMod.Basic
-import Theory.AssertAxioms
+module
+
+public import Compiler.PredCompile
+public import Mathlib.Data.ZMod.Basic
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler
 

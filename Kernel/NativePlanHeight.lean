@@ -15,8 +15,29 @@ Thus a commit before admission expires the signature; a competing append after
 admission contends. Retry must preserve the signed call; fresh signing requires
 fresh continuity. Recorded exact invocation replay precedes deadline admission.
 -/
-import Kernel.NativeHost
-import Kernel.NativeHostSession
+module
+
+public import Kernel.NativeHost
+public import Kernel.NativeHostSession
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.NativePlanHeight
 

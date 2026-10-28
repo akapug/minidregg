@@ -3,19 +3,40 @@ an ordinary finite transaction, not a separate admission or persistence path.
 Every target and the authority read incidence form one actual MultiCellHyperedge
 PreparedTuple; all signatures and current policies precede its single CAS.  The
 shared replay marker is the intent's durable nullifier. -/
-import Kernel.ResourceTransaction
-import Kernel.ResourceInvocationSignatureFirst
-import Kernel.ObjectiveBendNativeAdmission
-import Compiler.NativeInvocationProfile
-import Kernel.RefusalLane
-import Compiler.PhysicalLawResolution
-import Compiler.ComposedLawDiagnostics
-import Compiler.WorldKindLawDependencies
-import Kernel.ResourceObservationAdmission
-import Compiler.ResourceAuthorityProjection
-import Kernel.JointSlots
-import Kernel.StreamWrite
-import Kernel.ConfidentialAudienceAdmission
+module
+
+public import Kernel.ResourceTransaction
+public import Kernel.ResourceInvocationSignatureFirst
+public import Kernel.ObjectiveBendNativeAdmission
+public import Compiler.NativeInvocationProfile
+public import Kernel.RefusalLane
+public import Compiler.PhysicalLawResolution
+public import Compiler.ComposedLawDiagnostics
+public import Compiler.WorldKindLawDependencies
+public import Kernel.ResourceObservationAdmission
+public import Compiler.ResourceAuthorityProjection
+public import Kernel.JointSlots
+public import Kernel.StreamWrite
+public import Kernel.ConfidentialAudienceAdmission
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ResourceMoneyReceiver
 open Minidregg.Kernel.DeclaredResourceController
@@ -183,7 +204,7 @@ def readRequest (prepared : PreparedInvocation deployment profile ambient ground
   { requestFor ground.authority profile.semantics ambient command command.targets[i]
       (prepared.targets i).before.payload.root with
     verb := observeVerb command.targets[i].kind
-    effectsDigest := (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.OBSERVE/v5".toUTF8.toList
+    effectsDigest := (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.OBSERVE/v7".toUTF8.toList
       ((StreamCodec.product bytesStream StreamCodec.nat).encode
         (commandBytes ground.authority.domain profile.semantics command,
           command.targets[i].target))).digest }

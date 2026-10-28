@@ -2,6 +2,7 @@
 //! Only op46's freshly returned committed frame can cross into physical RPC.
 #![allow(dead_code)] // Resident listener is enabled only with the reverse v2 reserve client.
 
+use crate::io_context::IoContext;
 use crate::agent_api_custody::AgentCustody;
 use crate::agent_api_wire::Request;
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
@@ -22,7 +23,7 @@ use crate::canonical::{decimal, lower_hex};
 pub(crate) use crate::canonical::hex;
 
 const COMMITTED: &[u8] = b"DREGG/APPLICATION/AGENT-DISPATCH-COMMITTED-PERMIT/v2";
-const OUTCOME: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v7";
+const OUTCOME: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v8";
 
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
@@ -200,7 +201,7 @@ impl ReverseCustodyClient {
             .ancestors()
             .enumerate()
         {
-            let meta = std::fs::symlink_metadata(ancestor)?;
+            let meta = std::fs::symlink_metadata(&ancestor).ctx("inspect", &ancestor)?;
             let root_owned = crate::namespace_identity::root_owned(ancestor, &meta);
             let sticky_root = depth > 0 && root_owned && meta.mode() & 0o1000 != 0;
             if !meta.is_dir()
@@ -212,7 +213,7 @@ impl ReverseCustodyClient {
                 return Err(invalid("reverse socket ancestor not protected"));
             }
         }
-        let before = std::fs::symlink_metadata(&self.socket)?;
+        let before = std::fs::symlink_metadata(&self.socket).ctx("inspect", &self.socket)?;
         if !before.file_type().is_socket() || before.uid() != self.controller_uid {
             return Err(invalid("reverse custody socket owner/type drift"));
         }
@@ -233,7 +234,7 @@ impl ReverseCustodyClient {
         {
             return Err(invalid("reverse custody peer UID drift"));
         }
-        let after = std::fs::symlink_metadata(&self.socket)?;
+        let after = std::fs::symlink_metadata(&self.socket).ctx("inspect", &self.socket)?;
         if !after.file_type().is_socket()
             || (before.dev(), before.ino()) != (after.dev(), after.ino())
         {
@@ -629,14 +630,14 @@ pub(crate) struct CommittedAgent {
 
 impl CommittedAgent {
     pub(crate) fn clear_committed_submit_marker(&self) -> io::Result<()> {
-        let metadata = std::fs::symlink_metadata(&self.active_marker)?;
+        let metadata = std::fs::symlink_metadata(&self.active_marker).ctx("inspect", &self.active_marker)?;
         if !metadata.is_file()
             || (metadata.dev(), metadata.ino()) != self.active_identity
-            || std::fs::read(&self.active_marker)? != self.active_bytes
+            || std::fs::read(&self.active_marker).ctx("read", &self.active_marker)? != self.active_bytes
         {
             return Err(invalid("agent native submit marker drift"));
         }
-        std::fs::remove_file(&self.active_marker)?;
+        std::fs::remove_file(&self.active_marker).ctx("remove", &self.active_marker)?;
         File::open(
             self.active_marker
                 .parent()
@@ -787,18 +788,18 @@ pub(crate) fn authorize_once(
     let mut active = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(&active_marker)?;
+        .open(&active_marker).ctx("open", &active_marker)?;
     active.write_all(&marker_bytes)?;
     active.sync_all()?;
     let active_metadata = active.metadata()?;
     let active_identity = (active_metadata.dev(), active_metadata.ino());
-    File::open(parent)?.sync_all()?;
+    File::open(&parent).ctx("open", &parent)?.sync_all()?;
     if cancelled.load(Ordering::Acquire) {
-        if std::fs::read(&active_marker)? != marker_bytes {
+        if std::fs::read(&active_marker).ctx("read", &active_marker)? != marker_bytes {
             return Err(invalid("agent marker drift before cancelled op46"));
         }
-        std::fs::remove_file(&active_marker)?;
-        File::open(parent)?.sync_all()?;
+        std::fs::remove_file(&active_marker).ctx("remove", &active_marker)?;
+        File::open(&parent).ctx("open", &parent)?.sync_all()?;
         return Err(invalid("agent caller cancelled before op46"));
     }
     let frame = operator.invoke(crate::host_operations::AGENT_PAID_DISPATCH_SUBMIT, &ingress)?;

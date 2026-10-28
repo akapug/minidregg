@@ -5,6 +5,7 @@
 //! `lifecycle_v3_completion_native` (op70 plan / op71 assemble / op38 submit /
 //! op39 receipt-only lookup). Uncertain op38 is never resubmitted.
 
+use crate::io_context::IoContext;
 use crate::dispatch_author::{private_signing_key, SignerPin};
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
 use crate::hostd::Journal;
@@ -83,7 +84,7 @@ pub(crate) struct RetryReportInput<'a> {
 
 fn nonce() -> io::Result<String> {
     let mut bytes = [0u8; 16];
-    File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut bytes)?;
     let value = u128::from_le_bytes(bytes);
     if value == 0 {
         return Err(invalid("v4 retry physical nonce zero"));
@@ -551,7 +552,7 @@ pub(crate) fn assemble_once(
     write_new(parent, ACTIVE_MARKER, &active)?;
     let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_COMPLETION_PLAN, &fixed.selector.framed(&request)?)?;
     write_new(attempt_dir, "op70-frame.bin", &reply)?;
-    let plan = framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_COMPLETION_PLAN, PLAN_TAG)?;
+    let plan = framed_payload("launch completion plan", &reply, crate::host_operations::APPLICATION_LAUNCH_COMPLETION_PLAN, PLAN_TAG)?;
     let plan_path = write_new(attempt_dir, "plan.bin", plan)?;
     let inspected = operator.tool(
         "inspect",
@@ -591,7 +592,7 @@ pub(crate) fn assemble_once(
     write_new(attempt_dir, "op71-requested.bin", &pair)?;
     let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_COMPLETION_ASSEMBLE, &pair)?;
     write_new(attempt_dir, "op71-frame.bin", &reply)?;
-    let ingress = framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_COMPLETION_ASSEMBLE, INGRESS_TAG)?.to_vec();
+    let ingress = framed_payload("launch completion assemble", &reply, crate::host_operations::APPLICATION_LAUNCH_COMPLETION_ASSEMBLE, INGRESS_TAG)?.to_vec();
     write_new(attempt_dir, COMPLETION_INGRESS_FILE, &ingress)?;
     Ok(AssembledRetryCompletion {
         attempt_dir: attempt_dir.to_path_buf(),
@@ -615,8 +616,8 @@ fn checked_assembled(
         .parent()
         .ok_or_else(|| invalid("v4 retry completion parent absent"))?;
     private_dir(parent)?;
-    if fs::read(parent.join(ACTIVE_MARKER))? != assembled.active_marker
-        || fs::read(attempt.join(COMPLETION_INGRESS_FILE))? != assembled.ingress
+    if fs::read(parent.join(ACTIVE_MARKER)).ctx("read", &(parent.join(ACTIVE_MARKER)))? != assembled.active_marker
+        || fs::read(attempt.join(COMPLETION_INGRESS_FILE)).ctx("read", &(attempt.join(COMPLETION_INGRESS_FILE)))? != assembled.ingress
         || assembled.begin_sha256 != hex(&Sha256::digest(&begin.ingress))
         || assembled.claim_sha256 != hex(&Sha256::digest(&claim.claim_ingress))
         || assembled.report_sha256 != hex(&Sha256::digest(signed_report))
@@ -668,7 +669,7 @@ pub(crate) fn submit_fresh_once(
     )?;
     let reply = operator.invoke(crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_SUBMIT, &assembled.ingress)?;
     write_new(attempt, "op38-frame.bin", &reply)?;
-    let outcome = framed_payload(&reply, crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_SUBMIT, OUTCOME_TAG)?;
+    let outcome = framed_payload("lifecycle completion submit", &reply, crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_SUBMIT, OUTCOME_TAG)?;
     let outcome_path = write_new(attempt, "op38-outcome.bin", outcome)?;
     let inspected = operator.tool(
         "inspect",
@@ -700,7 +701,7 @@ pub(crate) fn recover_receipt_only(
         "mini-spk-launch-retry-completion-submit-requested-v4",
         COMPLETION_INGRESS_FILE,
     )?;
-    let marker: Value = serde_json::from_slice(&fs::read(attempt_dir.join("op38-requested.json"))?)?;
+    let marker: Value = serde_json::from_slice(&fs::read(attempt_dir.join("op38-requested.json")).ctx("read", &(attempt_dir.join("op38-requested.json")))?)?;
     if !ingress.starts_with(INGRESS_TAG)
         || text(&marker, "claimSha256")? != hex(&Sha256::digest(&claim.committed))
     {

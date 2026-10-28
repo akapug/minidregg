@@ -5,7 +5,11 @@ Privacy is recorded as four independent observations.  In particular, a
 cryptographic hiding statement is only a statement carried by a profile; this
 file neither realizes nor assumes one for any concrete primitive.
 -/
-import Mathlib.Tactic
+module
+
+public import Mathlib.Tactic
+
+@[expose] public section
 
 namespace Minidregg.Theory
 

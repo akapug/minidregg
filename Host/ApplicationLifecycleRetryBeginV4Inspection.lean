@@ -5,8 +5,12 @@ the exact request, the failed-start recovery selector and all signing headers
 so the operator can compare the repeated create action, descriptor, volume and
 recovery before signing.
 -/
-import Host.ApplicationLifecycleRetryBeginV4Authoring
-import Lean.Data.Json
+module
+
+public import Host.ApplicationLifecycleRetryBeginV4Authoring
+public import Lean.Data.Json
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationLifecycleRetryBeginV4Inspection
 

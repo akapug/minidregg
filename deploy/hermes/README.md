@@ -293,10 +293,13 @@ one credit per purse micro-unit):
 `demo/install-hermes STEP...` (run as root) is the sequence J14 runs on the
 ACP room resident, with the box's paths and dregg-infra's registration
 (`mini-controller-register`, `mini-grain-controller@TASK`,
-`mini-grain-resident@TASK`). Every Mini command runs as the service account
-(`SVC`, default `mini-core`). Steps, in order:
+`mini-grain-resident@TASK`). Two accounts act: the operator (`OPERATOR`,
+default `mini-core`) for the sponsor, the founder and the concierge, and the
+resident (`RESIDENT`, default `mini-h-INSTANCE`, made by `preflight`) for
+Hermes's subjects, controller, resident and workers, through its own operator
+route (step `route`). Steps, in order:
 
-    install-hermes preflight subjects room runtime create handoff summon controller dispatch resident
+    install-hermes preflight route subjects room runtime create handoff summon controller dispatch resident
 
 Its rehearsal is J14 on the same candidate with `J14_ROUTE=pool` (the
 operator's sealed pool key, the metered tariff quoted from the upstream's
@@ -428,7 +431,7 @@ set`, `--action grant` to their own grain's runner).
 tariffs):
 
     INSTANCE=glm BASE=9871000 MODEL=glm-5.3-flash ROOM=subscribers TIER=1 POOL_ROW=zai-glm \
-      HERMES_ROOT=OUT demo/install-hermes preflight subjects room concierge runtime create handoff summon controller dispatch resident
+      HERMES_ROOT=OUT demo/install-hermes preflight route subjects room concierge runtime create handoff summon controller dispatch resident
 
 `concierge` installs `mini-concierge-subscribers.timer` (one pass a minute).
 
@@ -455,7 +458,7 @@ once: `chat join subscribers @subscribers-invite.json`; a renewal is adopted by
 Whether the coding plan's terms permit serving others' agents is for the join
 page to state.
 
-## State (lane L4b, 2026-10-27)
+## State (lane L4b, 2026-10-28)
 
 **The room resident (J14)** passes whole on the lane (run 24, 153/153 rows; upstream Hermes
 Agent 6d8a8beb in the gated worker, pool route, `--network none` plus the bridge). The subscriber
@@ -510,38 +513,123 @@ to a candidate whose host carries bc88a5ab, and add `J14_AWAIT=1` for the bridge
 - each write is paid (one `hermes/turn`) and journaled as a `room_attempt` before it runs, and its
   exact lookup is `RoomTools::lookup`.
 
-**One uid per resident (owner: yes; blocked on one route decision).** The names are
-`mini-h-hermes` and `mini-h-glm`, each a system user with a same-named group, sent to infra.
-- **Measured** (J14 run 24: 3 resident prompts, 11 paid model calls, 85 signed attempts, 240
-  queries; `footprint.tsv` and `host-ops.txt` in every J14 step dir from 0a8527b8 on):
-  - the uid would own about 43 MiB and 8,700 inodes: controller root 41.4 MiB / 8,574 inodes,
-    Hermes's `/workspace` 0.9 MiB / 37 inodes (`state.db` 712 KiB), homes 0.2 MiB, launcher 0.6 MiB;
-  - growth is about 3.8 MiB and 780 inodes per paid model call, nearly all of it the controller's
-    journal (`attempt-*`, `query-*`, `provider-meter-*`), and about 80 KiB per prompt in `state.db`.
-- **Infra's planned 32 MiB / 2,500-inode quota** would stop a resident inside its first session.
-  Proposed instead: 512/640 MiB and 100K/125K inodes, which covers one summon budget (1000 at
-  hermes/turn 10, so at most 100 model calls, about 380 MiB and 78K inodes).
-- **The journal needs a retention policy (owed).** At the pool row's 200 calls a day, one resident's
-  journal grows about 760 MiB and 156K inodes a day, against a 20 GB Mini volume.
-- **The route decision.** The groups in the brief do not exist for the operator socket:
-  - it is owner-private by law (the client refuses a socket or directory that its own euid does not
-    own), and the resident's preflight requires the private operator and its `mini.control`;
-  - only the key broker is group-reachable (`mini-sessions`; a member is matched by primary gid,
-    so a resident in it is not a member);
-  - a resident under its own uid therefore needs a controller-private operator route: a
-    systemd-activated socket owned by the resident, served by a `mini-core` proxy forwarding the
-    controller's operation surface (the set measured in `host-ops.txt`), plus a status-only control
-    socket, plus `--operator-peer-uid` on every operator command rather than only reserve commands.
-  - `grain-runtime create` also signs the birth with the operator's sponsor key, so create must split
-    into an operator birth and a resident remainder.
-  - Infra side: `controller-entry.py` needs a per-registration `serviceUid`, per-task `User=` and
-    `Requires=user@UID`, the resident uids as broker provider peers, the user@ drop-in
-    (`RestrictNamespaces=`, `Delegate=`) and a slice per uid, linger, and `/var/lib/mini/glm` among
-    the allowed write roots.
-  - install-hermes changes once the route is decided.
-- **The sandbox threshold** is now its own figure (0a8527b8): `sandbox.workspaceMib`, S 64, M 128,
-  L 256 MiB, beside `scratchMib` (S 16, M 64, L 128, `/tmp` 16, `LimitFSIZE` = scratch). The demo's
-  install-hermes grants no sandbox today, so neither figure applies there yet.
+**One uid per resident (L4b; coordinator rulings 2026-10-27: least-privilege route, fix the journal).**
+- **Accounts:** `install-hermes` acts as the operator (`mini-core`: sponsor, founder, concierge) and
+  as `mini-h-INSTANCE` (system user + same-named group, nologin, home `/var/lib/mini/INSTANCE`,
+  linger, one supplementary group = the key broker's socket group). Ownership: instance root and
+  runtime root root's; `operator/` the operator's; the rest the resident's.
+- **The route** (`cae52528`): step `route` renders `mini-resident-operator-INSTANCE.socket`
+  (`run/mini.sock` fd3, `run/mini.control` fd4, `SocketUser` the resident) and `.service`
+  (`mini serve-resident-operator-proxy` as the operator). Only the resident uid connects; Host
+  frames pass only if the public relay would pass them AND the operation is in
+  `transport::RESIDENT_OPERATIONS` (0-11, 17, 19, 30, 31, 96-102, 144, 151, 153, 180); the rest
+  are refused by name. The control listener passes `status` only. The route is a strict subset of
+  the public surface, so it needs no Lean-side statement. Clients pin the listener creator with
+  `MINI_OPERATOR_PEER_UID=0` (or `--operator-peer-uid`, now accepted on every command).
+  The list is seeded from run 24's retained custody; **confirm it** from `host-ops.txt` of the first
+  J14 on a v8 candidate (the lane's mini already speaks genesis v8: on 23861533 and 3315a908 every
+  world bootstrap refuses `unknown field platform`).
+- **Create split:** `grain-runtime create SPEC --birth-socket OPERATOR-SOCKET` (operator: the
+  sponsor-signed birth only), root `chown -R` the root, then the resident's `create SPEC`.
+- **Journal retention** (`history_compaction.rs`): after each prompt record, when the quiescence
+  census is empty, decided operations' files (`attempt-`, `query-`, `provider-*`, `policy-*`,
+  `source-`, `current-author-`) and decided room-workspace attempts become one line each in
+  `state/history.jsonl` (names, exact outcome, source digest); superseded chat reads and
+  `sources/q-*.json` go. `retained_outcome` answers exact lookup across the prune (filtered tests).
+  Kept: journal, `resident-*`, `prompt-outcome-*`, gates, proposals, `requests/`,
+  `room-operations/` (RoomTools::lookup), undecided attempts.
+- **Measured before / projected after** (J14 run 24, 3 prompts, 11 paid calls): before 43 MiB and
+  8,700 inodes; what compaction keeps there is about 5.4 MiB and 770 inodes, growing about
+  40 inodes per prompt (room-operations, requests, resident records) plus about 80 KiB per prompt
+  of `state.db` and history lines. **Owed: measure it** (footprint.tsv on the v8 candidate run;
+  the target is 32 MiB and about 2,000 inodes over a full summon budget), then send infra (ae95a4eac63b0715e; aed5ecf506cf840af is stopped) one
+  batch: the figure, the unit text above, and its four items (controller-entry per-registration
+  serviceUid with `User=`/`Group=`/`Requires=user@UID`/`Environment=MINI_OPERATOR_PEER_UID=0` for a
+  resident registration; the resident uids as broker provider peers; per uid the user@ drop-in
+  `RestrictNamespaces=` + `Delegate=cpu cpuset io memory pids` and a `user-UID.slice` wall;
+  `/var/lib/mini/glm` among the allowed write roots).
+- **The sandbox threshold** is its own figure (`sandbox.workspaceMib` S 64 / M 128 / L 256 MiB,
+  beside `scratchMib` S 16 / M 64 / L 128). The demo's install-hermes grants no sandbox today.
+- **Verification so far:** filtered tests on dregg-build (warm `hermes-tier`, branch
+  `lane/hermes-b`): grain-runtime `sandbox_`, `history_compaction`, `quiescence`, `grain_create`;
+  mini `resident_`, `operator_peer`, `agent_operator`. install-hermes has not run anywhere: it needs
+  the demo box with infra's items.
+
+**Quest 2 on the first v8 candidate 0ce31391** (`/build/lanes/hermes-tier-run/hb-q2.sh RUN_DIR` =
+tools-run.sh with `C=` that candidate, J14_TOOLS=1 J14_AWAIT=1, root `hroot-q2`; run dirs
+`/build/lanes/hermes-live-run/hb-q2-N`):
+- run 1: J14 row 8, alice's 200000000 await funding exceeded the J14 sponsor's 100000; fixed
+  (b740e6f0, sponsor funded under J14_AWAIT).
+- run 2: 122/133, stopped at row 133. Row 122: the room write was refused at the tail bound (head 257
+  certified 0 bound 256); J14 never certified its World. Fixed (2aa94b0c, the operator certifies
+  before each resident pass). Compaction never ran (journal.providerSettlement persists as the next
+  call's anchor); fixed (2aa94b0c, keep from the latest settlement and prompt). `host-ops.txt`:
+  1, 2, 3, 4, 5, 17, 19, 96, 97, 98, 144, all on the allowlist; 0, 6-11, 30, 31, 99-102, 151,
+  153, 180 unused (narrow after the await rows run). Footprint before compaction: g 63.5 MiB /
+  13,329 inodes for 4 prompts and 14 model calls.
+- run 3: 126/137, stopped at row 137. Row 126: the tools pass ran out of budget at compute turn
+  57 of 180. The gate wrote no CPU record because the controller's stop killed it, so 1800 s was
+  charged. Fixed in 1d947aa9 (unverified): systemd's CPUUsageNSec is recorded before the kill.
+  **Open, undiagnosed:** the tools pass selected bob's earlier nogrant request ("please append
+  'typo fixed' to cell ..."), not his sandbox ask. Hermes was offered the seven sandbox tools
+  (provider.shown.jsonl) but answered the old request, so the test provider never took its sandbox
+  branch (hermes-test-provider `sandbox_reply_for` keys on `selectedRequest.text` containing
+  "sandbox"). Look at the resident's request selection after the nogrant pass
+  (`resident/requests.json` in the run's g/state).
+- run 4 (`hb-q2-4`, 0ce31391, 132/149): the CPU record still failed (systemd CPUUsageNSec
+  "[not set]"), so the charge was again 180 turns; await rows refused "this deployment registers no
+  Objective policy"; compaction never ran (g 65 MiB / 13,745 inodes); host ops as run 2 plus nothing
+  new. Fixed in 7a831d07: J14_AWAIT pins the Objective policy, the pre-kill CPU record reads
+  the unit cgroup's cpu.stat, compaction also runs at the next prompt's start (right after a
+  record the resident completion is still due).
+  **Still open, undiagnosed:** the tools prompt's brief does not contain bob's sandbox ask at all
+  (no "sandbox" text in resident-tools.jsonl; resident/requests.json shows pending [] and three
+  completed requests), so the test provider never takes its sandbox branch. Check whether bob's
+  `ask lab ... in the sandbox` line reaches the resident's request scan (cursors per author in
+  resident/requests.json) before the tools pass.
+- run 5 (`hb-q2-5`, 2d8b7ed54, 180/214; J0-J5 PASS on main's harness): compaction ran (g 47 MiB /
+  10,039 inodes, down from 65 MiB / 13,745; two passes compacted 111 and 122 operations). The CPU
+  record still failed: no cpu.stat, because the stop's SIGTERM ends the unit before the read. The
+  180-turn charge left an unconfirmed compute payment, which refused every later pass (await,
+  redteam, dismiss: "recorded payment is not confirmed; exact recovery only"). Fixed in 56f6741a:
+  the record is read before the first signal. Host ops unchanged (1-5, 17, 19, 96-98, 144).
+  The sandbox ask still never reaches the tools brief (see run 4).
+- run 6 (`hb-q2-6`, 7027e0ace, 211/233): the CPU fix works (each tools prompt ~5.6 s = 1 compute
+  turn, paid); compaction ran 4 times (g 49 MiB / 9,767 inodes for 7 prompts, 7 model calls).
+  Remaining reds (tools 127-136, await 159-167, redteam 179-195): those passes' briefs had no
+  selectedRequest and no recentMemberEntries (a maintenance pass), so the test provider never took
+  its sandbox/await/redteam branch. Hypothesis: certifying between the ask and the pass hides the
+  ask from the brief. aa325a6c moves the certify to after each pass.
+- run 7 (`hb-q2-7`, 76758dba6 genesis, tree aa325a6c, 211/233): the same 22 reds. Moving the
+  certify did not help. **Diagnosis so far (the open red):** the resident serves requests late,
+  FIFO, about two passes behind. The ask and nogrant passes ran maintenance prompts (their briefs
+  have no `selectedRequest`), the tools pass served alice's first ask (author 1205…, sequence 1;
+  `strings resident-tools.jsonl | grep -o 'selectedRequest.\{0,900\}'`), and so on. Every
+  brief's `acceptedHeight` is 49. Six requests completed in total (resident/request-*-completed.json).
+  The ask/nogrant checks pass anyway because the test librarian answers from history. Next step:
+  why `resident_requests::select` (entries `kind == say`, `to == me`, `height > acceptedHeight`
+  from `prepare_resident`'s tail page) misses the newest ask in its own pass. Compare the pass's
+  `sourceRequests` with the room tail at that moment (run J14 once with `--only J14` and inspect the
+  resident's prepared assignment).
+- run 7 footprint: g 49 MiB / 9,767 inodes, of which the room workspace's attempts/ held 22 MiB and
+  5,271 inodes (finished reads and result.json writes, which compaction skipped). d06cb6fc compacts
+  them, except attempts a room write record names.
+- run 8 (`hb-q2-8`, aae3e2e37, tree d06cb6fc, 210/233): the same tools/await/redteam reds (the
+  request lag). Footprint: the uid owns about 35 MiB and 6,400 inodes after 6 prompts and 6 model
+  calls (g 33.2 MiB / 6,326 inodes). It no longer grows per call; what is left is the latest
+  prompt's custody plus a fixed part, and the room workspace still holds 11 MiB / 2,558 inodes.
+  **Infra landed items 2-4 in demo-vm 4138262** (broker provider peers; `demo-resident-walls`
+  for the user@ drop-in, slice wall and linger, run by step 9 after `install-hermes preflight`;
+  /var/lib/mini/glm allowed). **Item 1 is open** (controller-entry.py per-registration service uid,
+  with infra a298031c78e86d651, spec sent): until it lands, registering a controller under mini-h-* is refused, so
+  install-hermes's `controller` step cannot pass on the box. **Infra's batch was sent to ae95a4eac63b0715e**: users, the route unit text, the four infra
+  items, this measurement, and an interim quota of 48/56 MiB and 10K/12K inodes pending ember. The
+  32 MiB / 2,000-inode target is not met yet. Owed: compact the room workspace residue (the latest
+  prompt's reads and the room-operations-referenced writes), then send infra the smaller figure.
+- The allowlist stays as seeded until the await rows run on their own ask. The used set on every run
+  so far: 1-5, 17, 19, 96-98, 144.
+- Every J14 pass runs from main's scripts and a candidate's source (coordinator); a J5 red from an
+  older tree is a stale harness.
 
 **Owed:**
 - Run J14_TOOLS and J14_AWAIT on a candidate carrying bc88a5ab and this lane (L4b quest 2:

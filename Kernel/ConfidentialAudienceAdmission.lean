@@ -4,9 +4,14 @@ its current height, signed roster witness and final commit. No bytes are returne
 Initial device profile: one separate content registry, canonical atom 0 containing
 exactly the complete entry list. Device-source writes in the same invocation are
 refused until a source-owned final-overlay construction exists. -/
-import Kernel.RecipientReadEntitlement
-import Kernel.ObjectAudience
-import Kernel.AudienceRosterBinding
+module
+
+public import Kernel.RecipientReadEntitlement
+public import Kernel.ObjectAudience
+public import Kernel.AudienceRosterBinding
+
+@[expose] public section
+
 namespace Minidregg.Kernel.ConfidentialAudienceAdmission
 open Minidregg.Compiler
 open Minidregg.Compiler.Tower256ConcreteBackend

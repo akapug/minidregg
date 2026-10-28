@@ -431,7 +431,7 @@ pub fn receive(config: &Config, dispatch: &DispatchClaim, held: &SealedNative) -
         Initial::load(&pending_base, b"DREGG.PRIVATE.WORKER.PENDING.KEY\x01")?
     } else {
         let mut random = [0u8; 32];
-        File::open("/dev/urandom")?.read_exact(&mut random)?;
+        crate::entropy::os_fill(&mut random)?;
         Initial::create(
             &pending_base,
             b"DREGG.PRIVATE.WORKER.PENDING.KEY\x01",

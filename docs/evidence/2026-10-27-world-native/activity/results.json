@@ -1,0 +1,310 @@
+{
+ "rows": [
+  {
+   "step": "extract-quote-is-the-policy-ceiling",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "published": {
+     "extractTicks": "3200000"
+    },
+    "policy": 3200000
+   },
+   "group": null
+  },
+  {
+   "step": "publish",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "publish"
+  },
+  {
+   "step": "create",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "create"
+  },
+  {
+   "step": "birth",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "birth"
+  },
+  {
+   "step": "commit-performed-at-birth",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "source": {
+     "kind": "performed",
+     "reason": null,
+     "verdict": "settled"
+    },
+    "state": {
+     "fields": [
+      {
+       "name": "total",
+       "value": {
+        "tag": "natural",
+        "value": "5"
+       }
+      }
+     ],
+     "tag": "record"
+    }
+   },
+   "group": "effect-satisfiable"
+  },
+  {
+   "step": "deliver-from-the-purse-refused",
+   "expect": "refused",
+   "detailExpected": "notAccountOwner",
+   "type": "refused",
+   "reason": "operation-rejected",
+   "detail": "Minidregg.Kernel.ObjectiveActivityReceiver.Reject.notAccountOwner",
+   "ok": true,
+   "group": "effect-satisfiable"
+  },
+  {
+   "step": "deliver-commit",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "effect-satisfiable"
+  },
+  {
+   "step": "transfer-performed-moves-exactly-1",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "source": {
+     "kind": "performed",
+     "reason": null,
+     "verdict": "settled"
+    },
+    "second": [
+     100000000000,
+     100000000001
+    ],
+    "state": {
+     "fields": [
+      {
+       "name": "total",
+       "value": {
+        "tag": "natural",
+        "value": "6"
+       }
+      }
+     ],
+     "tag": "record"
+    }
+   },
+   "group": "effect-satisfiable"
+  },
+  {
+   "step": "deliver-transfer",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "effect-satisfiable"
+  },
+  {
+   "step": "birth-unfunded",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "effect-teeth-unfunded"
+  },
+  {
+   "step": "deliver-commit-unfunded",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "effect-teeth-unfunded"
+  },
+  {
+   "step": "transfer-refused-unfunded-moves-nothing",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "source": {
+     "kind": "performed",
+     "reason": "unfunded",
+     "verdict": "refused"
+    },
+    "second": [
+     100000000001,
+     100000000001
+    ],
+    "version": [
+     "3",
+     "3"
+    ]
+   },
+   "group": "effect-teeth-unfunded"
+  },
+  {
+   "step": "birth-reserved",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "effect-teeth-reserved"
+  },
+  {
+   "step": "deliver-commit-reserved",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "effect-teeth-reserved"
+  },
+  {
+   "step": "transfer-refused-reserved-moves-nothing",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "source": {
+     "kind": "performed",
+     "reason": "reserved",
+     "verdict": "refused"
+    },
+    "second": [
+     100000000001,
+     100000000001
+    ],
+    "version": [
+     "4",
+     "4"
+    ]
+   },
+   "group": "effect-teeth-reserved"
+  },
+  {
+   "step": "create-lawful",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "effect-law-refuses-delivery"
+  },
+  {
+   "step": "birth-lawful",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "effect-law-refuses-delivery"
+  },
+  {
+   "step": "deliver-law-refused",
+   "expect": "refused",
+   "detailExpected": "objectWrite",
+   "type": "refused",
+   "reason": "operation-rejected",
+   "detail": "Minidregg.Kernel.ObjectiveActivityReceiver.Reject.kernel (Minidregg.Kernel.ObjectiveActivity.Refusal.objectWrite (Minidregg.Kernel.ObjectRecord.WriteRefusal.lawDenied { path := [2], clause := Minidregg.Pred.Pred.le \"state/total\" 5, before := some 5, after := some 6 }))",
+   "ok": true,
+   "group": "effect-law-refuses-delivery"
+  },
+  {
+   "step": "law-refused-delivery-writes-and-moves-nothing",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "total": 5,
+    "version": [
+     "1",
+     "1"
+    ]
+   },
+   "group": "effect-law-refuses-delivery"
+  }
+ ],
+ "totals": [
+  {
+   "after": "born",
+   "height": "15",
+   "total": "0"
+  },
+  {
+   "after": "after-transfer",
+   "height": "16",
+   "total": "0"
+  },
+  {
+   "after": "born-unfunded",
+   "height": "18",
+   "total": "0"
+  },
+  {
+   "after": "refused-unfunded",
+   "height": "19",
+   "total": "0"
+  },
+  {
+   "after": "born-reserved",
+   "height": "20",
+   "total": "0"
+  },
+  {
+   "after": "refused-reserved",
+   "height": "21",
+   "total": "0"
+  },
+  {
+   "after": "born-lawful",
+   "height": "23",
+   "total": "0"
+  },
+  {
+   "after": "after-law-refusal",
+   "height": "23",
+   "total": "0"
+  }
+ ],
+ "objects": {
+  "obj": {
+   "object": "15295884778496835149",
+   "capability": "15895360027698301429"
+  },
+  "lawful": {
+   "object": "14473132624736375185",
+   "capability": "15148972292001265614"
+  }
+ },
+ "allPass": true,
+ "pin": "113272511604190550553704737762050633363893885159284391224719745342660995821255",
+ "height": "23"
+}

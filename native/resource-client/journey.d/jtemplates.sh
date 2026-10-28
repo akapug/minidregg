@@ -7,8 +7,9 @@
 #             byte for byte.
 #   workroom  alice: `room new lab --template workroom` births lab, lab/index (the
 #             map: a doc only alice writes, that only grows), lab/wall (a stream),
-#             lab/notes (a draft), lab/tasks (a note); `doc show lab/index` lists
-#             the links by name; `doc backlinks lab/wall` finds the index.
+#             lab/notes (a draft), lab/tasks (a note); `doc show lab/index` prints
+#             the map's line and the room's shared names; `doc links lab/index`
+#             lists the links by name; `doc backlinks lab/wall` finds the index.
 #   by hand   the file `room template show` printed, with $ROOM and $ME replaced
 #             by sed, piped into `mini shell` (script mode) births lab2: the same
 #             shape (doc show / read outputs equal modulo the room's name, ids,
@@ -49,7 +50,12 @@ TABLE=$SD/jtemplates.tsv
 printf 'n\tstep\twho\tline\texpect\trc\tverdict\tnote\n' >"$TABLE"
 N=0; FAILED=0; FIRST_FAIL=""
 
-ws_of() { if [ "$1" = sponsor ]; then echo "$SPONSOR_WS"; else echo "$WS/$1"; fi; }
+# dana is the split-tenancy member: HOME is a session dir and the workspace sits
+# beneath it, as deploy/shell/mini-shell-ssh passes them (--workspace
+# SESSIONS/NAME/workspace --home SESSIONS/NAME); the others keep sibling dirs.
+ws_of() {
+  case "$1" in sponsor) echo "$SPONSOR_WS" ;; dana) echo "$H/dana/workspace" ;; *) echo "$WS/$1" ;; esac
+}
 
 say() {
   local who=$1 line=$2
@@ -213,7 +219,7 @@ printf '%s\n' '{"type":"all","predicates":[]}' >"$SD/permit-all.json"
 
 # ------------------------------------------------ friends: enroll, provision, init
 declare -A SUBJ
-for f in alice bob carl; do
+for f in alice bob carl dana; do
   mkdir -p -m 700 "$H/$f"
   ok setup "$f" "keygen mini.key"
   operator setup "CUSTODY: copy $f's secret into the sponsor home (enroll plan+seal sign with both keys)" \
@@ -255,8 +261,9 @@ ok list alice "room template show social member"
 check list "room template show social member prints member.shell" cmp -s "$OUT" "$TPL/social/member.shell"
 
 # ------------------------------------------------ a workroom
+# 20 lines: chat adopt made workrooms chat rooms from birth (90562d76c).
 stderr_says workroom alice "room new lab --template workroom" 0 \
-  "template workroom/template.shell: 19 line(s) done"
+  "template workroom/template.shell: 20 line(s) done"
 for leaf in lab lab.index lab.wall lab.notes lab.tasks; do
   check workroom "alice holds a reference $leaf" test -f "$AW/$leaf.json"
 done
@@ -285,18 +292,29 @@ cp "$OUT" "$SD/lab-wall.read"
 ok workroom alice "doc show lab/index"
 cp "$OUT" "$SD/lab-index.show"
 check workroom "doc show lab/index: the map's line" grep -q "workroom lab: wall is what we say" "$OUT"
-check workroom "doc show lab/index: a link to lab/wall by name (a stream: mini:object/ID)" grep -qE -- "-> lab/wall \(object [0-9]+\)" "$OUT"
-check workroom "doc show lab/index: a link to lab/notes by name" grep -qE -- "-> lab/notes \(document [0-9]+\)" "$OUT"
-check workroom "doc show lab/index: a link to lab/tasks by name" grep -qE -- "-> lab/tasks \(document [0-9]+\)" "$OUT"
-check workroom "doc show lab/index: exactly three links" test "$(grep -c '^link ' "$OUT")" = 3
+WALLID=$(jq -r .target "$AW/lab.wall.json"); NOTESID=$(jq -r .target "$AW/lab.notes.json"); TASKSID=$(jq -r .target "$AW/lab.tasks.json")
+check workroom "doc show lab/index: the room's shared names, each bound to its exact ID, and no others" \
+  sh -c "grep -qxF '  wall → object:$WALLID' '$OUT' && grep -qxF '  notes → object:$NOTESID' '$OUT' && grep -qxF '  tasks → object:$TASKSID' '$OUT' && test \$(grep -c '^  [a-z]* → ' '$OUT') = 3"
+ok workroom alice "doc links lab/index"
+cp "$OUT" "$SD/lab-index.links"
+check workroom "doc links lab/index: a link to lab/wall by name (a stream is a cell: a document target)" \
+  grep -qE -- "^link [0-9]+ -> document lab/wall \(target [0-9]+\) relation 0 " "$OUT"
+check workroom "doc links lab/index: a link to lab/notes by name" \
+  grep -qE -- "^link [0-9]+ -> document lab/notes \(target [0-9]+\) relation 0 " "$OUT"
+check workroom "doc links lab/index: a link to lab/tasks by name" \
+  grep -qE -- "^link [0-9]+ -> document lab/tasks \(target [0-9]+\) relation 0 " "$OUT"
+check workroom "doc links lab/index: exactly three links (the room's shared-name links beside them)" \
+  test "$(grep -cE '^link [0-9]+ -> document lab/' "$OUT")" = 3
 ok workroom alice "doc show lab/notes"
 cp "$OUT" "$SD/lab-notes.show"
-check workroom "doc show lab/notes links back to lab/index" grep -qE -- "-> lab/index \(document [0-9]+\)" "$OUT"
+ok workroom alice "doc links lab/notes"
+check workroom "doc links lab/notes links back to lab/index" \
+  grep -qE -- "^link [0-9]+ -> document lab/index(,[^ ]+)* \(target [0-9]+\) relation 0 " "$OUT"
 ok workroom alice "doc show lab/tasks"
 cp "$OUT" "$SD/lab-tasks.show"
 ok workroom alice "doc backlinks lab/wall"
-check workroom "doc backlinks lab/wall: the index links to the wall" \
-  sh -c "grep -q '^lab/index link ' '$OUT' && grep -q '^# 1 backlink' '$OUT'"
+check workroom "doc backlinks lab/wall: exactly one backlink, from lab/index, to the wall's exact target" \
+  sh -c "grep -qE '^lab/index(,[^ ]+)* link ' '$OUT' && grep -q 'target document $WALLID' '$OUT' && grep -q '^# 1 backlink' '$OUT'"
 ok workroom alice "doc backlinks lab/index"
 check workroom "doc backlinks lab/index: notes links back" sh -c "grep -q '^lab/notes link ' '$OUT'"
 ok workroom alice "room list"
@@ -333,9 +351,11 @@ INDEX=$(jq -r .target "$AW/lab.index.json"); NOTES=$(jq -r .target "$AW/lab.note
 ok member bob "import lab/index object $INDEX $BOBCAP"
 ok member bob "import lab/notes object $NOTES $BOBCAP"
 ok member bob "doc show lab/index"
-check member "bob reads the map: the line and three links" \
-  sh -c "grep -q 'workroom lab: wall is what we say' '$OUT' && test \$(grep -c '^link ' '$OUT') = 3"
-check member "bob's map names lab/notes by bob's own reference" grep -qE -- "-> lab/notes \(document $NOTES\)" "$OUT"
+check member "bob reads the map: the line, and notes bound to the exact ID his lab/notes reference holds" \
+  sh -c "grep -q 'workroom lab: wall is what we say' '$OUT' && grep -qxF '  notes → object:$NOTES' '$OUT'"
+ok member bob "doc links lab/index"
+check member "bob reads the map: three links" test "$(grep -cE '^link [0-9]+ -> document ' "$OUT")" = 3
+check member "bob's map names lab/notes by bob's own reference" grep -qE -- "lab/notes \(target $NOTES\)" "$OUT"
 ok member bob "doc edit b1 lab/index 1 'bob rewrites the map'"
 refused member bob "submit b1" law-denied
 check member "the refusal names the index's clause (alice is the only writer)" grep -q "$A" "$ERR"
@@ -376,8 +396,11 @@ for leaf in pub pub.index pub.wall pub.intro; do
 done
 check social "pub/wall is a stream" jq -e '.storage == "stream"' "$WS/alice/sources/create-pub.wall.request.json"
 ok social alice "doc show pub/index"
+check social "pub's map binds wall and intro to their exact IDs" \
+  sh -c "grep -qxF '  wall → object:$(jq -r .target "$AW/pub.wall.json")' '$OUT' && grep -qxF '  intro → object:$(jq -r .target "$AW/pub.intro.json")' '$OUT'"
+ok social alice "doc links pub/index"
 check social "pub's map links pub/wall and pub/intro by name" \
-  sh -c "grep -qE -- '-> pub/wall \(object [0-9]+\)' '$OUT' && grep -qE -- '-> pub/intro \(document [0-9]+\)' '$OUT'"
+  sh -c "grep -qE -- '^link [0-9]+ -> document pub/wall \(target [0-9]+\) ' '$OUT' && grep -qE -- '^link [0-9]+ -> document pub/intro \(target [0-9]+\) ' '$OUT'"
 stderr_says social alice "room welcome pub $C --template social" 0 "template social/member.shell: 4 line(s) done"
 check social "carl's stream: born in pub, owned by alice who bore it (a room birth is owned by its creator)" \
   jq -e --arg a "$A" --arg pub "$(jq -r .target "$AW/pub.json")" \
@@ -408,10 +431,52 @@ done
 check story "tale/scenes is a stream; chapters a note" \
   sh -c "jq -e '.storage == \"stream\"' '$WS/alice/sources/create-tale.scenes.request.json' && jq -e '.predicate.predicates[1].predicates[1].slot == \"content/atom-edits\"' '$WS/alice/sources/create-tale.chapters.request.json'"
 ok story alice "doc show tale/index"
+check story "tale's map binds chapters, scenes and cast to their exact IDs" \
+  sh -c "for l in chapters scenes cast; do grep -qxF \"  \$l → object:\$(jq -r .target '$AW/tale.'\$l'.json')\" '$OUT' || exit 1; done"
+ok story alice "doc links tale/index"
 check story "tale's map links chapters, scenes and cast by name" \
-  sh -c "grep -qE -- '-> tale/chapters \(document' '$OUT' && grep -qE -- '-> tale/scenes \(object' '$OUT' && grep -qE -- '-> tale/cast \(document' '$OUT'"
+  sh -c "grep -qE -- '^link [0-9]+ -> document tale/chapters \(target [0-9]+\) ' '$OUT' && grep -qE -- '^link [0-9]+ -> document tale/scenes \(target [0-9]+\) ' '$OUT' && grep -qE -- '^link [0-9]+ -> document tale/cast \(target [0-9]+\) ' '$OUT'"
 ok story alice "doc show tale/chapters"
-check story "tale/chapters links tale/cast" grep -qE -- "-> tale/cast \(document" "$OUT"
+ok story alice "doc links tale/chapters"
+check story "tale/chapters links tale/cast" grep -qE -- "tale/cast \(target [0-9]+\)" "$OUT"
+
+# ------------------------------------------------ story under live traffic, and split tenancy
+# A second member appends in a loop (bob, into lab/notes: his grant writes
+# there), so the world head moves between every two reads of a template. The
+# shared-name chain must be judged in one image, not refused for an unrelated
+# head move. The writer has a PID file and is stopped by that PID only.
+BG=$SD/bg; mkdir -p -m 700 "$BG"
+bgwriter() {
+  local i=0
+  while :; do
+    i=$((i + 1))
+    "$SHELL_BIN" shell --socket "$SOCKET" --host "$HOST" --config "$CONFIG" \
+      --workspace "$(ws_of bob)" --home "$H/bob" --line "doc append bg$i lab/notes 'traffic $i'" >/dev/null 2>&1 &&
+    "$SHELL_BIN" shell --socket "$SOCKET" --host "$HOST" --config "$CONFIG" \
+      --workspace "$(ws_of bob)" --home "$H/bob" --line "submit bg$i" >/dev/null 2>&1 &&
+      echo "$i" >"$BG/count"
+  done
+}
+bgwriter </dev/null >"$BG/writer.log" 2>&1 &
+echo $! >"$BG/writer.pid"
+for i in $(seq 1 600); do [ -s "$BG/count" ] && break; sleep 0.1; done
+check traffic "the background writer is admitting appends" test -s "$BG/count"
+BG0=$(cat "$BG/count" 2>/dev/null || echo 0)
+stderr_says traffic alice "room new tale2 --template story" 0 "template story/template.shell: 19 line(s) done"
+stderr_says traffic dana "room new tale3 --template story" 0 "template story/template.shell: 19 line(s) done"
+BG1=$(cat "$BG/count" 2>/dev/null || echo 0)
+check traffic "the head moved while the templates ran (writer admitted $BG0 -> $BG1 appends)" test "$BG1" -gt "$BG0"
+operator traffic "stop the background writer by its PID file" bash -c 'kill -TERM "$(cat "$1")"; for i in $(seq 1 100); do kill -0 "$(cat "$1")" 2>/dev/null || exit 0; sleep 0.1; done; exit 1' _ "$BG/writer.pid"
+sleep 1
+for leaf in tale2 tale2.chapters tale2.index; do
+  check traffic "alice holds a reference $leaf" test -f "$AW/$leaf.json"
+done
+for leaf in tale3 tale3.chapters tale3.index; do
+  check traffic "dana (split tenancy: workspace under HOME) holds a reference $leaf" test -f "$(ws_of dana)/refs/$leaf.json"
+done
+ok traffic dana "doc show tale3/index"
+check traffic "tale3's map binds chapters, scenes and cast to dana's exact IDs" \
+  sh -c "for l in chapters scenes cast; do grep -qxF \"  \$l → object:\$(jq -r .target '$(ws_of dana)/refs/tale3.'\$l'.json')\" '$OUT' || exit 1; done"
 
 # ------------------------------------------------ restart; a cold audit
 pidfile=$W/public/server.pid

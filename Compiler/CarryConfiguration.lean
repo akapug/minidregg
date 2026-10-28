@@ -3,7 +3,11 @@ Profile descriptions omit some settings; comparing those descriptions alone
 cannot establish that an upgrade retained birth bounds or evaluator selection.
 All unknown configuration fields remain in this comparison and therefore fail
 closed if added, removed, or changed. Numeric JSON values stay arbitrary-width. -/
-import Lean
+module
+
+public import Lean
+
+@[expose] public section
 
 namespace Minidregg.Compiler.CarryConfiguration
 

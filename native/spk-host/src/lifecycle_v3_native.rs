@@ -64,9 +64,12 @@ fn checked_physical_identity(view: &Value, launch: &SourceBoundLaunch<'_>) -> io
     Ok(())
 }
 
-pub(crate) fn framed_payload<'a>(reply: &'a [u8], opcode: u8, tag: &[u8]) -> io::Result<&'a [u8]> {
+/// The payload of a Host reply to `opcode` under `tag`. `step` names the lifecycle step the
+/// reply answers (`"launch claim assemble"`, `"lifecycle begin submit"`, ...), so a refused or
+/// misframed reply says which step it was, never a fixed label.
+pub(crate) fn framed_payload<'a>(step: &str, reply: &'a [u8], opcode: u8, tag: &[u8]) -> io::Result<&'a [u8]> {
     if reply.len() < 6 {
-        return Err(invalid("v3 BEGIN native reply truncated"));
+        return Err(io::Error::new(io::ErrorKind::InvalidData, format!("{step}: native reply truncated")));
     }
     let length = u32::from_le_bytes(reply[..4].try_into().unwrap()) as usize;
     if !(2..=MAX_FRAME).contains(&length)
@@ -75,12 +78,83 @@ pub(crate) fn framed_payload<'a>(reply: &'a [u8], opcode: u8, tag: &[u8]) -> io:
         || !reply[5..].starts_with(tag)
         || reply[5..].len() <= tag.len()
     {
-        return Err(invalid("v3 BEGIN native reply version or framing refused"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "{step}: native reply to op {opcode} refused: answered under marker {} with {} bytes, not the expected tag",
+                reply[4],
+                reply.len()
+            ),
+        ));
     }
     Ok(&reply[5..])
 }
 
+/// A Host refusal of one BEGIN step, by name. A NO_RECORD (253) or HOST_OUTCOME (255) reply
+/// carries the Host's encoded outcome instead of the step's payload; it is retained beside the
+/// step's frame and decoded by the Host's own decoder (`inspect outcome`), never here, and
+/// the error carries that decoding (reason, and the law clause or detail). NO_RECORD is a
+/// decided no-append refusal; HOST_OUTCOME is the undecided envelope and says so. Any other
+/// reply is left to `framed_payload`.
+pub(crate) fn host_refusal(
+    operator: &PrivateOperator,
+    attempt_dir: &Path,
+    step: &str,
+    appends: bool,
+    reply: &[u8],
+) -> io::Result<()> {
+    use crate::host_operations::{RESPONSE_HOST_OUTCOME, RESPONSE_NO_RECORD};
+    if reply.len() < 6 || (reply[4] != RESPONSE_NO_RECORD && reply[4] != RESPONSE_HOST_OUTCOME) {
+        return Ok(());
+    }
+    let decided = reply[4] == RESPONSE_NO_RECORD;
+    let outcome = write_new(attempt_dir, &format!("{step}-refusal-outcome.bin"), &reply[5..])?;
+    // Nothing was appended when the Host says NO_RECORD, or when the step appends nothing
+    // whatever it answers (plans and assemblies; only submits append). Such an attempt is
+    // settled: `BEGIN_REFUSED_MARKER` in a BEGIN attempt lets a later INSTALL set it aside and
+    // begin afresh (`grain::set_aside_refused_install`). An undecided submit keeps it held.
+    let settled = decided || !appends;
+    if settled {
+        write_new(
+            attempt_dir,
+            BEGIN_REFUSED_MARKER,
+            &serde_json::to_vec(&json!({
+                "protocol":"mini-spk-launch-begin-refused-v1",
+                "step":step,
+                "marker":reply[4],
+                "outcomeSha256":hex(&Sha256::digest(&reply[5..])),
+            }))?,
+        )?;
+    }
+    let named = operator
+        .tool("inspect", "outcome", &outcome, &attempt_dir.join(format!("{step}-refusal-outcome.json")))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .map(|view| {
+            let field = |name: &str| view.get(name).and_then(Value::as_str).unwrap_or("").to_owned();
+            let kind = field("type");
+            let reason = field("reason");
+            let clause = match field("explain") {
+                explain if !explain.is_empty() => explain,
+                _ => view.get("detail").map(Value::to_string).unwrap_or_default(),
+            };
+            format!("{kind}: {reason}: {clause}")
+        })
+        .unwrap_or_else(|| "the Host's outcome did not decode".to_owned());
+    Err(io::Error::new(
+        io::ErrorKind::PermissionDenied,
+        if decided {
+            format!("Host refused lifecycle step {step} (no record; nothing was appended): {named}")
+        } else {
+            format!("Host answered lifecycle step {step} undecided: {named}")
+        },
+    ))
+}
+
 pub(crate) const BEGIN_ACTIVE_MARKER: &str = "lifecycle-begin-v3-active.json";
+/// Written in the BEGIN attempt directory when the Host refused a step and nothing was
+/// appended (`host_refusal`).
+pub(crate) const BEGIN_REFUSED_MARKER: &str = "begin-refused.json";
 pub(crate) const BEGIN_INGRESS_FILE: &str = "begin-v3.bin";
 
 fn hold_begin_attempt(parent: &Path, active: &[u8]) -> io::Result<()> {
@@ -412,7 +486,8 @@ pub(crate) fn submit_once(
     hold_begin_attempt(parent, &active)?;
     let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_BEGIN_PLAN, &fixed.selector.framed(&request)?)?;
     write_new(attempt_dir, "op66-frame.bin", &reply)?;
-    let plan = framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_PLAN, PLAN_TAG)?;
+    host_refusal(operator, attempt_dir, "op66-plan", false, &reply)?;
+    let plan = framed_payload("launch begin plan", &reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_PLAN, PLAN_TAG)?;
     let plan_path = write_new(attempt_dir, "plan.bin", plan)?;
     let inspection = operator.tool(
         "inspect",
@@ -441,7 +516,8 @@ pub(crate) fn submit_once(
     write_new(attempt_dir, "op67-requested.bin", &pair)?;
     let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_BEGIN_ASSEMBLE, &pair)?;
     write_new(attempt_dir, "op67-frame.bin", &reply)?;
-    let ingress = framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_ASSEMBLE, BEGIN_TAG)?.to_vec();
+    host_refusal(operator, attempt_dir, "op67-assemble", false, &reply)?;
+    let ingress = framed_payload("launch begin assemble", &reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_ASSEMBLE, BEGIN_TAG)?.to_vec();
     write_new(attempt_dir, BEGIN_INGRESS_FILE, &ingress)?;
     let marker = json!({
         "protocol":"mini-spk-launch-begin-submit-requested-v1",
@@ -457,7 +533,8 @@ pub(crate) fn submit_once(
     )?;
     let reply = operator.invoke(crate::host_operations::APPLICATION_LIFECYCLE_BEGIN_SUBMIT, &ingress)?;
     write_new(attempt_dir, "op22-frame.bin", &reply)?;
-    let outcome = framed_payload(&reply, crate::host_operations::APPLICATION_LIFECYCLE_BEGIN_SUBMIT, b"DREGG/NATIVE-HOST/OUTCOME/v7")?;
+    host_refusal(operator, attempt_dir, "op22-submit", true, &reply)?;
+    let outcome = framed_payload("lifecycle begin submit", &reply, crate::host_operations::APPLICATION_LIFECYCLE_BEGIN_SUBMIT, b"DREGG/NATIVE-HOST/OUTCOME/v8")?;
     let outcome_path = write_new(attempt_dir, "op22-outcome.bin", outcome)?;
     let inspection = operator.tool(
         "inspect",
@@ -622,11 +699,34 @@ mod tests {
         reply.push(66);
         reply.extend_from_slice(PLAN_TAG);
         reply.push(1);
-        assert!(framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_PLAN, PLAN_TAG).is_ok());
-        assert!(framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_ASSEMBLE, PLAN_TAG).is_err());
-        assert!(framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_PLAN, BEGIN_TAG).is_err());
+        assert!(framed_payload("launch begin plan", &reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_PLAN, PLAN_TAG).is_ok());
+        assert!(framed_payload("launch begin assemble", &reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_ASSEMBLE, PLAN_TAG).is_err());
+        assert!(framed_payload("launch begin plan", &reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_PLAN, BEGIN_TAG).is_err());
         reply.push(0);
-        assert!(framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_PLAN, PLAN_TAG).is_err());
+        assert!(framed_payload("launch begin plan", &reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_PLAN, PLAN_TAG).is_err());
+    }
+
+    /// A claim-step reply under NO_RECORD (the op69 refusal of candidate 0ce31391) names the
+    /// claim step, never "BEGIN".
+    #[test]
+    fn misframed_reply_names_its_step() {
+        let body = b"DREGG/NATIVE-HOST/OUTCOME/v8refused";
+        let mut reply = ((body.len() + 1) as u32).to_le_bytes().to_vec();
+        reply.push(crate::host_operations::RESPONSE_NO_RECORD);
+        reply.extend_from_slice(body);
+        let error = framed_payload(
+            "launch claim assemble",
+            &reply,
+            crate::host_operations::APPLICATION_LAUNCH_CLAIM_ASSEMBLE,
+            b"DREGG/APPLICATION/LIFECYCLE-CLAIM-INGRESS/v3",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.starts_with("launch claim assemble: "), "{error}");
+        assert!(error.contains("claim"), "{error}");
+        assert!(!error.contains("BEGIN"), "{error}");
+        let short = framed_payload("launch claim plan", &[0, 0], crate::host_operations::APPLICATION_LAUNCH_CLAIM_PLAN, b"x").unwrap_err().to_string();
+        assert!(short.starts_with("launch claim plan: "), "{short}");
     }
 
     #[test]

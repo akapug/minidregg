@@ -36,12 +36,33 @@ says about the loaded snapshot), `shape_lawful` (an admitted patch's every
 written cell is lawful), `receive_committed_lawful` and
 `kernelOnly_writers_sound` (the same, for a committed outcome).
 -/
-import Compiler.DurableReceiverIO
-import Compiler.CredentialSignatureIO
-import Compiler.CredentialSignatureAdmission
-import Compiler.ResourceBirthCodec
-import Theory.Receiving
-import Kernel.ReceivingLaw
+module
+
+public import Compiler.DurableReceiverIO
+public import Compiler.CredentialSignatureIO
+public import Compiler.CredentialSignatureAdmission
+public import Compiler.ResourceBirthCodec
+public import Theory.Receiving
+public import Kernel.ReceivingLaw
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.Receiving
 

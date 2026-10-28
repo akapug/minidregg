@@ -8,8 +8,12 @@ containing the *whole* original Mini genesis and accepted prefix for the
 selected Newsgroups audience. It is not a grant, consent proof, redaction,
 fn signature, article admission, or public transport authorization.
 -/
-import Host.GrainOriginSource
-import Theory.Sp800185Cshake256Core
+module
+
+public import Host.GrainOriginSource
+public import Theory.Sp800185Cshake256Core
+
+@[expose] public section
 
 namespace Minidregg.Host.GrainOriginPreparation
 

@@ -12,6 +12,7 @@ member's observe grants.
 -/
 import Kernel.NativeClientConsent
 import Kernel.NativeThinConsent
+import Host.ThinBirthConsent
 import Kernel.ConsentAnchor
 import Kernel.NativeSpecializedConsent
 import Kernel.NativeHostGenesis
@@ -406,8 +407,9 @@ def consent (services : ProviderRouteConsent.Services) (config : NativeHost.Conf
       selectedHeaders config session wanted headers
   | _ => throw (IO.userError "unsupported consent operation")
 
-/-- Thin consent frames (230 intent, 231 observation, 232 plan): answered from
-local custody alone, with no Store and no replay (`Kernel.NativeThinConsent`).
+/-- Thin consent frames (230 intent, 231 observation, 232 plan; 234 birth intent and
+235 birth plan, which carry the member's own birth source): answered from local custody alone,
+with no Store and no replay (`Kernel.NativeThinConsent`, `Kernel.NativeThinBirth`).
 A refusal names what thin consent cannot show; nothing falls back to a replay
 or to signing what was not checked. -/
 def thinRefusal (refusal : NativeThinConsent.Refusal) : String :=
@@ -416,12 +418,16 @@ def thinRefusal (refusal : NativeThinConsent.Refusal) : String :=
       s!"thin consent cannot display this turn: target {target}: {what} unsigned"
   | other => s!"thin consent refused: {repr other}"
 
+/-- A write's display: the post's bytes at every address the opening discloses, and its root only
+when the opening seals nothing (`NativeThinConsent.Display`). -/
 def displayJson (display : NativeThinConsent.Display) : Json :=
   match display.post with
   | none => Json.mkObj [("target", toJson (toString display.target)), ("read", true)]
-  | some (bytes, root) => Json.mkObj [("target", toJson (toString display.target)),
-      ("postRoot", toJson (toString root.value)),
-      ("postBytes", toJson (SourceAgreementJson.encodeHex bytes))]
+  | some (bytes, root) => Json.mkObj ([("target", toJson (toString display.target))] ++
+      (match root with
+        | some root => [("postRoot", toJson (toString root.value))]
+        | none => []) ++
+      [("postBytes", toJson (SourceAgreementJson.encodeHex bytes))])
 
 /-- A delegation's display: the signed parent id, target and child capability
 bytes. The child's lineage is the kernel's copy of that parent, not shown. -/
@@ -434,6 +440,37 @@ def shownJson : NativeThinConsent.Shown → Json
   | .invocation displays => Json.arr (displays.map displayJson).toArray
   | .delegation display => Json.arr #[delegateJson display]
 
+/-- A thin birth's display (`Kernel.NativeThinBirth.BirthDisplay`): the member-authored
+descriptor and source capabilities, the coordinates the Host's authoring read (shown, gated at
+admission), and the finalized descriptor the headers sign (the authored one plus the kernel's
+auxiliary creates). -/
+def birthJson (display : NativeThinBirth.BirthDisplay) : Json :=
+  Json.mkObj [("birth", Json.mkObj [
+    ("draft", toJson (SourceAgreementJson.encodeHex display.draft)),
+    ("sourceCapabilities", toJson (display.capabilities.map fun capability => toString capability.value)),
+    ("coordinates", Json.mkObj [
+      ("height", toJson (toString display.coordinates.height)),
+      ("issuerEpoch", toJson (toString display.coordinates.issuerEpoch)),
+      ("policyEpochs", toJson (display.coordinates.policyEpochs.map fun (policy, epoch) =>
+        [toString policy, toString epoch])),
+      ("lineage", toJson (display.coordinates.lineage.map fun (placement, ancestors) =>
+        Json.mkObj [("placement", toJson (toString placement)),
+          ("ancestors", toJson (ancestors.map toString))]))]),
+    ("finalized", toJson (SourceAgreementJson.encodeHex display.finalized))])]
+
+/-- The member's own birth source, as the thin birth frames carry it. -/
+def birthSource (bytes : List UInt8) : IO Json := do
+  let some text := String.fromUTF8? bytes.toByteArray
+    | throw (IO.userError "thin birth source is not UTF-8")
+  match Json.parse text with
+  | .ok json => pure json
+  | .error detail => throw (IO.userError s!"thin birth source JSON: {detail}")
+
+def isBirth (wanted : NativeObservationCodec.Intent) : Bool :=
+  match wanted.purpose with
+  | .prepare (.birth _ _) => true
+  | _ => false
+
 def thin (services : ProviderRouteConsent.Services) (config : NativeHost.Config)
     (operation : UInt8) (payload : List UInt8) : IO (List UInt8) := do
   let (intentBytes, rest) ← splitPair payload
@@ -443,7 +480,20 @@ def thin (services : ProviderRouteConsent.Services) (config : NativeHost.Config)
   let (signer, rest) ← splitPair rest
   unless signer.length == 32 do throw (IO.userError "custody signer is not an Ed25519 key")
   let semantics := config.profile.semantics
+  if (operation == 230 || operation == 232) && isBirth wanted then
+    throw (IO.userError "a thin birth is consented with the member's source (thin birth frames 234/235); nothing signed")
   match operation with
+  | 234 =>
+      match ThinBirthConsent.checkIntent config (← birthSource rest) wanted with
+      | .error refusal => throw (IO.userError (thinRefusal refusal))
+      | .ok _ => pure intentBytes
+  | 235 =>
+      let (planBytes, sourceBytes) ← splitPair rest
+      match ThinBirthConsent.checkPlan config (← birthSource sourceBytes) wanted planBytes with
+      | .error refusal => throw (IO.userError (thinRefusal refusal))
+      | .ok (headers, shown) =>
+          pure (Json.mkObj [("headers", toJson (headers.map SourceAgreementJson.encodeHex)),
+            ("display", birthJson shown)]).compress.toUTF8.toList
   | 230 =>
       unless rest.isEmpty do throw (IO.userError "intent consent has unexpected trailing bytes")
       pure intentBytes
@@ -561,7 +611,7 @@ frame 229 returns the anchor of the current admission; frame 233 re-checks the
 Store against the held admission (a resident provider sends it once per client
 connection, `ConsentAnchor.recheckStore`). Possession (226) is a
 function of the retained command and the configuration, and thin consent
-frames (230–232) read no Store: they admit nothing. This process serves no
+frames (230–232, 234, 235) read no Store: they admit nothing. This process serves no
 codec frames: the one pure codec implementation is the Host's storeless
 `codec` loop (`Host.Main.serveCodec`). Every other frame first admits the Store (`verifyInitial`
 once, then `refresh`); a failed admission terminates the provider, so no cached
@@ -578,7 +628,7 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
   let body ← readExactly input length
   let operation := body[0]!
   let payload := body.toList.drop 1
-  if operation ≥ 230 && operation ≤ 232 || operation == 226 then
+  if operation ≥ 230 && operation ≤ 232 || operation == 234 || operation == 235 || operation == 226 then
     let answer ← try
         let reply ← if operation == 226 then possession config payload
           else do thin (← IO.ofExcept settings.providerRoutes) config operation payload

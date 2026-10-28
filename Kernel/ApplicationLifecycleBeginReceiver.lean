@@ -4,10 +4,31 @@ records a Mini-owned pending request only after ordinary current DRC mutation
 admission and a separately authorized, same-image package observation. It
 does not launch, attest, complete, or reconcile a physical process.
 -/
-import Kernel.ApplicationLifecycleBeginIngress
-import Kernel.PhysicalResourceReadGuard
-import Kernel.ApplicationDispatchManifest
-import Kernel.ResourceObservationAdmission
+module
+
+public import Kernel.ApplicationLifecycleBeginIngress
+public import Kernel.PhysicalResourceReadGuard
+public import Kernel.ApplicationDispatchManifest
+public import Kernel.ResourceObservationAdmission
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleBeginReceiver
 

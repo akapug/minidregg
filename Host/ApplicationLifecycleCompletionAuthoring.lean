@@ -3,8 +3,12 @@ Source-owned authoring for a physical lifecycle completion. The three stages
 make the custodian sign the exact report before a management principal signs
 the command derived from current native observations. None is admission.
 -/
-import Kernel.ApplicationLifecycleCompletionIngress
-import Kernel.ApplicationLifecycleResidentProfile
+module
+
+public import Kernel.ApplicationLifecycleCompletionIngress
+public import Kernel.ApplicationLifecycleResidentProfile
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationLifecycleCompletionAuthoring
 

@@ -51,13 +51,34 @@ One intent writing several cells is the existing mechanism: a `DataIntent`'s
 writes are a list over cells and `DurableDataIntent.execute` installs all of
 them or none (`PayEnrolProofs.multi_cell_intent_atomic`).
 -/
-import Kernel.ClockCellDomain
-import Kernel.PayObservationReceiver
-import Kernel.PayChainTip
-import Kernel.PayEnrolDecision
-import Kernel.ParticipantKeyEnrollment
-import Kernel.NativeHostGenesis
-import Kernel.ClockLaw
+module
+
+public import Kernel.ClockCellDomain
+public import Kernel.PayObservationReceiver
+public import Kernel.PayChainTip
+public import Kernel.PayEnrolDecision
+public import Kernel.ParticipantKeyEnrollment
+public import Kernel.NativeHostGenesis
+public import Kernel.ClockLaw
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PayEnrolReceiver
 

@@ -11,13 +11,34 @@ physical handler must stage the immutable source blob and atomically install
 that one cell with the remaining hyperedge participants before publishing the
 result.
 -/
-import Compiler.CredentialAuthorityPolicyRegistry
-import Compiler.TypedCellHyperedgeArtifact
-import Compiler.CanonicalRuntimeProfileCore
-import Theory.PolicyInstall
-import Compiler.PhysicalLawResolution
-import Compiler.CandidateLawResolution
-import Kernel.ReceivingLaw
+module
+
+public import Compiler.CredentialAuthorityPolicyRegistry
+public import Compiler.TypedCellHyperedgeArtifact
+public import Compiler.CanonicalRuntimeProfileCore
+public import Theory.PolicyInstall
+public import Compiler.PhysicalLawResolution
+public import Compiler.CandidateLawResolution
+public import Kernel.ReceivingLaw
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PolicyInstallController
 

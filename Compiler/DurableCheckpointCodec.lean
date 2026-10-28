@@ -33,17 +33,48 @@ The world root is the parameterised `Checkpoint.check` of DATAMODEL B2 over
 the current cell-root function (`rootBytes`), until C1 supplies the world-root
 function; it is recomputed from the checkpoint's cells, never trusted.
 -/
-import Compiler.PersistedCodecTags
-import Compiler.PersistedCodecShapes
-import Compiler.CanonicalCellRegistry
-import Compiler.DurableReceiverCodec
-import Compiler.Sp800185Cshake256
-import Compiler.Sp800185Kmac256
-import Kernel.DurableCheckpoint
-import Kernel.WorldRootCache
-import Kernel.WorldSystemCodec
-import Theory.AssertAxioms
-import Theory.AssertCompiled
+module
+
+public import Compiler.PersistedCodecTags
+public import Compiler.PersistedCodecShapes
+public import Compiler.CanonicalCellRegistry
+public import Compiler.DurableReceiverCodec
+public import Compiler.Sp800185Cshake256
+public import Compiler.Sp800185Kmac256
+public import Kernel.DurableCheckpoint
+public import Kernel.WorldRootCache
+public import Kernel.WorldSystemCodec
+public import Theory.AssertAxioms
+public import Theory.AssertCompiled
+meta import Compiler.PersistedCodecTags
+meta import Compiler.PersistedCodecShapes
+meta import Compiler.CanonicalCellRegistry
+meta import Compiler.DurableReceiverCodec
+meta import Compiler.Sp800185Cshake256
+meta import Compiler.Sp800185Kmac256
+meta import Kernel.DurableCheckpoint
+meta import Kernel.WorldRootCache
+meta import Kernel.WorldSystemCodec
+meta import Theory.AssertAxioms
+meta import Theory.AssertCompiled
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+meta import Compiler.PersistedCodecTagRegistry
+
+@[expose] public section
 
 namespace Minidregg.Compiler.DurableCheckpointCodec
 
@@ -205,7 +236,7 @@ def StoreEpoch.accumulatorParts : List String := ["history", "spent", "index", "
 
 /-- Every part name a label may carry, in label order. -/
 def StoreEpoch.partNames : List String :=
-  ["state-key", "schema-refs", Minidregg.Compiler.PersistedCodecTags.native_host_log_tag] ++ StoreEpoch.accumulatorParts ++ ["commands"]
+  ["state-key", "schema-refs", Minidregg.Compiler.PersistedCodecTags.prefix_native_host_log_tag] ++ StoreEpoch.accumulatorParts ++ ["commands"]
 
 /-- The part of a label named `name`, if present. -/
 def StoreEpoch.partNamed (parts : List String) (name : String) : Option String :=
@@ -223,7 +254,7 @@ def StoreEpoch.parse (text : String) : Option StoreEpoch :=
   let names := parts.map StoreEpoch.partName
   if names = StoreEpoch.partNames.filter (names.contains ·) then
     match StoreEpoch.partNamed parts "state-key", StoreEpoch.partNamed parts "schema-refs",
-        StoreEpoch.partNamed parts Minidregg.Compiler.PersistedCodecTags.native_host_log_tag with
+        StoreEpoch.partNamed parts Minidregg.Compiler.PersistedCodecTags.prefix_native_host_log_tag with
     | some stateKey, some schemaRefs, some logTag =>
         let accumulator := match StoreEpoch.accumulatorParts.filterMap (StoreEpoch.partNamed parts) with
           | [] => "none"
@@ -367,9 +398,9 @@ theorem seedEpoch_v1_refusedFor (host : StoreEpoch) (rest : List UInt8) :
   have older : seedFrameName ++ [1] ≠ (seedFrameFor host).frame := by
     intro same
     have tails := List.append_cancel_left
-      (same.trans (by simp [seedFrameFor, PersistedCodecTags.seedWireVersion, List.append_assoc]) :
-      seedFrameName ++ [1] = seedFrameName ++ (4 :: host.label.toUTF8.toList))
-    simp at tails
+      (same.trans (by simp [seedFrameFor, List.append_assoc]) :
+      seedFrameName ++ [1] = seedFrameName ++ (UInt8.ofNat PersistedCodecTags.seedWireVersion :: host.label.toUTF8.toList))
+    simp [PersistedCodecTags.seedWireVersion] at tails
   unfold SeedEpoch.ofBytesFor
   rw [bytesStream.decodePrefix_encode]
   simp only [older, if_false, List.take_left, List.drop_left, if_true]
@@ -384,9 +415,9 @@ theorem seedEpoch_v2_refusedFor (host : StoreEpoch) (label rest : List UInt8) :
   have notCurrent : seedFrameName ++ 2 :: label ≠ (seedFrameFor host).frame := by
     intro same
     have tails := List.append_cancel_left
-      (same.trans (by simp [seedFrameFor, PersistedCodecTags.seedWireVersion, List.append_assoc]) :
-      seedFrameName ++ 2 :: label = seedFrameName ++ (4 :: host.label.toUTF8.toList))
-    simp at tails
+      (same.trans (by simp [seedFrameFor, List.append_assoc]) :
+      seedFrameName ++ 2 :: label = seedFrameName ++ (UInt8.ofNat PersistedCodecTags.seedWireVersion :: host.label.toUTF8.toList))
+    simp [PersistedCodecTags.seedWireVersion] at tails
   unfold SeedEpoch.ofBytesFor
   rw [bytesStream.decodePrefix_encode]
   simp only [notCurrent, if_false, List.take_left, List.drop_left, if_true]
@@ -409,9 +440,9 @@ theorem seedEpoch_v3_refusedFor (host : StoreEpoch) (label rest : List UInt8) :
   have notCurrent : seedFrameName ++ 3 :: label ≠ (seedFrameFor host).frame := by
     intro same
     have tails := List.append_cancel_left
-      (same.trans (by simp [seedFrameFor, PersistedCodecTags.seedWireVersion, List.append_assoc]) :
-      seedFrameName ++ 3 :: label = seedFrameName ++ (4 :: host.label.toUTF8.toList))
-    simp at tails
+      (same.trans (by simp [seedFrameFor, List.append_assoc]) :
+      seedFrameName ++ 3 :: label = seedFrameName ++ (UInt8.ofNat PersistedCodecTags.seedWireVersion :: host.label.toUTF8.toList))
+    simp [PersistedCodecTags.seedWireVersion] at tails
   unfold SeedEpoch.ofBytesFor
   rw [bytesStream.decodePrefix_encode]
   simp only [notCurrent, if_false, List.take_left, List.drop_left, if_true]
@@ -424,6 +455,31 @@ theorem seedEpoch_v3_refusedFor (host : StoreEpoch) (label rest : List UInt8) :
 theorem seedEpoch_v3_refused (label rest : List UInt8) :
     ∃ named, (SeedEpoch.ofBytes (bytesStream.encode (seedFrameName ++ 3 :: label) ++ rest)).refusal =
       some named := seedEpoch_v3_refusedFor StoreEpoch.current label rest
+
+/-- **Every v4 Store refuses by name**, whatever label it carries: its seed predates
+the structure re-emitted with seed frame version 5, and a retired frame is not read as a
+labelled epoch. -/
+theorem seedEpoch_v4_refusedFor (host : StoreEpoch) (label rest : List UInt8) :
+    ∃ named, (SeedEpoch.ofBytesFor host (bytesStream.encode (seedFrameName ++ 4 :: label) ++ rest)).refusalFor host =
+      some named := by
+  have notCurrent : seedFrameName ++ 4 :: label ≠ (seedFrameFor host).frame := by
+    intro same
+    have tails := List.append_cancel_left
+      (same.trans (by simp [seedFrameFor, List.append_assoc]) :
+      seedFrameName ++ 4 :: label = seedFrameName ++ (UInt8.ofNat PersistedCodecTags.seedWireVersion :: host.label.toUTF8.toList))
+    simp [PersistedCodecTags.seedWireVersion] at tails
+  unfold SeedEpoch.ofBytesFor
+  rw [bytesStream.decodePrefix_encode]
+  simp only [notCurrent, if_false, List.take_left, List.drop_left, if_true]
+  cases label with
+  | nil => exact ⟨_, rfl⟩
+  | cons byte bytes =>
+      simp only [PersistedCodecTags.seedWireVersion]
+      exact ⟨_, rfl⟩
+
+theorem seedEpoch_v4_refused (label rest : List UInt8) :
+    ∃ named, (SeedEpoch.ofBytes (bytesStream.encode (seedFrameName ++ 4 :: label) ++ rest)).refusal =
+      some named := seedEpoch_v4_refusedFor StoreEpoch.current label rest
 
 /-- **Every v1 Store refuses by name**: its frame carries no epoch. -/
 theorem seedEpoch_v1_refused (rest : List UInt8) :
@@ -488,7 +544,7 @@ theorem seedEpoch_commandsV1_refused (rest : List UInt8) :
 
 theorem seedEpoch_noAccumulator_refused (rest : List UInt8) :
     (SeedEpoch.ofBytes (bytesStream.encode (labelledFrame labelWithoutAccumulator) ++ rest)).refusal =
-      some "this Store was born in another epoch (history accumulator: Store none, this Host history/mmr-v1;index/trie-v1;checkpoint/v5); re-genesis the world" := by
+      some s!"this Store was born in another epoch (history accumulator: Store none, this Host {StoreEpoch.current.accumulator}); re-genesis the world" := by
   rw [seedEpoch_ofBytes_labelled]
   native_decide
 
@@ -500,7 +556,7 @@ def labelSpentMap : String :=
 accumulator), never read as this Host's. -/
 theorem seedEpoch_spentMap_refused (rest : List UInt8) :
     (SeedEpoch.ofBytes (bytesStream.encode (labelledFrame labelSpentMap) ++ rest)).refusal =
-      some s!"this Store was born in another epoch (cell schema references: Store schema-refs/v5, this Host {persistedSchemaRefs}; log tags: Store DREGG/NATIVE-HOST/LOG-TAG/v3, this Host DREGG/NATIVE-HOST/LOG-TAG/v4; history accumulator: Store history/mmr-v1;spent/trie-v1;checkpoint/v3, this Host history/mmr-v1;index/trie-v1;checkpoint/v5); re-genesis the world" := by
+      some s!"this Store was born in another epoch (cell schema references: Store schema-refs/v5, this Host {persistedSchemaRefs}; log tags: Store DREGG/NATIVE-HOST/LOG-TAG/v3, this Host {logTagLabel}; history accumulator: Store history/mmr-v1;spent/trie-v1;checkpoint/v3, this Host {StoreEpoch.current.accumulator}); re-genesis the world" := by
   rw [seedEpoch_ofBytes_labelled]
   native_decide
 
@@ -522,6 +578,8 @@ theorem seedEpoch_spentMap_refused (rest : List UInt8) :
 #assert_axioms seedEpoch_v2_refused
 #assert_axioms seedEpoch_v3_refusedFor
 #assert_axioms seedEpoch_v3_refused
+#assert_axioms seedEpoch_v4_refusedFor
+#assert_axioms seedEpoch_v4_refused
 #assert_axioms seedEpoch_v1_refusedFor
 #assert_axioms seedEpoch_v1_refused
 /-- Version 2: a record carries its signing subject (`IntentRecord.subject`),

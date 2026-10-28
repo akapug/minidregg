@@ -1,7 +1,11 @@
 /- Shared source recommendation for useful paid entry. Provider tokens and
 compute are separately priced. A byte-priced deployment needs an explicit
 budget because these fixed interaction counts cannot quote unknown bytes. -/
-import Theory.ResourceBirth
+module
+
+public import Theory.ResourceBirth
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PayStarterAllowance
 open Minidregg.Theory.ResourceBirth (CreationTariff)

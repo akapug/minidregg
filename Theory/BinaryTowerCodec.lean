@@ -9,7 +9,11 @@ Fan--Paar packing.  This namespace re-exports that surface without retaining
 the arbitrary enumeration.
 -/
 
-import Theory.BinaryTowerFanPaarCodec
+module
+
+public import Theory.BinaryTowerFanPaarCodec
+
+@[expose] public section
 
 namespace Minidregg.Theory.BinaryTowerCodec
 

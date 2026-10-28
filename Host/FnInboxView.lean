@@ -5,10 +5,29 @@ under its current observe grant; query authority is established by that
 retained native attempt, not this pure decoder. This decoder does not admit a
 foreign operation, rerun fn signatures, or apply its carried publication at B.
 -/
-import Host.Json
-import Kernel.FnConsumerOperation
-import Kernel.FnReplyConsumption
-import Kernel.FnOriginOutbox
+module
+
+public import Host.Json
+public import Kernel.FnConsumerOperation
+public import Kernel.FnReplyConsumption
+public import Kernel.FnOriginOutbox
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Host.FnInboxView
 

@@ -45,15 +45,34 @@ second credit for the same transfer and a second report at the same tip slot
 (`PayObservationProofs.second_credit_refused`).  A duplicate transfer inside
 one report is refused before that (`duplicateInBatch`).
 -/
-import Kernel.CapabilityRevocationController
-import Kernel.ResourceBirthController
-import Kernel.PayObservation
-import Kernel.ClockCellDomain
-import Compiler.PhysicalLawResolution
-import Compiler.WorldKindLawDependencies
-import Kernel.ClockLaw
-import Kernel.ReceivingLaw
-import Kernel.Receiving
+module
+
+public import Kernel.CapabilityRevocationController
+public import Kernel.ResourceBirthController
+public import Kernel.PayObservation
+public import Kernel.ClockCellDomain
+public import Compiler.PhysicalLawResolution
+public import Compiler.WorldKindLawDependencies
+public import Kernel.ClockLaw
+public import Kernel.ReceivingLaw
+public import Kernel.Receiving
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PayObservationReceiver
 

@@ -13,6 +13,9 @@ MINI=${MINI:?set MINI to the source-matched native client}
 RESUME=${WORKROOM_RESUME:-fresh}
 case "$RESUME" in fresh|stale|split) ;; *) echo "invalid resume mode" >&2; exit 2 ;; esac
 command -v jq >/dev/null 2>&1 || exit 2
+REPO=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
+. "$REPO/native/resource-client/journey.d/lib/wire.sh"
+CONTENT_VERSION=$(content_command_version "$REPO")
 if [ "$RESUME" = stale ]; then
   [ -d "$EVIDENCE" ] && [ -s "$EVIDENCE/member-stale-attempt/signed-observation.bin" ] &&
     [ ! -e "$EVIDENCE/member-stale-attempt/call.bin" ] || {
@@ -149,7 +152,7 @@ delegate() {
 }
 make_edit() {
   label=$1 subject=$2 capability=$3 observed=$4 payload=$5 nonce=$6
-  jq -n --slurpfile view "$EVIDENCE/$observed/view.json" \
+  jq -n --arg version "$CONTENT_VERSION" --slurpfile view "$EVIDENCE/$observed/view.json" \
     --slurpfile challenge "$EVIDENCE/$observed/challenge.json" \
     --arg subject "$subject" --arg capability "$capability" \
     --arg payload "$payload" --arg nonce "$nonce" \
@@ -158,7 +161,7 @@ make_edit() {
         nonce:($nonce + "1"),targets:[{kind:"object",target:"8001",
           capability:$capability,
           observeCapability:(if $subject == "9" then "98" else null end),
-          schemaVersion:"1",
+          schemaVersion:$version,
           expectedTargetRoot:$view[0].cell.root,
           payload:{type:"content",actions:[{type:"editAtom",atom:"7401",
             before:($view[0].cell.entries[0] |
@@ -190,13 +193,13 @@ test "$(jq -er '.cell.root' "$EVIDENCE/member-before/view.json")" = \
 deny_query member-unrelated 9 7003 98 "$SECOND_KEY" 60009
 deny_query first-unrelated 8 "${WORKROOM_MEMBER_TASK:-7503}" 96 "$FIRST_KEY" 60010
 
-jq -n --slurpfile view "$EVIDENCE/first-before/view.json" \
+jq -n --arg version "$CONTENT_VERSION" --slurpfile view "$EVIDENCE/first-before/view.json" \
   --slurpfile challenge "$EVIDENCE/first-before/challenge.json" \
   --arg payload "$initial" \
   '{subject:"8",nonce:"60100",purpose:{type:"prepare",draft:{type:"invoke",
     command:{subject:"8",
       nonce:"60101",targets:[{kind:"object",target:"8001",capability:"95",
-        observeCapability:null,schemaVersion:"1",expectedTargetRoot:$view[0].cell.root,
+        observeCapability:null,schemaVersion:$version,expectedTargetRoot:$view[0].cell.root,
         payload:{type:"content",actions:[{type:"createAtom",atom:"7401",
           kind:{type:"text"},payload:$payload}]}}]}}},
     grants:[{kind:"object",target:"8001",capability:"95"}]}' \

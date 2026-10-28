@@ -58,7 +58,8 @@ class WS:
             if op == 0x9:
                 self.s.sendall(bytes([0x8A, 0x80]) + os.urandom(4)); continue
             if op == 0x8:
-                raise EOFError("close frame")
+                code = struct.unpack(">H", payload[:2])[0] if len(payload) >= 2 else None
+                raise EOFError("close frame code=%s reason=%r" % (code, payload[2:80]))
             if op == 0x1:
                 return payload.decode()
 

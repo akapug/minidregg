@@ -22,10 +22,29 @@ What the caches do not change: the image, its codec, the log, the world root,
 every receipt. Nothing here is persisted; a reopen rebuilds both in one pass
 over the log (`CellIds.ofImage`, `TxIndex.ofRecords`: linear, not quadratic).
 -/
-import Kernel.DurableReceiver
-import Std.Data.HashMap.Lemmas
-import Std.Data.HashSet.Lemmas
-import Theory.AssertAxioms
+module
+
+public import Kernel.DurableReceiver
+public import Std.Data.HashMap.Lemmas
+public import Std.Data.HashSet.Lemmas
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.SessionIndex
 

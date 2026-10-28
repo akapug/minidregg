@@ -24,9 +24,28 @@ come from is read from the cell it changes.
 
 Wire: `DREGG/PLATFORM/v1`.
 -/
-import Compiler.StoreCodec
-import Theory.ResourceBirth
-import Theory.AxiomPin
+module
+
+public import Compiler.StoreCodec
+public import Theory.ResourceBirth
+public import Theory.AxiomPin
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PlatformCellLayout
 
@@ -189,7 +208,7 @@ def valueStream : (space : Namespace) → StreamCodec (Namespace.Value space)
   | .record => platformStream
   | .controller => subjectStream
 
-def wireName : String := "DREGG/PLATFORM/v1"
+def wireName : String := "DREGG/PLATFORM/v3"
 
 def wire : Wire layout where
   name := wireName
@@ -202,7 +221,7 @@ def wire : Wire layout where
     | .record => "unit"
     | .controller => "unit"
   valueCodecId
-    | .record => "DREGG/PLATFORM/RECORD/v1"
+    | .record => "DREGG/PLATFORM/RECORD/v3"
     | .controller => "nat/subject-id/v1"
 
 def materializer : Materializer layout Digest := StoreCodec.materializer wire

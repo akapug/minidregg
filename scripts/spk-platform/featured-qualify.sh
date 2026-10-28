@@ -20,7 +20,7 @@ rows=$out/rows.tsv; : >"$rows"
 row() { printf '%s\t%s\t%s\n' "$([ "$2" = 1 ] && echo PASS || echo FAIL)" "$1" "$3" | tee -a "$rows"; }
 state=$(jq -er .stateRoot "$PROFILE")
 
-# letter  name         packageId                         class  page   kind
+# letter  name         packageId                         class  page   kind  [role: the owner role id when role 0 cannot write]
 apps="j EtherCalc 9b3b76152e7d8db9f54dba7455ea9239 S / web
 k HedgeDoc ff642cdb65178a6a2dff96ca15dd7028 M / web
 l Davros 15bf92664a1b14a784bf737e502e13b7 M / web
@@ -42,11 +42,12 @@ package() { # ID -> path
   [[ -f $f ]] || bash "$repo/deploy/market/mini-market-fetch" --state "$out/state" --mini "$BIN/mini" fetch "$id" >/dev/null 2>&1
   [[ -f $f ]] && echo "$f"
 }
-basis() { # SPK -> role basis, as japps.sh picks it
-  local q=$HOME/.mini-featured-basis.$$; mkdir -m 0700 "$q"; cp "$1" "$q/p.spk"
-  if "$BIN/spk-host" qualify --import-profile standard-v1 "$q/p.spk" 2>/dev/null | jq -e '.signedSchema.roles | length > 0' >/dev/null
-  then echo '{"type":"role","id":"0"}'; else echo '{"type":"allAccess"}'; fi
-  rm -rf "$q"
+basis() { # SPK -> the owner's role basis
+  # The grain's owner holds every permission the package declares (Sandstorm's owner is not a role), so
+  # the basis is allAccess, "all current schema bits". Role 0 is the package's first and usually weakest role
+  # (sntfy "api", Davros "viewer", hledger-web "viewer"), under which sntfy's page answers 401 and the
+  # Davros and hledger-web writes are refused by the app itself.
+  echo '{"type":"allAccess"}'
 }
 # One request over a route: METHOD PATH [CURL ARGS...]; prints the status, body in $body.
 req() {
@@ -69,6 +70,9 @@ jreq() {
   done < <(grep -i '^set-cookie:' "$body.headers" | tr -d '\r' | sed 's/^[Ss]et-[Cc]ookie: *//; s/;.*//')
 }
 
+# snip: the first 160 bytes of the last response body ($body) on one line, for a failure's detail.
+snip() { head -c 160 "$body" 2>/dev/null | tr '\r\n\t' '   '; }
+
 # The beneath-HTML write per app: what a resident does instead of clicking.
 write_EtherCalc() {
   local put; put=$(req PUT /_/featured -H 'Content-Type: text/csv' --data-binary $'item,qty\nwidgets,3\n')
@@ -83,13 +87,17 @@ write_EtherCalc() {
 write_HedgeDoc() { write_HedgeDocRT; }
 write_Davros() {
   local put; put=$(req PUT /remote.php/webdav/featured.txt -H 'Content-Type: text/plain' --data-binary 'filed by a resident')
+  local putbody; putbody=$(snip)
   local got; got=$(req GET /remote.php/webdav/featured.txt)
-  [[ $put =~ ^20 && $got == 200 ]] && grep -q 'filed by a resident' "$body" && echo "1 PUT webdav/featured.txt $put; GET $got"
+  [[ $put =~ ^20 && $got == 200 ]] && grep -q 'filed by a resident' "$body" && { echo "1 PUT webdav/featured.txt $put; GET $got"; return; }
+  echo "0 PUT webdav/featured.txt $put [$putbody]; GET $got [$(snip)]"
 }
 write_sntfy() {
   local post; post=$(req POST /featured --data-binary 'job done, from a resident')
+  local postbody; postbody=$(snip)
   local got; got=$(req GET '/featured/json?poll=1&since=all')
-  [[ $post == 200 && $got == 200 ]] && grep -q 'job done' "$body" && echo "1 POST /featured $post; poll $got"
+  [[ $post == 200 && $got == 200 ]] && grep -q 'job done' "$body" && { echo "1 POST /featured $post; poll $got"; return; }
+  echo "0 POST /featured $post [$postbody]; poll $got [$(snip)]"
 }
 # DokuWiki: the edit form (id dw__editform) posts sectok, id, rev, date, prefix, suffix, changecheck and
 # target as hidden fields next to wikitext, summary and the button do[save]. sectok is a hash of the PHP
@@ -118,8 +126,10 @@ write_HledgerWeb() {
   local post2='{"pbalanceassertion":null,"pstatus":"Unmarked","pamount":['"$a2"'],"ptransaction_":"1","paccount":"assets:cash","pdate":null,"ptype":"RegularPosting","pcomment":"","pdate2":null,"ptags":[],"poriginal":null}'
   local txn='{"tcomment":"","tpostings":['"$post1,$post2"'],"ttags":[],"tsourcepos":{"tag":"JournalSourcePos","contents":["",[1,1]]},"tdate":"2026-10-27","tcode":"","tindex":1,"tprecedingcomment":"","tdate2":null,"tdescription":"featured by a resident","tstatus":"Unmarked"}'
   local add; add=$(req PUT /add -H 'Content-Type: application/json' --data "$txn")
+  local addbody; addbody=$(snip)
   local got; got=$(req GET /transactions)
-  [[ $add =~ ^20 && $got == 200 ]] && grep -q 'featured by a resident' "$body" && echo "1 PUT /add $add; GET /transactions $got"
+  [[ $add =~ ^20 && $got == 200 ]] && grep -q 'featured by a resident' "$body" && { echo "1 PUT /add $add; GET /transactions $got"; return; }
+  echo "0 PUT /add $add [$addbody]; GET /transactions $got [$(snip)]"
 }
 # Datasette 0.63 has no HTTP write (a database is uploaded through the page's own form), so the row is
 # a RECORDED READ and passes as one: the grain answers the JSON API beneath the HTML and the database
@@ -132,15 +142,16 @@ write_Datasette() {
 }
 for f in "$here"/market-writes/*.sh ${QUALIFY_WRITES:+"$QUALIFY_WRITES"/*.sh}; do [[ -f $f ]] && . "$f"; done
 
-while read -r letter name pkg class page kind; do
+while read -r letter name pkg class page kind role; do
   [[ $want == *" $letter "* ]] || continue
   spk=$(package "$pkg") || { row "$name: package $pkg fetched and verified" 0 "fetch failed"; continue; }
   b=$(basis "$spk"); U=$(tr a-p A-P <<<"$letter")
+  [[ -z ${role:-} ]] || b="{\"type\":\"role\",\"id\":\"$role\"}"  # a table row may name the role its owner needs for the write
   started=$(date +%s)
   if env BIN="$BIN" "SPK_$U=$spk" "KIND_$U=$kind" "GET_PATH_$U=$page" "CLASS_$U=$class" "ROLE_BASIS_$U=$b" \
       sh "$repo/scripts/spk-platform/grain-journey.sh" phase "$RUN" "birth-$letter" "install-$letter" "share-$letter" \
       "start-$letter" "enroll-$letter" "get-$letter" >"$out/$letter-world.out" 2>"$out/$letter-world.err"; then ok=1; else ok=0; fi
-  row "$name: create, install, share, start, enrol, page $page" "$ok" "$(( $(date +%s) - started )) s $(tail -1 "$out/$letter-world.err" | cut -c1-120)"
+  row "$name: create, install, share, start, enrol, page $page" "$ok" "$(( $(date +%s) - started )) s $(tail -1 "$out/$letter-world.err" | cut -c1-120)$([[ $ok == 1 ]] || { f=$RUN/evidence/$(grep -o '^[a-z]*-'"$letter"' .*exit=[1-9]' "$out/$letter-world.out" | head -1 | cut -d' ' -f1)-body; echo " [failed $(basename "$f"): $(head -n 1 "$f.headers" 2>/dev/null | tr -d '\r') $(head -c 160 "$f.body" 2>/dev/null | tr '\r\n\t' '   ')]"; })"
   [[ $ok == 1 ]] || continue
   app=$(jq -er '.applicationGrainBirth.applicationBirth.application.app' "$RUN/evidence/$letter-app-source.json")
   dir=$state/apps/$app/routes/owner-$kind body=$out/bodies/$letter

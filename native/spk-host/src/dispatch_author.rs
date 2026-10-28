@@ -3,6 +3,7 @@
 //! source slot to an operator-pinned key before signing exact header bytes.
 //! Neither an HTTP request nor a Host plan chooses a new signer.
 
+use crate::io_context::IoContext;
 use crate::dispatch_inspection::{app_route_path, HttpProjection, Route};
 use ed25519_dalek::{Signer, SigningKey};
 use serde::Deserialize;
@@ -226,9 +227,9 @@ pub(crate) fn private_signing_key(path: &Path) -> io::Result<SigningKey> {
     let parent = path
         .parent()
         .ok_or_else(|| invalid("signer has no parent"))?;
-    let dir = fs::symlink_metadata(parent)?;
-    let named = fs::symlink_metadata(path)?;
-    let mut file = File::open(path)?;
+    let dir = fs::symlink_metadata(&parent).ctx("inspect", &parent)?;
+    let named = fs::symlink_metadata(&path).ctx("inspect", &path)?;
+    let mut file = File::open(&path).ctx("open", &path)?;
     let opened = file.metadata()?;
     let uid = unsafe { libc::geteuid() };
     if !path.is_absolute()

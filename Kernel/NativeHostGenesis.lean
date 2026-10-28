@@ -12,11 +12,30 @@ same canonical cell laws and the one-cell authority loader used by turns.
 Key shape/enrollment is checked, not private-key possession or policy liveness.
 A deliberately denying factory policy is valid deployment configuration.
 -/
-import Compiler.WorldExecutionContract
-import Kernel.ResourceBirthPolicyController
-import Kernel.PayClaimLaw
-import Kernel.ClockLaw
-import Theory.AssertAxioms
+module
+
+public import Compiler.WorldExecutionContract
+public import Kernel.ResourceBirthPolicyController
+public import Kernel.PayClaimLaw
+public import Kernel.ClockLaw
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.NativeHostGenesis
 
@@ -288,7 +307,7 @@ each ticker's `C_tick` are derived, beside the optional payment observer) and C1
 (the scalar list carries the tail bound `L` after the factory controller).  Every
 version-3 source refuses (`v3_config_refused`); version 2 named the authority cell
 as the fourth deployment coordinate. -/
-def configFrame : List UInt8 := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v8".toUTF8.toList
+def configFrame : List UInt8 := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v9".toUTF8.toList
 
 def configRawCodec : LawfulCodec Config where
   encode config := configFrame ++ configWireStream.encode config.toWire

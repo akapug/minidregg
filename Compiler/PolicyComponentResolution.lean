@@ -1,6 +1,10 @@
 /- Source-owned law graph loading. History authenticates records; component refs
 and containing-room exports alone create restriction edges. -/
-import Compiler.PolicyHistoryResolution
+module
+
+public import Compiler.PolicyHistoryResolution
+
+@[expose] public section
 
 namespace Minidregg.Compiler.PolicyComponentResolution
 

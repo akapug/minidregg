@@ -416,6 +416,7 @@ pub static APPS: Grammar = Grammar { verb: "apps", leaves: &[
     Leaf { path: &["apps", "open"], args: &[arg("GRAIN", Kind::Word)], flags: &[switch("--json")], effect: Effect::Transition, about: "your route's one-time bootstrap token for the grain's own origin (used once)" },
     Leaf { path: &["apps", "stop"], args: &[arg("GRAIN", Kind::Word)], flags: &[switch("--json")], effect: Effect::Transition, about: "STOP through the lifecycle; undecided with `apps status GRAIN` while it runs" },
     Leaf { path: &["apps", "start"], args: &[arg("GRAIN", Kind::Word)], flags: &[switch("--json")], effect: Effect::Transition, about: "START through the lifecycle" },
+    Leaf { path: &["apps", "renew"], args: &[arg("GRAIN", Kind::Word)], flags: &[switch("--json")], effect: Effect::Transition, about: "re-enroll your grain's routes against the generation it now serves (a restart starts a new one; START renews on its own, this is the explicit form; says so and submits nothing when nothing is stale)" },
     Leaf { path: &["apps", "share"], args: &[arg("GRAIN", Kind::Word), arg("MEMBER", Kind::Word)], flags: &[switch("--json")], effect: Effect::Transition, about: "a route on your grain for MEMBER (v1: members of a shared grain look like one user to the app)" },
     Leaf { path: &["apps", "export"], args: &[arg("GRAIN", Kind::Word), arg("FILE", Kind::Word)], flags: &[switch("--json")], effect: Effect::Transition, about: "the grain's data as a package you keep" },
     Leaf { path: &["apps", "delete"], args: &[arg("GRAIN", Kind::Word)], flags: &[switch("--json")], effect: Effect::Transition, about: "DELETE through the lifecycle" },
@@ -880,6 +881,17 @@ mod tests {
 
     fn words(line: &str) -> Vec<String> {
         line.split(' ').map(str::to_owned).collect()
+    }
+
+    #[test]
+    fn apps_renew_is_a_transition_leaf_taking_one_grain() {
+        let renew = leaf(&APPS, &["apps", "renew"]).expect("the apps grammar has renew");
+        assert_eq!(renew.args.len(), 1);
+        assert!(matches!(renew.effect, Effect::Transition));
+        let parsed = parse(&APPS, &words("apps renew a4501 --json")).unwrap();
+        assert_eq!(parsed.leaf.path, ["apps", "renew"]);
+        assert_eq!(parsed.arg(0), "a4501");
+        assert!(parse(&APPS, &words("apps renew")).is_err(), "a grain is required");
     }
 
     #[test]

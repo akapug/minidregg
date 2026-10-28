@@ -4,8 +4,27 @@ ticket, payer and funding, but every birth allocation and signing header is
 derived from the currently verified Mini image. Assembly only inserts detached
 signatures; native receiving rechecks both branches and the exact final source.
 -/
-import Kernel.ApplicationShareIssueAdmission
-import Kernel.NativeHost
+module
+
+public import Kernel.ApplicationShareIssueAdmission
+public import Kernel.NativeHost
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationShareIssueAuthoring
 open Minidregg.Compiler

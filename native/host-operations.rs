@@ -439,7 +439,11 @@ pub const CONSENT_THIN_OBSERVATION: u8 = 231;
 pub const CONSENT_THIN_PLAN: u8 = 232;
 // re-check the Store before a connection's first frame (233, ConsentAnchor.recheckStore)
 pub const CONSENT_STORE_RECHECK: u8 = 233;
-pub const CONSENT_FRAMES: &[u8] = &[CONSENT_INTENT, CONSENT_OBSERVATION, CONSENT_PLAN, CONSENT_OPERATOR_PLAN, CONSENT_POSSESSION, CONSENT_OBJECTIVE, CONSENT_ANCHOR_OFFER, CONSENT_ANCHOR_ADMITTED, CONSENT_THIN_INTENT, CONSENT_THIN_OBSERVATION, CONSENT_THIN_PLAN, CONSENT_STORE_RECHECK];
+// thin consent: a birth intent against the deployed authoring of the member's own source (234, Kernel.NativeThinBirth)
+pub const CONSENT_THIN_BIRTH_INTENT: u8 = 234;
+// thin consent: a birth plan against the authored draft and the member's derivation of every branch (235, Kernel.NativeThinBirth)
+pub const CONSENT_THIN_BIRTH_PLAN: u8 = 235;
+pub const CONSENT_FRAMES: &[u8] = &[CONSENT_INTENT, CONSENT_OBSERVATION, CONSENT_PLAN, CONSENT_OPERATOR_PLAN, CONSENT_POSSESSION, CONSENT_OBJECTIVE, CONSENT_ANCHOR_OFFER, CONSENT_ANCHOR_ADMITTED, CONSENT_THIN_INTENT, CONSENT_THIN_OBSERVATION, CONSENT_THIN_PLAN, CONSENT_STORE_RECHECK, CONSENT_THIN_BIRTH_INTENT, CONSENT_THIN_BIRTH_PLAN];
 
 // Kernel/ApplicationDispatchAdmission.lean ordinaryHeaderName: the signed ordinary request headers.
 pub const ORDINARY_HEADER_NAMES: &[&str] = &["cookie", "accept", "accept-encoding", "content-type", "user-agent", "if-match", "if-none-match", "x-requested-with", "x-csrftoken", "x-csrf-token", "oc-total-length", "oc-chunk-size", "x-oc-mtime", "oc-fileid", "oc-chunked", "oc-checksum", "oc-chunk-offset", "oc-lazyops", "content-encoding"];

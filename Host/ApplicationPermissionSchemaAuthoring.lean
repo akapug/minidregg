@@ -4,8 +4,12 @@ The JSON came from an app capability and is untrusted. This module only emits
 canonical descriptor bytes; it does not install them or authorize a session.
 The eventual Host.Json entry must call its duplicate-key-safe `parse` first.
 -/
-import Kernel.ApplicationPermissionSchema
-import Lean.Data.Json
+module
+
+public import Kernel.ApplicationPermissionSchema
+public import Lean.Data.Json
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationPermissionSchemaAuthoring
 open Lean

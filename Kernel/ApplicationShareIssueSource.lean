@@ -6,11 +6,30 @@ signature/capability/law at the same loaded image, then emit one distinct
 durable issue event. A bare resource birth or this generated draft alone is
 never a dispatch share.
 -/
-import Kernel.ApplicationDispatchAuthority
-import Kernel.ApplicationGrain
-import Kernel.NativeHostContext
-import Kernel.ResourceBirthController
-import Theory.AssertAxioms
+module
+
+public import Kernel.ApplicationDispatchAuthority
+public import Kernel.ApplicationGrain
+public import Kernel.NativeHostContext
+public import Kernel.ResourceBirthController
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationShareIssueSource
 open Minidregg.Compiler
@@ -327,7 +346,7 @@ descriptors stay opaque bytes authenticated by their original profile's record.
 Hash collision resistance is external; digest equality is not byte equality. -/
 def sourceBytesFromDescriptorBytes (spec : Spec) (descriptorBytes : List UInt8) :
     List UInt8 :=
-  "DREGG/APPLICATION/SHARE-ISSUE-SOURCE/v4".toUTF8.toList ++
+  "DREGG/APPLICATION/SHARE-ISSUE-SOURCE/v6".toUTF8.toList ++
     (StreamCodec.product bytesStream bytesStream).encode (specCodec.encode spec, descriptorBytes)
 
 def sourceBytes (spec : Spec) (descriptor : Descriptor CanonicalCellRegistry.registry) :
@@ -337,7 +356,7 @@ def sourceBytes (spec : Spec) (descriptor : Descriptor CanonicalCellRegistry.reg
 
 def issueMarker (spec : Spec) (descriptor : Descriptor CanonicalCellRegistry.registry) : Nat :=
   (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/SHARE-ISSUE-MARKER/v4".toUTF8.toList
+    "DREGG/APPLICATION/SHARE-ISSUE-MARKER/v6".toUTF8.toList
     (sourceBytes spec descriptor)).digest.value
 
 def appRequestFromSourceBytes (domain semantics : Digest) (federation : FederationId)

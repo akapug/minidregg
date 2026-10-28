@@ -4,6 +4,7 @@
 //! creator); this process writes the two broker-selected identities into it from
 //! outside and then joins it, staying the unit MainPID. Both resident and worker
 //! later drop all capability sets.
+use crate::io_context::IoContext;
 use std::fs::{self, File, Metadata, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
@@ -44,11 +45,49 @@ fn stable(meta: &Metadata) -> (u64,u64,u32,u64,u64,i64,i64,i64,i64) {
 fn provenance_key(meta: &Metadata) -> (u64,u64,u32,u64,u64,i64,i64,i64,i64) {
     if meta.is_dir() { (meta.dev(),meta.ino(),meta.mode(),0,0,0,0,0,0) } else { stable(meta) }
 }
-fn unchanged(pin: &Pin, observed: &Metadata) -> bool {
+/// The id a filesystem owner `original` (an id of the namespace the process started in)
+/// reports as inside the namespace described by `map_text` (`/proc/self/{u,g}id_map`:
+/// `inside outside count` rows): its mapped inside id, or `overflow` when unmapped.
+/// `None` when the map is malformed, which callers treat as "not unchanged".
+fn visible_id(map_text: &str, original: u32, overflow: u32) -> Option<u32> {
+    let mut seen = None;
+    for row in map_text.lines().filter(|r| !r.trim().is_empty()) {
+        let f: Vec<u64> = row.split_whitespace().map(str::parse::<u64>).collect::<Result<_,_>>().ok()?;
+        let [inside, outside, count] = f[..] else { return None; };
+        if count == 0 || inside + count > 1 << 32 || outside + count > 1 << 32 { return None; }
+        let o = u64::from(original);
+        if o >= outside && o < outside + count && seen.is_none() { seen = Some((inside + (o - outside)) as u32); }
+    }
+    Some(seen.unwrap_or(overflow))
+}
+/// The running process's namespace view of ids. Read afresh per check rather than cached:
+/// the maps are tiny and a cache could outlive a (refused) namespace change.
+struct IdView { uid_map: String, gid_map: String, overflow_uid: u32, overflow_gid: u32 }
+impl IdView {
+    fn current() -> Option<Self> {
+        let n = |p: &str| fs::read_to_string(p).ok().and_then(|t| t.trim().parse().ok()).unwrap_or(65534);
+        Some(Self { uid_map: fs::read_to_string("/proc/self/uid_map").ok()?, gid_map: fs::read_to_string("/proc/self/gid_map").ok()?,
+            overflow_uid: n("/proc/sys/fs/overflowuid"), overflow_gid: n("/proc/sys/fs/overflowgid") })
+    }
+}
+/// Two recorded limits. Inside the namespace every unmapped owner reads as the overflow id, so a
+/// root-owned pin re-owned to a different UNMAPPED uid still reads as unchanged here; the provenance
+/// key (dev, ino, mode, and for files the whole stable state) and the mode check still catch a
+/// replaced inode or a widened mode. A mapped non-overflow id is refused (a chown seen from inside).
+/// `current` and `observed` are in-namespace views and must agree; the pin's `original`
+/// owner (taken before entry) must translate to exactly that view.
+fn owners_agree(original: (u32,u32), current: (u32,u32), observed: (u32,u32), view: &IdView) -> bool {
+    current == observed
+        && visible_id(&view.uid_map, original.0, view.overflow_uid) == Some(current.0)
+        && visible_id(&view.gid_map, original.1, view.overflow_gid) == Some(current.1)
+}
+fn unchanged_in(pin: &Pin, observed: &Metadata, view: &IdView) -> bool {
     let Ok(current) = pin.file.metadata() else { return false; };
     provenance_key(&current) == provenance_key(&pin.original) && provenance_key(observed) == provenance_key(&pin.original)
-        && (current.uid(),current.gid()) == (observed.uid(),observed.gid())
-        && (current.uid(),current.gid()) == (pin.original.uid(),pin.original.gid())
+        && owners_agree((pin.original.uid(),pin.original.gid()), (current.uid(),current.gid()), (observed.uid(),observed.gid()), view)
+}
+fn unchanged(pin: &Pin, observed: &Metadata) -> bool {
+    IdView::current().is_some_and(|view| unchanged_in(pin, observed, &view))
 }
 /// Exact pre-namespace owner/group, only for the same unchanged held inode.
 /// Once bootstrap has captured custody, an unknown inode is never blessed by
@@ -78,7 +117,7 @@ fn protected_handle(path: &Path) -> io::Result<File> {
     use std::os::unix::ffi::OsStrExt;
     use std::path::Component;
     if !path.is_absolute() { return Err(refused("bootstrap custody path must be absolute")); }
-    let mut current=OpenOptions::new().read(true).custom_flags(libc::O_PATH|libc::O_DIRECTORY|libc::O_CLOEXEC).open("/")?;
+    let mut current=OpenOptions::new().read(true).custom_flags(libc::O_PATH|libc::O_DIRECTORY|libc::O_CLOEXEC).open("/").ctx("open", &"/")?;
     let components:Vec<_>=path.components().skip(1).collect();
     for (index,component) in components.iter().enumerate() {
         if !host_trusted(&current.metadata()?) { return Err(refused("bootstrap custody ancestor belongs to another principal or is writable")); }
@@ -120,7 +159,7 @@ fn public_tree(path: &Path, roots: &mut Provenance, depth: usize) -> io::Result<
     if depth>MAX_CUSTODY_DEPTH { return Err(refused("bootstrap public-data tree depth exceeded")); }
     remember(path,roots)?;
     if roots.paths[path].original.is_dir() {
-        for entry in fs::read_dir(path)? {
+        for entry in fs::read_dir(&path).ctx("list", &path)? {
             public_tree(&entry?.path(),roots,depth+1)?;
         }
     }
@@ -141,7 +180,7 @@ fn remember_spk_namespace(world: &Path, roots: &mut Provenance) -> io::Result<()
         }
         remember(&store,roots)?;
         let mut seen=0;
-        for entry in fs::read_dir(&store)? {
+        for entry in fs::read_dir(&store).ctx("list", &store)? {
             seen+=1;
             if seen>MAX_CUSTODY_HANDLES { return Err(refused("bootstrap publication listing bound exceeded")); }
             let entry=entry?;
@@ -228,7 +267,7 @@ pub(crate) fn load_registered_controller(registry: &crate::volume_helper::Regist
     }
     let path=directory.join("namespace.json");
     minidregg_compatible_upgrade_custody::root_ancestors(&path)?;
-    let mut file=OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW|libc::O_CLOEXEC|libc::O_NONBLOCK).open(&path)?;
+    let mut file=OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW|libc::O_CLOEXEC|libc::O_NONBLOCK).open(&path).ctx("open", &path)?;
     let before=file.metadata()?;
     if !before.is_file() || before.uid()!=0 || before.nlink()!=1 || before.mode()&0o7777!=0o644
         || before.len()==0 || before.len()>4096 {
@@ -237,7 +276,7 @@ pub(crate) fn load_registered_controller(registry: &crate::volume_helper::Regist
     let mut bytes=Vec::new();
     Read::by_ref(&mut file).take(4097).read_to_end(&mut bytes)?;
     let after=file.metadata()?;
-    let named=fs::symlink_metadata(&path)?;
+    let named=fs::symlink_metadata(&path).ctx("inspect", &path)?;
     if bytes.len() as u64!=before.len() || stable(&before)!=stable(&after)
         || stable(&before)!=stable(&named) || (before.dev(),before.ino(),before.uid(),before.gid())!=(named.dev(),named.ino(),named.uid(),named.gid()) {
         return Err(refused("registered controller receipt changed while read"));
@@ -266,7 +305,7 @@ pub(crate) fn pinned_bwrap(path: &Path, sha256: &str) -> io::Result<crate::dispa
     if !PHYSICAL_BWRAPS.iter().any(|b| Path::new(b) == path) {
         return Err(refused("namespace bwrap is not a deployed physical bwrap"));
     }
-    let m = fs::symlink_metadata(path)?;
+    let m = fs::symlink_metadata(&path).ctx("inspect", &path)?;
     if !m.file_type().is_file() || m.uid() != 0 || m.mode() & 0o022 != 0 || m.mode() & 0o111 == 0 {
         return Err(refused("namespace bwrap must be a root-owned non-writable executable"));
     }
@@ -397,7 +436,7 @@ pub(crate) fn enter_registered(bwrap: &Path, bwrap_sha256: &str, operator_uid: u
         }
         let ns_path = format!("/proc/{pid}/ns/user");
         let ns = File::open(&ns_path).map_err(at("bwrap child namespace", &ns_path))?;
-        if ns.metadata()?.ino() == fs::metadata("/proc/self/ns/user")?.ino() {
+        if ns.metadata()?.ino() == fs::metadata("/proc/self/ns/user").ctx("inspect", &"/proc/self/ns/user")?.ino() {
             return Err(refused("namespace bwrap did not create a user namespace"));
         }
         map("/usr/bin/newuidmap", pid, operator_uid, app_uid,controller.map(|c|c.uid))?;
@@ -414,8 +453,8 @@ pub(crate) fn enter_registered(bwrap: &Path, bwrap_sha256: &str, operator_uid: u
         if unsafe { libc::setgroups(0, std::ptr::null()) } != 0 {
             return Err(io::Error::other(format!("namespace empty groups refused after gid mapping: {}", io::Error::last_os_error())));
         }
-        let uid = fs::read_to_string("/proc/self/uid_map")?;
-        let gid = fs::read_to_string("/proc/self/gid_map")?;
+        let uid = fs::read_to_string("/proc/self/uid_map").ctx("read", &"/proc/self/uid_map")?;
+        let gid = fs::read_to_string("/proc/self/gid_map").ctx("read", &"/proc/self/gid_map")?;
         if !exact_map(&uid, operator_uid, app_uid,controller.map(|c|c.uid)) || !exact_map(&gid, operator_gid, app_gid,controller.map(|c|c.gid)) {
             return Err(refused("namespace identity maps differ from broker selection"));
         }
@@ -453,6 +492,39 @@ mod tests {
         fs::remove_dir_all(&dir).unwrap();
     }
 
+    fn view(uid_map: &str) -> IdView { IdView { uid_map: uid_map.into(), gid_map: uid_map.into(), overflow_uid: 65534, overflow_gid: 65534 } }
+    #[test]
+    fn visible_id_translates_identity_shifted_unmapped_and_refuses_malformed() {
+        assert_eq!(visible_id("         0          0 4294967295\n", 0, 65534), Some(0));
+        assert_eq!(visible_id("         0          0 4294967295\n", 1000, 65534), Some(1000));
+        assert_eq!(visible_id("0 100000 65536\n", 100005, 65534), Some(5));
+        assert_eq!(visible_id("1000 1000 1\n100001 100001 1\n", 0, 65534), Some(65534));
+        assert_eq!(visible_id("1000 1000 1\n100001 100001 1\n", 100001, 65534), Some(100001));
+        assert_eq!(visible_id("1000 x 1\n", 1000, 65534), None);
+        assert_eq!(visible_id("1000 1000\n", 1000, 65534), None);
+        assert_eq!(visible_id("1000 1000 0\n", 1000, 65534), None);
+    }
+    #[test]
+    fn root_owned_pin_is_unchanged_under_a_map_lacking_root_and_not_under_a_mapped_id() {
+        let ns = view("1000 1000 1\n100001 100001 1\n");
+        assert!(owners_agree((0,0), (65534,65534), (65534,65534), &ns), "unmapped root reads as overflow");
+        assert!(!owners_agree((0,0), (1000,1000), (1000,1000), &ns), "a mapped non-overflow id is a chown");
+        assert!(!owners_agree((0,0), (65534,65534), (0,0), &ns), "current and observed must agree");
+        assert!(!owners_agree((0,0), (0,0), (0,0), &ns), "raw original is not visible inside");
+        assert!(owners_agree((0,0), (0,0), (0,0), &view("0 0 4294967295\n")), "identity map: today's check");
+    }
+    #[test]
+    fn unchanged_in_drives_a_real_pin_through_an_injected_map() {
+        let dir = std::env::temp_dir().join(format!("mini-pin-map-{}", std::process::id()));
+        fs::create_dir(&dir).unwrap();
+        let pin = Pin { file: File::open(&dir).unwrap(), original: fs::metadata(&dir).unwrap() };
+        let me = pin.original.uid();
+        let ok = view(&format!("{me} {me} 1\n"));
+        assert!(unchanged_in(&pin, &fs::metadata(&dir).unwrap(), &ok));
+        let shifted = view(&format!("{} {me} 1\n", me + 7));
+        assert!(!unchanged_in(&pin, &fs::metadata(&dir).unwrap(), &shifted), "stat still reports the raw id");
+        fs::remove_dir_all(&dir).unwrap();
+    }
 
     fn registry() -> crate::volume_helper::Registry {
         serde_json::from_value(serde_json::json!({

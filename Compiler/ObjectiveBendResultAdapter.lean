@@ -1,9 +1,29 @@
 /- Objective closed ground returns. Profile metadata comes from the independently
 accepted native method/profile, not a returned record or caller-selected mask.
 This producer creates clear content effects, never encryption or authority. -/
-import Theory.ObjectiveBendTyping
-import Theory.ObjectiveBendDemandCapacity
-import Compiler.BendWorldPlan
+module
+
+public import Theory.ObjectiveBendTyping
+public import Theory.ObjectiveBendDemandCapacity
+public import Compiler.BendWorldPlan
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Compiler.ObjectiveBendResultAdapter
 open Minidregg.Theory
 open Minidregg.Theory.TypedAuthorization

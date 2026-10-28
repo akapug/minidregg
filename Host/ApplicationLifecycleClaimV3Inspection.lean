@@ -3,8 +3,12 @@ Read-only presentation of the exact event24 committed frame. Decoding this
 frame does not establish that it came from a fresh op26 callback; the physical
 host must compare the echoed bytes with its retained native response.
 -/
-import Kernel.ApplicationLifecycleClaimV3Projection
-import Lean.Data.Json
+module
+
+public import Kernel.ApplicationLifecycleClaimV3Projection
+public import Lean.Data.Json
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationLifecycleClaimV3Inspection
 

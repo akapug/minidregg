@@ -1,5 +1,9 @@
 /- Receive one governed failed START reconciliation against a verified native tip. Exact post-CAS readback is required for confirmation; an uncertain reply is recovered by receipt-only same-ingress lookup. -/
-import Kernel.NativeHostReplay
+module
+
+public import Kernel.NativeHostReplay
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationFailedStartRecoveryReceiver
 

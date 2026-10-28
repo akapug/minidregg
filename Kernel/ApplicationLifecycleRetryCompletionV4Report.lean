@@ -4,8 +4,29 @@ exact selected command digest and the protected persistent-volume mapping
 alongside its process observation. Mini checks the signed shape and current
 authority; it cannot inspect the OS or infer execution from a receipt.
 -/
-import Kernel.ApplicationLifecycleRetryClaimV4Projection
-import Kernel.ApplicationLifecycleCompletionReport
+module
+
+public import Kernel.ApplicationLifecycleRetryClaimV4Projection
+public import Kernel.ApplicationLifecycleCompletionReport
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Report
 
@@ -111,11 +132,11 @@ def Report.validFor (report : Report)
           report.pid == 0 && report.stopAudit.isEmpty
     | .start, .running =>
         !report.invocationId.isEmpty && decide (report.invocationId.length ≤ 256) &&
-        !report.controlGroup.isEmpty && decide (report.controlGroup.length ≤ 256) &&
+        ApplicationLifecycleCompletionReport.controlGroupWithin report.controlGroup &&
         decide (report.pid > 0) && report.stopAudit.isEmpty
     | .stop, .stopped =>
         !report.invocationId.isEmpty && decide (report.invocationId.length ≤ 256) &&
-        !report.controlGroup.isEmpty && decide (report.controlGroup.length ≤ 256) &&
+        ApplicationLifecycleCompletionReport.controlGroupWithin report.controlGroup &&
         !report.stopAudit.isEmpty && decide (report.stopAudit.length ≤ 4096) &&
         report.pid == 0 &&
         ApplicationLifecycleCompletionReport.stopAuditValid report.unit

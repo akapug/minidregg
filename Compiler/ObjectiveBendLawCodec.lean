@@ -4,9 +4,28 @@ A law travels as a postfix token stream (the way `PolicyRecordCodec` carries a `
 node is one token after its children, and decoding runs the tokens on a stack. The codec is
 lawful (`lawStream`, `lawsStream`): a law's bytes are a function of the law, and the artifact
 identity that hashes them commits exactly the laws. -/
-import Compiler.ObjectiveBendLaw
-import Compiler.PolicyRecordCodec
-import Compiler.IntStream
+module
+
+public import Compiler.ObjectiveBendLaw
+public import Compiler.PolicyRecordCodec
+public import Compiler.IntStream
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.ObjectiveBendLawCodec
 open Minidregg.Compiler.ObjectiveBendLaw

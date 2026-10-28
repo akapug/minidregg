@@ -4,7 +4,14 @@
 Source: the package's server/server.js (Data = Mongo.Collection "Data", DATA_ID "default_id",
 publication "thedocument", Data.allow update for sandstorm permission owner/modify; the client
 saves with Data.update(DATA_ID, {$set: {value}})). Framing is ddp-coedit.py's. Writes through one
-connection, reads back through a second one's subscription. Prints "1 <detail>" or "0 <reason>".
+connection, reads back through a second one's subscription.
+
+The write connection first completes the app's Sandstorm login rendezvous (package
+programs/server/packages/kenton_accounts-sandstorm.js): the DDP method loginWithSandstorm(token) blocks
+up to 10 s until an HTTP POST /.sandstorm-login with Content-Type application/x-sandstorm-login-token
+and the same token as its body arrives; that POST is what carries the X-Sandstorm-* headers, so it goes
+through the grain route like any browser request. Without it every method fails with 400 "Client did not
+complete authentication handshake" and the Data.allow rule (permission owner or modify) cannot be read. Prints "1 <detail>" or "0 <reason>".
 """
 import importlib.util, os, sys, time
 
@@ -13,11 +20,38 @@ spec = importlib.util.spec_from_file_location("ddpcoedit", os.path.join(here, ".
 ddp = importlib.util.module_from_spec(spec); spec.loader.exec_module(ddp)
 
 
+def post_login_token(route, token):
+    """The rendezvous POST, over the route's socket with the browser session's cookie and Origin."""
+    import socket
+    cookie = open(os.path.join(route, "browser.token")).read().strip()
+    body = token.encode()
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(60)
+    s.connect(os.path.join(route, "http.sock"))
+    s.sendall(("POST /.sandstorm-login HTTP/1.1\r\nHost: grain.test\r\nOrigin: https://grain.test\r\n"
+               "Cookie: __Host-mini_spk_session=%s\r\nContent-Type: application/x-sandstorm-login-token\r\n"
+               "Content-Length: %d\r\nConnection: close\r\n\r\n" % (cookie, len(body))).encode() + body)
+    reply = b""
+    while True:
+        chunk = s.recv(4096)
+        if not chunk:
+            break
+        reply += chunk
+    return reply.split(b"\r\n", 1)[0].decode("latin1") + " " + reply.split(b"\r\n\r\n", 1)[-1][:120].decode("latin1")
+
+
 def main():
     route = sys.argv[1]
     text = "written by a resident %d" % int(time.time())
     try:
         a = ddp.connect(route); a.ddp()
+        token = "login-%d" % int(time.time() * 1000)
+        a.send({"msg": "method", "method": "loginWithSandstorm", "id": "0", "params": [token]})
+        time.sleep(0.5)
+        posted = post_login_token(route, token)
+        logged = a.until(lambda m: m.get("msg") == "result" and m.get("id") == "0", 30)
+        if not logged or "error" in logged:
+            print("0 loginWithSandstorm refused: %s; POST /.sandstorm-login: %s" % (str(logged)[:160], posted[:100])); return
         a.send({"msg": "method", "method": "/Data/update", "id": "1",
                 "params": [{"_id": "default_id"}, {"$set": {"value": text}}]})
         res = a.until(lambda m: m.get("msg") == "result" and m.get("id") == "1", 120)

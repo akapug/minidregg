@@ -27,6 +27,8 @@ mod admission;
 mod create;
 mod inspect;
 mod resident;
+mod programs;
+mod stories;
 #[path = "web/world.rs"]
 mod world;
 #[path = "web/search.rs"]

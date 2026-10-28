@@ -24,9 +24,28 @@ changes)`.  Any other leg is persisted verbatim (`encodeLeg`).
   byte strings with one `rootBytes` (a cSHAKE256 collision on concrete inputs):
   the digest guard is exactly as strong as that hash.
 -/
-import Kernel.DeployedTurnCodec
-import Kernel.Bounds
-import Theory.AssertAxioms
+module
+
+public import Kernel.DeployedTurnCodec
+public import Kernel.Bounds
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.DeployedTurnCompact
 

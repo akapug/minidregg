@@ -4,10 +4,14 @@ authorizes the exact current resource read. This constructs an owner signature
 preimage; it does not attest that a claimed historical source operation was
 accepted. The recipient separately verifies the signature and current law.
 -/
-import Host.Json
-import Kernel.FnSelectiveReleaseArticle
-import Kernel.FnSelectiveReleaseIngress
-import Kernel.ContentResource
+module
+
+public import Host.Json
+public import Kernel.FnSelectiveReleaseArticle
+public import Kernel.FnSelectiveReleaseIngress
+public import Kernel.ContentResource
+
+@[expose] public section
 
 namespace Minidregg.Host.FnSelectiveReleaseAuthoring
 

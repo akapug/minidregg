@@ -6,6 +6,7 @@
 //! an absent file or an I/O failure passes through as the OS reported it. A caller whose parent
 //! directory is itself custody checks that directory first, as before.
 
+use crate::io_context::IoContext;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
@@ -24,11 +25,11 @@ fn read_bounded(path: &Path, min: u64, max: u64, message: &'static str) -> io::R
     if !path.is_absolute() {
         return Err(refused(message));
     }
-    let named = fs::symlink_metadata(path)?;
+    let named = fs::symlink_metadata(&path).ctx("inspect", &path)?;
     let mut file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(path)?;
+        .open(&path).ctx("open", &path)?;
     let opened = file.metadata()?;
     if !opened.is_file()
         || opened.nlink() != 1

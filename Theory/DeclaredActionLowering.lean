@@ -19,9 +19,28 @@ The state layout is deliberately the deployed `EffectDeclaration.effectLayout`.
 This is a bounded lowering for that effect vocabulary, not a claim that every
 future language can be encoded by these three constructors.
 -/
-import Theory.AcceptedCellEffect
-import Theory.DeclaredTurn
-import Theory.ResourceCost
+module
+
+public import Theory.AcceptedCellEffect
+public import Theory.DeclaredTurn
+public import Theory.ResourceCost
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Theory.DeclaredActionLowering
 

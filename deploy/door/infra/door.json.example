@@ -9,6 +9,7 @@
   "sponsorFloor": "20000",
   "linkTtlHours": 168,
   "loginHost": "demo.dregg.online",
+  "story": {"author": "box", "name": "tale"},
   "pay": {
     "enrolPin": "/etc/mini/pay/enrol-v2.json",
     "birthContext": "/etc/mini/pay/birth-context.json",

@@ -4,8 +4,28 @@ Weak-head call-by-name gives an independent partial meaning to lazy mix/fix.
 A sharing implementation must prove representation adequacy; this reference
 relation does not claim a heap machine, type safety, termination, proof
 consistency, or authority. -/
-import Lean
-import Theory.AxiomPin
+module
+
+public import Lean
+public import Theory.AxiomPin
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Theory.ObjectiveBendOpenRecursion
 set_option autoImplicit false
 

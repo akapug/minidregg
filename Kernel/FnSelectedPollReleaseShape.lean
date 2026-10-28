@@ -4,7 +4,11 @@ is a lower component check, not proof that a caller's record was admitted.
 Replay supplies the record and receipt from its same native-admitted walk;
 the upper live selector supplies them from a private Verified value.
 -/
-import Kernel.FnSelectiveReleaseReceiver
+module
+
+public import Kernel.FnSelectiveReleaseReceiver
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnSelectedPollReleaseShape
 

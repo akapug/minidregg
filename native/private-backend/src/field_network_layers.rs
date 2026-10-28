@@ -520,14 +520,11 @@ pub(crate) mod tests {
             .take(3)
             .map(|n| (n.holder(), n.output().unwrap().shares().to_vec()))
             .collect::<Vec<_>>();
-        let poly = acss_id::polynomial(&ps[..2], 1).unwrap();
+        let poly = crate::reconstruction::polynomial(&ps[..2], 1).unwrap();
         for (h, v) in ps {
             assert_eq!(
                 v[0],
-                poly[0]
-                    .iter()
-                    .rev()
-                    .fold(Field(0), |s, c| s.mul(Field(h as u128 + 1)).add(*c))
+                crate::reconstruction::eval(&poly[0], Field(h as u128 + 1))
             );
         }
         poly[0][0]
@@ -697,7 +694,7 @@ pub(crate) mod tests {
                 )
             })
             .collect::<Vec<_>>();
-        assert_eq!(acss_id::polynomial(&ps, 1).unwrap()[0][0], Field(1));
+        assert_eq!(crate::reconstruction::polynomial(&ps, 1).unwrap()[0][0], Field(1));
         assert!(stores
             .iter()
             .all(|s| s.as_ref().unwrap().state().completed_batches() == 1));

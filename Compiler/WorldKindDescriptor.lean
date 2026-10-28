@@ -4,10 +4,29 @@ StoreCodec. This module is a source-owned codec/layout implementation, not a
 native endpoint: authentication, birth binding and law admission must be
 connected before a caller may install these values in the serving registry.
 -/
-import Compiler.StoreCodec
-import Compiler.IntStream
-import Compiler.PolicyRecordCodec
-import Compiler.ResourceBirthCodec
+module
+
+public import Compiler.StoreCodec
+public import Compiler.IntStream
+public import Compiler.PolicyRecordCodec
+public import Compiler.ResourceBirthCodec
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.WorldKindDescriptor
 

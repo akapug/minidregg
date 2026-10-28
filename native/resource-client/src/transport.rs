@@ -270,6 +270,30 @@ pub(crate) fn agent_operator_envelope(envelope: &[u8], config: &[u8]) -> Result<
     Ok(())
 }
 
+/// The Host operations a room resident's controller reaches through its own
+/// systemd-activated operator proxy (deploy/hermes/README.md "One uid per
+/// resident"): the request/submit/lookup/query/observation family, provider
+/// continuity and usage quotes, current births, fleet turns and heads, key
+/// rotation status, receipt continuity and carried lookups. Measured from the
+/// controller's and resident's retained custody on J14 and confirmed by
+/// J14's `host-ops.txt` (MINI_TRACE).
+pub(crate) const RESIDENT_OPERATIONS: &[u8] =
+    &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 17, 19, 30, 31, 96, 97, 98, 99, 100, 101, 102, 144, 151, 153, 180];
+
+/// A resident's operator route admits a request only when the public relay
+/// would (the same framing, body bounds and route refusals) AND its operation
+/// is a resident operation, so the route is a strict subset of the public
+/// surface and grants no authority a member's relay lacks. Everything else is
+/// refused by name before any upstream byte.
+pub(crate) fn resident_operator_envelope(envelope: &[u8], config: &[u8], catalog_enabled: bool) -> Result<(), String> {
+    let (_, request) = split_envelope(envelope, config)?;
+    let operation = *request.first().ok_or("empty host request")?;
+    if !RESIDENT_OPERATIONS.contains(&operation) {
+        return Err(format!("operation {operation} is not on the resident operator route"));
+    }
+    public_envelope(envelope, config, catalog_enabled).map_err(|reason| format!("operation {operation}: {reason}"))
+}
+
 pub(crate) fn catalog_enabled(config: &[u8]) -> Result<bool, String> {
     Ok(serde_json::from_slice::<serde_json::Value>(config)
         .map_err(|e| format!("invalid operator config JSON: {e}"))?
@@ -986,7 +1010,7 @@ pub(crate) fn invoke_pinned_deadline(
     if reply.len() > HOST_MAX_FRAME || reply.is_empty() {
         return Err("uncertain host response exceeds host frame bound".to_owned());
     }
-    if reply[0] == 254 {
+    if reply[0] == mini_sdk::host_operations::RESPONSE_NEVER_FORWARDED {
         return Err(format!(
             "socket rejected request: {}",
             String::from_utf8_lossy(&reply[1..])
@@ -1171,7 +1195,7 @@ fn invoke_inner(
     if reply.len() > HOST_MAX_FRAME {
         return Err("uncertain host response exceeds host frame bound".to_owned());
     }
-    if reply[0] == 254 {
+    if reply[0] == mini_sdk::host_operations::RESPONSE_NEVER_FORWARDED {
         return Err(format!(
             "socket rejected request: {}",
             String::from_utf8_lossy(&reply[1..])
@@ -1230,7 +1254,7 @@ pub(crate) fn exchange_unix(socket: &Path, frame: &[u8]) -> Result<Vec<u8>, Stri
             reader: &mut stream,
             deadline: Instant::now() + Duration::from_secs(1),
         }) {
-            if refusal.first() == Some(&254) {
+            if refusal.first() == Some(&mini_sdk::host_operations::RESPONSE_NEVER_FORWARDED) {
                 return Ok(refusal);
             }
         }

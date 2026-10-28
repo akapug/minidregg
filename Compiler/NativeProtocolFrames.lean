@@ -3,7 +3,11 @@ runtime identity. This module deliberately imports no controller or profile:
 wire epochs can be committed without a codec → profile → codec import cycle.
 Existing namespaces are retained so every encoder/decoder uses these same
 constants; retired frame fixtures remain next to their refusal proofs. -/
-import Init
+module
+
+public import Init
+
+@[expose] public section
 
 namespace Minidregg.Compiler.NativeHostCodec
 
@@ -19,7 +23,7 @@ def signingPlanFrame : List UInt8 := "DREGG/NATIVE-HOST/SIGNING-PLAN/v6".toUTF8.
 /-- Version 5 adds the committed charged terminal disposition and its canonical
 typed objective-activity cause bytes. Older outcomes refuse; none is
 reinterpreted. -/
-def outcomeFrame : List UInt8 := "DREGG/NATIVE-HOST/OUTCOME/v7".toUTF8.toList
+def outcomeFrame : List UInt8 := "DREGG/NATIVE-HOST/OUTCOME/v8".toUTF8.toList
 
 end Minidregg.Compiler.NativeHostCodec
 

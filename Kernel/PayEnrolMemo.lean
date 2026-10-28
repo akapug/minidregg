@@ -28,9 +28,28 @@ reports the raw bytes of the one memo instruction, or that there was none, or
 that there were two or more (`unbound`), or that the one memo was not UTF-8 or
 too long (`invalid`).
 -/
-import Compiler.ResourceBirthCodec
-import Kernel.PayTariff
-import Kernel.Base64
+module
+
+public import Compiler.ResourceBirthCodec
+public import Kernel.PayTariff
+public import Kernel.Base64
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PayEnrolMemo
 

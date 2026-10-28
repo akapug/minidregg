@@ -7,9 +7,28 @@ the whole closed command, domain and current semantics. The receiver commits the
 returned pay patch together with the prepared V2 legs and operation nonce in one
 intent. No original deposit is rewritten or observed a second time.
 -/
-import Kernel.PayEnrolV2Legs
-import Kernel.PayPendingRotation
-import Kernel.PayChainTip
+module
+
+public import Kernel.PayEnrolV2Legs
+public import Kernel.PayPendingRotation
+public import Kernel.PayChainTip
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PayClaimDecision
 

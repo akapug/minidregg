@@ -20,7 +20,7 @@
 #       filled to the connection bound (64), the next is refused
 #       `busy: connection limit`, and is answered once the idle ones expire;
 #   (d) the J-PAY-6 route-mismatch grain intent through op 7 (raw frame and
-#       `mini author`): 255 with `route-mismatch` named, the same Host process
+#       `mini author`): refused under NO_RECORD (253) with `route-mismatch` named, the same Host process
 #       answers on, and a fresh connection is answered;
 #   (e) host-malformed's whole malformed-request table (journey.d/j12x.sh)
 #       replayed after all of the above: every row refused by name.
@@ -33,14 +33,24 @@ D=$JOURNEY_STEP_DIR/jserve
 mkdir -p -m 700 "$D"
 export D HERE_HOOKS=$(cd "$(dirname "$0")" && pwd)
 python3 - <<'PY'
-import json, os, socket, struct, subprocess, sys, threading, time
+import hashlib, json, os, socket, struct, subprocess, sys, threading, time
 
 D = os.environ["D"]; MINI = os.environ["MINI"]; HOST = os.environ["HOST"]
 CONFIG = os.environ["CONFIG"]; SOCKET = os.environ["SOCKET"]
 NEWCOMER = os.environ["NEWCOMER_WS"]; WORLD = os.environ["JOURNEY_WORLD"]
-TAG = b"DREGG/NATIVE-HOST/OUTCOME/v7"
+TAG = b"DREGG/NATIVE-HOST/OUTCOME/v8"
 rows = []; failed = []; latencies = []
 config = open(CONFIG, "rb").read()
+HOST_PIN = hashlib.sha256(open(HOST, "rb").read()).digest()  # envelope v2: the Host image pin (v1 is refused)
+# The one wire: request bytes and response markers from the registry (protocol/host-operations.json).
+REGISTRY = json.load(open(os.path.join(os.environ["HERE_HOOKS"], "..", "..", "..", "protocol", "host-operations.json")))
+OP = {e["symbol"]: e["code"] for e in REGISTRY["operations"]}
+MARKER = {e["symbol"]: e["code"] for e in REGISTRY["response_markers"]}
+DESCRIBE, AUTHOR = OP["DESCRIBE"], OP["AUTHOR"]
+# A refusal the Host decides before any append goes out under NO_RECORD (c5e268ebd,
+# Host/RequestRefusal.lean exceptionAnswer); HOST_OUTCOME carries only undecided answers.
+NO_RECORD, NEVER_FORWARDED = MARKER["NO_RECORD"], MARKER["NEVER_FORWARDED"]
+AUTHOR_PHASE = f"op {AUTHOR}".encode()
 
 def server_pid():
     return open(os.path.join(WORLD, "public", "server.pid")).read().strip()
@@ -61,8 +71,8 @@ def frame_of(sock):
     if head is None: return None
     return exact(struct.unpack("<I", head)[0])
 
-def envelope(request, version=1):
-    return bytes([version]) + struct.pack("<I", len(config)) + config + request
+def envelope(request, version=2):
+    return bytes([version]) + struct.pack("<I", len(config)) + config + (HOST_PIN if version == 2 else b"") + request
 
 def raw(request, body=None, timeout=600, delivered=None):
     s = socket.socket(socket.AF_UNIX); s.settimeout(timeout); s.connect(SOCKET)
@@ -98,7 +108,7 @@ def honest_reads(n=3):
     return good, sorted(walls)[n // 2], walls, detail
 
 def describe():
-    r = raw(bytes([0]), timeout=30)
+    r = raw(bytes([DESCRIBE]), timeout=30)
     return r is not None and r[0] == 0
 
 def row(name, expected, got, ok):
@@ -120,7 +130,12 @@ def guarded(name, expected, act):
         ok and same and live)
 
 def socket_refusal(reply, needle):
-    return reply is not None and reply[0] == 254 and needle.encode() in reply[1:]
+    return reply is not None and reply[0] == NEVER_FORWARDED and needle.encode() in reply[1:]
+
+def author_refused(reply, *needles):
+    """The Host refused an author request by name, in phase op AUTHOR, writing nothing."""
+    return reply is not None and reply[0] == NO_RECORD and AUTHOR_PHASE in reply \
+        and all(n.encode() in reply for n in needles)
 
 def show(reply):
     if reply is None: return "no reply"
@@ -143,7 +158,7 @@ def trickle():
     latencies.append(("(a) staller holds 3 bytes (slowest of 3)", max(walls)))
     refusal = frame_of(s); refused_at = time.monotonic() - t0
     s.close()
-    named = refusal is not None and refusal[0] == 254 and b"frame read deadline" in refusal
+    named = refusal is not None and refusal[0] == NEVER_FORWARDED and b"frame read deadline" in refusal
     good = ok and max(walls) < 2.0 and named
     return good, (f"honest reads slowest {max(walls):.3f} s of {['%.3f' % w for w in walls]} ({'answered' if ok else detail}); staller refused "
                   f"{show(refusal)!r} {refused_at:.1f} s after it stalled")
@@ -155,7 +170,7 @@ guarded("(a) a client sends 3 bytes then sleeps 30 s",
 # toward this bound. Fill exactly to it, so this still exercises the most
 # expensive admitted array rather than a fast prequeue socket refusal.
 AUTHOR_BODY_MAX = 4 * 1024 * 1024 + 2 + 256
-AUTHOR_PREFIX = bytes([7]) + struct.pack("<H", 6) + b"intent"
+AUTHOR_PREFIX = bytes([AUTHOR]) + struct.pack("<H", 6) + b"intent"
 SOURCE_MAX = AUTHOR_BODY_MAX - (len(AUTHOR_PREFIX) - 1)
 def full_author(source):
     assert len(source) <= SOURCE_MAX
@@ -176,7 +191,7 @@ def long_request():
     ok, wall, detail = honest_read()
     t.join()
     latencies.append(("(b) honest read behind the long request", wall))
-    slow_named = out["reply"] is not None and out["reply"][0] == 255 and b"op 7" in out["reply"]
+    slow_named = author_refused(out["reply"])
     good = loaded and ok and slow_named and socket_refusal(bad, "invalid socket envelope") and bad_wall < 1.0 \
         and wall <= out["wall"] + base + 2.0
     return good, (f"long request {out['wall']:.3f} s (alone {alone:.3f} s) -> {show(out['reply'])!r}; "
@@ -194,7 +209,7 @@ def queue_bound():
     if not delivered.wait(30): raise RuntimeError("hostile queue blocker not delivered")
     replies = [None] * 40
     def one(i):
-        replies[i] = raw(bytes([0]), timeout=120)
+        replies[i] = raw(bytes([DESCRIBE]), timeout=120)
     ts = [threading.Thread(target=one, args=(i,)) for i in range(40)]
     for x in ts: x.start()
     loaded = t.is_alive()
@@ -202,7 +217,7 @@ def queue_bound():
     t.join()
     busy = sum(1 for r in replies if socket_refusal(r, "busy: host queue full"))
     answered = sum(1 for r in replies if r is not None and r[0] == 0)
-    named = out["reply"] is not None and out["reply"][0] == 255 and b"op 7" in out["reply"]
+    named = author_refused(out["reply"])
     good = loaded and named and answered == 32 and busy == 8
     return good, (f"40 describes behind a long request: {answered} answered, {busy} refused `busy: host queue full`; "
                   f"Host load pending after submission: {loaded}; blocker -> {show(out['reply'])!r}")
@@ -234,7 +249,7 @@ def many_keys():
     ok, wall, detail = honest_read()
     t.join()
     latencies.append(("(b3) honest read behind a maximum admitted key object", wall))
-    named = out["reply"] is not None and out["reply"][0] == 255 and b"op 7" in out["reply"]
+    named = author_refused(out["reply"])
     over, over_wall = timed(lambda: raw(oversized_keys_body))
     over_named = socket_refusal(over, "author request body exceeds its bound")
     good = loaded and named and ok and out["wall"] < 60 and wall <= out["wall"] + base + 2.0 \
@@ -247,10 +262,10 @@ guarded("(b3) maximum admitted distinct keys and the oversized 1M-key object",
         "admitted keys refused by Host in < 60 s; honest read answered right after under load; 1M keys socket-refused by name < 1 s",
         many_keys)
 def duplicate_key():
-    reply = raw(bytes([7]) + struct.pack("<H", 6) + b"intent" + b'{"a":"1","a":"2"}', timeout=60)
-    return reply is not None and reply[0] == 255 and b"duplicate JSON object field: a" in reply, show(reply)
+    reply = raw(AUTHOR_PREFIX + b'{"a":"1","a":"2"}', timeout=60)
+    return author_refused(reply, "duplicate JSON object field: a"), show(reply)
 guarded("(b4) an op 7 object naming one key twice",
-        "255 refused malformed, `duplicate JSON object field: a`", duplicate_key)
+        "253 (NO_RECORD) refused malformed, phase op 7, `duplicate JSON object field: a`", duplicate_key)
 
 # ---------------------------------------------------------------- (c) silent connections
 def silent(n):
@@ -274,7 +289,7 @@ guarded("(c) 50 connections that send nothing",
 def connection_bound():
     socks = silent(64)
     time.sleep(0.5)
-    over = raw(bytes([0]), timeout=30)
+    over = raw(bytes([DESCRIBE]), timeout=30)
     for s in socks: frame_of(s)
     for s in socks: s.close()
     time.sleep(0.3)
@@ -297,12 +312,12 @@ source = json.dumps(intent).encode()
 open(os.path.join(D, "route-mismatch-intent.json"), "wb").write(source)
 
 def route_mismatch_raw():
-    reply = raw(bytes([7]) + struct.pack("<H", 12) + b"grain-intent" + source, timeout=60)
-    named = reply is not None and reply[0] == 255 and b"op 7" in reply and b"route-mismatch" in reply
+    reply = raw(bytes([AUTHOR]) + struct.pack("<H", 12) + b"grain-intent" + source, timeout=60)
+    named = author_refused(reply, "route-mismatch")
     fresh = describe()
     return named and fresh, f"{show(reply)!r}; fresh connection answered: {fresh}"
 guarded("(d) J-PAY-6 route-mismatch grain intent, raw op 7 frame",
-        "255 refused, phase op 7, `route-mismatch` named; the next connection answered", route_mismatch_raw)
+        "253 (NO_RECORD) refused, phase op 7, `route-mismatch` named; the next connection answered", route_mismatch_raw)
 
 def route_mismatch_client():
     out = os.path.join(D, "route-mismatch.bin")

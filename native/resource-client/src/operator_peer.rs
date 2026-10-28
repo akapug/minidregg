@@ -68,7 +68,10 @@ mod tests {
     use std::os::unix::net::UnixListener;
     use std::time::Duration;
     fn fixture() -> (PathBuf, PathBuf, UnixListener) {
-        let directory = std::env::temp_dir().join(format!("mini-operator-peer-{}-{}", std::process::id(),
+        // Short on purpose: this scratch binds a Unix socket, and macOS caps a
+        // socket path at 104 bytes (`SUN_LEN`), which a long `$TMPDIR` already
+        // spends most of.
+        let directory = std::env::temp_dir().join(format!("mini-op-{}-{}", std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
         fs::create_dir(&directory).unwrap();
         fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();

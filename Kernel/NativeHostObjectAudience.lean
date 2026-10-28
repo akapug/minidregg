@@ -1,9 +1,28 @@
 /- Signed source and device-catalog observations for protected document epochs.
 These helpers use the common observation admission and never confer mutation authority. -/
-import Kernel.NativeHostContext
-import Kernel.NativeHostReplay
-import Kernel.NativeObservationController
-import Kernel.AudienceRosterBinding
+module
+
+public import Kernel.NativeHostContext
+public import Kernel.NativeHostReplay
+public import Kernel.NativeObservationController
+public import Kernel.AudienceRosterBinding
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.NativeHost
 open Minidregg.Theory

@@ -23,7 +23,11 @@ Build consequence: compiled code (and `#eval`/`native_decide` at elaboration) ne
 inputs of every Lean executable) and `.lake/native/libmini_kernels_lean.so` (loaded into `lean`
 by the lakefile's `--load-dynlib`). Run it before `lake build`.
 -/
-import Theory.Sp800185Cshake256Fast
+module
+
+public import Theory.Sp800185Cshake256Fast
+
+@[expose] public section
 
 namespace Minidregg.Compiler.Sp800185Cshake256
 

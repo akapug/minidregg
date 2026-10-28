@@ -1,7 +1,11 @@
 /- One current-profile event28 CAS after an authenticated carry anchor. The
 receiver consumes the real suffix admission token and returns its extension;
 old-prefix records are never represented as target-profile admitted history. -/
-import Kernel.NativeHostReplay
+module
+
+public import Kernel.NativeHostReplay
+
+@[expose] public section
 
 namespace Minidregg.Kernel.CarriedSessionEnrollmentReceiver
 
