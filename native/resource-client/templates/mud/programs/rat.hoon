@@ -1,4 +1,4 @@
-::  rat.hoon: a mob's behaviour, MUD §2.5 (wander / strike / flee / respawn)
+::  rat.hoon: a mob's behaviour, docs/MUD.md §2.5 (wander / strike / flee / respawn)
 ::  TEXT, NOT COMPILED: pseudocode for the NOCK lanes. Sample layout and key convention: programs/README.md.
 ::
 ::  A mob is a sheet {REALM}-mob-{M} whose subject M is the mob's own enrolled key, held by the referee
@@ -11,7 +11,7 @@
 ::           '0/N'  the rat's own sheet (sheet/fields.json)
 ::           '1/N'  its current room (room/fields.json: 0 id, 2 dark, 8+3k exit-DIR_k, 9+3k locked-DIR_k)
 ::           'p/I'  I = 0..7: the subjects whose sheets are observed to be in the rat's room (the runner reads
-::                  `at` over the area's sheets, MUD §2.0, and passes their ids; ASSUMED key form 'p/I')
+::                  `at` over the area's sheets, docs/MUD.md §2.0, and passes their ids; ASSUMED key form 'p/I')
 ::           'h/I'  1 if subject p/I is hostile to rats (a player who struck a rat; the referee's journal)
 ::  product  ONE of
 ::           - strike:  ~[['0/7' --1] ['0/8' target] ['0/14' --3]]       intent strike, skill gnaw

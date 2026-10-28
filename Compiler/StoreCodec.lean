@@ -1284,7 +1284,7 @@ theorem noncanonical_value_bytes_stream_refused :
 
 end Worked
 
-/-! ## Unbounded capacity (DATAMODEL §4.12) -/
+/-! ## Unbounded capacity (docs/DATAMODEL.md §4.12) -/
 
 section Capacity
 

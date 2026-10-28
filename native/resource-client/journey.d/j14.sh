@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# journey.d/j14.sh — P-HERMES-ROOM (PLACE §2.7 J14, §2.10 budgets): Hermes as
+# journey.d/j14.sh — P-HERMES-ROOM (docs/PLACE.md §2.7 J14, §2.10 budgets): Hermes as
 # librarian.
 #
 # On this journey's live Store (after J5). Friends are enrolled, provisioned

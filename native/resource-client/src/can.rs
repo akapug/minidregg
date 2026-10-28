@@ -1,4 +1,4 @@
-//! `can [NAME] [--all]` (P-AFFORDANCES; DEOS §1.3, deos's `project_for(held)`).
+//! `can [NAME] [--all]` (P-AFFORDANCES; docs/DEOS.md §1.3, deos's `project_for(held)`).
 //!
 //! For each resource this workspace names (or NAME): read, from the Host, the
 //! capability record behind each capability the reference names (a signed

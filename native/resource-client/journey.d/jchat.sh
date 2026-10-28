@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# JCHAT (PLACE §2.3, §5 item 4, client half): friends talk in a room through
+# JCHAT (docs/PLACE.md §2.3, §5 item 4, client half): friends talk in a room through
 # `mini shell` on this journey's live Store.
 #
 # Five friends are enrolled and provisioned the way OPERATOR.md does it (as in

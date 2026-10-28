@@ -1,7 +1,7 @@
 /-
-# Kernel.RoomKick — a kick ends a member's authority in the room (PLACE §2.2)
+# Kernel.RoomKick — a kick ends a member's authority in the room (docs/PLACE.md §2.2)
 
-PLACE J10: "A kicks B; B's read of the note is refused `revoked`; B's cap on a
+J10 (docs/PLACE.md §2.1, §2.2), as designed: "A kicks B; B's read of the note is refused `revoked`; B's cap on a
 doc B created under `lab` is also refused (it was an attenuation of B's room
 cap — the tooth for `ancestors`)."
 

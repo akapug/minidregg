@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# journey.d/j15.sh — P-STORY (PLACE §2.8, item 8; journey step J15): a story is a
+# journey.d/j15.sh — P-STORY (docs/PLACE.md §2.8, §5 item 8; journey step J15): a story is a
 # table its author seals, and then the table is the law on every player's cell.
 #
 #   author    alice: `story law tale` prints the law sealing will install;

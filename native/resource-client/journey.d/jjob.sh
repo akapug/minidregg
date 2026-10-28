@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# J-JOB (COMPUTE, the floor): one friend posts a Nock job in a room, another
+# J-JOB (docs/COMPUTE.md §2): one friend posts a Nock job in a room, another
 # friend's node runs it, the answer comes back, and a WRONG answer costs the
 # provider its bond -- adjudicated by one `ran` turn: the kernel re-executes the
 # job's program on its own sample and compares the outputs exactly.

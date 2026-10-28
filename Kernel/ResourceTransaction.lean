@@ -134,7 +134,7 @@ structure Command where
   subject : SubjectId
   nonce : Nat
   targets : List Target
-  /-- A Nock run whose product these writes claim to be (NOCK §2.4). Signed with
+  /-- A Nock run whose product these writes claim to be (docs/NOCK.md §2.4). Signed with
   the command: the claim's steps are the fee its signer consents to. When
   present, every write of every target must be a field write the re-executed
   program's product names (`Kernel.Run.checkRun`). -/
@@ -1242,7 +1242,7 @@ def sourceStore (domain : Digest) (directory : Directory Nat Registry) :
     CanonicalPolicyRegistry.PayloadStore where
   fetch := CanonicalCellRegistry.fetchPolicySource domain directory
 
-/-! ## The run check (K-RAN, NOCK §2.4) -/
+/-! ## The run check (K-RAN, docs/NOCK.md §2.4) -/
 
 /-- The policy slots of one stream append: the entry's fields as request
 slots, so a stream law can name its author (`request/subject`), its topics
@@ -2062,7 +2062,7 @@ kernel accepted at one admission is accepted, with the same verdict, at any
 other — another height, another signer, another command — over the same
 targets, whenever the ABI's named slots hold the values they held. A job whose
 sample reads only its order's write-once fields therefore has one truth at
-every height (COMPUTE §2.2). -/
+every height (docs/COMPUTE.md §2.2). -/
 theorem pinned_claim_admissible_across_heights {E : Evaluator} {program : NockProgramCodec.Program}
     {validatedFundingIndex : Option Nat}
     {libraries : List NockProgramCodec.Program} {ambient ambient' : Ambient}

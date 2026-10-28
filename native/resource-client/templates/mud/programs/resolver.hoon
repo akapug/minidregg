@@ -1,4 +1,4 @@
-::  resolver.hoon: combat resolution, MUD §2.3 / affliction-table.json
+::  resolver.hoon: combat resolution, docs/MUD.md §2.3 / affliction-table.json
 ::  TEXT, NOT COMPILED: pseudocode for the NOCK lanes. Sample layout and key convention: programs/README.md.
 ::
 ::  sample   [ctx=[height=@ caller=@ room=@ now=@] inv=(list [key=@t val=@s])]
@@ -81,7 +81,7 @@
     %3  [--4 `'1/10' --3]                             ::  gnaw:    strike, 4, asthma,    bal 3 (mob)
     %4  [--1 `'1/12' --4]                             ::  gust:    cast,   1, clumsiness, eq 4
   ==
-++  get                                                ::  linear lookup, --0 if absent (NOCK.md §5's get)
+++  get                                                ::  linear lookup, --0 if absent (docs/NOCK.md §5's get)
   |=  k=@t
   ^-  @s
   =/  l  inv

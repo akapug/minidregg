@@ -33,6 +33,16 @@ read the declaration it names.
 
 ## Admission and the kernel
 
+- [Data model](DATAMODEL.md): kernel state as one store over a fold of patches; roots,
+  history, checkpoints.
+- [SURPASS](SURPASS.md): the Host's admission as one World transition (`Turn.ofIntent`).
+- [The place](PLACE.md): rooms, streams, documents, laws and runners;
+  [the docuverse](DEOS.md).
+- [Programs](NOCK.md): Nock programs refereed by re-execution, and
+  [any registered evaluator](EVAL.md).
+- [Jobs](COMPUTE.md): compute jobs as cells, checked by re-execution and paid through the Book.
+- [The MUD](MUD.md): rooms, items, combat and markets as laws.
+- [Channels](CHANNELS.md): constant-rate broadcast domains (Lean model and epoch record).
 - [Hyperedge design](HYPEREDGE-DESIGN.md): a turn as a wide pullback; the design behind
   `Kernel/Turn`.
 - [Kernel necessity](KERNEL-NECESSITY.md), [N2](N2-HYPEREDGE-LIMIT.md),

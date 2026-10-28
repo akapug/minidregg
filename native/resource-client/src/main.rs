@@ -480,8 +480,8 @@ pub(crate) fn refusal_line(outcome: &Value) -> Option<String> {
     ))
 }
 
-/// What to do about a refusal whose name alone does not say (AUDIT-ROOMS,
-/// client defect 8). A delegation's `descent` check reads the authority as it
+/// What to do about a refusal whose name alone does not say (JDISCLOSE row
+/// d8). A delegation's `descent` check reads the authority as it
 /// stood when the proposal was authored (its root, the issuer and policy
 /// epochs, a fresh child id, an unspent nullifier); most often the authority
 /// has moved since, and the cure is a new proposal.

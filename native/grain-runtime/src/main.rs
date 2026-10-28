@@ -181,7 +181,7 @@ struct ToolTask {
     /// image. The family allowlists alone never enable op30/31 delivery.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     current_birth_host_sha256: Option<String>,
-    /// The room this grain's Hermes was summoned into (PLACE §2.7): the room
+    /// The room this grain's Hermes was summoned into (docs/PLACE.md §2.7): the room
     /// tools (`resource_tools::room_tool_specs`) run the pinned client's shell
     /// under this workspace; each write pays the room's `hermes/turn` first.
     #[serde(default, skip_serializing_if = "Option::is_none")]

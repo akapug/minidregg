@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# JROT (K-PREROTATE, DEOS #19): key pre-rotation on the journey's live Store.
+# JROT (K-PREROTATE, docs/DEOS.md §9 row 19): key pre-rotation on the journey's live Store.
 #
 # A friend enrolls with a committed next key kept on "other media"; writes; a
 # thief holding a copy of the friend's daily key tries to rotate the subject to

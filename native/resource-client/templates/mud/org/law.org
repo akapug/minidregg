@@ -1,5 +1,5 @@
 -- kind: org
--- MUD §2.7 org cell {REALM}-org-{G}. Installed as `law.management ; law.org`.
+-- docs/MUD.md §2.7 org cell {REALM}-org-{G}. Installed as `law.management ; law.org`.
 -- Joint index for a handover: 0 = this org cell, 1 = the closed ballot. NEEDS K-JOINT-INDEX.
 -- 1 writer: the founder or the sitting leader.
 any [ not (verb == 2), subject == {FOUNDER}, eqSlots subject field leader before ];

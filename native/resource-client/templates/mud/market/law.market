@@ -1,5 +1,5 @@
 -- kind: market
--- MUD §2.8 order-book cell {REALM}-market-{K}, four order slots o0..o3. Only the market runner writes it; the
+-- docs/MUD.md §2.8 order-book cell {REALM}-market-{K}, four order slots o0..o3. Only the market runner writes it; the
 -- goods and gold are escrowed in the market's Book account A_mkt, which this law cannot see until K-BOOK-SLOTS.
 -- Installed as `law.management ; law.market`.
 -- 1 writer

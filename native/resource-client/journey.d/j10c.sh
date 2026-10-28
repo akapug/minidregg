@@ -29,7 +29,7 @@
 #             the exact retry returns the original receipt. alice re-invites bob:
 #             a NEW grant, which reads and places.
 #   kick      alice kicks carl (the founder's revocation still works): carl's read
-#             is refused. Then the tooth PLACE names (J10): bob bears notes6
+#             is refused. Then the tooth J10 names (docs/PLACE.md §2.2): bob bears notes6
 #             into lab with his new grant, writes it, and delegates it to dave;
 #             alice kicks bob (`room kick` revokes every standing grant he holds
 #             under lab). bob's own doc is refused `revoked` (show, append,
@@ -344,7 +344,7 @@ ok kick alice "submit k-carl"
 refused kick carl "read labc" revoked
 ok kick bob "read lab2"
 
-# ------------------------------------------------ kick: a doc bob bore falls with him (PLACE J10)
+# ------------------------------------------------ kick: a doc bob bore falls with him (J10, docs/PLACE.md §2.2)
 ok kickdoc bob "doc append b-n6 notes6 written-before-the-kick"
 ok kickdoc bob "submit b-n6"
 ok kickdoc bob "delegate d-n6 notes6 $D observe 1000"

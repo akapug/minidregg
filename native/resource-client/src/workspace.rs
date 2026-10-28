@@ -2843,8 +2843,8 @@ fn read_private(root: &Path, workspace: &Value, resource_name: &str, room: &str)
 
 /// The private room a CELL is sealed under, as this workspace knows it: the
 /// `sealedIn` mark of this reference, or of any other reference to the same
-/// cell (AUDIT-ROOMS, client defect 3: the mark was per reference name, so a
-/// second import of a sealed doc wrote plaintext into the private room).
+/// cell (JDISCLOSE row d3: a mark kept per reference name let a
+/// second import of a sealed doc write plaintext into the private room).
 pub(crate) fn sealed_room(root: &Path, reference: &Value) -> Option<String> {
     if let Some(room) = reference.get("sealedIn").and_then(Value::as_str) {
         return Some(room.to_owned());
@@ -6442,7 +6442,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 return read_private(&root, &workspace, &name, &room);
             }
             // A cell born in a private room is read through its room's keys,
-            // as `tail` does (AUDIT-ROOMS, client defect 2).
+            // as `tail` does (JDISCLOSE row d2).
             let resolved = reference(&root, &name)?;
             if action == "read" {
                 if let Some(room) = sealed_room(&root, &resolved) {

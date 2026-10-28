@@ -1,4 +1,4 @@
-//! Stories (PLACE §2.8, item 8): a friend writes a transition table, seals it,
+//! Stories (docs/PLACE.md §2.8, §5 item 8): a friend writes a transition table, seals it,
 //! and from then on the table is the LAW on every player's cell.
 //!
 //! THE TABLE is a document in the story's room (`NAME/table`), one row per

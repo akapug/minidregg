@@ -1,7 +1,7 @@
 /-
 # Kernel.HostRefinesWorld -- the present Host is an implementation refinement of `World.step`
 
-SURPASS §2(b), stage 0, lanes T3 and T3b.  No Host byte changes.  The deployed
+docs/SURPASS.md §2(b), stage 0, lanes T3 and T3b.  No Host byte changes.  The deployed
 transition is `DurableDataIntent.execute` (reached through
 `DurableCheckpoint.prepare`) followed by the append that `Loaded.extend` makes
 and the checkpoint rebase `afterCheckpoint` may make; its state is

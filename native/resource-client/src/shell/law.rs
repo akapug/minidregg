@@ -613,7 +613,7 @@ mod tests {
         assert!(parse("field 17 opens (field 18) with field 20 + 1").unwrap_err().contains("expected `;`"));
     }
 
-    /// The job law (COMPUTE §2.3, `Kernel/Job.lean`): the shell grammar text
+    /// The job law (docs/COMPUTE.md §2.3, `Kernel/Job.lean`): the shell grammar text
     /// `law.job.shell` (the Host's rendering of every clause, written by
     /// `scripts/gen-joblaw.py`) parses to exactly `law.job.json`, both with the
     /// same placeholder binding.

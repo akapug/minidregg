@@ -1040,7 +1040,7 @@ theorem cost_sound {sh : Shape} {f s : Noun} {B : Nat} (h : cost sh f = some B)
   | crash r => rw [hx] at hw; simp only [Res.within] at hw; dsimp only; omega
   | exhausted => exact absurd hx hne
 
-/-- The form EVAL §3 proposed, at fuel exactly the bound. -/
+/-- The form docs/EVAL.md §3 proposed, at fuel exactly the bound. -/
 theorem cost_sound_at_bound {sh : Shape} {f s : Noun} {B : Nat} (h : cost sh f = some B)
     (hs : HasShape s sh) : Nock.run B s f ≠ .error .exhausted ∧ Nock.steps B s f ≤ B :=
   cost_sound h hs B le_rfl

@@ -1,5 +1,5 @@
 -- kind: sheet
--- MUD sheet law (MUD.md §2.1, §2.2, §2.3). Installed as `law.management ; law.sheet`, so clause 0 is
+-- MUD sheet law (docs/MUD.md §2.1, §2.2, §2.3). Installed as `law.management ; law.sheet`, so clause 0 is
 -- management and the clause numbers in the comments count from 1 in this file = 1.. in the installed law.
 -- Joint indices are the command's 0-based target order (K-JOINT-INDEX):
 -- The owner's intent is three fields written in one turn: intent (action), target (a sheet id), skill.
@@ -138,7 +138,7 @@ any [ not (verb == 2), not (subject == {REF}), field eq delta == 0,
 -- 30 intent-clear [J-MUD-3 row 2]: the referee only clears intent, target and skill.
 any [ not (verb == 2), not (subject == {REF}), all [ field intent delta == 0, field target delta == 0, field skill delta == 0 ],
       all [ field intent == 0, field target == 0, field skill == 0 ] ];
--- 31 ward [J-MUD-3 row 15]: a raised ward blocks paralysis (the defence-blocks-affliction fact, MUD §2.3).
+-- 31 ward [J-MUD-3 row 15]: a raised ward blocks paralysis (the defence-blocks-affliction fact, docs/MUD.md §2.3).
 any [ not (verb == 2), field def-ward before == 0, field aff-paralysis delta <= 0 ];
 -- 32 defend [J-MUD-3 row 15b]: a ward is raised only on my own defend intent.
 any [ not (verb == 2), field def-ward delta <= 0, field intent before == 3 ];
