@@ -62,6 +62,14 @@ cohorts; an idle-task receipt with `fullConsent: null` makes no full-consent cla
 It does not extend an active call's budget or promise that future Store changes
 will require no further verification.
 
+New `grain-runtime create` controllers with a dispatch purse enable this setting
+automatically after the selected Mini and its actual consent provider confirm
+full readiness. This bounded preparation precedes signed work in the Whole
+phase and retains its acknowledgement and input hashes in `create/`. It requires
+a supporting toolchain; unsupported or failed preparation refuses provisioning.
+Plain grains retain thin consent, and an already published controller keeps its
+existing setting unchanged.
+
 Hard EOF or explicit disconnect signals the owned process group immediately;
 the persistent controller then stops its remaining members and sends Mini a
 signed `interrupt` generation fence. A soft transport close leaves its current

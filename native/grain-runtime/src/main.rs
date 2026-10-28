@@ -1035,6 +1035,20 @@ struct ConsentFullReadiness {
     ready: bool,
 }
 
+impl ConsentFullReadiness {
+    fn parse(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() > 1024 {
+            return Err("full-consent readiness reply exceeds 1024 bytes".into());
+        }
+        let receipt: Self = serde_json::from_slice(bytes)
+            .map_err(|e| format!("full-consent readiness reply: {e}"))?;
+        if receipt.kind != "mini-consent-full-readiness-v1" || !receipt.ready {
+            return Err("full-consent provider did not confirm readiness".into());
+        }
+        Ok(receipt)
+    }
+}
+
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 enum ForegroundPhase {
@@ -13205,15 +13219,7 @@ impl Runtime {
             "--host", self.config.host.to_str().ok_or("host path UTF-8")?,
             "--config", self.config.host_config.to_str().ok_or("config path UTF-8")?,
         ])?;
-        if output.stdout.len() > 1024 {
-            return Err("full-consent readiness reply exceeds 1024 bytes".into());
-        }
-        let receipt: ConsentFullReadiness = serde_json::from_slice(&output.stdout)
-            .map_err(|e| format!("full-consent readiness reply: {e}"))?;
-        if receipt.kind != "mini-consent-full-readiness-v1" || !receipt.ready {
-            return Err("full-consent provider did not confirm readiness".into());
-        }
-        Ok(Some(receipt))
+        ConsentFullReadiness::parse(&output.stdout).map(Some)
     }
 
     /// Explicit operator readiness, before any tool request is submitted.
