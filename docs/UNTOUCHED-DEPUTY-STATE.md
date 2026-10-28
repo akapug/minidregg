@@ -1,4 +1,4 @@
-# Untouched-areas deputy: state (rewritten whole; 2026-10-28 morning, after resume: anchor-label fix routed)
+# Untouched-areas deputy: state (rewritten whole; 2026-10-28 morning, after resume: mirror test green)
 
 Inputs: docs/review/2026-10-27-untouched-areas/{LEAN,NATIVE}.md, docs/review/2026-10-27-blind-spots/BLIND-SPOTS.md Sweep 1.
 Each lane: /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>.
@@ -78,7 +78,7 @@ Older: 2d8b7ed54 (jtemplates 196/196 there), 7027e0ace.
 Its hbox worlds: /tank/rows-2d8b7ed5-apps/w-{featured,b1,b2,b4,b6,rt,fixups}. Mine: b3 /tank/lanes/app-market-b3, b5 /tank/rows-b5, b7 and b8 under /tank; japps /build/lanes/un-stream-continuity-runs/w*, jtemplates /build/t/uns-run* (dregg-build). Verdicts go to it for ROWS-OWED section 0.
 
 ## Shas sent to the integrator this round
-- 3a8109059 (lane/un-ns-owner-clean, replaces the un-ns-owner wip commits): dfea4d91d 317 controlGroup bound (elaborated on dregg-ref, 3380 jobs, byte-identical), e44a4a75c + c9329c1c0 resident fds/in-world PID files/stop-residents.sh, 3a8109059 bounded SQLITE_PROTOCOL retry + named refusal. Owed: Rust mirror test resident_control_group_stays_within_the_lean_bound on a box (asked, with a red-proof); two-world start; stop-residents.sh first real run; ROWS-OWED failure-15 note.
+- 3a8109059 (lane/un-ns-owner-clean, replaces the un-ns-owner wip commits): dfea4d91d 317 controlGroup bound (elaborated on dregg-ref, 3380 jobs, byte-identical), e44a4a75c + c9329c1c0 resident fds/in-world PID files/stop-residents.sh, 3a8109059 bounded SQLITE_PROTOCOL retry + named refusal. Rust mirror test resident_control_group_stays_within_the_lean_bound GREEN on dregg-build, red-proofed (bound 318 -> left 317, right 318; restored). Owed: two-world start (queued behind the world-up lock, 3000 s waiter); stop-residents.sh first real run; ROWS-OWED failure-15 note.
 - 391311929 (lane/un-anchor-label): japps co-edit red on w4 after 789b9b478 ("enroll b2: the ticket's issue receipt anchor is missing"): the anchor was read under the base label, but the second session enrolls as b2; the repeat enroll already passes the base label (dispatcher: repeat `$letter`, second session `${letter}2`), so the label as given is right for both. Reviewed; land before any japps rerun. a4e312352a7091f59 reruns japps with it (incl. restart -> enroll-a2 -> Hacker Slides write).
 - lane/un-enroll-renew fab9bfb03 (+ cherry-pick of 391311929): World::enroll after every START, `mini apps renew --grain G` leaf + derived form, apps --dir fix, INSTALL.md §7; 12/12 filtered on dregg-build; planted-fault reds owed. NOT for main until ONE box-elaborated sha with 43a6f023f.
 - 886c43dfd (un-market-install) on main (aae3e2e37). Gate on 76758dba6 FAILED in the integrator's own composed harness (`..` in the socket path), fixed by it at 171e5af5b.
