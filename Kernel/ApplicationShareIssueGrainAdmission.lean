@@ -88,6 +88,16 @@ theorem Accepted.sound {profile : CanonicalRuntimeProfile.Profile F}
 
 private def refused : String := "grain-backed app share issue refused"
 
+/-- The refusal names the admission stage that failed, behind the same stable prefix. Every stage
+returned the one bare string before, so a refused ticket issue could not be told apart from any other. -/
+private def refusedAt (stage : String) : String := refused ++ ": " ++ stage
+
+/-- The stage text for the grain birth's own admission, with the reason it rejected. -/
+private def grainRefusal {α : Type} (admitted : Except GrainResourceBirthAdmission.Reject α) : String :=
+  match admitted with
+  | .error reject => refusedAt ("grain birth admission: " ++ toString (repr reject))
+  | .ok _ => refusedAt "grain birth admission"
+
 def admitNative (profile : CanonicalRuntimeProfile.Profile F)
     (config : NativeHost.Config) (pins : FactoryPins)
     (native : CredentialSignatureIO.NativeConfig)
@@ -96,21 +106,22 @@ def admitNative (profile : CanonicalRuntimeProfile.Profile F)
       (Σ ingress : ApplicationShareIssueGrainSource.Ingress,
         Accepted profile config pins durable ambient ingress)) := do
   let some ingress := ApplicationShareIssueGrainSource.codec.decode bytes
-    | return .error refused
-  let some decoded := ingress.decodeGrain | return .error refused
+    | return .error (refusedAt "ingress decode")
+  let some decoded := ingress.decodeGrain | return .error (refusedAt "grain ingress decode")
   let .ok sourceReady := ApplicationShareIssueSource.prepare profile config ingress.spec
-    | return .error refused
+    | return .error (refusedAt "source prepare")
   let some tariff := GrainResourceBirthAdmission.grainTariffAt config.deployment durable
-    | return .error refused
+    | return .error (refusedAt "grain tariff")
   let .ok birth := GrainResourceBirthController.prepareSourceBirth
       profile.compilerProfile profile.disabledEvaluators config.deployment pins durable profile.semantics
-      tariff decoded.source ambient.height sourceReady.sourced | return .error refused
+      tariff decoded.source ambient.height sourceReady.sourced | return .error (refusedAt "source birth prepare")
   let .ok grain := GrainResourceBirthTransaction.prepareTargets profile
       config.deployment pins durable ambient tariff decoded.source birth
-    | return .error refused
-  let .ok grainAccepted ← GrainResourceBirthAdmission.admitDecodedNative
+    | return .error (refusedAt "birth targets prepare")
+  let grainAdmission ← GrainResourceBirthAdmission.admitDecodedNative
       profile config.deployment pins durable ambient tariff decoded.source
-      birth grain native decoded | return .error refused
+      birth grain native decoded
+  let .ok grainAccepted := grainAdmission | return .error (grainRefusal grainAdmission)
   if sourceDescriptorBytes :
       CanonicalCellRegistry.sourceEncoding.codec.encode decoded.source.birth =
         CanonicalCellRegistry.sourceEncoding.codec.encode
@@ -128,9 +139,9 @@ def admitNative (profile : CanonicalRuntimeProfile.Profile F)
       (Minidregg.Compiler.ServedBasis.Ground.full _ birth.prepared.pre.directory birth.prepared.pre.authority)
     let .ok appPrepared := ApplicationShareIssueDelegation.prepare context
         profile config.federation ambient.height ingress.spec decoded.source.birth
-      | return .error refused
+      | return .error (refusedAt "app delegation prepare")
     let .ok appChecked ← ApplicationShareIssueDelegation.check native appPrepared
-        ingress.appEnvelope | return .error refused
+        ingress.appEnvelope | return .error (refusedAt "app delegation check")
     if appReadOnly : ∀ guard ∈ ApplicationShareIssueDelegation.readGuards appPrepared, guard.cellId ∉
         (GrainResourceBirthTransaction.writes birth grain).map
           DurableDataIntent.DataWrite.cellId then
@@ -139,9 +150,9 @@ def admitNative (profile : CanonicalRuntimeProfile.Profile F)
           ⟨decoded, grainBytes, sourceReady,
             tariff, birth, grain, grainAccepted, sourceDescriptor,
             appPrepared, appChecked, appReadOnly⟩⟩
-      else return .error refused
-    else return .error refused
-  else return .error refused
+      else return .error (refusedAt "grain ingress bytes")
+    else return .error (refusedAt "app delegation guard overlaps a birth write")
+  else return .error (refusedAt "source descriptor differs from the expected one")
 
 /-- The joint factory witness checks the same signed Book fee as the platform record's
 creation-tariff quote on the whole ticket payload the factory judged. Grain settlement is a separate
