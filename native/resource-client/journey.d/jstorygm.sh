@@ -153,4 +153,16 @@ check story "the GM's invitation line was printed" test -s "$H/gm/requests/invit
 ok story gm "story join $S @invitation.txt"
 ok story gm "narrate the door groans"
 refused story sponsor "narrate the author is not the teller" law-denied ""
+# A player's invitation is idempotent: the second `story invite` for the same player prints the saved line and
+# writes nothing (demo-dry: "scalar proposal requires 1..64 actions" on a re-invite); an invitation that is not
+# one (a non-GM named as GM) is refused by name.
+outcomes() { find "$SPONSOR_WS/attempts" -name 'outcome.json' 2>/dev/null | wc -l; }
+ok story sponsor "story invite $S $G"
+INV1=$(sed -n "s/^story join $S //p" "$OUT" | head -1)
+BEFORE=$(outcomes)
+ok story sponsor "story invite $S $G"
+check story "the second invite wrote nothing (no new outcome)" test "$(outcomes)" = "$BEFORE"
+check story "the second invite reprints the same invitation" test "$(sed -n "s/^story join $S //p" "$OUT" | head -1)" = "$INV1"
+check story "and says it is already invited" grep -q 'already invited' "$OUT"
+fails story sponsor "story invite $S 424242 gm" 2 "not $S's GM"
 finish
