@@ -84,7 +84,7 @@ class ApplicationClosureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);journal=root/'journal.json';receipt=root/'stop.json'
             j=driver.Journey.__new__(driver.Journey);j.bins=root;j.profile=root/'profile.json';j.application_unit='owned.service'
-            for field in ('applicationApiAttempt','dispatchHold','foregroundAttempt','parentHold','pending'):
+            for field in ('applicationApiAttempt','dispatchHold','foregroundAttempt','parentHold','pending','providerHold','child'):
                 journal.write_text(driver.json.dumps({field:{'uncertain':True}}))
                 with patch.object(j,'fixed',return_value=journal),patch.object(j,'run') as run:
                     with self.assertRaisesRegex(ValueError,'unsettled'):j.stop_qualified_application()

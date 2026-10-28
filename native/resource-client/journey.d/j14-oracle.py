@@ -958,7 +958,8 @@ class Journey:
         self.fixed('controller-stop')
         journal=read(self.fixed('controller-journal'))
         fields=('applicationApiAttempt','dispatchAttempt','dispatchHold','dispatchPending',
-                'foregroundAttempt','parentHold','toolHold','toolPending','pending','settlementDue')
+                'foregroundAttempt','parentHold','toolHold','toolPending','pending','settlementDue',
+                'providerAttempt','providerHold','providerPending','child','roomAttempt','workspaceAttempt')
         if any(journal.get(name) is not None for name in fields):
             raise ValueError('application teardown retains unsettled controller custody')
         receipt=self.run('app-stop',[self.bins/'spk-host','grain','stop',self.profile,'9890001'],timeout=2400)
