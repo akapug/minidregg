@@ -128,12 +128,16 @@ jq -n --arg manifest "$out/manifest.json" --arg commit "$(jq -r .sourceCommit "$
 python3 -I "$here/same-store-profile.py" "$out/profile-input.json" >"$out/profile.stdout"
 # ── platform-inputs.json: the constructor's shape, from this world ──────────────
 inventory=$(jq '[.members | to_entries[] | {key: .value.subject, value: {subject: .value.subject, workspace: .value.workspace, home: .value.home}}] | from_entries' "$world")
-authority=$(jq -n --arg factory "$(jq -r .factoryId "$genesis")" '{factory:{target:$factory,ownerCapability:"54",managementCapability:"55"}}')
-# The metered parent and tool tasks: mini apps bootstrap registered them in the sponsor workspace.
-for role in parent tool; do
+authority='{}'
+# The factory, as the sponsor holds it (genesis gave the sponsor its reference), and the metered parent
+# and tool tasks mini apps bootstrap registered: every capability is the one the sponsor's reference names.
+[[ $(jq -r .target "$sponsor_ws/refs/factory.json" 2>/dev/null) == "$(jq -r .factoryId "$genesis")" ]] \
+  || refuse "the sponsor workspace holds no reference to genesis's factory $(jq -r .factoryId "$genesis") (refs/factory.json)"
+for role in factory parent tool; do
   ref=$sponsor_ws/refs/$role.json
   [[ -f $ref ]] || refuse "meteredTasksRequired: no $ref; run \`mini apps bootstrap --dir $sponsor_ws\` first (deploy/market/INSTALL.md §4 step 0)"
-  authority=$(jq --arg role "$role" --slurpfile r "$ref" '.[$role] = {task: $r[0].target, ownerCapability: $r[0].observeCapability, managementCapability: $r[0].operationCapability}' <<<"$authority")
+  key=task; [[ $role != factory ]] || key=target
+  authority=$(jq --arg role "$role" --arg key "$key" --slurpfile r "$ref" '.[$role] = {($key): $r[0].target, ownerCapability: $r[0].observeCapability, managementCapability: $r[0].operationCapability}' <<<"$authority")
 done
 jq -n --arg config "$config" --arg genesis "$genesis" --arg manifest "$out/manifest.json" --arg public "$socket" --arg private "$private_socket" \
   --arg sponsor "$sponsor_ws" --argjson inventory "$inventory" --argjson authority "$authority" \
