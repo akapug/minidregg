@@ -209,6 +209,8 @@ class Journey:
     def await_worker_release(self):
         selected=os.environ.get('J14_ORACLE_WORKER_RELEASE')
         if not selected:return
+        if Path(self.runtime)!=self.bins/'grain-runtime':
+            raise ValueError('worker release may update only the selected owned bin overlay')
         path=Path(selected)
         if not path.is_absolute():raise ValueError('worker release path must be absolute')
         previous=sha(self.runtime);deadline=time.monotonic()+1800
