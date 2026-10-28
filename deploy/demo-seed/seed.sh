@@ -143,7 +143,8 @@ if as "$SAGE" "look" && grep -qF "lamp upstairs" <<<"$OUT"; then skip_ "first sc
 else as "$SAGE" "narrate '$opening'" && ok_ "first scene narrated by the GM" || fail_ "narrate: $(errtail_)"; fi
 
 # --- 5. one Objective Bend program, one run
-if as "$BOX" "bend show lobby-tally"; then skip_ "bend object lobby-tally exists"
+# done = the object has an activity record (a made cell alone is not a run: `bend show` says "no activity record")
+if as "$BOX" "bend show lobby-tally" && ! grep -q "no activity record" <<<"$OUT"; then skip_ "bend object lobby-tally already runs tally"
 else
   src=${TALLY_SRC:-$C/world/activity/Tally.obend}; [ -f "$src" ] || src=$here/../../world/activity/Tally.obend
   if [ -f "$src" ]; then
