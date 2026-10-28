@@ -103,6 +103,16 @@ copies each into `/var/lib/mini/sessions/public/inbox/NAME.TARGET.json` (owned b
 (`mini workspace --action import --from-ref`); a name already taken gets `NAME-CAPABILITY`. A
 revoked grant renders nothing: the signed read refuses.
 
+**It warms the public reader.** At its start and at every sweep, when `/etc/mini/public-subject`
+exists and no live public body answers from the current basis (subject, front document, the
+reader's `workspace.json`, the pinned config, the candidate), it starts the public body and sends it
+one `GET /`, so the body's start and its consent worker's Store replay are paid before the first
+visitor (demo-dry 2026-10-28: 23 s cold on an idle box, the gateway's 504 at 120 s under load). The
+journal says `public reader warmed (body PID): HTTP/1.1 200 OK in N s`. A body whose basis changed (a
+re-genesis, a re-enrolled reader, a new front document) is ended and replaced. Keeping the worker
+warm afterwards is the frame's: `mini-consent@public` does not idle out (dregg-infra, install.sh).
+The tour's J-COLD-READ rows (`journey.d/jweb-frontend.sh`) check the cold path.
+
 The `install-demo.sh` contract check: `mini-web.service` carries the full
 `placeholders/web-gateway.conf` floor; `mini-web-spawn.service` is root by design (the door's
 `mini-session-run@.service` is its precedent) and declares its `CapabilityBoundingSet`,
