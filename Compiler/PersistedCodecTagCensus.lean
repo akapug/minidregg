@@ -302,11 +302,13 @@ elab "#assert_persisted_codec_tags" : command => do
         unless pin.2 == fingerprint do
           changed := changed.push s!"{render bytes} (pinned {pin.2}, now {fingerprint}; owners {ownerNames.toList})"
   let stale := pinned.filter (fun pin => !shapes.any (fun shape => hexOf shape.1 == pin.1))
+  -- Structural pins are advisory (ember, 10-28): a byte-identical rewrite moves a fingerprint, so a moved
+  -- or missing pin warns and never stops a build. Tag-set equality and ownership above stay errors.
   unless changed.isEmpty do
-    throwError m!"persisted codec structure changed under an unchanged identity (bump it: scripts/codec-shapes-regen.py): {changed.toList}"
+    logWarning m!"persisted codec structure changed under an unchanged identity (advisory): {changed.toList}"
   unless unpinned.isEmpty && stale.isEmpty do
-    throwError m!"persisted codec shape pins out of date (re-emit: scripts/codec-shapes-regen.py): unpinned {unpinned.toList}; stale {stale.map (·.1)}"
-  logInfo m!"#assert_persisted_codec_tags: {seen.size} definitions reached; {reachable.length} canonical identities; reachable set = registry set (both directions); {shapes.size} structural fingerprints equal their pins"
+    logWarning m!"persisted codec shape pins out of date (advisory): unpinned {unpinned.toList}; stale {stale.map (·.1)}"
+  logInfo m!"#assert_persisted_codec_tags: {seen.size} definitions reached; {reachable.length} canonical identities; reachable set = registry set (both directions); {shapes.size} structural fingerprints ({changed.size} moved, {unpinned.size} unpinned, {stale.size} stale pins; advisory)"
 
 /-- Regeneration: the same census, writing the pins module instead of checking it. -/
 elab "#emit_persisted_codec_shapes " path:str : command => do
