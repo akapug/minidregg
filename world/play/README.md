@@ -3,7 +3,7 @@
 `CommitReveal.obend` is rock, paper, scissors between two players who do not trust each other,
 with a stake each. Preview evidence only (effect-free preview, `preview-cohort.json`, 29 rows);
 no native receipt exists for this package.
-Native: native scenario `play` in world-activity-admit.py (not yet run; runs in the central gate).
+Native: admitted on the activity route on candidate 0ce31391, scenario `play` of `native/resource-client/world-activity-admit.py`, 27/27 rows (every refusal row confirms its refusal); run `scripts/world-native-admit.sh play --route activity --scenario play --entry play`. Evidence: `docs/evidence/2026-10-27-world-native/play/` (`verdicts.txt`, `results.json`).
 
 ## What it does
 

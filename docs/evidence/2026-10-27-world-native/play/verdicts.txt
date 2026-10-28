@@ -1,0 +1,31 @@
+candidate 0ce31391790a7e2ed9f83eb1b8bb85d6556a0de3  method world/play/CommitReveal.obend  entry play  flags none
+extract-quote-is-the-policy-ceiling          check     ok {"published": {"extractTicks": "3200000"}, "policy": 3200000}
+publish                                      installed confirmed  
+create                                       installed confirmed  
+birth                                        installed confirmed  
+{"record": {"activity": "78068251179061438069193420882138983467866374176792971967205653849605501854462", "checkpointBytes": "37308", "checkpointDecodes": true, "checkpointDigest": "52675516290507466506288756370638627060684482723527521989505327692738393433246", "escrow": {"account": "7", "payer": "7", "resume": {"coreBytes": "127596", "domainWork": "0", "extractTicks": "3200000", "feeDebit": "0", "heap": "200000", "incidences": "0", "inputBytes": "0", "leaseByteBlocks": "0", "memoryTouches": "0", "networkBytes": "0", "outputBytes": "200000", "outputNodes": "20000", "proofWork": "0", "replayByte
+born-awaiting-the-keeper-ledger-0            check     ok {"source": {"decider": "40", "kind": "reply", "slot": "51889406466536787604330792951063104726831921449508139899029992023942395637048", "slotCell": "121273874244
+resolve-commit-a                             installed confirmed  
+deliver-commit-a                             installed confirmed  
+resolve-commit-b                             installed confirmed  
+deliver-commit-b                             installed confirmed  
+resolve-reveal-a                             installed confirmed  
+deliver-reveal-a                             installed confirmed  
+resolve-reveal-b                             installed confirmed  
+deliver-reveal-b                             installed confirmed  
+winner-paid-exactly-the-pot-from-the-purse   check     ok {"source": {"kind": "performed", "reason": null, "verdict": "settled"}, "winner": [100000000000, 100200000000], "state": {"fields": [{"name": "moves", "value": 
+deliver-settled                              installed confirmed  
+pot-paid-once-and-finished                   check     ok {"phase": null, "state": {"fields": [{"name": "moves", "value": {"tag": "natural", "value": "1"}}], "tag": "record"}}
+create-poor                                  installed confirmed  
+birth-underfunded                            installed confirmed  
+resolve-commit-a-underfunded                 installed confirmed  
+deliver-commit-a-underfunded                 installed confirmed  
+resolve-commit-b-underfunded                 installed confirmed  
+deliver-commit-b-underfunded                 installed confirmed  
+resolve-timeout-underfunded                  installed confirmed  
+deliver-timeout-underfunded                  installed confirmed  
+payout-refused-unfunded-moves-nothing        check     ok {"source": {"kind": "performed", "reason": "unfunded", "verdict": "refused"}, "version": ["1", "1"], "state": {"fields": [{"name": "moves", "value": {"tag": "na
+deliver-refused-underfunded                  installed confirmed  
+refused-payout-waits-for-the-next-event      check     ok {"source": {"decider": "40", "kind": "reply", "slot": "79830817474101911876200017674776489468913412530519790236982774319191067278225", "slotCell": "189352895273
+{"rows": 27, "failed": []}
+overall rc=0

@@ -1,0 +1,463 @@
+{
+ "rows": [
+  {
+   "step": "extract-quote-is-the-policy-ceiling",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "published": {
+     "extractTicks": "3200000"
+    },
+    "policy": 3200000
+   },
+   "group": null
+  },
+  {
+   "step": "publish",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "publish"
+  },
+  {
+   "step": "create",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "create"
+  },
+  {
+   "step": "birth",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "birth"
+  },
+  {
+   "step": "born-awaiting-the-keeper-shelf-empty",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "source": {
+     "decider": "40",
+     "kind": "reply",
+     "slot": "110874972299776608687425349225633627010939018101266557319907812596118225336592",
+     "slotCell": "212599908081794794048526318663154089846903255136293827941618794753522099792269"
+    },
+    "state": {
+     "fields": [
+      {
+       "name": "chapters",
+       "value": {
+        "tag": "natural",
+        "value": "0"
+       }
+      },
+      {
+       "name": "author",
+       "value": {
+        "tag": "natural",
+        "value": "0"
+       }
+      },
+      {
+       "name": "text",
+       "value": {
+        "tag": "label",
+        "value": ""
+       }
+      }
+     ],
+     "tag": "record"
+    }
+   },
+   "group": "story"
+  },
+  {
+   "step": "resolve-propose-1",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "story"
+  },
+  {
+   "step": "deliver-propose-1",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "story"
+  },
+  {
+   "step": "resolve-propose-2",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "story"
+  },
+  {
+   "step": "deliver-propose-2",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "story"
+  },
+  {
+   "step": "resolve-vote-2",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "story"
+  },
+  {
+   "step": "deliver-vote-2",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "story"
+  },
+  {
+   "step": "resolve-seal",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "story"
+  },
+  {
+   "step": "deliver-seal",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "story"
+  },
+  {
+   "step": "seal-commits-the-winning-chapter",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "source": {
+     "kind": "performed",
+     "reason": null,
+     "verdict": "settled"
+    },
+    "state": {
+     "fields": [
+      {
+       "name": "chapters",
+       "value": {
+        "tag": "natural",
+        "value": "1"
+       }
+      },
+      {
+       "name": "author",
+       "value": {
+        "tag": "natural",
+        "value": "2"
+       }
+      },
+      {
+       "name": "text",
+       "value": {
+        "tag": "label",
+        "value": "a ship in the fog"
+       }
+      }
+     ],
+     "tag": "record"
+    }
+   },
+   "group": "story"
+  },
+  {
+   "step": "deliver-settled",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "story"
+  },
+  {
+   "step": "sealed-once-and-complete",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "phase": null,
+    "state": {
+     "fields": [
+      {
+       "name": "chapters",
+       "value": {
+        "tag": "natural",
+        "value": "1"
+       }
+      },
+      {
+       "name": "author",
+       "value": {
+        "tag": "natural",
+        "value": "2"
+       }
+      },
+      {
+       "name": "text",
+       "value": {
+        "tag": "label",
+        "value": "a ship in the fog"
+       }
+      }
+     ],
+     "tag": "record"
+    }
+   },
+   "group": "story"
+  },
+  {
+   "step": "create-lawful",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "story-teeth-law-refuses-seal"
+  },
+  {
+   "step": "birth-lawful",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "story-teeth-law-refuses-seal"
+  },
+  {
+   "step": "resolve-propose-lawful",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "story-teeth-law-refuses-seal"
+  },
+  {
+   "step": "deliver-propose-lawful",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "story-teeth-law-refuses-seal"
+  },
+  {
+   "step": "resolve-vote-lawful",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "story-teeth-law-refuses-seal"
+  },
+  {
+   "step": "deliver-vote-lawful",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "story-teeth-law-refuses-seal"
+  },
+  {
+   "step": "resolve-seal-lawful",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "story-teeth-law-refuses-seal"
+  },
+  {
+   "step": "deliver-seal-law-refused",
+   "expect": "refused",
+   "detailExpected": "objectWrite",
+   "type": "refused",
+   "reason": "operation-rejected",
+   "detail": "Minidregg.Kernel.ObjectiveActivityReceiver.Reject.kernel (Minidregg.Kernel.ObjectiveActivity.Refusal.objectWrite (Minidregg.Kernel.ObjectRecord.WriteRefusal.lawDenied { path := [2], clause := Minidregg.Pred.Pred.le \"state/chapters\" 0, before := some 0, after := some 1 }))",
+   "ok": true,
+   "group": "story-teeth-law-refuses-seal"
+  },
+  {
+   "step": "law-refused-seal-writes-nothing",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "state": {
+     "fields": [
+      {
+       "name": "chapters",
+       "value": {
+        "tag": "natural",
+        "value": "0"
+       }
+      },
+      {
+       "name": "author",
+       "value": {
+        "tag": "natural",
+        "value": "0"
+       }
+      },
+      {
+       "name": "text",
+       "value": {
+        "tag": "label",
+        "value": ""
+       }
+      }
+     ],
+     "tag": "record"
+    },
+    "version": [
+     "1",
+     "1"
+    ]
+   },
+   "group": "story-teeth-law-refuses-seal"
+  }
+ ],
+ "totals": [
+  {
+   "after": "born",
+   "height": "15",
+   "total": "0"
+  },
+  {
+   "after": "resolved-propose-1",
+   "height": "16",
+   "total": "0"
+  },
+  {
+   "after": "after-propose-1",
+   "height": "17",
+   "total": "0"
+  },
+  {
+   "after": "resolved-propose-2",
+   "height": "18",
+   "total": "0"
+  },
+  {
+   "after": "after-propose-2",
+   "height": "19",
+   "total": "0"
+  },
+  {
+   "after": "resolved-vote-2",
+   "height": "20",
+   "total": "0"
+  },
+  {
+   "after": "after-vote-2",
+   "height": "21",
+   "total": "0"
+  },
+  {
+   "after": "resolved-seal",
+   "height": "22",
+   "total": "0"
+  },
+  {
+   "after": "after-seal",
+   "height": "23",
+   "total": "0"
+  },
+  {
+   "after": "after-settled",
+   "height": "24",
+   "total": "0"
+  },
+  {
+   "after": "birth-lawful-view",
+   "height": "26",
+   "total": "0"
+  },
+  {
+   "after": "resolved-propose-lawful",
+   "height": "27",
+   "total": "0"
+  },
+  {
+   "after": "after-propose-lawful",
+   "height": "28",
+   "total": "0"
+  },
+  {
+   "after": "resolved-vote-lawful",
+   "height": "29",
+   "total": "0"
+  },
+  {
+   "after": "after-vote-lawful",
+   "height": "30",
+   "total": "0"
+  },
+  {
+   "after": "after-law-refusal",
+   "height": "31",
+   "total": "0"
+  }
+ ],
+ "objects": {
+  "obj": {
+   "object": "14143872930514400481",
+   "capability": "14416860590100711616"
+  },
+  "lawful": {
+   "object": "13614417903411454358",
+   "capability": "9715796156774468418"
+  }
+ },
+ "allPass": true,
+ "pin": "19673593777156016567563461249435709264102050099479887621362391829892267518240",
+ "height": "31"
+}

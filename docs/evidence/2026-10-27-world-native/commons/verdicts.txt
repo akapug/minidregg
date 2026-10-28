@@ -1,0 +1,24 @@
+candidate 0ce31391790a7e2ed9f83eb1b8bb85d6556a0de3  method world/commons/ResidentServiceCommons.obend  entry lifecycle  flags none
+extract-quote-is-the-policy-ceiling          check     ok {"published": {"extractTicks": "3200000"}, "policy": 3200000}
+publish                                      installed confirmed  
+create                                       installed confirmed  
+birth                                        installed confirmed  
+{"record": {"activity": "72114838380020805446847972503136696083663553824754266523750297131110715107950", "checkpointBytes": "62039", "checkpointDecodes": true, "checkpointDigest": "5671323895169066276099282918630120029505298471159512815017042446804384666670", "escrow": {"account": "7", "payer": "7", "resume": {"coreBytes": "202322", "domainWork": "0", "extractTicks": "3200000", "feeDebit": "0", "heap": "200000", "incidences": "0", "inputBytes": "0", "leaseByteBlocks": "0", "memoryTouches": "0", "networkBytes": "0", "outputBytes": "200000", "outputNodes": "20000", "proofWork": "0", "replayBytes
+cohort-events-are-reserve-then-cancel        check     ok {"labels": ["reserveRequested", "cancelRequested"]}
+born-awaiting-the-keeper-vacant-0-admissions check     ok {"source": {"decider": "40", "kind": "reply", "slot": "52111704222011691344503021177949678196485950991738661023690827380660339106262", "slotCell": "164611209485
+resolve-reserve                              installed confirmed  
+deliver-reserve                              installed confirmed  
+reserve-admission-commits-held-once          check     ok {"source": {"kind": "performed", "reason": null, "verdict": "settled"}, "state": {"fields": [{"name": "phase", "value": {"tag": "label", "value": "held"}}, {"na
+deliver-settled-reserve                      installed confirmed  
+resolve-cancel                               installed confirmed  
+deliver-cancel                               installed confirmed  
+cancel-admission-commits-cancelled-once      check     ok {"source": {"kind": "performed", "reason": null, "verdict": "settled"}, "state": {"fields": [{"name": "phase", "value": {"tag": "label", "value": "cancelled"}},
+deliver-settled-cancel                       installed confirmed  
+terminal-phase-ends-the-activity             check     ok {"phase": null, "state": {"fields": [{"name": "phase", "value": {"tag": "label", "value": "cancelled"}}, {"name": "admissions", "value": {"tag": "natural", "val
+create-lawful                                installed confirmed  
+birth-lawful                                 installed confirmed  
+resolve-reserve-lawful                       installed confirmed  
+deliver-reserve-law-refused                  refused   refused operation-rejected al.lawDenied { path := [2], clause := Minidregg.Pred.Pred.le "state/admissions" 0, before := some 0, after := some 1 }))
+law-refused-admission-writes-nothing         check     ok {"state": {"fields": [{"name": "phase", "value": {"tag": "label", "value": "vacant"}}, {"name": "admissions", "value": {"tag": "natural", "value": "0"}}], "tag"
+{"rows": 20, "failed": []}
+overall rc=0
