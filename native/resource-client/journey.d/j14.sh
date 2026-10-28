@@ -601,9 +601,13 @@ N=$((N + 1)); WALL=-
   --intent-kind birth-intent --key "$W/sponsor.key" --dir "$SD/stale-birth" >"$L/stale-birth.out" 2>"$L/stale-birth.err"
 STALE_RC=$?
 STALE1=$(cat "$W"/public/serve*.log 2>/dev/null | grep -c 'submission refused (operator log).*birthStale')
-record aged OPERATOR "a birth authored at genesis (notBefore $GH) is refused on the aged World" "refused, operator log birthStale" \
-  "rc $STALE_RC, birthStale lines $STALE0 -> $STALE1" \
-  "$([ "$STALE_RC" != 0 ] && [ "$STALE1" -gt "$STALE0" ] && echo ok || echo FAIL)" "$(tail -1 "$L/stale-birth.err" | cut -c1-160)"
+# The Host refuses it at prepare (the submitter reads the kernel's reason) or, if a
+# plan was signed, at admission (the operator log names it): birthStale either way.
+STALE_NAMED=$(grep -c 'ResourceBirthPolicyController.Reject.birthStale' "$L/stale-birth.err")
+record aged OPERATOR "a birth authored at genesis (notBefore $GH) is refused on the aged World" "refused birthStale" \
+  "rc $STALE_RC, prepare refusals naming birthStale $STALE_NAMED, operator-log birthStale lines $STALE0 -> $STALE1" \
+  "$([ "$STALE_RC" != 0 ] && { [ "$STALE_NAMED" -gt 0 ] || [ "$STALE1" -gt "$STALE0" ]; } && echo ok || echo FAIL)" \
+  "$(grep -m1 -o 'refused: .\{0,140\}' "$L/stale-birth.err")"
 # Hermes's grain and controller config, in one command.
 jq -n --arg mini "$MINI" --arg host "$HOST" --arg cfg "$CONFIG" --arg sock "$SOCKET" --arg g "$W/genesis.json" \
   --arg ns "$W/namespace" --arg root "$G" --arg sk "$W/sponsor.key" --arg sp "$SPONSOR_SUBJECT" \
