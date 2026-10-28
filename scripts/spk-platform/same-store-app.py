@@ -129,6 +129,28 @@ def delegate_lifecycle(x,c):
     x.f['lifecycleDelegation']={'request':delegation,'result':result,'selectorSha256':sha(selector)};x.write_state()
     return selector
 
+def share_delegation(x,c):
+    """The share ticket's issuer is the manager, so the manager must HOLD the capability the ticket cites:
+    the owner delegates it a child of appOwnerCapability (the shape apps.rs delegate_share uses: propose,
+    submit, publish-delegation in the owner's workspace). The ticket then cites that child."""
+    delegation=c['lifecycleDelegation'];workspace=absolute(delegation['ownerWorkspace'])
+    name='spk-'+hashlib.sha256(x.app.encode()).hexdigest()[:12]+'-app'
+    pid='share-'+hashlib.sha256(x.app.encode()).hexdigest()[:12]
+    budget=x.authority['template']['ownerBudget']
+    request=x.fresh('share-delegation-request.json')
+    save(request,{'type':'minidregg-workspace-proposal-v1','action':'delegate','name':name,'recipient':delegation['manager'],
+        'verbs':['observe','mutate','delegate','append','place'],'maxCost':str(budget)})
+    mini=x.m['mini']['path'];attempt=workspace/'attempts'/pid;proposal=workspace/'proposals'/pid
+    reference=proposal/'recipient-reference.json'
+    if not reference.exists():
+        x.run([mini,'workspace','--action','propose','--dir',workspace,'--request',request,'--proposal-id',pid])
+        x.run([mini,'workspace','--action','submit','--dir',workspace,'--intent',proposal/'intent.json','--attempt',attempt])
+        x.run([mini,'workspace','--action','publish-delegation','--dir',workspace,'--proposal-id',pid,'--attempt',attempt])
+    ref=load(reference)
+    require(ref.get('type')=='minidregg-delegated-reference-v1' and ref.get('target')==x.app and ref.get('recipient')==delegation['manager'] and ref.get('capability'),'share delegation reference differs from app/manager')
+    x.f['shareDelegation']={'capability':ref['capability'],'reference':str(reference)};x.write_state()
+    return ref['capability']
+
 # The Host replays history inside INSTALL and START; these bound a hung helper,
 # not an ordinary slow one. An interrupted INSTALL preparation cannot be
 # repeated, so its bound is far above any measured run (1605 s on the first
@@ -261,6 +283,7 @@ def attach(path, prepare_only=False):
     x.step('app:reserve',lambda:x.reserve(app_reserve(x)),effect_only=True)
     x.step('app:birth',lambda:birth_app(x))
     if c.get('lifecycleDelegation') is not None:x.step('lifecycle',lambda:delegate_lifecycle(x,c),reentrant=True)
+    if c.get('lifecycleDelegation') is not None:x.step('share-delegation',lambda:share_delegation(x,c),reentrant=True)
     x.step('install',lambda:install_app(x,c),reentrant=True)
     for label,d in x.f['delegates'].items():
         k='member:'+label+':'

@@ -413,6 +413,11 @@ class Fixture:
                 "headerSha256": hashlib.sha256(bytes.fromhex(slot[header])).hexdigest(), "keyPath": str(key)})
         save(out, dict(base, signers=signers))
 
+    def issue_cap(self):
+        """The capability a share ticket cites: the child the owner delegated the manager at the
+        share-delegation step when there is one, else the app owner capability (manager-owned apps)."""
+        return self.f.get("shareDelegation", {}).get("capability", self.appcap)
+
     def issue(self, d, reserve=True, observe=True):
         kind = d.get("sessionKind", "web")
         schema = load(self.pkg / "schema-inspection.json")
@@ -432,7 +437,7 @@ class Fixture:
                     "kind": kind, "subject": d["subject"], "origin": {"type": "human"},
                     "sessionCapability": d["cap"], "appObserveCapability": d["appObserve"],
                     "ticketObserveCapability": d["ticketObserve"]}, "ceiling": ceiling, "issueNonce": self.n(), "notAfter": "1000000000"},
-                "issuer": self.creator, "appDelegateCapability": self.appcap,
+                "issuer": self.creator, "appDelegateCapability": self.issue_cap(),
                 "ticketOwnerCapability": d["ticketOwner"], "ticketControlCapability": d["ticketControl"]}
         req = {"spec": spec, "payer": self.creator, "funding": [], "sourceCapabilities": [self.accountcap],
                "tool": self.tool, "parent": self.parent}
@@ -442,7 +447,7 @@ class Fixture:
         inspected = load(preview / "request-inspected.json")
         base = {"type": "minidregg-grain-share-issue-approval-v1", "requestSha256": sha(preview / "request.bin"),
                 "canonicalSpec": inspected["canonicalSpec"], "issuer": spec["issuer"],
-                "participantSubject": d["subject"], "appDelegateCapability": self.appcap, "ticketResource": d["ticket"]}
+                "participantSubject": d["subject"], "appDelegateCapability": self.issue_cap(), "ticketResource": d["ticket"]}
         base.update({k: inspected[k] for k in ["payer","funding","sourceCapabilities","tool","parent"]})
         self.approve(preview / "plan-inspected.json", "header", base, approval)
         self.mini("grain-share-issue-prepare", "--request", request, "--approval", approval, "--dir", issue, operator=True)
