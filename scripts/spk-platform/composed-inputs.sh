@@ -11,6 +11,7 @@
 #   OUT_DIR/documents-binding.json mini-protected-same-store-v1 (owner, member, reader, reviewer)
 #   OUT_DIR/resident-binding.json  mini-same-world-resident-binding-v1
 #   OUT_DIR/composed-args.txt      the exact `composed-scenario.py spec ...` arguments to add
+#   OUT_DIR/broker-setup/recovery.json  the teardown locator: run `world-down.sh OUT_DIR` before the world goes down
 #
 # The SPK platform on the scenario's own Store: ROOT SETUP (deploy/spk-host/install-user-world under
 # sudo -n), the operator broker unit, `same-store-profile.py` (grain init-store against the existing
@@ -115,6 +116,14 @@ hostid=$(sha256sum /etc/machine-id | cut -d ' ' -f1)
 printf 'ROOT SETUP BEGIN store=%s\n' "$store" | tee -a "$out/root-setup.log"
 sudo -n -- "$repo/deploy/spk-host/install-user-world" install "$out/bin/mini-spk-volume-helper" "$helper" "$store" "$deployment" "$hostid" "$op_uid" "$start" 16 >>"$out/root-setup.log" 2>&1
 printf 'ROOT SETUP store=%s helper=%s\n' "$store" "$helper" | tee -a "$out/root-setup.log"
+# The teardown locator world-down.sh reads: `world-down.sh OUT_DIR` stops this Store's grain units and
+# broker, destroys its volumes through the helper and removes the root registry, sudoers rule, helper
+# and /var/lib/mini-spk-worlds/STORE (install-user-world remove). Whoever takes the world down runs it
+# first; without it every composed run left its grain world behind (123 GB on dregg-build, 2026-10-28).
+mkdir -m 700 "$out/broker-setup"
+jq -n --arg store "$store" --arg grains "$grains" --arg helper "$helper" \
+  '{protocol:"mini-spk-world-recovery-v1",store:$store,grainsRoot:$grains,brokerSocket:($grains+"/runtime-"+$store+"/broker.sock"),helper:$helper}' \
+  >"$out/broker-setup/recovery.json"
 registry=/etc/mini-spk-volumes/$store.json
 jq -n --slurpfile registry "$registry" --arg binary "$spk_host" --arg sha "$spk_host_sha" --arg ingest "$out/bin/spk-ingest" --arg op "$op_name" \
   --arg bwrap "$bwrap" --arg bwrapSha "$(sha256sum "$bwrap" | cut -d ' ' -f1)" '

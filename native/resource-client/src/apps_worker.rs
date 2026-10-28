@@ -1348,6 +1348,18 @@ impl ProcessWorld {
     }
 }
 
+/// The session, descriptor and ticket resource ids of one share, derived from the world's nonce counter
+/// (unique per call, never repeated). They live above 2^62 and below 2^63: clear of the workroom's small
+/// fixture ids and of every participant-namespace id (at least 2^63), so a share can never collide with
+/// either, and the block of 16 consecutive ids per call (session, session + 1 the descriptor, ticket) is
+/// injective in the counter. The old `app * 100 + 10` overflowed for a namespace app id.
+pub(crate) fn share_ids(base: u64) -> Result<(u64, u64)> {
+    const SHARE_ID_FLOOR: u64 = 1 << 62;
+    let block = base.checked_mul(16).and_then(|b| SHARE_ID_FLOOR.checked_add(b)).filter(|b| *b < 1 << 63 && b.checked_add(15).is_some())
+        .ok_or_else(|| format!("shareIdsExhausted: nonce {base} leaves no share id block below 2^63"))?;
+    Ok((block, block + 2))
+}
+
 impl World for ProcessWorld {
     fn package(&self, package_id: &str) -> Result<Option<(PathBuf, String, u64)>> {
         let path = self.quarantine.join(format!("{package_id}.spk"));
@@ -1391,11 +1403,8 @@ impl World for ProcessWorld {
     }
     fn route(&self, work: &Path, app: &str, member: &str, expected_host: &str) -> Result<RouteBound> {
         // The journey's share(): session birth, ticket issue, observe delegation, route; then enroll.
-        let app_n: u64 = app.parse().map_err(|_| "app is not decimal")?;
         let base = self.nonce()?;
-        let n = (base % 1_000_000) as u64;
-        let session = app_n * 100 + 10 + (n % 7);
-        let ticket = app_n * 100 + 20 + (n % 7);
+        let (session, ticket) = share_ids(base)?;
         let cap = 300_000 + (base % 100_000) * 10;
         let label = format!("route-{member}");
         self.birth_session(work, &format!("{label}-session"), app, session, "web", cap, base)?;
@@ -1466,19 +1475,19 @@ impl World for ProcessWorld {
             api_token_sha256: text(&custodian, "apiTokenSha256")?.to_owned(),
             enrollment: json!({"session":session.to_string(),"cap":cap.to_string(),"ticket":ticket.to_string(),
                 "appObserveCapability":appcap,"packageObserveCapability":pkgcap,
+                "packageManifest":birth_source.pointer("/applicationGrainBirth/applicationBirth/application/packageManifest").and_then(Value::as_str).ok_or("birth source lacks packageManifest")?,
                 "ticketIssue":t.join("issue")}),
             directory,
         })
     }
     fn enroll(&self, work: &Path, app: &str, member: &str, enrollment: &Value) -> Result<Enrolled> {
-        let [session, cap, ticket, appcap, pkgcap] = ["session", "cap", "ticket", "appObserveCapability", "packageObserveCapability"]
+        let [session, cap, ticket, appcap, pkgcap, manifest] = ["session", "cap", "ticket", "appObserveCapability", "packageObserveCapability", "packageManifest"]
             .map(|k| enrollment.get(k).and_then(Value::as_str).unwrap_or("").to_owned());
-        if [&session, &cap, &ticket, &appcap, &pkgcap].iter().any(|v| v.is_empty()) {
+        if [&session, &cap, &ticket, &appcap, &pkgcap, &manifest].iter().any(|v| v.is_empty()) {
             return Err(format!("routeUnenrollable: the route for {member} was bound before enrollment facts were retained; it needs a new share"));
         }
         let issue = PathBuf::from(enrollment.get("ticketIssue").and_then(Value::as_str).unwrap_or(""));
         let (session_n, cap_n): (u64, u64) = (session.parse().map_err(|_| "session is not decimal")?, cap.parse().map_err(|_| "cap is not decimal")?);
-        let app_n: u64 = app.parse().map_err(|_| "app is not decimal")?;
         let label = format!("enroll-{member}");
         let base = self.nonce()?;
         // The serving generation: the app cell's field 0.
@@ -1518,7 +1527,7 @@ impl World for ProcessWorld {
         let count: i64 = anchor.pointer("/receipt/acceptedCount").and_then(Value::as_str).and_then(|v| v.parse().ok()).ok_or("the issue anchor has no acceptedCount")?;
         let pkgdir = self.identities_root.join(app).join("install").join("launch-descriptor").join("package-v1");
         let schema = read_json(&pkgdir.join("schema-inspection.json"))?;
-        let request = json!({"issueIndex":(count - 1).to_string(),"ticketResource":ticket,"packageManifest":(app_n + 1).to_string(),
+        let request = json!({"issueIndex":(count - 1).to_string(),"ticketResource":ticket,"packageManifest":manifest,
             "role":{"basis":role_basis(&self.role_basis, &schema),"added":[],"removed":[],"roleSchemaRoot":schema["root"],"roleVersion":schema["version"]},
             "descriptorCapability":(cap_n + 2).to_string(),"sessionObserveCapability":cap,"descriptorObserveCapability":(cap_n + 2).to_string(),
             "manifestObserveCapability":pkgcap,"nonce":(base + 3).to_string()});
@@ -1623,6 +1632,21 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn share_ids_are_injective_clear_of_namespace_ids_and_never_overflow() {
+        use super::share_ids;
+        let (s0, t0) = share_ids(70_001_000).unwrap();
+        let (s1, t1) = share_ids(70_002_000).unwrap();
+        assert_eq!((t0 - s0, t1 - s1), (2, 2));
+        assert!(s1 > t0, "consecutive shares never overlap");
+        for base in [1u64, 70_001_000, (1 << 58) - 1] {
+            let (session, ticket) = share_ids(base).unwrap();
+            assert!(session >= 1 << 62 && ticket + 13 < 1 << 63, "above the fixtures, below every namespace id (2^63)");
+        }
+        assert!(share_ids(1 << 58).unwrap_err().starts_with("shareIdsExhausted"), "past 2^63 refuses by name");
+        assert!(share_ids(u64::MAX).unwrap_err().starts_with("shareIdsExhausted"), "no wrap at u64::MAX");
+    }
     use super::*;
     use std::sync::Mutex as StdMutex;
 

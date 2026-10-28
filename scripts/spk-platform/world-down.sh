@@ -31,7 +31,9 @@ rc=0
 if [[ -f $CONFIG ]]; then
   BIN="$BIN" GRAINS_ROOT="$GRAINS_ROOT" BROKER_SOCKET="$BROKER_SOCKET" "$here/grain-journey.sh" stop-services "$RUN" >>"$run/cleanup-services.log" 2>&1 || rc=1
 fi
-"$here/stop-residents.sh" "$RUN" >>"$run/cleanup-services.log" 2>&1 || rc=1
+# A composed-inputs root (recovery locator only) has no world of its own: the world's residents are
+# its builder's to stop (jworld-scratch down).
+if [[ -d $RUN ]]; then "$here/stop-residents.sh" "$RUN" >>"$run/cleanup-services.log" 2>&1 || rc=1; fi
 : >"$run/residents-$STORE.log"
 while read -r unit; do
   [[ -n $unit ]] || continue

@@ -23,6 +23,11 @@
 #   APPS_E2E_GET_PATH  the authenticated GET's path (default /; the oracle bridge serves /health)
 #   APPS_E2E_POST      "PATH|CONTENT-TYPE|BODY-FILE": one authenticated POST after the GET, body kept in OUT/<grain>.post.body
 #   APPS_E2E_STOP=1    `mini apps stop` the grain at the end and check it is decided stopped
+#   APPS_E2E_BOOTSTRAP=1  the world's metered tasks are the ones `mini apps bootstrap` births and activates
+#                      for the manager (a fresh world's first install), not the workroom's pre-activated 7901/7902
+#   APPS_E2E_RESTART=1 on Hacker Slides: write through the route, restart (stop, start: generation +2), write
+#                      again with NO enroll step, `mini apps renew` says current, then an operator-direct restart
+#                      (spk-host grain stop/start, which skips the worker's enroll) is refused by name until renew
 set -uo pipefail
 umask 077
 [[ $# -ge 3 ]] || { echo "usage: $0 WORLD.env OUT_DIR APP-ID [APP-ID...]" >&2; exit 2; }
@@ -64,7 +69,10 @@ init_ws() { # NAME SUBJECT KEY CONTEXT  (the workroom's records commit to no nex
     --birth-context "$4" --namespace-root "$out/ns-$1" --no-prerotation >"$out/init-$1.out" 2>"$out/init-$1.err"
   [[ -f $ws/workspace.json ]]
 }
-init_ws manager 8 "$WR/tool.key" "$(context 8 55 42)"; row "manager workspace (subject 8) over the workroom's tool key" "$([ -f "$out/ws-manager/workspace.json" ] && echo 1 || echo 0)" "$(tail -1 "$out/init-manager.err" 2>/dev/null | cut -c1-120)"
+# With APPS_E2E_BOOTSTRAP the manager pays the bootstrap birth from a funded account of its own, provisioned
+# by the sponsor the way the member's is below, so the manager workspace is initialised after that.
+manager_row() { row "manager workspace (subject 8) over the workroom's tool key" "$([ -f "$out/ws-manager/workspace.json" ] && echo 1 || echo 0)" "$(tail -1 "$out/init-manager.err" 2>/dev/null | cut -c1-120)"; }
+if [ "${APPS_E2E_BOOTSTRAP:-0}" != 1 ]; then init_ws manager 8 "$WR/tool.key" "$(context 8 55 42)"; manager_row; fi
 init_ws controller 7 "$WR/controller.key" "$(context 7 54 41)"; row "controller workspace (subject 7, the parent task's owner) over the workroom's controller key" "$([ -f "$out/ws-controller/workspace.json" ] && echo 1 || echo 0)" "$(tail -1 "$out/init-controller.err" 2>/dev/null | cut -c1-120)"
 # The member is funded the way the door funds one (dregg-infra mini-reenroll): the sponsor (the
 # factory's controller, 7) provisions a funded account for the holder through the factory and
@@ -78,6 +86,11 @@ mini workspace --action provision --dir "$out/ws-controller" --name member9 --ho
   --account-predicate "$out/permit-all.json" --factory-ref factory >"$out/provision.out" 2>"$out/provision.err"
 MEMBER_CONTEXT=$out/ws-controller/provisions/member9/birth-context.json
 row "the sponsor provisions the member a funded account ($MEMBER_FUNDING), as the door does" "$([ -s "$MEMBER_CONTEXT" ] && echo 1 || echo 0)" "$(jq -r '.account.target // empty' "$out/provision.out" 2>/dev/null) $(tail -1 "$out/provision.err" | cut -c1-140)"
+if [ "${APPS_E2E_BOOTSTRAP:-0}" = 1 ]; then
+  mini workspace --action provision --dir "$out/ws-controller" --name manager8 --holder 8 --funding "${MANAGER_FUNDING:-100000}" \
+    --account-predicate "$out/permit-all.json" --factory-ref factory >"$out/provision-manager.out" 2>"$out/provision-manager.err"
+  init_ws manager 8 "$WR/tool.key" "$out/ws-controller/provisions/manager8/birth-context.json"; manager_row
+fi
 init_ws member 9 "$WR/member.key" "$MEMBER_CONTEXT"; row "member workspace (subject 9) over the workroom's member key, from the provisioned birth context" "$([ -f "$out/ws-member/workspace.json" ] && echo 1 || echo 0)" "$(tail -1 "$out/init-member.err" 2>/dev/null | cut -c1-120)"
 WSM=$out/ws-manager WSC=$out/ws-controller WS9=$out/ws-member HOME9=$out/home-member
 
@@ -120,13 +133,27 @@ widen_factory() {
 fl=$(widen_factory) && ok=1 || ok=0
 row "the controller sets the scratch factory's birth clause to the demo genesis base (all [])" $ok "${fl:-$(tail -1 "$out/factory-law/"*.err 2>/dev/null | cut -c1-160)}"
 
+# ---- a fresh world's metered tasks: `mini apps bootstrap` (APPS_E2E_BOOTSTRAP=1) --------------------
+if [ "${APPS_E2E_BOOTSTRAP:-0}" = 1 ]; then
+  mini apps bootstrap --dir "$WSM" --budget "${BOOTSTRAP_BUDGET:-5000}" >"$out/bootstrap.out" 2>"$out/bootstrap.err"
+  act=1
+  for step in tool-attach parent-attach parent-reserve; do
+    jq -e '.type == "confirmed"' "$WSM/attempts/apps-activate-$step/outcome.json" >/dev/null 2>&1 || act=0
+  done
+  row "apps bootstrap births the tool and parent tasks and activates them (tool attach, parent attach, parent reserve 1: all admitted)" \
+    "$([ -f "$WSM/refs/tool.json" ] && [ -f "$WSM/refs/parent.json" ] && [ "$act" = 1 ] && echo 1 || echo 0)" \
+    "tool $(jq -r .toolTask "$out/bootstrap.out" 2>/dev/null) parent $(jq -r .parentTask "$out/bootstrap.out" 2>/dev/null) $(tail -1 "$out/bootstrap.err" | cut -c1-120)"
+fi
+
 # ---- the metered tasks' owners delegate observe+mutate to the member -------------------------------
 # The workroom's tool (7902) is owned by subject 8 (capability 81), its parent (7901) by the
 # controller 7 (capability 71; 8 holds only the management capability 73, which cannot delegate).
 # On the box both are the sponsor's, born by mini apps bootstrap; here each owner delegates its own.
-mini workspace --action import --dir "$WSM" --name tool --kind object --target 7902 --observe-capability 81 --operation-capability 81 >"$out/import-tool.out" 2>&1
-mini workspace --action import --dir "$WSC" --name parent --kind object --target 7901 --observe-capability 71 --operation-capability 71 >"$out/import-parent.out" 2>&1
-row "the task owners hold their references (tool: 8, parent: 7)" "$([ -f "$WSM/refs/tool.json" ] && [ -f "$WSC/refs/parent.json" ] && echo 1 || echo 0)" "$(tail -1 "$out/import-parent.out" | cut -c1-100)"
+if [ "${APPS_E2E_BOOTSTRAP:-0}" != 1 ]; then
+  mini workspace --action import --dir "$WSM" --name tool --kind object --target 7902 --observe-capability 81 --operation-capability 81 >"$out/import-tool.out" 2>&1
+  mini workspace --action import --dir "$WSC" --name parent --kind object --target 7901 --observe-capability 71 --operation-capability 71 >"$out/import-parent.out" 2>&1
+  row "the task owners hold their references (tool: 8, parent: 7)" "$([ -f "$WSM/refs/tool.json" ] && [ -f "$WSC/refs/parent.json" ] && echo 1 || echo 0)" "$(tail -1 "$out/import-parent.out" | cut -c1-100)"
+fi
 delegate() { # WORKSPACE REF
   local ws=$1 ref=$2 id=apps-$2-member
   printf '{"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"%s","recipient":"9","verbs":["observe","mutate"],"maxCost":"%s"}\n' "$ref" "${APPS_MAX:-1000}" >"$out/delegate-$ref.json"
@@ -135,7 +162,8 @@ delegate() { # WORKSPACE REF
   mini workspace --action publish-delegation --dir "$ws" --proposal-id "$id" --attempt "$ws/attempts/$id" >"$out/publish-$ref.out" 2>&1 || return 1
   cp "$ws/proposals/$id/recipient-reference.json" "$HOME9/inbox/$ref.json"
 }
-ok=1; delegate "$WSM" tool || ok=0; delegate "$WSC" parent || ok=0
+ok=1; delegate "$WSM" tool || ok=0
+if [ "${APPS_E2E_BOOTSTRAP:-0}" = 1 ]; then delegate "$WSM" parent || ok=0; else delegate "$WSC" parent || ok=0; fi
 row "each owner delegates observe+mutate on its task to the member; references land in HOME/inbox" "$ok" "$(for r in tool parent; do tail -1 "$out/propose-$r.out" 2>/dev/null | cut -c1-80; done | tr '\n' ' ')"
 
 # ---- the world's apps config and the worker --------------------------------------------------------
@@ -143,9 +171,17 @@ mkdir -m 700 -p "$out/quarantine" "$out/wanted" "$out/verdicts" "$out/meta" "$ou
 chmod 755 "$out/verdicts" "$out/meta"
 for f in "${MINI_MARKET_CACHE:-/nonexistent}"/*.spk; do [ -f "$f" ] && cp "$f" "$out/quarantine/"; done
 printf '{"protocol":"mini-apps-config-v1","managementSubject":"8","toolRef":"tool","parentRef":"parent","tariff":{"base":"2","perBirth":"1"}}\n' >"$out/apps.json"
-jq -n --arg profile "$PROFILE" --arg mini "$MINI" --arg psock "$PSOCK" --arg genesis "$GENESIS" --arg q "$out/quarantine" --arg w "$out/wanted" --arg v "$out/verdicts" --arg nonce "$out/nonce" '
+# The workroom's own tasks by default; with APPS_E2E_BOOTSTRAP the manager owns both bootstrapped
+# tasks, so its owner capabilities are the worker's.
+TOOL_TASK=7902 TOOL_CAP=81 PARENT_TASK=7901 PARENT_CAP=73
+if [ "${APPS_E2E_BOOTSTRAP:-0}" = 1 ]; then
+  TOOL_TASK=$(jq -er .target "$WSM/refs/tool.json") TOOL_CAP=$(jq -er .operationCapability "$WSM/refs/tool.json")
+  PARENT_TASK=$(jq -er .target "$WSM/refs/parent.json") PARENT_CAP=$(jq -er .operationCapability "$WSM/refs/parent.json")
+fi
+jq -n --arg profile "$PROFILE" --arg mini "$MINI" --arg psock "$PSOCK" --arg genesis "$GENESIS" --arg q "$out/quarantine" --arg w "$out/wanted" --arg v "$out/verdicts" --arg nonce "$out/nonce" \
+  --arg tt "$TOOL_TASK" --arg tc "$TOOL_CAP" --arg pt "$PARENT_TASK" --arg pc "$PARENT_CAP" '
   {protocol:"mini-apps-world-v1",profile:$profile,mini:$mini,publicSocket:$psock,managementKeyId:"8008",
-   toolTask:"7902",toolCapability:"81",parentTask:"7901",parentCapability:"73",genesis:$genesis,
+   toolTask:$tt,toolCapability:$tc,parentTask:$pt,parentCapability:$pc,genesis:$genesis,
    quarantine:$q,wanted:$w,verdicts:$v,domain:"demo.test",nonceFile:$nonce,roleBasis:{type:"allAccess"}}' >"$out/apps-world.json"
 nohup "$MINI" apps-worker --state "$out/state" --world "$out/apps-world.json" --member-socket "$out/worker.sock" --edge-socket "$out/edge.sock" --dev-member member >"$out/worker.log" 2>&1 &
 echo $! >"$out/worker.pid"
@@ -153,6 +189,57 @@ for _ in $(seq 1 50); do [ -S "$out/worker.sock" ] && break; sleep 0.1; done
 row "the worker serves its member socket" "$([ -S "$out/worker.sock" ] && echo 1 || echo 0)" "pid $(cat "$out/worker.pid")"
 stop_worker() { [ -f "$out/worker.pid" ] && kill "$(cat "$out/worker.pid")" 2>/dev/null; rm -f "$out/worker.pid"; }
 trap stop_worker EXIT
+
+# ---- restart then write (APPS_E2E_RESTART=1, Hacker Slides) ---------------------------------------
+# The worker enrols the owner's route after every START (apps_worker.rs World::enroll), so a member
+# restarts and writes with no enroll or renew step. A route that nobody re-enrolled is refused by name.
+slides_put() { # MARKER -> http code (the response body stays in OUT/put.body)
+  printf '# %s\n\n---\n\n## Mini market write\n' "$1" >"$out/put.md"
+  curl -sS --max-time 900 --unix-socket "$rdir/http.sock" -X PUT -H "Host: $grain.demo.test" -H "Origin: https://$grain.demo.test" \
+    -H "Cookie: __Host-mini_spk_session=$(cat "$rdir/browser.token")" -H 'Content-Type: text/markdown' --data-binary @"$out/put.md" \
+    -o "$out/put.body" -w '%{http_code}' "http://$grain.demo.test/slides.md" 2>>"$out/put.err" || echo 000
+}
+slides_www() { # the anonymous read-back through the publishing socket
+  curl -sS --max-time 120 --unix-socket "${rdir%/routes/*}/www.sock" -H 'Host: grain.test' http://grain.test/slides.md 2>>"$out/put.err"
+}
+serving_generation() { # the highest generation the worker holds a receipted enrollment for
+  local d g best=0
+  for d in "$out/state/work/$grain/enroll-member"/enroll-member-g[0-9]*; do
+    [ -s "$d/receipt.json" ] || continue; g=${d##*-g}; [ "$g" -gt "$best" ] && best=$g
+  done
+  echo "$best"
+}
+restart_rows() {
+  local g0 g1 code www stale outcome appid
+  g0=$(serving_generation)
+  code=$(slides_put "slides write before the restart"); www=$(slides_www)
+  row "Hacker Slides: a write through the member's route before any restart is admitted and read back" \
+    "$([ "$code" = 200 ] && grep -Fq 'slides write before the restart' <<<"$www" && echo 1 || echo 0)" "PUT /slides.md $code; generation $g0"
+  mini apps stop --dir "$WS9" --grain "$grain" --json >"$out/restart-stop.json" 2>&1
+  mini apps start --dir "$WS9" --grain "$grain" --json >"$out/restart-start.json" 2>&1
+  g1=$(serving_generation)
+  # no enroll step here: START enrolled the route against the new generation itself
+  code=$(slides_put "slides write after the restart"); www=$(slides_www)
+  row "restart then write, no manual enroll: generation $g0 -> $g1, the write through the route is admitted and read back" \
+    "$([ "$g1" = $((g0 + 2)) ] && [ "$code" = 200 ] && grep -Fq 'slides write after the restart' <<<"$www" && echo 1 || echo 0)" \
+    "PUT /slides.md $code; stop $(jq -r .state "$out/restart-stop.json" 2>/dev/null) start $(jq -r .state "$out/restart-start.json" 2>/dev/null)"
+  outcome=$(mini apps renew --dir "$WS9" --grain "$grain" --json 2>&1); printf '%s\n' "$outcome" >"$out/renew-current.json"
+  row "apps renew --grain after the restart reports current (nothing stale, nothing submitted)" \
+    "$(grep -q '"state": "current"' <<<"$outcome" && echo 1 || echo 0)" "$(grep -oE '"(state|detail)": "[^"]*"' <<<"$outcome" | tr '\n' ' ' | cut -c1-200)"
+  # The stale case, the cheapest honest way: the operator restarts the app directly (spk-host grain
+  # stop and start, the very commands the worker runs) so nothing re-enrols the member's session.
+  appid=$(jq -er .app "$out/state/grains/$grain.json" 2>/dev/null || jq -er '.. | .app? // empty' "$out/state/grains/$grain.json" | head -1)
+  "$BIN/spk-host" grain stop "$PROFILE" "$appid" >"$out/direct-stop.out" 2>&1
+  "$BIN/spk-host" grain start "$PROFILE" "$appid" >"$out/direct-start.out" 2>&1
+  code=$(slides_put "slides write on a stale enrollment"); stale=$(head -c 400 "$out/put.body" | tr '\n' ' ')
+  row "a write whose session enrollment names the old generation is refused by name (renew it with mini apps renew)" \
+    "$([ "$code" != 200 ] && grep -q "session enrollment names app generation $g1 but the app now serves generation $((g1 + 2))" <<<"$stale" && grep -q 'mini apps renew' <<<"$stale" && echo 1 || echo 0)" "PUT /slides.md $code: $(cut -c1-220 <<<"$stale")"
+  outcome=$(mini apps renew --dir "$WS9" --grain "$grain" --json 2>&1); printf '%s\n' "$outcome" >"$out/renew-renewed.json"
+  code=$(slides_put "slides write after renew"); www=$(slides_www)
+  row "apps renew re-enrols the stale route (renewed), then the write is admitted and read back" \
+    "$(grep -q '"state": "renewed"' <<<"$outcome" && [ "$code" = 200 ] && grep -Fq 'slides write after renew' <<<"$www" && echo 1 || echo 0)" \
+    "$(grep -oE '"state": "[a-z]*"' <<<"$outcome" | head -1) PUT /slides.md $code"
+}
 
 # ---- the install, as the member -------------------------------------------------------------------
 export MINI_MARKET_INDEX=$FIXTURE MINI_MARKET_META=$out/meta MINI_APPS_VERDICTS=$out/verdicts MINI_APPS_WORKER_SOCKET=$out/worker.sock MINI_APPS_CONFIG=$out/apps.json
@@ -177,6 +264,7 @@ install_app() { # APP-ID
 # The member's own account pays: its balance before the first install and after each one is the
 # measured cost of an install (the budget figure INSTALL.md §4 states).
 balance() { mini credit --action balance --dir "$WS9" 2>/dev/null | sed -nE 's/^credit ([0-9]+) .*/\1/p' | head -1; }   # "credit N  (asset 0, account A, signed read at height H)"
+bal_start=$(balance)
 bal_before=$(balance); echo "member balance before installs: ${bal_before:-unreadable}" >>"$out/balances.log"
 for app in "$@"; do
   name=$(jq -r --arg a "$app" '.apps[] | select(.appId == $a or .packageId == $a) | .name' "$FIXTURE" | head -1)
@@ -186,6 +274,21 @@ for app in "$@"; do
     row "the install of $name debited the member's own account" "$([ "$bal_after" -lt "$bal_before" ] && echo 1 || echo 0)" "before=$bal_before after=$bal_after debit=$((bal_before - bal_after))"
   fi
   bal_before=$bal_after
+  # The Host's side of the install, whatever the worker did after it: the tool reservation and the
+  # application birth admitted (the request record keeps the birth receipt), not law-denied.
+  adm=""; for rec in "$out"/state/requests/*.json; do case $rec in *.outcome.json) continue ;; esac
+    adm=$(jq -r --arg a "$app" 'select(.appId == $a or .packageId == $a) | .documents.birthReceipt.effect // empty' "$rec" 2>/dev/null | head -1); [ -n "$adm" ] && break; done
+  # The funding is the measured install spend (about 10,360 on Hacker Slides: the request cell, six delegation
+  # proposals and the three-resource application birth at tariff base 2, perBirth 1, perInitialPayloadByte 1)
+  # plus a margin; a spend above the funding is refused by name, never absorbed.
+  if [ -n "$bal_start" ] && [ -n "$bal_after" ]; then
+    spend=$((bal_start - bal_after))
+    row "the member's install spend is within its funding ($MEMBER_FUNDING)" "$([ "$spend" -le "$MEMBER_FUNDING" ] && echo 1 || echo 0)" \
+      "$([ "$spend" -le "$MEMBER_FUNDING" ] || echo "spendOverFunding: ")spend $spend of $MEMBER_FUNDING"
+  fi
+  row "the first install of $name is admitted by the Host at the tool reservation and the application birth (not law-denied)" \
+    "$([ "$adm" = admitted ] && ! grep -q 'law-denied' "$out/install-$app.err" "$out/install-$app.json" 2>/dev/null && echo 1 || echo 0)" \
+    "birth ${adm:-none}; $(grep -ohE 'law-denied|installRefused|no-grant|resourceBatch|birthStale' "$out/install-$app.err" "$out/install-$app.json" 2>/dev/null | sort -u | tr '\n' ' ')"
   if [ "$installed" = 0 ]; then
     grain=$(grep -oE '"grain": "a[0-9]+"' "$out/install-$app.json" | head -1 | grep -oE 'a[0-9]+')
     row "install $name as the member: running, grain $grain" 1 "$(jq -r '.receipt.origin' "$out/install-$app.json" 2>/dev/null)"
@@ -195,6 +298,7 @@ for app in "$@"; do
       -H "Cookie: __Host-mini_spk_session=$(cat "$rdir/browser.token")" -o "$out/$grain.body" -w '%{http_code}' "http://$grain.demo.test$GET_PATH" 2>"$out/$grain.curl.err" || echo 000)
     anon=$(curl -sS --max-time 120 --unix-socket "$rdir/http.sock" -H "Host: $grain.demo.test" -o /dev/null -w '%{http_code}' "http://$grain.demo.test$GET_PATH" 2>/dev/null || echo 000)
     row "origin check $grain: authenticated GET $GET_PATH 200 through the route, anonymous refused" "$([ "$code" = 200 ] && [ "$anon" != 200 ] && echo 1 || echo 0)" "authed=$code anon=$anon $(head -c 60 "$out/$grain.body" | tr '\n' ' ')"
+    if [ "${APPS_E2E_RESTART:-0}" = 1 ] && [ "$app" = "${APPS_E2E_RESTART_APP:-}" ]; then restart_rows; fi
     if [ -n "${APPS_E2E_POST:-}" ]; then
       IFS='|' read -r ppath ptype pbody <<<"$APPS_E2E_POST"
       pcode=$(curl -sS --max-time 900 --unix-socket "$rdir/http.sock" -H "Host: $grain.demo.test" -H "Origin: https://$grain.demo.test" \

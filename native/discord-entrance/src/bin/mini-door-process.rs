@@ -81,7 +81,7 @@ struct DoorConfig {
     /// "tale"}`): the author's account invites the member as a player and the member joins, so the
     /// tour's story door has a cell to move on. Absent: no story step.
     story: Option<StoryConfig>,
-    /// The house's shared room every member joins at enrolment (`room`: `{"founder": "box",
+    /// The house's shared room every member joins at enrolment (`room`: `{"founder": "house",
     /// "name": "lobby"}`): the founder's account invites the member and the member joins, so the
     /// tour's Hermes step has the room the house summoned Hermes into. Absent: no room step.
     room: Option<StoryConfig>,
