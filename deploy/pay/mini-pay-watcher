@@ -1,5 +1,5 @@
 #!/bin/sh
-# One tick of the PAY watcher (PAY.md §3.4): a oneshot, run by mini-pay-watcher.timer.
+# One tick of the PAY watcher (PAY §3.4): a oneshot, run by mini-pay-watcher.timer.
 #
 #   1. `mini pay watch-config`  the watcher config from the signed pay view (op 107): the
 #                               tariff's mint and token program, the ASSIGNED book rows, and

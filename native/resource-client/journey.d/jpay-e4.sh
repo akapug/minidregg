@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# J-PAY-E4 (PAY.md §11.9 JOIN-SOLANA): a friend enrols themselves by paying, end to end on
+# J-PAY-E4 (PAY §11.9 JOIN-SOLANA): a friend enrols themselves by paying, end to end on
 # fixtures — `mini join --solana` → a fixture transfer carrying that memo → the real tick script
 # (deploy/pay/mini-pay-watcher) → the observer's self-enrollment through ops 117-120 on the
 # Host's OPERATOR socket → the enrollment view → the roster renderer (dry run) → `join --wait`.

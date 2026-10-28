@@ -1,4 +1,4 @@
-//! `mini join --solana | --wait | --renew`: enrol yourself by paying (PAY.md §11.6).
+//! `mini join --solana | --wait | --renew`: enrol yourself by paying (PAY §11.6).
 //!
 //!   mini join --solana --host HOST --config PINNED-CONFIG.json (--socket SOCKET | --view PAY-VIEW.bin)
 //!                      --enrol ENROL.json --dir NEW-JOIN-DIR [--key MINI.key] [--ssh-key KEY] [--name N]
