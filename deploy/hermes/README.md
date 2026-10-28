@@ -517,6 +517,8 @@ are checked before native writes; runtime/provider overlays and orchestration fi
 recorded separately. Use a fresh evidence directory. The socket directory is separately allocated
 under `/build/lanes` (override `J14_ORACLE_SOCKET_PARENT` for another protected, short parent),
 and task IDs are allocated per run so preserved worlds do not share system unit names.
+Before session creation or a restarted room turn, the journey also waits for native idle
+readiness; the presence of a controller socket alone does not establish readiness.
 
 The receiving checks cover the room's named refusal, the founder's grant, the actual Oracle
 answer joined to native dispatch settlement, a fresh paid room reply, and controller restart.

@@ -15,6 +15,19 @@ spec=importlib.util.spec_from_file_location('j14_oracle_driver',Path(__file__).w
 driver=importlib.util.module_from_spec(spec);spec.loader.exec_module(driver)
 
 class ReadinessTests(unittest.TestCase):
+    def test_start_requires_native_idle_readiness_for_the_selected_task(self):
+        with tempfile.TemporaryDirectory() as directory:
+            response=Path(directory)/'idle.json'
+            j=driver.Journey.__new__(driver.Journey);j.c={'taskBase':'100'}
+            correct={'type':'mini-grain-idle-readiness-v1','ready':True,'task':'101'}
+            for value,accepted in [(correct,True),({**correct,'task':'102'},False),({**correct,'ready':False},False),({'socketReady':True},False)]:
+                response.write_text(driver.json.dumps(value))
+                with patch.object(j,'fixed',return_value=response) as fixed:
+                    if accepted:j.start_controller()
+                    else:
+                        with self.assertRaisesRegex(ValueError,'native idle readiness'):j.start_controller()
+                    self.assertEqual([call.args for call in fixed.call_args_list],[('controller-start',),('controller-prepare-idle',)])
+
     def test_retained_socket_inode_is_not_a_ready_listener(self):
         with tempfile.TemporaryDirectory(prefix='j14-ready-',dir='/tmp') as root:
             path=Path(root)/'listener.sock'

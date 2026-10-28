@@ -854,7 +854,22 @@ class Journey:
         # Preserve the original exported filename selected in the pinned input;
         # the attachment permits only its exact prepared/activated successor.
         shutil.copyfile(self.c['controllerConfig'],read(contract)['paths']['controllerConfig'])
+        self.finish_attachment(contract,prepared)
+
+    def start_controller(self):
         self.fixed('controller-start')
+        readiness=read(self.fixed('controller-prepare-idle'))
+        if (readiness.get('type')!='mini-grain-idle-readiness-v1' or readiness.get('ready') is not True
+                or readiness.get('task')!=self.task('controller')):
+            raise ValueError('native idle readiness did not identify this controller')
+
+    def finish_attachment(self,contract,prepared):
+        """Continue from an installed prepared config without repeating its delegations."""
+        self.contract=contract
+        def phase(name,*extra):
+            return self.run('attachment-'+name,['python3',REPO/'scripts/application-attachment.py',contract,name,*extra],timeout=3600)
+        def result(path):return read(path.read_text().strip())
+        self.start_controller()
         request=secrets.token_hex(16);args=self.root/'session-arguments.json';write(args,prepared['nextTool']['arguments'])
         write(self.root/'session-request.json',{'requestId':request,'tool':prepared['nextTool']['name'],'arguments':str(args)})
         session=self.fixed('controller-tool',request,prepared['nextTool']['name'],args)
@@ -873,7 +888,7 @@ class Journey:
         self.application_unit=read(start)['unit']
         activated=result(phase('activate','--input',start))
         self.enroll(activated['bundle'],'application')
-        self.fixed('controller-start')
+        self.start_controller()
         self.application_unit=read(start)['unit']
 
     def enroll(self,bundle,mode):
@@ -966,7 +981,7 @@ class Journey:
         turn('refused',False);self.web('refused',False)
         self.shell('alice','tariff lab set hermes/tools 8');self.web('granted',True)
         evidence=turn('answered',True)
-        self.fixed('controller-stop');self.fixed('controller-start')
+        self.fixed('controller-stop');self.start_controller()
         turn('controller-restarted',True)
         write(self.root/'result.json',{'protocol':'mini-j14-oracle-result-v1','passed':True,
             'store':self.broker['store'],'controllerUid':self.layout['controllerUid'],'operatorUid':os.getuid(),
