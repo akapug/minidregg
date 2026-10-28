@@ -135,7 +135,8 @@
                       "text",
                       "json-lines",
                       "caldav-multistatus",
-                      "rss"
+                      "rss",
+                      "json-string-fragment"
                     ]
                   },
                   "status": {
@@ -230,6 +231,43 @@
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "fragment": {
+                    "type": "object",
+                    "properties": {
+                      "prefix": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "suffix": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      }
+                    },
+                    "required": [
+                      "prefix",
+                      "suffix"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "responseHeaders": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 8,
+                    "propertyNames": {
+                      "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$"
+                    },
+                    "additionalProperties": {
+                      "enum": [
+                        "etag",
+                        "last-modified",
+                        "content-type",
+                        "content-length",
+                        "x-sandstorm-app-data-version"
+                      ]
+                    }
                   }
                 },
                 "required": [
@@ -239,7 +277,26 @@
                   "decode",
                   "status"
                 ],
-                "additionalProperties": false
+                "additionalProperties": false,
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "decode": {
+                          "const": "json-string-fragment"
+                        }
+                      },
+                      "required": [
+                        "decode"
+                      ]
+                    },
+                    "then": {
+                      "required": [
+                        "fragment"
+                      ]
+                    }
+                  }
+                ]
               },
               {
                 "type": "object",
