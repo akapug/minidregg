@@ -526,7 +526,11 @@ theorem run_congr_at {L : Layout.{0, 0, 0}} (address : Address L) :
       apply run_congr_at address rest
       by_cases written : op.writeAddress? = some address
       · have at_ := Op.writeAddress?_eq_some written
-        cases op <;> simp_all [Op.apply, Op.writeAddress?, Op.address]
+        cases op with
+        | read => simp [Op.writeAddress?] at written
+        | write => subst at_; simp [Op.apply, Op.address, Store.set]
+        | allocate => subst at_; simp [Op.apply, Op.address, Store.set]
+        | free => subst at_; simp [Op.apply, Op.address, Store.set]
       · rw [Op.apply_frame _ _ _ written, Op.apply_frame _ _ _ written, same]
 
 /-- **An address the shown store lacks and the actual one holds is written by no patch that
@@ -590,8 +594,7 @@ theorem checkOpened_ok {deployment : Deployment} {command : Command} {target : T
       Patch.ValidFrom cell.logical patch ∧ shown = Patch.run cell.logical patch := by
   unfold checkOpened at checked
   rw [served] at checked
-  simp only [bind, Except.bind, pure, Except.pure] at checked
-  repeat' split at checked
+  repeat' (first | split at checked | (simp only [bind, Except.bind] at checked))
   all_goals first
     | (cases checked; done)
     | skip
