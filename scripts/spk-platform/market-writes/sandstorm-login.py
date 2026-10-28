@@ -60,5 +60,5 @@ def login(send, wait, route, mid="0"):
     th = threading.Thread(target=poster, daemon=True)
     th.start()
     res = wait(lambda m: m.get("msg") == "result" and m.get("id") == mid, 40)
-    th.join(5)
+    th.join(90)
     return res, "method sent %.1fs, result at %.1fs; %s" % (sent, time.time() - t0, " | ".join(notes))
