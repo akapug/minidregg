@@ -484,7 +484,7 @@ instance birthWindowDecidable (template : CanonicalRuntimeProfile.FactoryTemplat
   unfold BirthWindow
   infer_instance
 
-/-! ### A born grant's revocation lineage (PLACE §2.2: a kick takes down the docs)
+/-! ### A born grant's revocation lineage (docs/PLACE.md §2.2: a kick takes down the docs)
 
 Authority over a cell born in a room is an attenuation of the creator's room
 grant. The born owner and control grants cannot be `Attenuates`-children of it:

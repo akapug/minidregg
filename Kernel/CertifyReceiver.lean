@@ -8,8 +8,8 @@ it) with log-chain value `c` is vouched for, and writes the system cell's
   `installPolicy`), admitted in capability mode under the factory's current law
   with the operation slot `authority/operation/certify` — the authority shape of
   the clock tick and PAY's book receiver, so the factory law decides WHICH
-  certifiers may certify (today the operator; after SURPASS N1 a witness
-  quorum's certificate);
+  certifiers may certify (today the operator; a witness
+  quorum's certificate is not built);
 * the command pins the current factory, authority and system roots;
 * the command names exactly the current head and its chain value
   (`headMismatch`, `chainMismatch`), and the head is past the certified height

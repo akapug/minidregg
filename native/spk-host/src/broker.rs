@@ -50,7 +50,7 @@ pub struct SizeClass {
     pub io_weight: u32,
     pub volume_mib: u64,
     /// Concurrent WebSockets one grain generation may hold open. The open is
-    /// a Mini dispatch; frames are unmetered by design (SPK-HOSTING §348), so
+    /// a Mini dispatch; frames are not Mini writes and carry no fee, so
     /// this and `ws_bytes_per_minute` are their physical bound. The open past
     /// the cap is refused `wsConcurrencyCap` before any Mini write.
     pub ws_max_open: usize,

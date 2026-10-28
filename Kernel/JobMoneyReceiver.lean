@@ -1,5 +1,5 @@
 /-
-# Kernel.JobMoneyReceiver — the signed job-money turn (COMPUTE §2.6, lane C3 K-JOB-MONEY)
+# Kernel.JobMoneyReceiver — the signed job-money turn (docs/COMPUTE.md §2.6, lane C3 K-JOB-MONEY)
 
 One signed command (`Command`: job, action, account, amount) is one turn over
 two cells, decided by `JobMoney.decideMoney`:

@@ -1,7 +1,7 @@
 /-
 # Theory.ConservationBridge -- the existing conservation results as corollaries
 
-DATAMODEL.md §3.1 names two existing conservation results that are "the same
+docs/DATAMODEL.md §3.1 names two existing conservation results that are "the same
 fact said once": `CanonicalResourceKernel.Book.applyPosting_conserves` (and its
 batch form `Batch.conservation`) and `DeclaredActionLowering`'s
 `Declaration.postingSum_zero` / `Accepted.conserves` over `run_balance`.  This

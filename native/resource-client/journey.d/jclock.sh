@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# K-CLOCK (MUD.md item 3) + CLOCK-SUBJECT: the deployment's one clock, on the
+# K-CLOCK (docs/MUD.md §5 item 3) + CLOCK-SUBJECT: the deployment's one clock, on the
 # journey's Store, ticked by its dedicated clock subject.
 #
 # Journey hook contract (journey.sh header): executed with MINI, SPONSOR_WS,

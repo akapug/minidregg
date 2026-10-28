@@ -1,7 +1,7 @@
 /-
 # Kernel.TurnCensus — every live admission is expressible as a `Turn` (T1)
 
-SURPASS §2(b), lane T1.  The Host admits through the 48 constructors of
+docs/SURPASS.md §2(b), lane T1.  The Host admits through the 48 constructors of
 `NativeHostReplay.NativeAdmission` on `final`: T1's 33 plus `final-pay`'s
 `payObservation`, `payEnrol`, `payRefill` and C3's `jobMoney` (rows added at
 the BRAID-PROOF merge), and C14's `certify` (added at the BRAID-COMPUTE merge), ACTIVITY-NATIVE's `activity`, SEATS-NATIVE's `seat`, and rooms' `renounce` and `subjectKeyRotation`, plus current-key commitment adoption and v2 paid admission/claim.  `Compiler.TurnCensusCoverage` fails the build when
@@ -24,7 +24,7 @@ What this is not: `Turn.ofConstructor` here builds from each receiver's
 its `Accepted` object.  Deriving the turn from the admitted object is T3's
 `Turn.ofIntent`; the shapes here are the targets it must hit.
 
-`step_conserves` (SURPASS T9): a Book leg whose patch is a list of postings
+`step_conserves` (docs/SURPASS.md §2(b), lane T9): a Book leg whose patch is a list of postings
 moves the total over any account set by exactly the postings' deltas into it;
 a balanced posting conserves it.  Stated and proved for the census Book
 layout (`total` over a finite account set).  The deployed Book cell
@@ -763,7 +763,7 @@ theorem run_postings_total (K : Finset Nat) :
         ring
       · simp [ha]
 
-/-- **`step_conserves`** (SURPASS T9's statement, at the census Book): if an
+/-- **`step_conserves`** (docs/SURPASS.md §2(b), lane T9's statement, at the census Book): if an
 accepted turn's leg on an existing Book cell is a list of postings that
 balances over an account set `K`, the Book's total over `K` is the same
 after the turn as before. -/

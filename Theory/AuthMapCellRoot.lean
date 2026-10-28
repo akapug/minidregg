@@ -3,7 +3,7 @@
 
 `Theory.AuthMap`'s two-level section takes the cell root as a free parameter
 `cellRoot : C → V`.  `Theory.CellState` fixes what a cell root is: the
-materializer's root of the logical store, `Materializer.rootOf` (DATAMODEL §6
+materializer's root of the logical store, `Materializer.rootOf` (docs/DATAMODEL.md §6
 Q3: the root is a function of the logical store; stage F hashes the canonical
 bytes, D1 swaps in an `AuthMap` root under the same function type).
 

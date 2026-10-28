@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# journey.d/jtemplates.sh — P-DOC-TEMPLATES (DEOS §9 row 6; J23 row 1): a room
+# journey.d/jtemplates.sh — P-DOC-TEMPLATES (docs/DEOS.md §9 row 6; J23 row 1): a room
 # born from a template has a map, and the template is the lines a friend types.
 #
 #   list      `room template list` names workroom, social, story; `room template
@@ -25,7 +25,7 @@
 #             after it.
 #   social    `room new pub --template social` births pub/index, pub/wall,
 #             pub/intro; `room welcome pub CARL --template social` invites carl and
-#             births pub/stream-CARL owned by carl (PLACE §2.3 (a)): carl appends
+#             births pub/stream-CARL owned by carl (docs/PLACE.md §2.3 (a)): carl appends
 #             to it, alice (room founder) is refused by its law, naming the clause.
 #   story     `room new tale --template story` births tale/index, tale/chapters,
 #             tale/scenes (a stream), tale/cast, with the map's links.

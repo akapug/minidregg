@@ -1,5 +1,5 @@
 /-
-# Kernel.PayLedger — the audit identity of the credit asset (PAY P3, P6; COMPUTE §2.6)
+# Kernel.PayLedger — the audit identity of the credit asset (PAY P3, P6; docs/COMPUTE.md §2.6)
 
 Every posting the pay line makes to the Book in the credit asset is one of:
 

@@ -863,7 +863,7 @@ theorems above make of it. -/
 
 namespace Sample
 
-/-- EVAL §2b(b)'s falsifier: `f/1 ≤ 0`, monotone, and `f/1 = 1`. -/
+/-- docs/EVAL.md §2b(b)'s falsifier: `f/1 ≤ 0`, monotone, and `f/1 = 1`. -/
 def falsifier : Pred := Pred.all [.le "f/1" 0, .monotone "f/1", .eq "f/1" 1]
 
 /-- The same law without the `eq`. -/

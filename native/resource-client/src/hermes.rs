@@ -1,4 +1,4 @@
-//! Hermes in a room (PLACE §2.7, §2.10, §5 row 7): `summon ROOM as ROLE
+//! Hermes in a room (docs/PLACE.md §2.7, §2.10, §5 item 7): `summon ROOM as ROLE
 //! --budget N`, `ask ROOM TEXT`, `dismiss ROOM`.
 //!
 //! Hermes is a participant like any friend: an enrolled subject `H` that holds

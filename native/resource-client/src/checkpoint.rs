@@ -18,7 +18,7 @@
 //! `tail` (head − certified) and `remaining` (heights left before the bound refuses).
 //!
 //! Today the certifier is the operator, trusted as the operator is; a timer runs this
-//! verb (the deployed certifier (dregg-infra edge/mini/mini-certify.timer)). After SURPASS N1 the certificate is a witness quorum's.
+//! verb (the deployed certifier (dregg-infra edge/mini/mini-certify.timer)). A witness quorum's certificate is not built.
 
 use crate::agent_reserve::field;
 use crate::*;

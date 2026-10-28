@@ -45,7 +45,7 @@ enum Mode {
     ContentStale8901,
     ContentBirth9301,
     /// `--room-librarian`: the librarian program, deterministically, over
-    /// the room tools (PLACE §2.7, J14). `--room-librarian-metered`: the
+    /// the room tools (docs/PLACE.md §2.7, J14). `--room-librarian-metered`: the
     /// same program as a pool upstream, whose stream ends with a usage event
     /// (the record the Host quotes a metered call from) and whose log names
     /// the bearer it was paid with. `--room-librarian-zai`: metered in the

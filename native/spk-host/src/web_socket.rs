@@ -1,4 +1,4 @@
-//! WebSockets through a grain route (SPK-HOSTING row 6). A socket is ONE
+//! WebSockets through a grain route. A socket is ONE
 //! admitted Mini dispatch, the open (method `WEBSOCKET`, a streamed dispatch);
 //! its frames are opaque bytes inside that admitted session, like a streamed
 //! body, and a close writes nothing to Mini. The stream is physically limited

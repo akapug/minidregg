@@ -607,7 +607,7 @@ def falsifier : Pred :=
 def admitting : Pred :=
   Pred.all [.le "resource/field/1/after" 0, .monotone "resource/field/1/after"]
 
-/-- The EVAL falsifier: unsatisfiable, and the certificate is the two-constraint cycle
+/-- The falsifier of docs/EVAL.md §2b(b): unsatisfiable, and the certificate is the two-constraint cycle
 `field 1 ≤ 0`, `field 1 ≥ 1`. -/
 theorem falsifier_answer :
     (match answer ⟨falsifier, Pred.all [], false⟩ with

@@ -21,7 +21,7 @@ the enrollment receiver; `none` = self-enrollment off) and `journalFloor`
 (atomic units below which an enrollment-index transfer is not admitted at
 all, so dust cannot buy a journal row).  A v1 tariff's bytes refuse to decode.
 
-Version 3 (`DREGG/PAY/TARIFF/v3`, COMPUTE §9 D4, lane C3 K-JOB-MONEY) adds the
+Version 3 (`DREGG/PAY/TARIFF/v3`, docs/COMPUTE.md §9 D4, lane C3 K-JOB-MONEY) adds the
 job market's slash split: `slashCallerPermille`, the share of a slashed bond
 minted back to the caller, in thousandths; the rest of the bond is never
 re-minted and stays in the well.  Valid only at most 1000.  The default is
@@ -105,7 +105,7 @@ structure Tariff where
   enrolIndex : Option Nat
   /-- Enrollment-index transfers below this many atomic units are refused. -/
   journalFloor : Nat
-  /-- Thousandths of a slashed job bond minted to the caller (COMPUTE §9 D4);
+  /-- Thousandths of a slashed job bond minted to the caller (docs/COMPUTE.md §9 D4);
   the remainder is never minted and stays in the well. -/
   slashCallerPermille : Nat
   deriving DecidableEq, Repr

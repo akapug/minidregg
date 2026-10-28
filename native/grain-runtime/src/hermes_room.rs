@@ -1,4 +1,4 @@
-//! The Hermes ROOM RUNNER (PLACE §2.7, §5 row 7): Hermes's controller for one
+//! The Hermes ROOM RUNNER (docs/PLACE.md §2.7, §5 item 7): Hermes's controller for one
 //! room it was summoned into.
 //!
 //! An attach: adopt what the founder handed over (`summon`'s hand-off in the

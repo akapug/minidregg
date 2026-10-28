@@ -1,5 +1,5 @@
 /-
-# Kernel.NockDoor — a NockApp kernel door, refereed (NOCK §2.7)
+# Kernel.NockDoor — a NockApp kernel door, refereed (docs/NOCK.md §2.7)
 
 A program whose ABI names a `door` is a NockApp kernel, run exactly as
 NockApp runs it (nockchain `cbd9298f`, `crates/nockapp/src/kernel/form.rs`):

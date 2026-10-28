@@ -15,7 +15,7 @@ record is gone):
   height, its world root, the log chain at that height, and
   `KMAC256(key, (keyId, height, root, H(body bytes)))`.
 
-**MAC custody (DATAMODEL §6 Q1).** The key is 32 bytes generated at
+**MAC custody (docs/DATAMODEL.md §6 Q1).** The key is 32 bytes generated at
 `mini bootstrap`, stored mode 0600 beside the operator configuration, one per
 Store; it authenticates only that Store's checkpoints and log tags. Rotation is
 a new checkpoint at the head under the new key (the checkpoint's chain value
@@ -29,7 +29,7 @@ recomputed over every stored record; the latest checkpoint's MAC, key id, world
 root and chain value must all match; every entry's tag must verify
 (`Compiler.DurableLogTags`), refused by height. Any mismatch refuses to open — nothing reinterprets.
 
-The world root is the parameterised `Checkpoint.check` of DATAMODEL B2 over
+The world root is the parameterised `Checkpoint.check` of docs/DATAMODEL.md §5 B2 over
 the current cell-root function (`rootBytes`), until C1 supplies the world-root
 function; it is recomputed from the checkpoint's cells, never trusted.
 -/
