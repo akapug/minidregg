@@ -13,12 +13,6 @@
    "status": "encoding"
   }
  },
- "Host/ApplicationAgentLifetimeGrantAuthoring.lean": {
-  "config.tariff": {
-   "count": 1,
-   "status": "owed"
-  }
- },
  "Host/ApplicationCurrentBirthAuthoring.lean": {
   "config.tariff": {
    "count": 1,
@@ -136,36 +130,6 @@
  "Kernel/ActivitySeatEnd.lean": {
   "config.tariff": {
    "count": 2,
-   "status": "owed"
-  }
- },
- "Kernel/ApplicationAgentLifetimeGrantAdmission.lean": {
-  "config.tariff": {
-   "count": 4,
-   "status": "owed"
-  }
- },
- "Kernel/ApplicationAgentLifetimeGrantIntentTemplate.lean": {
-  "config.tariff": {
-   "count": 1,
-   "status": "owed"
-  }
- },
- "Kernel/ApplicationAgentLifetimeGrantSource.lean": {
-  "config.tariff": {
-   "count": 3,
-   "status": "owed"
-  },
-  "profile.template": {
-   "count": 1,
-   "status": "owed"
-  },
-  "template.lifetime": {
-   "count": 1,
-   "status": "owed"
-  },
-  "template.ownerBudget": {
-   "count": 1,
    "status": "owed"
   }
  },
@@ -403,7 +367,7 @@
  },
  "TokenCensus/Table.lean": {
   "config.tariff": {
-   "count": 2,
+   "count": 1,
    "status": "owed"
   }
  }

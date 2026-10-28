@@ -82,9 +82,12 @@ def prepareLoaded {config : NativeHost.Config} {target : NativeHost.Durable}
   let height := NativeHost.logicalHeight config opened.durable
   let .ok ready := ApplicationAgentLifetimeGrantSource.prepare profile config spec
     | throw "agent lifetime grant source refused"
-  if opened.pins.tariff != config.tariff then
-    throw "agent lifetime grant factory tariff differs from loaded host"
-  let draft := ready.expectedDescriptor profile config
+  let some record := ResourceBirthPolicyController.Concrete.platformRecordAt config.deployment
+      opened.durable
+    | throw "platform cell unavailable: the image holds no platform record to price a lifetime grant from"
+  if opened.pins.tariff != record.creation then
+    throw "agent lifetime grant factory tariff differs from the platform record"
+  let draft := ready.expectedDescriptor profile config record
     opened.authority.snapshot.authState height payer funding
   let .ok prepared := ResourceBirthController.Concrete.prepareDraft
     profile.compilerProfile profile.disabledEvaluators config.deployment opened.pins
