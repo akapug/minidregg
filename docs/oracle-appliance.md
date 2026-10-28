@@ -110,44 +110,26 @@ replay, and completed a clean STOP and missing-data refusal. Its full recovery
 journey did not pass; the [retained result](oracle-shared-data-2026-10-27.md)
 records the failure and scope.
 
-The v5 agent run has both runtimes installed and its shared dataset published.
-Controller account recovery, consent storage repair, public listener restart,
-actual worker-policy installation and native controller enrollment now pass.
-Historical lookup now passes through the selected public socket. A subsequent
-recovery guard checked the wrong field of the signed query response and refused
-before birth. The corrected runtime preserves all original root and balance
-checks. Its next attempt reached session creation, which the fixture's factory
-policy refused before submission. Tool cleanup completed, but the parent hold
-still needs definite-error settlement; no request was resent or acknowledged.
-The qualified native refusal-recovery repair is now integrated. Its one
-terminal-only attempt hit the Host frame-read deadline during historical ticket
-lookup. The original parent reservation remains held, with no result or ACK.
-All owned services are stopped and the namespace is preserved; another attempt
-must account for that failure rather than resend the original operation.
+The fresh v7 qualification admitted an agent session and its persistent lifetime
+grant, migrated the payer route and completed native STOP and successor START.
+Its physical world was subsequently removed by unrelated cleanup while recovery
+was paused. The logical Store and admission evidence are preserved; that run is
+not a complete receiving result and its removed physical identity cannot resume.
+A replacement qualification is being prepared. The live Hermes composition has
+passed controller enrollment and signed readiness; agent answers, browser use
+and the complete restart journey remain open.
 
-The 27 October v7 run installed both appliances and admitted a real agent session.
-Lifetime-grant planning then refused: its source creates three grants while the
-ordinary birth validator requires two. The repair is now on `main`: a dedicated
-frame admits exactly the source's owner, controller and read-only participant
-observer; ordinary births retain their existing restriction. The fresh-world
-policy also permits the allocated grant resource. Earlier scoped checks passed
-for the production modules, observer boundary and factory predicate. No grant
-was submitted, application started, or Oracle/browser call made in that historical
-run. Cleanup passed and the stopped Store is preserved. A fresh run on 28 October
-has now admitted both the agent session and its lifetime grant on a coherent
-repaired Mini build. Route activation, agent calls, browser use and the complete
-restart journey are still being qualified.
-The [recovery record](evidence/oracle-hosted-recovery-2026-10-27.json) distinguishes
-both stopped runs and their exact evidence. The
-[factory evidence](evidence/oracle-grant-factory-2026-10-27.json) records its
-682 predicate checks and their limits. A subsequent
-[provisioning simplification](evidence/oracle-provisioning-configuration-2026-10-27.md)
-replaces source-text configuration and enrollment rewrites with explicit inputs
-and fixed provisioner phases. The workroom uses the shared genesis template;
-its five focused composition/allocation/birth checks now pass on dregg-ref.
-The fresh hosted qualification remains in
-[ROWS-OWED](ROWS-OWED.md#oracle-appliance), including a new-Host STOP receipt
-and an actual browser driver.
+Earlier stopped v5 and v7 Stores remain preserved. Their
+[recovery record](evidence/oracle-hosted-recovery-2026-10-27.json) names the exact
+outstanding custody and results. The lifetime-grant repair now admits the
+source's owner, controller and read-only observer through a dedicated frame;
+ordinary births retain their own restriction. The
+[factory evidence](evidence/oracle-grant-factory-2026-10-27.json) and
+[provisioning checks](evidence/oracle-provisioning-configuration-2026-10-27.md)
+record the narrower validation. Provisioning uses explicit configuration,
+fixed enrollment phases and the shared genesis template.
+[ROWS-OWED](ROWS-OWED.md#oracle-appliance) tracks the remaining receiving work,
+its owned worlds and the actual browser driver.
 
 The same-world Hermes integration is also on `main`. Agent creation can include
 a separate dispatch purse; a reusable attachment helper joins the actual
