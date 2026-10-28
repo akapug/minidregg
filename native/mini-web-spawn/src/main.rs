@@ -315,7 +315,10 @@ impl Helper {
     /// The publication hand-off: every member's `proposals/*/recipient-reference.json` addressed to
     /// the public subject is copied into the public reader's `inbox/NAME.TARGET.json` (owned by
     /// the public member, 0600). Nothing is decided here: the reference is a hint, and the public
-    /// body's own signed read publishes or refuses the document.
+    /// body's own signed read publishes or refuses the document. The one thing only this helper
+    /// knows is which member's home a publication came from, so it alone hands over a house name
+    /// (`spawn::handed_name`): the front page and the operations room come only from the member
+    /// the operator named for them.
     fn collect(&mut self) {
         let Some(subject) = self.spawner.public_subject() else {
             return self.hand_off_blocked("the public reader is not enrolled (no public subject): publications are not handed to it".into());
@@ -333,6 +336,8 @@ impl Helper {
         if !self.dev {
             unsafe { libc::chown(std::ffi::CString::new(inbox.to_string_lossy().as_bytes()).unwrap().as_ptr(), public.uid, u32::MAX) };
         }
+        let front_doc = self.spawner.front_doc();
+        let house = self.spawner.house_publications();
         for (name, home) in self.spawner.homes() {
             if name == spawn::PUBLIC_NAME {
                 continue;
@@ -358,6 +363,7 @@ impl Helper {
                     .and_then(|p| p["delegation"]["name"].as_str().map(str::to_owned))
                     .filter(|n| !n.is_empty() && n.len() <= 64 && n.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'))
                     .unwrap_or_else(|| "doc".into());
+                let doc = spawn::handed_name(&doc, &name, front_doc.as_deref(), &house);
                 let dest = inbox.join(format!("{doc}.{target}.json"));
                 let bytes = fs::read(&reference).unwrap_or_default();
                 chosen.insert(dest, (doc, target.to_owned(), bytes)); // oldest first: the newest stays

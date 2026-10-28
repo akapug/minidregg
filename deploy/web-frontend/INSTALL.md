@@ -88,6 +88,14 @@ of everything published. If the file is absent, empty or not a reference name (`
 most 64), or the document is not published to the public reader, `/` is the index as before.
 Members' front pages are unchanged.
 
+**Whose publication a house name is** is `/etc/mini/house-publications`, root-owned, one
+`NAME MEMBER` per line: the demo's `welcome house` and, once the box member exists,
+`operations box` (`printf 'welcome house\n' >/etc/mini/house-publications`). The front page's
+document, `operations` and every name listed are house names: the helper hands a publication over
+under a house name only from the member listed for it, and anyone else's document of that name as
+`NAME-MEMBER`, so no member's page can become the front page or the box's operations room by
+taking the name first. Without the file every house name is nobody's, and `/` is the index.
+
 **What the helper does on its own**, besides spawning: every 60 s it sweeps every member home's
 `workspace/proposals/*/recipient-reference.json` for references addressed to the public subject and
 copies each into `/var/lib/mini/sessions/public/inbox/NAME.TARGET.json` (owned by `mini-s-public`,

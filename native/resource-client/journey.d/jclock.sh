@@ -30,6 +30,8 @@
 # tick; a tick whose reply is lost resolves as `replayed` on the next run; 200
 # ephemeral ticks leave no attempt dir and 200 journal lines; 20 ephemeral reads
 # leave no attempt dir and 20 journal lines.
+# Ticks raced against 30 sponsor births (which move the authority root a tick pins) all
+# confirm: a stale pin is re-observed within the run, and counted in staleRefusals.
 # K-ORDER-WIDE rows (after the wall-clock tick, so clock/now is real unix time,
 # about 1.79e9): 20 signed reads of the same positive clock law answered; a write
 # at or below the clock admitted and one ahead of it refused naming the clock
@@ -266,6 +268,26 @@ view v6
 row "200 ephemeral ticks by the clock subject" "200 confirmed; at most 1 attempt dir at any time, 0 after; 200 journal lines" \
   "failed=$failed maxHeld=$maxheld left=$(attempt_dirs "$CLOCK_WS") journal=+$lines now=$(now_of v6) ($(( $(date +%s) - t0 )) s)" \
   "$([ $failed = 0 ] && [ "$maxheld" -le 1 ] && [ "$(attempt_dirs "$CLOCK_WS")" = 0 ] && [ $lines = 200 ] && [ "$(now_of v6)" = $((base + 201)) ]; echo $?)"
+
+# A tick pins the authority root it observed; births move that root. Ticks run while the
+# sponsor births resources: each tick re-observes on staleAuthority/staleClock within its run
+# (clock.rs, the client re-plan loop), so every tick confirms; staleRefusals counts the races it met.
+view vr0; aroot0=$(jq -r .authorityRoot "$D/vr0.out" 2>/dev/null)
+( for i in $(seq 1 30); do
+    "$MINI" workspace --action create --dir "$SPONSOR_WS" --name "race$i" --storage declared --predicate "$REQ/permit.json" >/dev/null 2>&1
+  done ) &
+echo $! >"$D/race-births.pid"
+rfailed=0; stale=0; i=0; rbase=$(now_of v6)
+while kill -0 "$(cat "$D/race-births.pid")" 2>/dev/null && [ $i -lt 200 ]; do
+  i=$((i + 1))
+  "$MINI" clock --action tick --workspace "$CLOCK_WS" --now $((rbase + i)) >"$D/trace.out" 2>"$D/trace.err" || { rfailed=$((rfailed + 1)); cp "$D/trace.out" "$D/trace-failed-$i.out"; }
+  stale=$((stale + $(jq -r '.staleRefusals // [] | length' "$D/trace.out" 2>/dev/null || echo 0)))
+done
+wait "$(cat "$D/race-births.pid")"
+view vr1; aroot1=$(jq -r .authorityRoot "$D/vr1.out" 2>/dev/null)
+row "ticks while the sponsor births 30 resources" "every tick confirmed (stale pins re-observed within the run); authority root moved; 0 attempts left" \
+  "ticks=$i failed=$rfailed staleRefusals=$stale authorityMoved=$([ "$aroot0" != "$aroot1" ] && echo yes || echo no) now=$(now_of vr1) left=$(attempt_dirs "$CLOCK_WS") [$(reason trace)]" \
+  "$([ $i -gt 0 ] && [ $rfailed = 0 ] && [ "$aroot0" != "$aroot1" ] && [ "$(now_of vr1)" = $((rbase + i)) ] && [ "$(attempt_dirs "$CLOCK_WS")" = 0 ]; echo $?)"
 
 # --- K-ORDER-WIDE: laws over clock/now at real unix time -------------------------------
 # turn WS ID REQUEST -> rc 0 iff installed; the Host's refusal line is in $D/ID-submit.err
