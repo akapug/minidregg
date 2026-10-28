@@ -1668,6 +1668,7 @@ pub fn run(config_path: &Path) -> io::Result<()> {
             "app-output-r{}-g{generation}.log",
             config.volume_resource
         )),
+        ifaddrs_shim: crate::sandbox::needs_ifaddrs_shim(&config.expected_raw_sha256),
     };
     let prepared =
         PreparedResident::prepare_with_public_data(&spec, config.app_uid, config.app_gid, &config.bwrap_sha256, public_data)?;
