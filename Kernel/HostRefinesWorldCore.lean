@@ -796,6 +796,24 @@ theorem toy_write_leg :
         t.legs.map fun leg => leg.patch.length) = some [2] := by
   decide +kernel
 
+/-- The toy refill turn (M2): no writes, one pin on cell 0, credit 5 on the incidences lane. -/
+def refillTurn : DTurn toyR Nat where
+  txId := ⟨9⟩
+  creates := []
+  legs := []
+  retires := []
+  event := ⟨0, ⟨0⟩, ⟨0⟩, []⟩
+  pins := [(0, 0)]
+  credit := fun l => if l = .incidences then 5 else 0
+
+/-- **Satisfiable pole (M2, the World half of item 7): a refill at an exhausted meter.**
+`w0` records its incidences allowance at `0`; the refill turn steps, and the stepped world's
+incidences meter is `5` (`step_meter`: `0 - 0 + 5`). -/
+theorem toy_refill_at_exhausted_meter :
+    w0.meter .incidences = 0 ∧
+      (World.step toyH w0 refillTurn).map (fun w => w.meter .incidences) = some 5 := by
+  decide +kernel
+
 /-- The deployed snapshot of a seed holding cell 0's bytes. -/
 def toySnap : DataSnapshot toyRoot :=
   DurableReceiver.Seed.snapshot toyRoot ⟨[], [(⟨0⟩, [1, 5])], 0⟩
@@ -927,6 +945,7 @@ end Example
 #assert_axioms Example.toy_rewrite_refused
 #assert_axioms Example.toy_rewrite_has_no_turn
 #assert_axioms Example.toy_write_steps
+#assert_axioms Example.toy_refill_at_exhausted_meter
 #assert_axioms Example.toy_write_leg
 #assert_axioms Example.toy_represents
 #assert_axioms Example.toy_refined
