@@ -270,15 +270,21 @@ pub(crate) fn agent_operator_envelope(envelope: &[u8], config: &[u8]) -> Result<
     Ok(())
 }
 
-/// The Host operations a room resident's controller reaches through its own
-/// systemd-activated operator proxy (deploy/hermes/README.md "One uid per
-/// resident"): the request/submit/lookup/query/observation family, provider
-/// continuity and usage quotes, current births, fleet turns and heads, key
-/// rotation status, receipt continuity and carried lookups. Measured from the
-/// controller's and resident's retained custody on J14 and confirmed by
-/// J14's `host-ops.txt` (MINI_TRACE).
+/// The Host operations a room resident's controller, its `bend` verbs and its
+/// hand-off reach through its own systemd-activated operator proxy
+/// (deploy/hermes/README.md "One uid per resident"): request/submit/lookup/
+/// observation/query (1-5), provider continuity and usage quotes (17, 19),
+/// fleet turns with their exact lookup and receipt recovery (96-99, 102), key
+/// rotation status (144), receipt continuity and carried lookups (151, 153),
+/// and the kernel activity a resident answers and delivers through (210-214:
+/// plan, assembly, submit, lookup, view). J14's `host-ops.txt` (MINI_TRACE of
+/// the controller and the resident) used 1-5, 17, 19, 96-98, 144 and 210-214;
+/// 99, 102, 151 and 153 are the recovery reads of those same paths. Codec ops
+/// (7-11) run in the local Host image, never on this route; describe and
+/// profile (0, 6), application current births (30, 31) and the fleet reads the
+/// concierge and fleet CLI use (100, 101, 180) are not a resident's.
 pub(crate) const RESIDENT_OPERATIONS: &[u8] =
-    &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 17, 19, 30, 31, 96, 97, 98, 99, 100, 101, 102, 144, 151, 153, 180];
+    &[1, 2, 3, 4, 5, 17, 19, 96, 97, 98, 99, 102, 144, 151, 153, 210, 211, 212, 213, 214];
 
 /// A resident's operator route admits a request only when the public relay
 /// would (the same framing, body bounds and route refusals) AND its operation

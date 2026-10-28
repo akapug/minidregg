@@ -162,12 +162,18 @@ pub(crate) fn compact(journal: &Journal, state: &Path, workspaces: &[&Path], hom
             let entry = entry.map_err(|e| e.to_string())?;
             let path = entry.path();
             if referenced.contains(&path) { continue; }
-            // A decided attempt (its outcome or result), or a finished signed
-            // read (its view, and no call or submission of any kind).
+            // A decided attempt (its outcome or result); a finished signed read
+            // (its view, or the Host's refusal of the read or of a proposal before
+            // any submission) with no call or submission of any kind; or a local
+            // render (a document, its context or transclusions) that never signed
+            // an intent for the Host.
+            let has = |f: &str| path.join(f).exists();
             let decided = path.join("outcome.json").is_file() || path.join("result.json").is_file();
-            let read = path.join("view.json").is_file() && !path.join("call.bin").exists()
-                && !path.join("submit.json").exists() && !path.join("plan.json").exists();
-            if !decided && !read { continue; }
+            let host = ["call.bin", "submit.json", "plan.json", "command.bin", "assembled.bin"].into_iter().any(has);
+            let read = !host && ["view.json", "query-refusal.json", "pre-submit-refusal.json"].into_iter().any(has);
+            let local = !host && !has("intent.bin")
+                && ["document.json", "context.json", "transclusions.json"].into_iter().any(has);
+            if !decided && !read && !local { continue; }
             let name = entry.file_name().to_string_lossy().into_owned();
             lines.push(json!({"workspace":workspace,"attempt":name,"outcome":outcome(&path.join("outcome.json"))}));
             summary.workspace_attempts += 1;
@@ -243,6 +249,16 @@ mod tests {
             serde_json::to_vec(&json!({"attempt": ws.join("attempts/a-write")})).unwrap()).unwrap();
         fs::create_dir_all(ws.join("attempts/a-read")).unwrap();
         fs::write(ws.join("attempts/a-read/view.json"), b"{}").unwrap();
+        // A read the Host refused, and a local document render: both finished.
+        fs::create_dir_all(ws.join("attempts/a-refused-read")).unwrap();
+        for f in ["intent.bin", "query-refusal.json"] { fs::write(ws.join("attempts/a-refused-read").join(f), b"{}").unwrap(); }
+        fs::create_dir_all(ws.join("attempts/a-render")).unwrap();
+        for f in ["context-in.json", "context.json"] { fs::write(ws.join("attempts/a-render").join(f), b"{}").unwrap(); }
+        // A proposal with a plan, and an intent signed for a render-named file: neither is a read or a render.
+        fs::create_dir_all(ws.join("attempts/a-planned")).unwrap();
+        for f in ["plan.json", "document.json"] { fs::write(ws.join("attempts/a-planned").join(f), b"{}").unwrap(); }
+        fs::create_dir_all(ws.join("attempts/a-signed")).unwrap();
+        for f in ["intent.bin", "document.json"] { fs::write(ws.join("attempts/a-signed").join(f), b"{}").unwrap(); }
         for id in 1..=3 { decided(&state, id); }
         fs::write(state.join("journal.json"), b"{}").unwrap();
         fs::write(state.join("resident-origin-0000000000000002.admitted.json"), b"{}").unwrap();
@@ -264,7 +280,7 @@ mod tests {
         assert!(!home.join("chat/reads/lab/feed.old").exists() && home.join("chat/reads/lab/feed.new").exists()
             && home.join("chat/reads/lab/roster.only").exists());
         assert!(!ws.join("sources/q-123.json").exists() && ws.join("sources/apps-bootstrap.json").exists());
-        assert_eq!((summary.operations, summary.workspace_attempts), (3, 2));
+        assert_eq!((summary.operations, summary.workspace_attempts), (3, 4));
         for id in 1..=3u64 {
             assert!(!state.join(format!("attempt-{id:016}")).exists() && !state.join(format!("query-{id:016}")).exists());
             assert_eq!(retained_outcome(&state, id).unwrap().unwrap(), before[id as usize - 1], "exact lookup survives the prune");
@@ -274,8 +290,12 @@ mod tests {
         assert!(ws.join("attempts/undecided").exists() && !ws.join("attempts/hr-g2").exists());
         assert!(ws.join("attempts/a-write").exists(), "a room write record's attempt stays for RoomTools::lookup");
         assert!(!ws.join("attempts/a-read").exists(), "a finished signed read goes");
+        assert!(!ws.join("attempts/a-refused-read").exists() && !ws.join("attempts/a-render").exists(),
+            "a refused read and a local render go");
+        assert!(ws.join("attempts/a-planned").exists() && ws.join("attempts/a-signed").exists(),
+            "a planned proposal and a signed intent stay");
         let history = fs::read_to_string(state.join(HISTORY)).unwrap();
-        assert_eq!(history.lines().count(), 5);
+        assert_eq!(history.lines().count(), 7);
         // A second pass finds nothing more and changes nothing.
         assert_eq!(compact(&journal, &state, &[ws.as_path()], &[home.as_path()]).unwrap().unwrap(), Summary::default());
         assert_eq!(fs::read_to_string(state.join(HISTORY)).unwrap(), history);
