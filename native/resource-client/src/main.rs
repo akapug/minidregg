@@ -11,6 +11,8 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(unix)]
+mod app_interface;
 mod attempt_state;
 mod bounds;
 mod fsio;
@@ -833,6 +835,7 @@ usage:
   mini well --action resubmit --dir WORKSPACE --attempt ATTEMPT   (the SAME retained ingress, decoded outcome)
   mini well --action ledger --dir WORKSPACE --output LEDGER.json
   mini fleet-sign join|send|transfer|receipt|incoming|retry [--profile P] ...   (dregg-client-sign's verbs on Mini, plus `incoming` for the helm adapter; `mini fleet-sign --help`)
+  mini app-interface --action tools|prepare|call --declaration FILE [--operation OP --args FILE --context FILE] [--attachment ALIAS --tool NAME --runtime BIN --controller-socket SOCKET --dir NEW_ATTEMPT]
   mini member --dir WORKSPACE [--name REF] [--home H] [--json true|false] [--action workspace|app-status]   (what `home` prints: your resources and exact recovery actions)
   mini clock --action init ... | view|tick --workspace WORKSPACE [--capability CAP]
   mini checkpoint --action view|certify --workspace WORKSPACE [--control CAP --min-tail N]
@@ -2778,6 +2781,8 @@ fn run(mut args: Args) -> Result<()> {
             let barrier = transport::durability_barrier();
             result.and(barrier)
         }
+        #[cfg(unix)]
+        "app-interface" => app_interface::run(args),
         "member" => member::run(args),
         #[cfg(unix)]
         "web" => web::run(args),

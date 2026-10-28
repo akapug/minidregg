@@ -126,6 +126,13 @@ pub fn resolve(x: &Value, args: &Value, context: &Value, results: &Value) -> Res
                     .cloned()
                     .ok_or_else(|| refuse("input-schema"));
             }
+            if let Some(k) = o.get("cookie") {
+                return results
+                    .get("__mini_cookie_jar")
+                    .and_then(|v| v.get(k.as_str()?))
+                    .cloned()
+                    .ok_or_else(|| refuse("app-cookie-missing"));
+            }
             if let Some(k) = o.get("context") {
                 return context
                     .get(string(k)?)
@@ -204,6 +211,15 @@ impl Declaration {
                 return Err(refuse("declaration-invalid"));
             }
         }
+        for op in ops.values() {
+            check_schema(&op["input"], 0)?;
+            check_schema(&op["output"], 0)?;
+        }
+        if let Some(defs) = value["$defs"].as_object() {
+            for schema in defs.values() {
+                check_schema(schema, 0)?;
+            }
+        }
         let sha256 = format!(
             "{:x}",
             Sha256::digest(
@@ -225,6 +241,9 @@ impl Declaration {
         if stack.iter().any(|n| n == name) {
             return Err(refuse("declaration-cyclic-relation"));
         }
+        if stack.len() > 64 {
+            return Err(refuse("declaration-dependency-over-bound"));
+        }
         let op = self.operation(name)?;
         stack.push(name.into());
         if let Some(reqs) = op.get("requires") {
@@ -235,6 +254,23 @@ impl Declaration {
                 let n = string(&req["op"])?;
                 if self.operation(n)?["write"] != false {
                     return Err(refuse("declaration-mutating-relation"));
+                }
+                self.dependencies(n, stack)?;
+            }
+        }
+        if let Some(steps) = op.get("prepare") {
+            let mut ids = std::collections::BTreeSet::new();
+            for step in steps
+                .as_array()
+                .ok_or_else(|| refuse("declaration-invalid"))?
+            {
+                let id = string(&step["id"])?;
+                if !ids.insert(id) {
+                    return Err(refuse("declaration-preparation-id"));
+                }
+                let n = string(&step["op"])?;
+                if self.operation(n)?["write"] != false {
+                    return Err(refuse("declaration-mutating-preparation"));
                 }
                 self.dependencies(n, stack)?;
             }
@@ -250,15 +286,28 @@ impl Declaration {
     pub fn tools(&self) -> Result<Vec<Value>> {
         let mut tools = vec![];
         for (name, op) in self.value["operations"].as_object().unwrap() {
+            if op["internal"] == true {
+                continue;
+            }
             let mut input = op["input"].clone();
             input["$defs"] = self.value["$defs"].clone();
-            tools.push(json!({"name":format!("mini_{}_{}",string(&self.value["name"])?,name.replace('.',"_")),"description":op["description"],"inputSchema":input,"outputSchema":{"type":"object","properties":{"value":op["output"]},"required":["value"],"additionalProperties":false,"$defs":self.value["$defs"]},"operation":name,"packageId":self.package_id,"interfaceSha256":self.sha256}));
+            tools.push(json!({"name":format!("mini_{}_{}",string(&self.value["name"])?,name.replace('.',"_")),"description":op["description"],"inputSchema":input,"outputSchema":{"type":"object","properties":{"value":op["output"]},"required":["value"],"additionalProperties":false,"$defs":self.value["$defs"]},"operation":name,"packageId":self.package_id,"interfaceSha256":self.sha256,"annotations":{"readOnlyHint":op["write"]==false,"idempotentHint":false},"_meta":{"interfaceDigest":self.sha256,"packageId":self.package_id,"operation":name}}));
         }
         Ok(tools)
+    }
+    pub fn validate_input(&self, name: &str, args: &Value) -> Result<()> {
+        self.validate(&self.operation(name)?["input"], args, "input", 0)
     }
     pub fn prepare(&self, name: &str, args: &Value, context: &Value) -> Result<PreparedCall> {
         let op = self.operation(name)?;
         self.validate(&op["input"], args, "input", 0)?;
+        if op
+            .get("prepare")
+            .and_then(Value::as_array)
+            .is_some_and(|a| !a.is_empty())
+        {
+            return Err(refuse("preparation-required"));
+        }
         if op
             .get("requires")
             .and_then(Value::as_array)
@@ -269,19 +318,23 @@ impl Declaration {
         self.encode(name, args, context)
     }
     fn encode(&self, name: &str, args: &Value, context: &Value) -> Result<PreparedCall> {
+        self.encode_results(name, args, context, &Value::Null)
+    }
+    fn encode_results(
+        &self,
+        name: &str,
+        args: &Value,
+        context: &Value,
+        results: &Value,
+    ) -> Result<PreparedCall> {
         let op = self.operation(name)?;
         let b = &op["binding"];
         if b["protocol"] != "http" {
             return Err(refuse("transport-unsupported"));
         }
         let empty = json!({});
-        let mut headers = resolve(
-            b.get("headers").unwrap_or(&empty),
-            args,
-            context,
-            &Value::Null,
-        )?;
-        let count = ["json", "base64", "text"]
+        let mut headers = resolve(b.get("headers").unwrap_or(&empty), args, context, results)?;
+        let count = ["json", "base64", "text", "form", "multipart"]
             .iter()
             .filter(|k| b.get(**k).is_some())
             .count();
@@ -290,17 +343,69 @@ impl Declaration {
         }
         let body = if let Some(v) = b.get("json") {
             headers["content-type"] = json!("application/json");
-            serde_json::to_vec(&resolve(v, args, context, &Value::Null)?)
+            serde_json::to_vec(&resolve(v, args, context, results)?)
                 .map_err(|_| refuse("binding-json"))?
         } else if let Some(v) = b.get("base64") {
-            binary(&resolve(v, args, context, &Value::Null)?)?
+            binary(&resolve(v, args, context, results)?)?
+        } else if let Some(v) = b.get("form") {
+            headers["content-type"] = json!("application/x-www-form-urlencoded");
+            let fields = resolve(v, args, context, results)?;
+            fields
+                .as_object()
+                .ok_or_else(|| refuse("binding-form-invalid"))?
+                .iter()
+                .map(|(k, v)| Ok(format!("{}={}", percent(k), percent(&scalar(v)?))))
+                .collect::<Result<Vec<_>>>()?
+                .join("&")
+                .into_bytes()
+        } else if let Some(parts) = b.get("multipart") {
+            let boundary = format!("mini{}", &self.sha256[..32]);
+            headers["content-type"] = json!(format!("multipart/form-data; boundary={boundary}"));
+            let mut body = vec![];
+            for part in parts
+                .as_array()
+                .ok_or_else(|| refuse("binding-multipart-invalid"))?
+            {
+                let name = multipart_token(string(&part["name"])?)?;
+                let filename = part
+                    .get("filename")
+                    .map(|v| resolve(v, args, context, results).and_then(|v| scalar(&v)))
+                    .transpose()?;
+                let mut disposition =
+                    format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"");
+                if let Some(f) = filename {
+                    disposition.push_str(&format!("; filename=\"{}\"", multipart_token(&f)?));
+                }
+                disposition.push_str("\r\n");
+                if let Some(t) = part.get("contentType") {
+                    let t = scalar(&resolve(t, args, context, results)?)?;
+                    if t.chars().any(|c| c.is_control()) {
+                        return Err(refuse("header-invalid"));
+                    }
+                    disposition.push_str(&format!("Content-Type: {t}\r\n"));
+                }
+                disposition.push_str("\r\n");
+                body.extend_from_slice(disposition.as_bytes());
+                let bytes = match (part.get("text"), part.get("base64")) {
+                    (Some(v), None) => scalar(&resolve(v, args, context, results)?)?.into_bytes(),
+                    (None, Some(v)) => binary(&resolve(v, args, context, results)?)?,
+                    _ => return Err(refuse("binding-multipart-invalid")),
+                };
+                if bytes
+                    .windows(boundary.len())
+                    .any(|w| w == boundary.as_bytes())
+                {
+                    return Err(refuse("multipart-boundary-collision"));
+                }
+                body.extend(bytes);
+                body.extend_from_slice(b"\r\n");
+            }
+            body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+            body
+        } else if let Some(v) = b.get("text") {
+            scalar(&resolve(v, args, context, results)?)?.into_bytes()
         } else {
-            b.get("text")
-                .map(string)
-                .transpose()?
-                .unwrap_or("")
-                .as_bytes()
-                .to_vec()
+            vec![]
         };
         if body.len() as u64 > number(&self.value["limits"]["bodyBytes"])? {
             return Err(refuse("body-over-bound"));
@@ -317,17 +422,15 @@ impl Declaration {
             {
                 return Err(refuse("header-invalid"));
             }
-            if k.starts_with("x-sandstorm-") || matches!(k.as_str(), "host" | "authorization") {
+            let lower = k.to_ascii_lowercase();
+            if lower.starts_with("x-sandstorm-")
+                || matches!(lower.as_str(), "host" | "authorization")
+            {
                 return Err(refuse("header-identity-forbidden"));
             }
             ordered_headers.push((k.clone(), s.into()));
         }
-        let q = resolve(
-            b.get("query").unwrap_or(&empty),
-            args,
-            context,
-            &Value::Null,
-        )?;
+        let q = resolve(b.get("query").unwrap_or(&empty), args, context, results)?;
         let mut query = vec![];
         for (k, v) in q.as_object().ok_or_else(|| refuse("query-invalid"))? {
             query.push(format!("{}={}", percent(k), percent(&scalar(v)?)))
@@ -351,14 +454,41 @@ impl Declaration {
         headers: &[(String, String)],
         body: &[u8],
     ) -> Result<Value> {
+        let write = self.operation(&p.operation)?["write"] == true;
+        self.decode_inner(p, status, headers, body)
+            .map_err(|mut e| {
+                if write
+                    && matches!(
+                        e.name.as_str(),
+                        "output-schema"
+                            | "app-response-invalid"
+                            | "app-content-type"
+                            | "app-text-invalid"
+                            | "reply-over-bound"
+                            | "dav-response-invalid"
+                    )
+                {
+                    e.uncertain = true;
+                }
+                e
+            })
+    }
+    fn decode_inner(
+        &self,
+        p: &PreparedCall,
+        status: u16,
+        headers: &[(String, String)],
+        body: &[u8],
+    ) -> Result<Value> {
         if p.declaration_sha256 != self.sha256 || p.package_id != self.package_id {
             return Err(refuse("interface-binding-mismatch"));
         }
         let op = self.operation(&p.operation)?;
+        let write = op["write"] == true;
         if body.len() as u64 > number(&self.value["limits"]["replyBytes"])? {
             return Err(Refusal {
                 name: "reply-over-bound".into(),
-                uncertain: p.write,
+                uncertain: write,
             });
         }
         if !op["binding"]["status"]
@@ -373,11 +503,11 @@ impl Declaration {
                     404 => "app-not-found",
                     409 => "app-conflict",
                     412 => "app-precondition-failed",
-                    500..=599 if p.write => "app-server-error-after-dispatch",
+                    500..=599 if write => "app-server-error-after-dispatch",
                     _ => "app-http-status",
                 }
                 .into(),
-                uncertain: p.write && status >= 500,
+                uncertain: write && status >= 500,
             });
         }
         let value = match string(&op["binding"]["decode"])? {
@@ -390,6 +520,19 @@ impl Declaration {
                 }
                 serde_json::from_slice(body).map_err(|_| refuse("app-response-invalid"))?
             }
+            "json-lines" => {
+                let text = std::str::from_utf8(body).map_err(|_| refuse("app-text-invalid"))?;
+                let rows = text
+                    .lines()
+                    .filter(|s| !s.trim().is_empty())
+                    .map(|line| {
+                        serde_json::from_str::<Value>(line)
+                            .map_err(|_| refuse("app-response-invalid"))
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                json!(rows)
+            }
+            "text" => json!(std::str::from_utf8(body).map_err(|_| refuse("app-text-invalid"))?),
             "base64" => json!({"contentBase64":STANDARD.encode(body)}),
             "status" => json!({"status":status}),
             "dav-multistatus" => dav(body)?,
@@ -557,6 +700,9 @@ fn dav(body: &[u8]) -> Result<Value> {
                 .find(|n| tag(*n, "status"))
                 .and_then(|n| n.text())
                 .ok_or_else(|| refuse("dav-response-invalid"))?;
+            if !status.starts_with("HTTP/") {
+                return Err(refuse("dav-response-invalid"));
+            }
             let code = status
                 .split_whitespace()
                 .nth(1)
@@ -590,4 +736,373 @@ fn dav(body: &[u8]) -> Result<Value> {
         out.push(json!({"href":href,"collection":collection.ok_or_else(||refuse("dav-property-missing"))?,"bytes":size,"etag":etag}));
     }
     Ok(json!(out))
+}
+
+fn multipart_token(s: &str) -> Result<String> {
+    if s.is_empty() || s.chars().any(|c| c.is_control() || matches!(c, '"' | '\\')) {
+        return Err(refuse("binding-multipart-invalid"));
+    }
+    Ok(s.into())
+}
+
+/// Selected by the controller from its authenticated attachment, never tool arguments.
+/// The admission callback must recheck this same subject/session on EVERY send.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionBinding {
+    pub package_id: String,
+    pub subject: String,
+    pub app: String,
+    pub generation: String,
+    pub session: String,
+    pub session_generation: String,
+}
+/// A definite response from the existing admitted application API. `receipt` is
+/// retained verbatim; typed projections never replace native completion evidence.
+#[derive(Clone, Debug)]
+pub struct NativeReply {
+    pub status: u16,
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
+    pub receipt: Value,
+}
+#[derive(Debug)]
+pub struct Execution {
+    pub outcome: Result<Value>,
+    pub receipts: Vec<Value>,
+}
+impl Declaration {
+    /// Run reads/preparations and exactly one requested operation, without retries.
+    /// `dispatch` is the existing current-authority admission/physical-custody path.
+    /// Its errors distinguish no-send refusals from uncertain sends. All definite
+    /// native receipts survive even if response decoding or later preflight fails.
+    pub fn execute<F>(
+        &self,
+        name: &str,
+        args: &Value,
+        context: &Value,
+        binding: &SessionBinding,
+        mut dispatch: F,
+    ) -> Execution
+    where
+        F: FnMut(&SessionBinding, &PreparedCall) -> Result<NativeReply>,
+    {
+        let mut receipts = vec![];
+        let outcome = if binding.package_id != self.package_id {
+            Err(refuse("package-binding-mismatch"))
+        } else {
+            self.execute_inner(
+                name,
+                args,
+                context,
+                binding,
+                &mut dispatch,
+                &mut receipts,
+                &mut vec![],
+                0,
+            )
+        };
+        Execution { outcome, receipts }
+    }
+    fn execute_inner<F>(
+        &self,
+        name: &str,
+        args: &Value,
+        context: &Value,
+        binding: &SessionBinding,
+        dispatch: &mut F,
+        receipts: &mut Vec<Value>,
+        cookies: &mut Vec<(String, String)>,
+        depth: usize,
+    ) -> Result<Value>
+    where
+        F: FnMut(&SessionBinding, &PreparedCall) -> Result<NativeReply>,
+    {
+        if depth > 32 {
+            return Err(refuse("preparation-depth-over-bound"));
+        }
+        let op = self.operation(name)?;
+        self.validate(&op["input"], args, "input", 0)?;
+        let mut results = json!({});
+        if let Some(steps) = op.get("prepare") {
+            for step in steps
+                .as_array()
+                .ok_or_else(|| refuse("declaration-invalid"))?
+            {
+                let subname = string(&step["op"])?;
+                if self.operation(subname)?["write"] != false {
+                    return Err(refuse("declaration-mutating-preparation"));
+                }
+                let subargs = resolve(&step["args"], args, context, &results)?;
+                let value = self.execute_inner(
+                    subname,
+                    &subargs,
+                    context,
+                    binding,
+                    dispatch,
+                    receipts,
+                    cookies,
+                    depth + 1,
+                )?;
+                let id = string(&step["id"])?;
+                if results.get(id).is_some() {
+                    return Err(refuse("declaration-preparation-id"));
+                }
+                results[id] = value;
+            }
+        }
+        if let Some(reqs) = op.get("requires") {
+            for req in reqs
+                .as_array()
+                .ok_or_else(|| refuse("declaration-invalid"))?
+            {
+                let subname = string(&req["op"])?;
+                if self.operation(subname)?["write"] != false {
+                    return Err(refuse("declaration-mutating-relation"));
+                }
+                let subargs = resolve(&req["args"], args, context, &results)?;
+                let value = self.execute_inner(
+                    subname,
+                    &subargs,
+                    context,
+                    binding,
+                    dispatch,
+                    receipts,
+                    cookies,
+                    depth + 1,
+                )?;
+                if let Some(exists) = req.get("exists") {
+                    for check in exists
+                        .as_array()
+                        .ok_or_else(|| refuse("declaration-invalid"))?
+                    {
+                        let collection = string(&check["collection"])?;
+                        let expected = resolve(&check["where"], args, context, &results)?;
+                        let rows = value[collection]
+                            .as_array()
+                            .ok_or_else(|| refuse("relation-not-visible-or-mismatched"))?;
+                        if rows.iter().filter(|v| matches_fields(v, &expected)).count() != 1 {
+                            return Err(refuse("relation-not-visible-or-mismatched"));
+                        }
+                    }
+                }
+                if let Some(checks) = req.get("assert") {
+                    for check in checks
+                        .as_array()
+                        .ok_or_else(|| refuse("declaration-invalid"))?
+                    {
+                        let got = lookup(&value, &check["path"])?;
+                        if *got != resolve(&check["equals"], args, context, &results)? {
+                            return Err(refuse("precondition-failed"));
+                        }
+                    }
+                }
+            }
+        }
+        results["__mini_cookie_jar"] =
+            Value::Object(cookies.iter().map(|(k, v)| (k.clone(), json!(v))).collect());
+        let mut call = self.encode_results(name, args, context, &results)?;
+        if !cookies.is_empty() {
+            if call
+                .ordered_headers
+                .iter()
+                .any(|(k, _)| k.eq_ignore_ascii_case("cookie"))
+            {
+                return Err(refuse("cookie-binding-ambiguous"));
+            }
+            call.ordered_headers.push((
+                "cookie".into(),
+                cookies
+                    .iter()
+                    .map(|(k, v)| format!("{k}={v}"))
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            ));
+        }
+        let reply = dispatch(binding, &call)?;
+        receipts.push(reply.receipt.clone());
+        for (k, v) in &reply.headers {
+            if k.eq_ignore_ascii_case("set-cookie") {
+                let pair = v.split(';').next().unwrap_or("");
+                let (name, value) = pair
+                    .split_once('=')
+                    .ok_or_else(|| refuse("app-cookie-invalid"))?;
+                if name.is_empty()
+                    || name
+                        .chars()
+                        .any(|c| !c.is_ascii_alphanumeric() && !"_-".contains(c))
+                    || value.chars().any(|c| c.is_control() || c == ';')
+                {
+                    return Err(refuse("app-cookie-invalid"));
+                }
+                if let Some(existing) = cookies.iter_mut().find(|(k, _)| k == name) {
+                    existing.1 = value.into()
+                } else {
+                    cookies.push((name.into(), value.into()))
+                }
+                if cookies.len() > 64
+                    || cookies
+                        .iter()
+                        .map(|(k, v)| k.len() + v.len() + 2)
+                        .sum::<usize>()
+                        > 16384
+                {
+                    return Err(refuse("app-cookie-over-bound"));
+                }
+            }
+        }
+        let mut value = self
+            .decode(&call, reply.status, &reply.headers, &reply.body)
+            .map_err(|mut e| {
+                if call.write
+                    && matches!(
+                        e.name.as_str(),
+                        "output-schema"
+                            | "app-response-invalid"
+                            | "app-content-type"
+                            | "app-text-invalid"
+                            | "reply-over-bound"
+                            | "dav-response-invalid"
+                    )
+                {
+                    e.uncertain = true;
+                }
+                e
+            })?;
+        if let Some(p) = op.get("projection") {
+            let expected = resolve(&p["where"], args, context, &results)?;
+            value = Value::Array(
+                value[string(&p["collection"])?]
+                    .as_array()
+                    .ok_or_else(|| refuse("output-schema"))?
+                    .iter()
+                    .filter(|v| matches_fields(v, &expected))
+                    .cloned()
+                    .collect(),
+            );
+            self.validate(&op["output"], &value, "output", 0)?;
+        }
+        Ok(value)
+    }
+    /// Qualification uses this executor too; each step has fresh current admission.
+    pub fn qualify<F>(
+        &self,
+        context: &Value,
+        binding: &SessionBinding,
+        mut dispatch: F,
+    ) -> Execution
+    where
+        F: FnMut(&SessionBinding, &PreparedCall) -> Result<NativeReply>,
+    {
+        let mut receipts = vec![];
+        let mut results = json!({});
+        let outcome = (|| {
+            if binding.package_id != self.package_id {
+                return Err(refuse("package-binding-mismatch"));
+            }
+            for step in self.value["qualification"]
+                .as_array()
+                .ok_or_else(|| refuse("declaration-invalid"))?
+            {
+                let args = resolve(&step["args"], &json!({}), context, &results)?;
+                let value = self.execute_inner(
+                    string(&step["op"])?,
+                    &args,
+                    context,
+                    binding,
+                    &mut dispatch,
+                    &mut receipts,
+                    &mut vec![],
+                    0,
+                )?;
+                results[string(&step["id"])?] = value.clone();
+                if let Some(checks) = step.get("assert") {
+                    for check in checks
+                        .as_array()
+                        .ok_or_else(|| refuse("declaration-invalid"))?
+                    {
+                        let ok = if let Some(expected) = check.get("contains") {
+                            let expected = resolve(expected, &json!({}), context, &results)?;
+                            value
+                                .as_array()
+                                .is_some_and(|a| a.iter().any(|v| matches_fields(v, &expected)))
+                        } else {
+                            *lookup(&value, &check["path"])?
+                                == resolve(&check["equals"], &json!({}), context, &results)?
+                        };
+                        if !ok {
+                            return Err(refuse("readback-mismatch"));
+                        }
+                    }
+                }
+            }
+            Ok(results)
+        })();
+        Execution { outcome, receipts }
+    }
+}
+fn matches_fields(value: &Value, expected: &Value) -> bool {
+    expected
+        .as_object()
+        .is_some_and(|o| o.iter().all(|(k, v)| value.get(k) == Some(v)))
+}
+fn lookup<'a>(value: &'a Value, path: &Value) -> Result<&'a Value> {
+    let mut value = value;
+    for p in path
+        .as_array()
+        .ok_or_else(|| refuse("declaration-invalid"))?
+    {
+        value = if let Some(i) = p.as_u64() {
+            value.get(i as usize)
+        } else {
+            value.get(string(p)?)
+        }
+        .ok_or_else(|| refuse("precondition-result-missing"))?;
+    }
+    Ok(value)
+}
+
+// Refuse unknown validating keywords rather than silently weakening a declaration.
+fn check_schema(s: &Value, depth: usize) -> Result<()> {
+    if depth > 64 {
+        return Err(refuse("schema-depth-over-bound"));
+    }
+    let object = s.as_object().ok_or_else(|| refuse("schema-invalid"))?;
+    for (k, v) in object {
+        match k.as_str() {
+            "type" | "$ref" | "enum" | "const" | "required" | "minimum" | "maximum"
+            | "minLength" | "maxLength" | "minItems" | "maxItems" | "title" | "description"
+            | "default" | "examples" | "contentMediaType" => {}
+            "format" => {
+                if v != "relative-path" {
+                    return Err(refuse("schema-format-unsupported"));
+                }
+            }
+            "contentEncoding" => {
+                if v != "base64" {
+                    return Err(refuse("schema-encoding-unsupported"));
+                }
+            }
+            "pattern" => {
+                regex_lite::Regex::new(string(v)?)
+                    .map_err(|_| refuse("schema-pattern-unsupported"))?;
+            }
+            "additionalProperties" => {
+                if !v.is_boolean() {
+                    return Err(refuse("schema-keyword-unsupported"));
+                }
+            }
+            "items" => check_schema(v, depth + 1)?,
+            "properties" | "$defs" => {
+                for sub in v
+                    .as_object()
+                    .ok_or_else(|| refuse("schema-invalid"))?
+                    .values()
+                {
+                    check_schema(sub, depth + 1)?;
+                }
+            }
+            _ => return Err(refuse("schema-keyword-unsupported")),
+        }
+    }
+    Ok(())
 }
