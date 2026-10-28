@@ -227,7 +227,7 @@ class Journey:
         value=read(path)
         if value.get('protocol')!='mini-j14-checkpoint-v1' or value.get('nextPhase') not in RESUMABLE:
             raise ValueError('source adoption is limited to pre-worker checkpoints')
-        if value['state'].get('controller') or (expected/'worker').exists():
+        if value['state'].get('controller') or (expected/'worker').exists() or any(p.is_dir() for p in expected.glob('worker-*')):
             raise ValueError('source adoption cannot replace staged controller custody')
         if not isinstance(reason,str) or not 1<=len(reason)<=400:raise ValueError('source adoption requires a bounded explanation')
         j=cls.__new__(cls);j.root=expected;j.logs=expected/'commands';j.lock_root()
@@ -472,7 +472,10 @@ class Journey:
             raise ValueError('worker release may update only the selected owned bin overlay')
         path=Path(selected)
         if not path.is_absolute():raise ValueError('worker release path must be absolute')
-        previous=sha(self.runtime);deadline=time.monotonic()+1800
+        successor=self.root/'worker-runtime-successor.json'
+        prior=read(successor) if successor.exists() else None
+        previous=prior['previousRuntimeSha256'] if prior else sha(self.runtime)
+        deadline=time.monotonic()+1800
         wait_record={'releasePath':str(path),'previousRuntimeSha256':previous,'maximumWaitSeconds':1800}
         retained=self.root/'worker-wait.json'
         if retained.exists():
@@ -490,17 +493,20 @@ class Journey:
         source=Path(release['runtime'])
         if not source.is_absolute() or source.is_symlink() or not source.is_file() or not os.access(source,os.X_OK) or sha(source)!=release['sha256']:
             raise ValueError('released runtime differs from selected pin')
+        expected={'protocol':'mini-j14-runtime-successor-v1','previousRuntimeSha256':previous,
+                  'initialCandidateManifest':self.c['manifest'],'release':release}
+        if prior is not None and prior!=expected:raise ValueError('runtime successor differs from retained release')
+        if prior is not None and sha(self.runtime)==release['sha256']:return
         if sha(self.runtime)!=previous:raise ValueError('initial runtime changed while preparation was running')
         temporary=self.bins/('grain-runtime-release-'+secrets.token_hex(6))
         shutil.copyfile(source,temporary);temporary.chmod(0o755)
         if sha(temporary)!=release['sha256']:raise ValueError('runtime changed during release copy')
-        write(self.root/'worker-runtime-successor.json',{'protocol':'mini-j14-runtime-successor-v1',
-            'previousRuntimeSha256':previous,'initialCandidateManifest':self.c['manifest'],'release':release})
+        if prior is None:write(successor,expected)
         os.replace(temporary,self.runtime)
 
     def worker(self):
         home=Path(self.layout['controllerHome']);base=home.parent;grain=home/'grain'
-        staged=self.root/'worker';staged.mkdir();launcher=staged/'launcher';launcher.mkdir()
+        staged=self.root/f'worker-{self.counter+1:04d}';staged.mkdir();launcher=staged/'launcher';launcher.mkdir()
         physical=self.run('bwrap',['sh',REPO/'deploy/grain-host/resolve-bwrap']).read_text().strip()
         self.run('launcher',['python3',REPO/'deploy/grain-host/materialize-bwrap.py','--physical-bwrap',physical,'--physical-sha256',sha(physical),'--output',launcher/'bwrap'])
         shutil.copyfile(self.bins/'launch-gate',launcher/'launch-gate');os.chmod(launcher/'launch-gate',0o700)
@@ -523,7 +529,7 @@ class Journey:
         while f'http://127.0.0.1:{port}/v1' not in (self.logs/'provider.stdout').read_text():
             if self.provider_process.poll() is not None or time.monotonic()>=deadline:raise RuntimeError('selected provider did not bind its loopback port')
             time.sleep(.1)
-        self.keyroot=Path(self.broker['grainsRoot'])/'j14-provider';self.keyroot.mkdir(mode=0o711)
+        self.keyroot=self.sockets/'provider';self.keyroot.mkdir(mode=0o711);self.keyroot.chmod(0o711)
         keysocket=self.keyroot/'keys.sock';keyclient=runtime/'keys-client.json'
         write(keyclient,{'type':'mini-keys-client-v1','socket':str(keysocket),'uid':os.getuid()})
         (self.keyroot/'credentials').mkdir(mode=0o700)

@@ -97,4 +97,19 @@ class WorkspaceTransportTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'identical native Store'):
                 j.migrate_workspace_transport()
 
+class RuntimeReleaseTests(unittest.TestCase):
+    def test_retained_release_recovers_pre_copy_and_completed_copy_only(self):
+        with tempfile.TemporaryDirectory(prefix='j14-release-',dir='/tmp') as temp:
+            root=Path(temp);bins=root/'bin';bins.mkdir();current=bins/'grain-runtime';current.write_bytes(b'old')
+            source=root/'qualified-runtime';source.write_bytes(b'new');source.chmod(0o700)
+            release=root/'release.json';driver.write(release,{'runtime':str(source),'sha256':driver.sha(source),'sourceCommit':'a'*40});release.chmod(0o600)
+            j=driver.Journey.__new__(driver.Journey);j.root=root;j.bins=bins;j.runtime=str(current);j.c={'manifest':str(root/'candidate.json')}
+            with patch.dict(driver.os.environ,{'J14_ORACLE_WORKER_RELEASE':str(release)}):
+                j.await_worker_release();record=(root/'worker-runtime-successor.json').read_bytes()
+                j.await_worker_release();self.assertEqual(current.read_bytes(),b'new')
+                current.write_bytes(b'old');j.await_worker_release();self.assertEqual(current.read_bytes(),b'new')
+                self.assertEqual((root/'worker-runtime-successor.json').read_bytes(),record)
+                current.write_bytes(b'foreign')
+                with self.assertRaisesRegex(ValueError,'initial runtime changed'):j.await_worker_release()
+
 if __name__=='__main__':unittest.main()
