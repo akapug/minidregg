@@ -3,9 +3,9 @@
 The pay rail's state and rules are the Lean pay cell (`Kernel/PayCell.lean`: tariff, deposit address book,
 assignments, enrolments), its observation receiver (`Kernel/PayObservation.lean`) and its self-enrollment
 receiver (`Kernel/PayEnrolReceiver.lean`). Comments in that code and in `native/pay-watcher` cite
-`PAY §N` and lane names such as P3b: sections and lanes of the payment design document of
-2026-09-30, which lives in a planning repository outside this tree. The Lean modules are the
-authority. This directory has what runs it on the box:
+`docs/PAY.md §N` and lane names such as P3b; `docs/PAY.md` describes the rail as shipped and lists
+the lanes in its §6 and §11.9. The Lean modules are the authority. This directory has what runs it
+on the box:
 
 - `mini-pay-watcher`: one tick. It derives the watcher config from the signed pay view, runs
   `pay-watcher`, retains and archives the complete tick, and submits one report with `mini pay observe`;

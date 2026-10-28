@@ -14,12 +14,12 @@ This module holds the values and the pure decision; the signed receiver is
 * `Observation` is the watcher's record (lane P1, `observations.json`): book
   index, the 32-byte deposit address, the 64-byte transaction signature, slot,
   block time, the atomic amount added to the address, mint and token program,
-  and (v2, PAY §11) what the transaction carried as a memo
+  and (v2, docs/PAY.md §11) what the transaction carried as a memo
   (`PayEnrolMemo.MemoField`: absent, the raw bytes of the one memo, or the
   watcher's `memoUnbound`/`memoInvalid`).  An ordinary deposit index ignores
   the memo; the enrollment index (`Tariff.enrolIndex`) is decided by
   `PayEnrolDecision`.
-* `nullifier domain o` is PAY §10 erratum 1: its canonical bytes are
+* `nullifier domain o` is docs/PAY.md §10 erratum 1: its canonical bytes are
   `"soltx:" ‖ signature(64) ‖ address(32)`, so one transaction paying two
   deposit addresses is two credits, and a second credit for the same
   (signature, address) is refused by the durable preflight.
@@ -177,7 +177,7 @@ def soltxPrefix : List UInt8 := [115, 111, 108, 116, 120, 58]
 
 theorem soltxPrefix_utf8 : soltxPrefix = "soltx:".toUTF8.toList := by decide +kernel
 
-/-- `"soltx:" ‖ signature ‖ address`: the transfer's identity (PAY §10). -/
+/-- `"soltx:" ‖ signature ‖ address`: the transfer's identity (docs/PAY.md §10). -/
 def nullifierBytes (o : Observation) : List UInt8 := soltxPrefix ++ o.signature ++ o.address
 
 def nullifier (domain : Digest) (o : Observation) : StableNullifier :=
@@ -468,7 +468,7 @@ theorem decideObservations_admitted {store : PayStore} {clock : ClockCell.Clock}
     plan.batch.Admission book :=
   (decideObservations_ok accepted).2.2.2.2.2.2.2.2
 
-/-- **The enrollment index is not an ordinary deposit index** (PAY §11.4):
+/-- **The enrollment index is not an ordinary deposit index** (docs/PAY.md §11.4):
 an accepted observation report never contains a transfer to
 `tariff.enrolIndex`; those are decided by `PayEnrolDecision` only. -/
 theorem enrol_index_not_ordinary {store : PayStore} {clock : ClockCell.Clock} {book : Book}

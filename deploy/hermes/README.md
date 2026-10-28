@@ -9,7 +9,7 @@ is also the **route** the purse records and is charged by:
 | `credential` (route) | bearer | what gates it | what the purse pays |
 |---|---|---|---|
 | `user` | the friend's own key (`mini key set`, sealed per friend by the broker) | the friend's grant naming this Hermes runner: a per-call output-token ceiling, an optional model, calls per UTC day, and a last block height. The broker reads the body it forwards against the grant, not what the controller says | the user route's per-operation fee, nothing else: the provider bills the friend |
-| `pool` | the operator's key (`mini-keys pool --action set`, as root) | the row's `caps` (per-call output tokens, calls per UTC day per runner, and the broker's own spend ceiling on the key) and the purse: Mini must admit the provider reserve (PAY §2.7) | the pool fee plus the metered tariff |
+| `pool` | the operator's key (`mini-keys pool --action set`, as root) | the row's `caps` (per-call output tokens, calls per UTC day per runner, and the broker's own spend ceiling on the key) and the purse: Mini must admit the provider reserve (docs/PAY.md §2.7) | the pool fee plus the metered tariff |
 | `homelab` | no `Authorization` header at all | the purse (a homelab endpoint on the operator's own network) | the homelab fee plus its metered rates |
 
 A call with no payer (a `user` row and no key or grant) is refused before

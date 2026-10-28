@@ -180,7 +180,7 @@ if [ -n "$OBSERVER" ]; then
   EXTRA_CLOCK_TICKERS=$ROOT/observer-ticker.json
   export EXTRA_GENESIS_ENROLLMENTS EXTRA_CLOCK_TICKERS
 fi
-# The PAY observer (PAY §3.5): an enrolled subject whose genesis capability on the pay
+# The PAY observer (docs/PAY.md §3.5): an enrolled subject whose genesis capability on the pay
 # cell (verb observePayment, the pay law `eq request/subject 30`) is the only authority that
 # can report a payment. On a deployment its key is /etc/mini/pay/observer.key (0600, mini).
 mkdir -m 700 "$ROOT/pay"

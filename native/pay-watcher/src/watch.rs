@@ -1,7 +1,7 @@
 //! One run: tip, then per book index per endpoint a view of the index's recent finalized
-//! transfers, then N-endpoint agreement (PAY §3.3) over those views.
+//! transfers, then N-endpoint agreement (docs/PAY.md §3.3) over those views.
 //!
-//! Every index is stateless except the ENROLLMENT index (PAY §11.9), which pages back to a
+//! Every index is stateless except the ENROLLMENT index (docs/PAY.md §11.9), which pages back to a
 //! persistent [`Cursor`] instead of a `maxPages` window. A per-payer address sees a handful of
 //! transfers; the enrollment address is public, a shared queue anyone can fill with memo-bearing
 //! dust, and a newest-N window there is §2.2's dust hole: enough dust pushes a real enrollment
@@ -105,7 +105,7 @@ fn pretty(value: &Value) -> Vec<u8> {
 }
 
 /// One retained receipt: a transfer the kernel has decided, named by the same pair its
-/// nullifier binds (`"soltx:" ‖ signature ‖ address`, PAY §10). One transaction can pay two
+/// nullifier binds (`"soltx:" ‖ signature ‖ address`, docs/PAY.md §10). One transaction can pay two
 /// book addresses, and a receipt for one of them must not stop the other from being read.
 pub type Receipt = (Sig, Key);
 
@@ -410,7 +410,7 @@ fn view_index(
                             Refusal::malformed(format!("credited amount {delta} exceeds u64"))
                         })?;
                         match enrol {
-                            // Dust is recorded here and never submitted (PAY §11.7).
+                            // Dust is recorded here and never submitted (docs/PAY.md §11.7).
                             Some(e) if amount < e.journal_floor => Outcome::Skip(
                                 Reason::BelowJournalFloor,
                                 format!("amount {amount} < journalFloor {}", e.journal_floor),

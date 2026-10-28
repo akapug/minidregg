@@ -1,5 +1,5 @@
 /-
-# Kernel.PayEnrolReceiver — one enrollment-index payment is one turn (PAY §11.4, P3b-2)
+# Kernel.PayEnrolReceiver — one enrollment-index payment is one turn (docs/PAY.md §11.4, P3b-2)
 
 The observer submits one finalized transfer to the enrollment index
 (`Tariff.enrolIndex`) as a signed `Command`.  The family (`payEnrolFamily`, a
@@ -1463,7 +1463,7 @@ def event (domain : Digest) (ingress : DecodedIngress) : StableEvent where
     ingress.bytes).digest
   canonicalBytes := ingress.bytes
 
-/-- **The pay self-enrollment family** (PAY §11.4). -/
+/-- **The pay self-enrollment family** (docs/PAY.md §11.4). -/
 def payEnrolFamily {F : Type} [Field F] [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) : Minidregg.Kernel.Receiving.Family where
   id := .payEnrol

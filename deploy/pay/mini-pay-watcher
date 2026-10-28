@@ -1,5 +1,5 @@
 #!/bin/sh
-# One tick of the PAY watcher (PAY §3.4): a oneshot, run by mini-pay-watcher.timer.
+# One tick of the PAY watcher (docs/PAY.md §3.4): a oneshot, run by mini-pay-watcher.timer.
 #
 #   1. `mini pay watch-config`  the watcher config from the signed pay view (op 107): the
 #                               tariff's mint and token program, the ASSIGNED book rows, and
@@ -13,7 +13,7 @@
 #                               observer's workspace; a decided transfer gets a receipt
 #                               (WS/pay/receipts/SIGNATURE.ADDRESS -> the attempt), which is
 #                               what step 2 reads next tick.
-#   5. self-enrollment          a record at the tariff's enrollment index (PAY §11) is never in
+#   5. self-enrollment          a record at the tariff's enrollment index (docs/PAY.md §11) is never in
 #                               a report: `observe` submits it ALONE through ops 117-120 on the
 #                               Host's operator socket under the observer's C_enrol, and the
 #                               kernel decides enrol | renew | journal. One decision spends one
@@ -35,7 +35,7 @@
 #   PAY_RPC_ENDPOINTS        live endpoints, whitespace- or comma-separated (rpc.env; never argv)
 #   PAY_RPC_FIXTURES         instead of live endpoints: fixture endpoint directories (rehearsal)
 #   PAY_MIN_ENDPOINTS        optional; the watcher's default is 2
-#   PAY_WATCH_ENROL          optional, `yes`: watch the enrollment row (PAY §11). Its index and
+#   PAY_WATCH_ENROL          optional, `yes`: watch the enrollment row (docs/PAY.md §11). Its index and
 #                            journal floor are the SIGNED TARIFF's (`mini pay watch-config --enrol
 #                            tariff`); the retired PAY_ENROL_INDEX / PAY_JOURNAL_FLOOR are refused
 #   PAY_ENROL_CAPABILITY PAY_OPERATOR_SOCKET   optional, together: the observer's genesis

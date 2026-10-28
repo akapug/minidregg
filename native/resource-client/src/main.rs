@@ -981,7 +981,7 @@ impl Args {
             return Err(USAGE.to_owned());
         }
         let mut raw = raw.peekable();
-        // `mini pay ACTION ...` (PAY §5 spells the verbs this way) is `mini pay --action ACTION ...`.
+        // `mini pay ACTION ...` (docs/PAY.md §5 spells the verbs this way) is `mini pay --action ACTION ...`.
         if command == OsStr::new("pay") || command == OsStr::new("store") || command == OsStr::new("apps") {
             if let Some(action) = raw.next_if(|next| !next.to_string_lossy().starts_with("--")) {
                 // `mini apps share a4501 bob`: the grammar leaf's positionals are the flags
@@ -999,7 +999,7 @@ impl Args {
         }
         while let Some(flag) = raw.next() {
             let rendered = flag.to_string_lossy();
-            // `mini join --solana|--wait|--renew` (PAY §11.6) is `mini join --mode MODE`.
+            // `mini join --solana|--wait|--renew` (docs/PAY.md §11.6) is `mini join --mode MODE`.
             if command == OsStr::new("join")
                 && matches!(rendered.as_ref(), "--solana" | "--wait" | "--renew")
             {
@@ -2680,7 +2680,7 @@ fn continuity(
     }
 }
 
-/// The Host's public enrollment view (op 112, PAY §11.5), decoded by the same Host (op 8
+/// The Host's public enrollment view (op 112, docs/PAY.md §11.5), decoded by the same Host (op 8
 /// `inspect pay-enrolment-view`) and printed as its JSON. This is the roster sync's input
 /// (`render-authorized-keys.sh --view required`): it needs only the socket, whose own config
 /// pin (`SOCKET.config`, written by `mini serve`) is the default envelope config, and the Host

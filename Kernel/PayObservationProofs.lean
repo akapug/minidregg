@@ -13,7 +13,7 @@
   `DurableDataIntent.consumed_nullifier_refused` — once a (signature, address)
   is spent, any report carrying it fails the durable preflight.
 * `distinct_address_same_signature_admitted`: one transaction paying two
-  deposit addresses is two credits (PAY §10 erratum 1).
+  deposit addresses is two credits (docs/PAY.md §10 erratum 1).
 
 Every statement has kernel-decided poles on concrete pay cells and Books.
 -/
