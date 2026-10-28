@@ -1,5 +1,5 @@
 /-
-# Kernel.DomainEpoch — the epoch record a channel domain commits to the Store (CHANNELS.md §2.4, §9 row 8)
+# Kernel.DomainEpoch — the epoch record a channel domain commits to the Store (docs/CHANNELS.md §2.4, §9 row 8)
 
 A channel domain's relay (its sequencer) appends ONE `EpochRecord` per epoch to the domain's
 channel cell, a K-STREAM `stream` cell born `--in R` under the sequencer's author law. A cell of
@@ -783,7 +783,7 @@ theorem absent_position_holds_fill (prf : FillPrf) (cid : UInt8) (e : UInt64)
     · exact .inr (.inr col)
   · exact .inr (.inl col)
 
-/-- **`omission_evident`** (CHANNELS.md §2.4, revision 2). Whoever holds an opening `o` of the honest
+/-- **`omission_evident`** (docs/CHANNELS.md §2.4, revision 2). Whoever holds an opening `o` of the honest
 seal's `absentCommit` — the operator and the witnesses; no member holds one — learns, at every
 position `o` marks absent, that no cell other than the fill is committed there: in particular not the
 holder's cell (premise `notFill`: the holder's cell is not byte-equal to the fill). Up to a collision of

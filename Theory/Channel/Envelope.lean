@@ -1,7 +1,7 @@
 /-
-# Theory.Channel.Envelope — a member's cell as its sealing fields (X25519 mode; CHANNELS.md §2.2, CH-CLIENT-1)
+# Theory.Channel.Envelope — a member's cell as its sealing fields (X25519 mode; docs/CHANNELS.md §2.2, CH-CLIENT-1)
 
-The member client (`mini channel`) seals one cell per tick. The cryptography is outside Lean (X25519,
+A member client seals one cell per tick (the native client was deleted on 2026-10-26; docs/CHANNELS.md §2.2). The cryptography is outside Lean (X25519,
 cSHAKE256 key derivation, ChaCha20-Poly1305: §2.2's assumptions A1, A2); where each field sits in the
 cell is here, so the client never re-implements the layout:
 

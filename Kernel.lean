@@ -148,7 +148,7 @@ import Kernel.StreamResource  -- per-author streams: append leg theorems, author
 import Kernel.PrivateRoomKeys  -- private room wrapping law
 import Kernel.PrivateRoomWrapGrant  -- J-PRIV-1: a member grant reads only its own wraps
 import Kernel.StreamWrite  -- stream head and immutable entry writes
-import Kernel.DomainEpoch  -- channel epoch record, absent opening, ChannelLaw, omission theorems (CHANNELS §2.4, CH-EPOCH)
+import Kernel.DomainEpoch  -- channel epoch record, absent opening, ChannelLaw, omission theorems (docs/CHANNELS.md §2.4, CH-EPOCH)
 import Kernel.DomainEpochStream  -- the channel law at the kernel append: refusals by name (CH-EPOCH)
 import Kernel.DomainEpochExport  -- the relay byte entry points: tick root, seal, opening, topic (CH-RELAY-1)
 import Kernel.DomainEpochLaw  -- the kernel side of the epoch record: ChannelLaw, admitAppend, ChannelStoreLaw (split from DomainEpoch, CH-CLIENT-1)
