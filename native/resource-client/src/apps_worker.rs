@@ -1,6 +1,6 @@
 //! `mini apps-worker`: the operator-side custodian of the app market
-//! (docs/APP-MARKET-2026-10-27.md §4). It runs as the grain world's operator in
-//! its user manager, beside the SPK broker, and acts on admitted install
+//! (docs/APP-MARKET-2026-10-27.md §4). It runs as the grain world's operator (a
+//! system unit, User=mini-core), reaches the SPK broker in mini-core's user manager, and acts on admitted install
 //! requests through `spk-host grain` and the ordinary `mini` client verbs, the
 //! way `scripts/spk-platform/grain-journey.sh` does by hand. It holds no member
 //! key; the member is named by the socket peer (`SO_PEERCRED`), never by a
