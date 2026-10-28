@@ -142,9 +142,11 @@ def controlGroupWithin (group : List UInt8) : Bool :=
   !group.isEmpty && decide (group.length ≤ controlGroupBound)
 
 example : controlGroupBound = 323 := by decide
--- The widened component is exactly a u64: the largest value has 20 digits, one past it has 21.
+-- The widened component is a u64: its largest value has 20 digits (2^64 also does, so the digit
+-- bound is necessary, not sufficient; the value bound is the Rust decimal check); 10^20 has 21.
 example : (toString (2 ^ 64 - 1)).length = 20 := by decide
-example : (toString (2 ^ 64)).length = 21 := by decide
+example : (toString (2 ^ 64)).length = 20 := by decide
+example : (toString (10 ^ 20)).length = 21 := by decide
 example : (toString 13827490942341725565).length = 20 := by decide
 -- Far inside the 4096-byte control-group cap.
 example : controlGroupBound < 4096 := by decide
