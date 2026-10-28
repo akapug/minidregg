@@ -618,7 +618,11 @@ tools-run.sh with `C=` that candidate, J14_TOOLS=1 J14_AWAIT=1, root `hroot-q2`;
   request lag). Footprint: the uid owns about 35 MiB and 6,400 inodes after 6 prompts and 6 model
   calls (g 33.2 MiB / 6,326 inodes). It no longer grows per call; what is left is the latest
   prompt's custody plus a fixed part, and the room workspace still holds 11 MiB / 2,558 inodes.
-  **Infra's batch was sent to ae95a4eac63b0715e**: users, the route unit text, the four infra
+  **Infra landed items 2-4 in demo-vm 4138262** (broker provider peers; `demo-resident-walls`
+  for the user@ drop-in, slice wall and linger, run by step 9 after `install-hermes preflight`;
+  /var/lib/mini/glm allowed). **Item 1 is open** (controller-entry.py per-registration service uid,
+  with the next infra lane): until it lands, registering a controller under mini-h-* is refused, so
+  install-hermes's `controller` step cannot pass on the box. **Infra's batch was sent to ae95a4eac63b0715e**: users, the route unit text, the four infra
   items, this measurement, and an interim quota of 48/56 MiB and 10K/12K inodes pending ember. The
   32 MiB / 2,000-inode target is not met yet. Owed: compact the room workspace residue (the latest
   prompt's reads and the room-operations-referenced writes), then send infra the smaller figure.
