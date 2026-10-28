@@ -1150,7 +1150,7 @@ chunk touches the bignum (a 256-bit digest: four, not thirty-two). -/
 def fixedValueAt (bytes : ByteArray) (start width : Nat) (fits : start + width ≤ bytes.size) : Nat :=
   if seven : 7 ≤ width then
     smallValueAt bytes start 7 (by omega) +
-      72057594037927936 * fixedValueAt bytes (start + 7) (width - 7) (by omega)
+      fixedValueAt bytes (start + 7) (width - 7) (by omega) <<< 56
   else smallValueAt bytes start width fits
 termination_by width
 
@@ -1168,8 +1168,8 @@ theorem fixedValueAt_eq (bytes : ByteArray) (start width : Nat) (fits : start + 
       rw [List.drop_drop]
     rw [List.take_add, dropped]
     simp only [fixedValue, List.map_append, denoteNat_append, List.length_map, List.length_take,
-      Nat.min_eq_left long, Nat.add_sub_cancel_left]
-    norm_num
+      Nat.min_eq_left long, Nat.add_sub_cancel_left, Nat.shiftLeft_eq]
+    (norm_num; ring)
   · exact smallValueAt_eq bytes start width fits
 termination_by width
 
