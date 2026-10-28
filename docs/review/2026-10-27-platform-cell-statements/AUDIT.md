@@ -1314,3 +1314,12 @@ member's actual consent: `prepared.post a = shown a` for every address the *memb
 `prepared.post a = prepared.pre.logical a` elsewhere (others' appends kept). Either thin consent gains that
 commuting variant, or `checkOpened` refuses thin consent for `commutes = true` commands until it does. That
 decision belongs to the thin-birth owner and the root; this branch should not merge before it.
+
+**Correction to the thirtieth pass: the cross-lane break is withdrawn.** Thin consent never accepts a
+`.content` target. `memberPatch` refuses it (`unsupportedPayload`, content reads policy coordinates and the
+height), and `honest_content_stream_write_named`, accepted earlier, proves the honest content view reaches
+that refusal. `OpenedDisplayIsCommit`'s proof closes the content case via `Supported target`. So the
+keystone's premise has no content inhabitant, and the commuting relaxation, confined to `computeTarget`'s
+`.content` arm, cannot reach it. Commuting appends are consented only through the full-peer provider. The
+contention lane may merge as far as thin consent is concerned. Owed only if content ever gains a thin arm:
+the commuting variant, in that same commit. The other three thirtieth-pass points stand.
