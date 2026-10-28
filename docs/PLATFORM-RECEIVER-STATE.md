@@ -36,7 +36,7 @@ forward the reds the integrator sends with file:line. Merge origin/main before e
   the Host loads came from genesis and install patches (the writers are proved; the induction
   over the replayed log is not stated yet).
 
-## L1e (lane/lean-audit-c, lane/lean-audit-c-m2): state
+## L1e (lane/lean-audit-c): state, handoff at about 600k
 
 L1e (successor to L1d) prices every birth family and the completion custodian key from the
 platform cell (lane/lean-audit-c), and carries M2, `Intent.credit` and the refill family
@@ -100,18 +100,38 @@ The auditor is af7a93e7b8ba729d4; passes 16–23 are on lane/audit-platform.
 - Pass 24: item 7 witnesses. Signed poles go over a recorded transcript; a native_decide
   module is the fallback, thresholded on the module's total gate time.
 
-### Landed and after
+### Landed and after (read this first)
 
-- 18ade1e4a is on main (0af55d21c): the conversion, lean-audit-c and M2. The integrator's next
+- 18ade1e4a is on main (0af55d21c): the conversion, lean-audit-c and M2. The integrator's A12c
   build runs the one codec regen and the epoch move, and re-records NativeAcceptedFixture and
   NativeDocWriteFixture.
-- **53d66406f, sent green:** the birth-authoring twin is collapsed. Host.Json's copy is deleted,
-  and every author (op 91, the loaded authors, thin consent) calls SourceAgreementJson's.
-  `birthCurrent_eq_birthAt` is rfl.
-- Open, put to the coordinator: the two loaded authors read the platform record through
-  different functions. Host.CurrentResourceBirthAuthoring uses `NativeHost.platformRecordIn`;
-  Host.SourceAgreementBirth uses `PlatformCellDomain.recordOn`. They read the same bytes, but it is
-  a second reader beside the census's one.
+- **53d66406f, sent green, landing with the integrator:** the birth-authoring twin is collapsed.
+  Host.Json's copy is deleted; every author calls SourceAgreementJson. `birthCurrent_eq_birthAt`
+  is rfl.
+- **75fee3810, sent green:** the reader collapse (coordinator ruling).
+  - `NativeHost.platformRecordIn` folds into `PlatformCellDomain.recordAt`, the one reader. It
+    reads bytes, so the served shape uses it; `recordOn` is `recordAt` of the snapshot's bytes.
+  - `recordOn_load` is the agreement lemma. No keystone statement moved.
+  - Built warm on hbox; only the known reds remain.
+  - It lands after A12c, or before if A12c is still waiting (the integrator decides).
+- **Item 7, the signed poles, still owed (audit pass 24).** They go over a recorded transcript:
+  `CheckedSignature` with Oracle `.recorded`, CredentialSignatureAdmission.lean:287-296.
+  - Needed: a birth admission parameterized by the oracle (today `admitDecodedNative` is IO),
+    and a recorded run. The pattern is Fixtures/NativeAcceptedFixture.lean with
+    scripts/native-accepted-fixture/generate.sh: the fixture signer signs `plan.slots`, the
+    native verifier's verdicts are recorded, and check-native-transcripts.sh re-checks them.
+  - Poles:
+    - `BranchAccepted … .factory` inhabited, and admission `.error .policyRejected` on the
+      refusing law;
+    - the `ReceiverReadsCurrent` satisfiable `AcceptedBirth`;
+    - the completion `Candidate` passing `platformReadOnly`;
+    - the Host-level refill at an exhausted meter.
+  - They live in Fixtures beside BirthPlanPoles.lean, whose genesis Config they reuse.
+- **Merge order:** lane/thin-birth carries an unfinished thin-consent law change in
+  Kernel/NativeThinConsent.lean (AUDIT §26; its continuation is docs/THIN-BIRTH-2026-10-28.md).
+  Its successor meets this lane's `BirthCoordinates.ownerBudget/lifetime/fee` and
+  `BirthTerms` on main. The consent display renders the terms (ClientConsentCore "terms",
+  jpriv2 row 20).
 
 ### Box trees
 
