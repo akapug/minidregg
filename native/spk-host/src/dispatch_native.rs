@@ -565,6 +565,10 @@ impl PrivateOperator {
         {
             return Err(invalid("Mini Host helper input identity or size refused"));
         }
+        if let Some(bytes) = self.tool_in_session(command, kind, input, output, deadline)? {
+            eprintln!("spk-host: tool-timing {command} {kind} pin_ms={pin_ms} session=1");
+            return Ok(bytes);
+        }
         let mut process = Command::new(executable.path());
         process.arg(&self.config).arg(command);
         if command == "profile" {
@@ -592,6 +596,102 @@ impl PrivateOperator {
                 HOST_MAX_FRAME - 1
             },
         )
+    }
+
+    /// The detached `author`/`inspect`/`signatures` verb as one call on the operator socket (the
+    /// Host's TOOL_AUTHOR, TOOL_INSPECT and TOOL_SIGNATURES operations), instead of a fresh Host
+    /// process. The input file was written (and its identity checked) by the caller and stays as
+    /// the audit copy; the output file and a refusal's `<output>.stderr` are written here as the
+    /// detached verb writes them, and the bytes returned are the output file's. `None` means the
+    /// session cannot answer and the caller runs the detached verb: no listener on the socket, a
+    /// request or an output that does not fit one frame, or a command without a session operation.
+    fn tool_in_session(
+        &self,
+        command: &str,
+        kind: &str,
+        input: &Path,
+        output: &Path,
+        deadline: Instant,
+    ) -> io::Result<Option<Vec<u8>>> {
+        use crate::host_operations::{TOOL_AUTHOR, TOOL_INSPECT, TOOL_SIGNATURES};
+        let (operation, with_kind) = match command {
+            "author" => (TOOL_AUTHOR, true),
+            "inspect" => (TOOL_INSPECT, true),
+            "signatures" => (TOOL_SIGNATURES, false),
+            _ => return Ok(None),
+        };
+        if with_kind && (kind.is_empty() || kind.len() > u16::MAX as usize) {
+            return Ok(None);
+        }
+        let mut payload = Vec::new();
+        if with_kind {
+            payload.extend_from_slice(&(kind.len() as u16).to_le_bytes());
+            payload.extend_from_slice(kind.as_bytes());
+        }
+        File::open(input).ctx("open", &input)?.take(HOST_MAX_FRAME as u64).read_to_end(&mut payload)?;
+        if payload.len() >= HOST_MAX_FRAME - 1 {
+            return Ok(None);
+        }
+        let reply = match self.invoke_until(operation, &payload, deadline) {
+            Ok(reply) => reply,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::ConnectionRefused
+                        | io::ErrorKind::NotFound
+                        | io::ErrorKind::ConnectionReset
+                        | io::ErrorKind::BrokenPipe
+                        | io::ErrorKind::UnexpectedEof
+                ) =>
+            {
+                return Ok(None)
+            }
+            Err(error) => return Err(error),
+        };
+        // `invoke_until` has checked the length prefix; byte 4 is the answering operation or a
+        // response marker (a refusal of the call itself), then the tool status and its bytes.
+        if reply[4] != operation || reply.len() < 6 {
+            return Err(invalid("Mini Host tool call was refused"));
+        }
+        let data = &reply[6..];
+        match reply[5] {
+            0 => {
+                let bound = if command == "inspect" { MAX_INSPECTION } else { HOST_MAX_FRAME - 1 };
+                if data.is_empty() || data.len() > bound {
+                    return Err(invalid("private native artifact size refused"));
+                }
+                let mut file = OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .mode(0o600)
+                    .custom_flags(libc::O_NOFOLLOW)
+                    .open(output).ctx("open", &output)?;
+                file.write_all(data)?;
+                Ok(Some(data.to_vec()))
+            }
+            1 => {
+                let reason = String::from_utf8_lossy(data);
+                if let Some(name) = output.file_name() {
+                    let mut stderr_name = name.to_owned();
+                    stderr_name.push(".stderr");
+                    let _ = OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .mode(0o600)
+                        .custom_flags(libc::O_NOFOLLOW)
+                        .open(output.with_file_name(stderr_name))
+                        .and_then(|mut file| file.write_all(&data[..data.len().min(MAX_HELPER_STDERR as usize)]));
+                }
+                let first = reason.lines().next().unwrap_or("").trim();
+                eprintln!("spk-host: pinned Mini Host helper refused: {first}");
+                Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("pinned Mini Host helper refused: {first}"),
+                ))
+            }
+            _ => Ok(None),
+        }
     }
 
     /// `inspect-stop-claim PLAN COMMITTED OUTPUT`: the current-image STOP

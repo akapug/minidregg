@@ -582,6 +582,10 @@ fn allowed_operator_operation(request: &[u8]) -> bool {
         [151, payload @ ..] => continuity_request(payload),
         [153, payload @ ..] => carried_lookup_request(payload),
         [156, ingress @ ..] => !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME,
+        // The detached author/inspect/signatures verbs as in-session calls: bytes in, bytes out,
+        // no service-side path, no Store effect. Framing only; the verb itself refuses what it
+        // cannot decode.
+        [195..=197, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
         // STOP inspection only joins retained bytes to current verified history.
         [155, pair @ ..] => pair.len() < HOST_MAX_FRAME && exact_pair(pair).is_some(),
         // Read-only signed stream authority checks remain operator-private.
@@ -2045,6 +2049,21 @@ mod tests {
             assert!(super::allowed_operator_operation(&valid));
             assert!(!super::allowed_operation(&valid, false));
             assert!(!super::allowed_operator_operation(&[operation]));
+            let mut oversized = vec![0; super::HOST_MAX_FRAME + 1];
+            oversized[0] = operation;
+            assert!(!super::allowed_operator_operation(&oversized));
+        }
+    }
+
+    #[test]
+    fn in_session_tools_are_the_operators_alone_and_need_a_payload() {
+        use mini_sdk::host_operations::{TOOL_AUTHOR, TOOL_INSPECT, TOOL_SIGNATURES};
+        for operation in [TOOL_AUTHOR, TOOL_INSPECT, TOOL_SIGNATURES] {
+            let valid = [operation, 4, 0, b'k', b'i', b'n', b'd', b'x'];
+            assert!(super::allowed_operator_operation(&valid), "operator route refused {operation}");
+            assert!(!super::allowed_operation(&valid, false) && !super::allowed_operation(&valid, true),
+                "a member's socket admitted {operation}");
+            assert!(!super::allowed_operator_operation(&[operation]), "{operation} with no payload");
             let mut oversized = vec![0; super::HOST_MAX_FRAME + 1];
             oversized[0] = operation;
             assert!(!super::allowed_operator_operation(&oversized));

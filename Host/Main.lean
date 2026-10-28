@@ -7235,6 +7235,33 @@ def runCommandCodec (_arguments : List String) (_configPath _command : String) (
           pure 0
   | _ => throw (IO.userError usage)
 
+/-- The detached `author`, `inspect` and `signatures` verbs as in-session calls (operations 195-197).
+The bytes cross the socket, never paths: the input goes to a private temporary file, the very
+verb the command line runs (`runCommandAuthor`, `runCommandInspect`, `runCommandSignatures`) reads
+it and writes a second temporary file, and that file's bytes are the answer. The first byte of the
+answer says how it went: 0 the output follows, 1 the verb refused and its message follows, 2 the
+output does not fit one frame (the caller runs the detached verb, whose output file has no frame
+bound). A verb that throws is answered, never propagated, so the session goes on. -/
+def runToolSession (settings : Settings) (command : String) (kind : Option String)
+    (input : List UInt8) : IO (List UInt8) :=
+  IO.FS.withTempFile fun _ inPath => IO.FS.withTempFile fun _ outPath => do
+    writeBytes inPath.toString input
+    let rest := kind.toList ++ [inPath.toString, outPath.toString]
+    let outcome : Except String UInt32 ← try
+        let code ← match command with
+          | "author" => runCommandAuthor [] "" command rest settings
+          | "inspect" => runCommandInspect [] "" command rest settings
+          | _ => runCommandSignatures [] "" command rest settings
+        pure (Except.ok code)
+      catch error => pure (Except.error (toString error))
+    match outcome with
+    | .error message => return 1 :: (message.take 4096).toUTF8.toList
+    | .ok 0 =>
+        let output ← readBytes outPath.toString
+        if output.length + 2 > FnEvidenceCodec.maxHostFrameBytes then return [2]
+        else return 0 :: output
+    | .ok code => return 1 :: s!"{command} exited {code}".toUTF8.toList
+
 /-- `stdio` (dispatched by `run`). -/
 def runCommandStdio (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
   let config := settings.config
@@ -7339,6 +7366,12 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                                 return ((19 : UInt8), report.compress.toUTF8.toList)
                             | .error reason =>
                                 return ((255 : UInt8), failure .operationRejected "provider-metering" reason)
+                        | 195 | 196 =>
+                            let (kind, source) ← splitKind payload
+                            return (operation, ← runToolSession settings
+                              (if operation == 195 then "author" else "inspect") (some kind) source)
+                        | 197 =>
+                            return (operation, ← runToolSession settings "signatures" none payload)
                         | 28 =>
                             let outcome ← applicationShareIssueSubmitSession
                               pinnedConfig state payload
