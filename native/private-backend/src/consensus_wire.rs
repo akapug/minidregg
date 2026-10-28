@@ -3,7 +3,7 @@
 use crate::{
     acs,
     asks::{self, PhaseMessage},
-    codec::{bad, bytes},
+    codec::{bad, bytes, Packet},
     gather, vaba,
 };
 use std::io::Result;
@@ -71,23 +71,16 @@ impl<'a> Cursor<'a> {
         Ok(())
     }
 }
-fn put_phase(p: &PhaseMessage, o: &mut Vec<u8>) {
-    match p {
-        PhaseMessage::Init(b) => {
-            o.push(0);
-            bytes(b, o)
-        }
-        PhaseMessage::Echo(b) => {
-            o.push(1);
-            bytes(b, o)
-        }
-        PhaseMessage::Ready(b) => {
-            o.push(2);
-            bytes(b, o)
-        }
-    }
+pub(crate) fn put_phase(p: &PhaseMessage, o: &mut Vec<u8>) {
+    let (tag, v) = match p {
+        PhaseMessage::Init(v) => (0, v),
+        PhaseMessage::Echo(v) => (1, v),
+        PhaseMessage::Ready(v) => (2, v),
+    };
+    o.push(tag);
+    bytes(v, o);
 }
-fn phase(c: &mut Cursor) -> Result<PhaseMessage> {
+pub(crate) fn get_phase(c: &mut Cursor) -> Result<PhaseMessage> {
     let t = c.byte()?;
     let b = c.bytes()?;
     match t {
@@ -137,7 +130,7 @@ fn cover(c: &mut Cursor, n: usize) -> Result<gather::Message> {
             2 => gather::IgBody::Prepare(set(c, n)?),
             _ => return Err(bad("gather tag")),
         }),
-        1 => gather::Body::Ra(c.u16()?, phase(c)?),
+        1 => gather::Body::Ra(c.u16()?, get_phase(c)?),
         2 => gather::Body::Withdraw,
         _ => return Err(bad("cover tag")),
     };
@@ -184,10 +177,10 @@ pub fn decode_vaba(b: &[u8], n: usize) -> Result<vaba::Message> {
     let view = c.u64()?;
     let body = match c.byte()? {
         0 => vaba::Body::Asks(c.u16()?, asks::decode_message(&c.bytes()?)?),
-        1 => vaba::Body::Pre(c.u16()?, phase(&mut c)?),
-        2 => vaba::Body::Vote(c.u16()?, phase(&mut c)?),
+        1 => vaba::Body::Pre(c.u16()?, get_phase(&mut c)?),
+        2 => vaba::Body::Vote(c.u16()?, get_phase(&mut c)?),
         3 => vaba::Body::Cover(cover(&mut c, n)?),
-        4 => vaba::Body::Final(phase(&mut c)?),
+        4 => vaba::Body::Final(get_phase(&mut c)?),
         _ => return Err(bad("VABA body tag")),
     };
     c.finish()?;
@@ -225,7 +218,7 @@ pub fn decode_acs(b: &[u8], n: usize) -> Result<acs::Message> {
     }
     let context = c.fixed32()?;
     let body = match c.byte()? {
-        0 => acs::Body::Selector(c.u16()?, phase(&mut c)?),
+        0 => acs::Body::Selector(c.u16()?, get_phase(&mut c)?),
         1 => acs::Body::Vaba(decode_vaba(&c.bytes()?, n)?),
         _ => return Err(bad("ACS body tag")),
     };
@@ -236,38 +229,54 @@ pub fn decode_acs(b: &[u8], n: usize) -> Result<acs::Message> {
     }
     Ok(m)
 }
-pub fn encode_outbox(ps: &[acs::Send]) -> Vec<u8> {
+/// An outbox: Nat count, then per packet the u16 LE recipient and the
+/// length-prefixed message wire.
+pub(crate) fn put_outbox<M>(ps: &[Packet<M>], encode: impl Fn(&M) -> Vec<u8>) -> Vec<u8> {
     let mut o = vec![];
     crate::codec::Nat::new(ps.len() as u64).put(&mut o);
     for p in ps {
         o.extend(p.to.to_le_bytes());
-        bytes(&encode_acs(&p.message), &mut o)
+        bytes(&encode(&p.message), &mut o)
     }
     o
 }
-pub fn decode_outbox(b: &[u8], n: usize) -> Result<Vec<acs::Send>> {
-    // Output is trusted local machine data but remains bounded and canonical.
+/// Strict inverse of `put_outbox`: at most `bound` packets, recipients below
+/// `n`, and the re-encoding must equal the input. `name` labels refusals.
+pub(crate) fn get_outbox<M>(
+    b: &[u8],
+    n: usize,
+    bound: usize,
+    name: &str,
+    decode: impl Fn(&[u8]) -> Result<M>,
+    encode: impl Fn(&M) -> Vec<u8>,
+) -> Result<Vec<Packet<M>>> {
     let mut c = Cursor::new(b)?;
     let count = c.count()?;
-    if count > crate::codec::MAX / 48 {
-        return Err(bad("outbox packet bound"));
+    if count > bound {
+        return Err(bad(&format!("{name} outbox bound")));
     }
     let mut out = vec![];
     for _ in 0..count {
         let to = c.u16()?;
         if to as usize >= n {
-            return Err(bad("outbox recipient"));
+            return Err(bad(&format!("{name} outbox recipient")));
         }
-        out.push(acs::Send {
+        out.push(Packet {
             to,
-            message: decode_acs(&c.bytes()?, n)?,
-        })
+            message: decode(&c.bytes()?)?,
+        });
     }
     c.finish()?;
-    if encode_outbox(&out) != b {
-        return Err(bad("outbox canonical"));
+    if put_outbox(&out, encode) != b {
+        return Err(bad(&format!("{name} outbox canonical")));
     }
     Ok(out)
+}
+pub fn encode_outbox(ps: &[acs::Send]) -> Vec<u8> {
+    put_outbox(ps, encode_acs)
+}
+pub fn decode_outbox(b: &[u8], n: usize) -> Result<Vec<acs::Send>> {
+    get_outbox(b, n, crate::codec::MAX / 48, "ACS", |m| decode_acs(m, n), encode_acs)
 }
 #[cfg(test)]
 mod tests {
@@ -347,11 +356,11 @@ mod pin_wire {
             put_phase(&p, &mut b);
             assert_eq!(b, vec![tag, 2, 255, 9, 8]);
             let mut c = crate::consensus_wire::Cursor::new(&b).unwrap();
-            assert_eq!(phase(&mut c).unwrap(), p);
+            assert_eq!(get_phase(&mut c).unwrap(), p);
             c.finish().unwrap();
         }
         let mut c = crate::consensus_wire::Cursor::new(&[3, 0, 255]).unwrap();
-        assert!(phase(&mut c).is_err());
+        assert!(get_phase(&mut c).is_err());
     }
 }
 

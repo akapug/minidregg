@@ -21,8 +21,8 @@ use crate::{
     acss_id::{self, AcssId},
     acss_id_store::{self, AcssMachine},
     asks::PhaseMessage,
-    codec::{bad, bytes, Generation, Nat},
-    consensus_wire::Cursor,
+    codec::{bad, bytes, Generation},
+    consensus_wire::{get_phase, put_phase, Cursor},
     custody::hash,
     entropy::Entropy,
     reconstruction::Field,
@@ -57,7 +57,7 @@ pub fn encode_message(m: &Message) -> Vec<u8> {
         }
         Body::InitialResult(p) => {
             b.push(1);
-            sh2t_id_store::put_phase(p, &mut b);
+            put_phase(p, &mut b);
         }
         Body::MaskedPoint(v) => {
             b.push(2);
@@ -65,7 +65,7 @@ pub fn encode_message(m: &Message) -> Vec<u8> {
         }
         Body::MaskedResult(p) => {
             b.push(3);
-            sh2t_id_store::put_phase(p, &mut b);
+            put_phase(p, &mut b);
         }
         Body::ChallengePoint(x) => {
             b.push(4);
@@ -73,11 +73,11 @@ pub fn encode_message(m: &Message) -> Vec<u8> {
         }
         Body::ChallengeResult(p) => {
             b.push(5);
-            sh2t_id_store::put_phase(p, &mut b);
+            put_phase(p, &mut b);
         }
         Body::ChallengeAgreement(p) => {
             b.push(6);
-            sh2t_id_store::put_phase(p, &mut b);
+            put_phase(p, &mut b);
         }
         Body::CheckPoint(v) => {
             b.push(7);
@@ -85,11 +85,11 @@ pub fn encode_message(m: &Message) -> Vec<u8> {
         }
         Body::CheckResult(p) => {
             b.push(8);
-            sh2t_id_store::put_phase(p, &mut b);
+            put_phase(p, &mut b);
         }
         Body::CheckAgreement(p) => {
             b.push(9);
-            sh2t_id_store::put_phase(p, &mut b);
+            put_phase(p, &mut b);
         }
         Body::FaultPoint(v) => {
             b.push(10);
@@ -102,7 +102,7 @@ pub fn encode_message(m: &Message) -> Vec<u8> {
         }
         Body::FaultResult(p) => {
             b.push(12);
-            sh2t_id_store::put_phase(p, &mut b);
+            put_phase(p, &mut b);
         }
     }
     b
@@ -113,24 +113,23 @@ pub fn decode_message(b: &[u8]) -> Result<Message> {
         return Err(bad("King wire domain"));
     }
     let context = c.fixed32()?;
-    let phase = |c: &mut Cursor| -> Result<PhaseMessage> { sh2t_id_store::phase(c) };
     let body = match c.byte()? {
         0 => Body::InitialPoint(sh2t_id_store::fields(&mut c)?),
-        1 => Body::InitialResult(phase(&mut c)?),
+        1 => Body::InitialResult(get_phase(&mut c)?),
         2 => Body::MaskedPoint(sh2t_id_store::fields(&mut c)?),
-        3 => Body::MaskedResult(phase(&mut c)?),
+        3 => Body::MaskedResult(get_phase(&mut c)?),
         4 => Body::ChallengePoint(Field(u128::from_le_bytes(c.take(16)?.try_into().unwrap()))),
-        5 => Body::ChallengeResult(phase(&mut c)?),
-        6 => Body::ChallengeAgreement(phase(&mut c)?),
+        5 => Body::ChallengeResult(get_phase(&mut c)?),
+        6 => Body::ChallengeAgreement(get_phase(&mut c)?),
         7 => Body::CheckPoint(sh2t_id_store::fields(&mut c)?),
-        8 => Body::CheckResult(phase(&mut c)?),
-        9 => Body::CheckAgreement(phase(&mut c)?),
+        8 => Body::CheckResult(get_phase(&mut c)?),
+        9 => Body::CheckAgreement(get_phase(&mut c)?),
         10 => Body::FaultPoint(sh2t_id_store::fields(&mut c)?),
         11 => Body::FaultSh2t {
             dealer: c.u16()?,
             message: sh2t_id_store::decode_message(&c.bytes()?)?,
         },
-        12 => Body::FaultResult(phase(&mut c)?),
+        12 => Body::FaultResult(get_phase(&mut c)?),
         _ => return Err(bad("King wire tag")),
     };
     c.finish()?;
@@ -141,36 +140,10 @@ pub fn decode_message(b: &[u8]) -> Result<Message> {
     Ok(m)
 }
 fn king_outbox(ps: &[triple_king::Send]) -> Vec<u8> {
-    let mut b = vec![];
-    Nat::new(ps.len() as u64).put(&mut b);
-    for p in ps {
-        b.extend(p.to.to_le_bytes());
-        bytes(&encode_message(&p.message), &mut b);
-    }
-    b
+    crate::consensus_wire::put_outbox(ps, encode_message)
 }
 fn parse_king_outbox(b: &[u8], n: usize) -> Result<Vec<triple_king::Send>> {
-    let mut c = Cursor::new(b)?;
-    let len = c.count()?;
-    if len > crate::codec::MAX / 40 {
-        return Err(bad("King outbox bound"));
-    }
-    let mut out = vec![];
-    for _ in 0..len {
-        let to = c.u16()?;
-        if to as usize >= n {
-            return Err(bad("King outbox recipient"));
-        }
-        out.push(triple_king::Send {
-            to,
-            message: decode_message(&c.bytes()?)?,
-        });
-    }
-    c.finish()?;
-    if king_outbox(&out) != b {
-        return Err(bad("King outbox canonical"));
-    }
-    Ok(out)
+    crate::consensus_wire::get_outbox(b, n, crate::codec::MAX / 40, "King", decode_message, encode_message)
 }
 
 /// One preparation source: the public identity of the dealer whose ACSS-Id

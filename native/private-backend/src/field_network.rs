@@ -8,7 +8,7 @@ use crate::{
     asks::PhaseMessage,
     circuit_batch::{Network, Op, Plan},
     codec::{bad, bytes, Correlation, Generation, Nat},
-    consensus_wire::Cursor,
+    consensus_wire::{get_phase, put_phase, Cursor},
     custody::hash,
     reconstruction::Field,
     triple_king::{self, CheckedTriples},
@@ -267,11 +267,7 @@ pub struct Message {
     pub context: [u8; 32],
     pub body: Body,
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Send {
-    pub to: u16,
-    pub message: Message,
-}
+pub type Send = crate::codec::Packet<Message>;
 pub(crate) fn values(phase: &PhaseMessage) -> &[u8] {
     match phase {
         PhaseMessage::Init(b) | PhaseMessage::Echo(b) | PhaseMessage::Ready(b) => b,
@@ -549,25 +545,6 @@ impl Engine {
     }
 }
 
-fn put_phase(p: &PhaseMessage, b: &mut Vec<u8>) {
-    let (tag, v) = match p {
-        PhaseMessage::Init(v) => (0, v),
-        PhaseMessage::Echo(v) => (1, v),
-        PhaseMessage::Ready(v) => (2, v),
-    };
-    b.push(tag);
-    bytes(v, b);
-}
-fn get_phase(c: &mut Cursor) -> Result<PhaseMessage> {
-    let t = c.byte()?;
-    let v = c.bytes()?;
-    match t {
-        0 => Ok(PhaseMessage::Init(v)),
-        1 => Ok(PhaseMessage::Echo(v)),
-        2 => Ok(PhaseMessage::Ready(v)),
-        _ => Err(bad("field phase")),
-    }
-}
 pub fn encode_message(m: &Message) -> Vec<u8> {
     let mut b = b"DREGG.PRIVATE.FIELD.WIRE\x01".to_vec();
     b.extend(m.context);
@@ -864,28 +841,5 @@ pub(crate) mod tests {
         assert!(
             Engine::reserve_many(p, &stocks, input, source, &sock, &root.join("retry")).is_err()
         );
-    }
-}
-
-#[cfg(test)]
-mod pin_wire {
-    use super::*;
-    use crate::asks::PhaseMessage as PinPhase;
-    #[test]
-    fn pin_phase_wire() {
-        for (tag, p) in [
-            (0u8, PinPhase::Init(vec![9, 8])),
-            (1, PinPhase::Echo(vec![9, 8])),
-            (2, PinPhase::Ready(vec![9, 8])),
-        ] {
-            let mut b = vec![];
-            put_phase(&p, &mut b);
-            assert_eq!(b, vec![tag, 2, 255, 9, 8]);
-            let mut c = crate::consensus_wire::Cursor::new(&b).unwrap();
-            assert_eq!(get_phase(&mut c).unwrap(), p);
-            c.finish().unwrap();
-        }
-        let mut c = crate::consensus_wire::Cursor::new(&[3, 0, 255]).unwrap();
-        assert!(get_phase(&mut c).is_err());
     }
 }

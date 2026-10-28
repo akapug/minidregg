@@ -2,7 +2,7 @@
 //! OS key polynomial coefficients + recursive outbox before publication.
 //! Native current release authority is NOT supplied by these byte codecs.
 use crate::{
-    codec::{bad, bytes, Generation, Nat},
+    codec::{bad, bytes, Generation},
     consensus_wire::Cursor,
     custody,
     private_initial::Initial,
@@ -13,36 +13,17 @@ use crate::{
 use std::{io::Result, path::Path};
 const DOMAIN: &[u8] = b"DREGG.PRIVATE.OUTPUT.INIT.FILE\x01";
 fn outbox(ps: &[Send]) -> Vec<u8> {
-    let mut b = vec![];
-    Nat::new(ps.len() as u64).put(&mut b);
-    for p in ps {
-        b.extend(p.to.to_le_bytes());
-        bytes(&private_output::encode_message(&p.message), &mut b)
-    }
-    b
+    crate::consensus_wire::put_outbox(ps, private_output::encode_message)
 }
 fn packets(b: &[u8], n: usize) -> Result<Vec<Send>> {
-    let mut c = Cursor::new(b)?;
-    let count = c.count()?;
-    if count > 65536 {
-        return Err(bad("output recursive outbox capacity"));
-    }
-    let mut ps = vec![];
-    for _ in 0..count {
-        let to = c.u16()?;
-        if to as usize >= n {
-            return Err(bad("output outbox recipient"));
-        }
-        ps.push(Send {
-            to,
-            message: private_output::decode_message(&c.bytes()?)?,
-        });
-    }
-    c.finish()?;
-    if outbox(&ps) != b {
-        return Err(bad("output outbox canonical"));
-    }
-    Ok(ps)
+    crate::consensus_wire::get_outbox(
+        b,
+        n,
+        65536,
+        "output",
+        private_output::decode_message,
+        private_output::encode_message,
+    )
 }
 #[derive(Clone)]
 pub struct OutputMachine {

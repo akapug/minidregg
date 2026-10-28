@@ -4,7 +4,7 @@
 //! Native authorization, successor privateRecovery or permission to dispatch.
 use crate::{
     circuit_batch::Plan,
-    codec::{bad, bytes, Nat},
+    codec::{bad, bytes},
     consensus_wire::Cursor,
     custody,
     field_network::{Message, Send},
@@ -73,36 +73,10 @@ pub struct RuntimeMachine<R: FieldRuntime> {
     pub state: R,
 }
 fn outbox<R: FieldRuntime>(ps: &[Send]) -> Vec<u8> {
-    let mut b = vec![];
-    Nat::new(ps.len() as u64).put(&mut b);
-    for p in ps {
-        b.extend(p.to.to_le_bytes());
-        bytes(&R::encode_message(&p.message), &mut b);
-    }
-    b
+    crate::consensus_wire::put_outbox(ps, R::encode_message)
 }
 fn decode_outbox_for<R: FieldRuntime>(b: &[u8], n: usize) -> Result<Vec<Send>> {
-    let mut c = Cursor::new(b)?;
-    let count = c.count()?;
-    if count > 65536 {
-        return Err(bad("field outbox count"));
-    }
-    let mut ps = vec![];
-    for _ in 0..count {
-        let to = c.u16()?;
-        if to as usize >= n {
-            return Err(bad("field outbox recipient"));
-        }
-        ps.push(Send {
-            to,
-            message: R::decode_message(&c.bytes()?)?,
-        });
-    }
-    c.finish()?;
-    if outbox::<R>(&ps) != b {
-        return Err(bad("field outbox canonical"));
-    }
-    Ok(ps)
+    crate::consensus_wire::get_outbox(b, n, 65536, "field", R::decode_message, R::encode_message)
 }
 impl<R: FieldRuntime> Machine for RuntimeMachine<R> {
     fn apply(&mut self, event: &[u8]) -> Result<Vec<u8>> {
