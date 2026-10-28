@@ -1306,10 +1306,19 @@ impl PrivateHttpEntrance {
                         .checked_add(1)
                         .ok_or_else(|| refuse("admission turn overflow"))?;
                     served.insert(queued.policy.fixed_subject.clone(), clock);
-                    dispatch(
+                    let waited = queued.queued_at.elapsed();
+                    let began = Instant::now();
+                    let done = dispatch(
                         Ok((queued.index, queued.request, queued.kind, &queued.policy)),
                         &mut entrances,
-                    )
+                    );
+                    eprintln!(
+                        "spk-host: http-timing {method:?} queue_ms={} dispatch_ms={} pending={}",
+                        waited.as_millis(),
+                        began.elapsed().as_millis(),
+                        pending.len()
+                    );
+                    done
                     .and_then(|reply| reply.ok_or_else(|| refuse("resident HTTP response absent")))
                     .unwrap_or_else(|error| {
                         eprintln!("spk-host: dispatch unavailable ({method:?}): {error}");
