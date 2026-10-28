@@ -60,11 +60,12 @@ Evidence: `/build/lanes/oracle-served-inspection/fixture-q2/report.json`.
 
 The consent image has SHA-256
 `02fc190423adedb51afe78fb0f18e583f829ef8703f6928d728ad2b65307d1dd`.
-Its supported build compiled the three changed consent modules and linked;
-the first invocation's final usage-prefix check was misconfigured. A corrected
-supported warm relink is pending its compiler-seat probe. These receiving
-measurements are valid for the pinned image, and do not claim that unfinished
-packaging check passed.
+Its supported build compiled the three changed consent modules and linked.
+The corrected supported warm relink passed its usage contract and complete
+manifest, producing exactly the same image hash. That relink took 424 seconds
+including the shared compiler-seat wait, with 2,747 MiB scope peak; it rebuilt
+no consent source module. Build evidence is `consent-out-r2/manifest.txt` under
+the same lane directory.
 
 
 Both the old `aae3e2e37` and newer `349e59ef1` candidates already materialize
