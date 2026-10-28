@@ -183,9 +183,11 @@ def runtime_ready(x):
     # broker runs its exact pinned SPK runtime. Establish both before the first
     # source write instead of after an app is born and installed.
     profile=load(x.profile)
-    for role in ['bwrap','spkHost']:
+    # The custody each consumer enforces: bwrap root-owned (namespace_identity.rs physical bwrap);
+    # the spkHost runtime root- or operator-owned, the broker's pinned_root_executable (broker.rs).
+    for role,owners in [('bwrap',{0}),('spkHost',{0,os.geteuid()})]:
         meta=os.lstat(profile[role])
-        require(stat.S_ISREG(meta.st_mode) and meta.st_uid==0 and not meta.st_mode&0o022 and sha(profile[role])==profile[role+'Sha256'],'native profile pins a '+role+' outside root custody')
+        require(stat.S_ISREG(meta.st_mode) and meta.st_uid in owners and not meta.st_mode&0o022 and sha(profile[role])==profile[role+'Sha256'],'native profile pins a '+role+' outside its custody')
     _,out,_=x.run([x.m['spkHost']['path'],'grain','runtime-status',x.profile],timeout=120)
     status=load(out)
     require(status.get('protocol')=='mini-spk-runtime-status-v1' and status.get('brokerProtocol')=='mini-spk-broker-runtime-v1'
