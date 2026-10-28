@@ -146,6 +146,75 @@ mod linux {
         }
     }
 
+    const RTM_NEWADDR: u16 = 20;
+    const RTM_GETADDR: u16 = 22;
+    const RTM_NEWROUTE: u16 = 24;
+    const NLMSG_ERROR: u16 = 2;
+    const NLMSG_DONE: u16 = 3;
+    const NLM_F_REQUEST: u16 = 0x1;
+    const NLM_F_ACK: u16 = 0x4;
+    const NLM_F_EXCL: u16 = 0x200;
+    const NLM_F_CREATE: u16 = 0x400;
+    const NLM_F_DUMP: u16 = 0x300;
+
+    /// One NETLINK_ROUTE request and its replies, as (message type, error) pairs where `error`
+    /// is the errno of an NLMSG_ERROR (negative, 0 for an ack) and 0 for any other message.
+    /// `Err` is the errno of the socket, send or receive that failed.
+    fn netlink_route(msg_type: u16, flags: u16, body: &[u8]) -> Result<Vec<(u16, i32)>, i32> {
+        let fd = unsafe { libc::socket(libc::AF_NETLINK, libc::SOCK_RAW | libc::SOCK_CLOEXEC, libc::NETLINK_ROUTE) };
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error().raw_os_error().unwrap_or(0));
+        }
+        let mut request = Vec::new();
+        request.extend_from_slice(&((16 + body.len()) as u32).to_ne_bytes());
+        request.extend_from_slice(&msg_type.to_ne_bytes());
+        request.extend_from_slice(&flags.to_ne_bytes());
+        request.extend_from_slice(&1_u32.to_ne_bytes());
+        request.extend_from_slice(&0_u32.to_ne_bytes());
+        request.extend_from_slice(body);
+        let timeout = libc::timeval { tv_sec: 3, tv_usec: 0 };
+        unsafe {
+            libc::setsockopt(fd, libc::SOL_SOCKET, libc::SO_RCVTIMEO, (&raw const timeout).cast(), std::mem::size_of::<libc::timeval>() as u32);
+        }
+        let sent = unsafe { libc::send(fd, request.as_ptr().cast(), request.len(), 0) };
+        let mut replies = Vec::new();
+        let mut failure = if sent < 0 { Some(std::io::Error::last_os_error().raw_os_error().unwrap_or(0)) } else { None };
+        let mut buffer = vec![0_u8; 32768];
+        'read: while failure.is_none() {
+            let n = unsafe { libc::recv(fd, buffer.as_mut_ptr().cast(), buffer.len(), 0) };
+            if n < 0 {
+                failure = Some(std::io::Error::last_os_error().raw_os_error().unwrap_or(0));
+                break;
+            }
+            let mut at = 0_usize;
+            while at + 16 <= n as usize {
+                let len = u32::from_ne_bytes(buffer[at..at + 4].try_into().unwrap()) as usize;
+                let ty = u16::from_ne_bytes(buffer[at + 4..at + 6].try_into().unwrap());
+                if len < 16 || at + len > n as usize {
+                    break 'read;
+                }
+                let error = if ty == NLMSG_ERROR && len >= 20 {
+                    i32::from_ne_bytes(buffer[at + 16..at + 20].try_into().unwrap())
+                } else {
+                    0
+                };
+                replies.push((ty, error));
+                if ty == NLMSG_DONE || ty == NLMSG_ERROR {
+                    break 'read;
+                }
+                at += (len + 3) & !3;
+            }
+            if flags & NLM_F_DUMP != NLM_F_DUMP {
+                break;
+            }
+        }
+        unsafe { libc::close(fd) };
+        match failure {
+            Some(errno) if replies.is_empty() => Err(errno),
+            _ => Ok(replies),
+        }
+    }
+
     pub fn run(report: &mut Report) {
         let uid = unsafe { libc::getuid() };
         let map = |name: &str| {
@@ -242,8 +311,17 @@ mod linux {
             loopback == Err(libc::ECONNREFUSED),
             json!({"127.0.0.1:1": format!("{loopback:?}")}),
         );
-        for (name, family) in [("netlink", libc::AF_NETLINK), ("packet", libc::AF_PACKET), ("vsock", libc::AF_VSOCK)] {
-            let result = outcome(unsafe { libc::socket(family, libc::SOCK_RAW | libc::SOCK_CLOEXEC, 0) } as i64);
+        // Only NETLINK_ROUTE (protocol 0) is allowed on AF_NETLINK; the other netlink protocols,
+        // packet and vsock keep the family refusal.
+        for (name, family, protocol) in [
+            ("netlink-generic", libc::AF_NETLINK, libc::NETLINK_GENERIC),
+            ("netlink-kobject-uevent", libc::AF_NETLINK, libc::NETLINK_KOBJECT_UEVENT),
+            ("netlink-netfilter", libc::AF_NETLINK, libc::NETLINK_NETFILTER),
+            ("netlink", libc::AF_NETLINK, libc::NETLINK_GENERIC),
+            ("packet", libc::AF_PACKET, 0),
+            ("vsock", libc::AF_VSOCK, 0),
+        ] {
+            let result = outcome(unsafe { libc::socket(family, libc::SOCK_RAW | libc::SOCK_CLOEXEC, protocol) } as i64);
             close(result);
             report.check(
                 &format!("socket-{name}-refused"),
@@ -251,6 +329,35 @@ mod linux {
                 describe(result),
             );
         }
+        // NETLINK_ROUTE reads (what getifaddrs does) and cannot write: the sandbox holds no
+        // capabilities, so address and route changes are refused by the kernel with EPERM.
+        let dump = netlink_route(RTM_GETADDR, NLM_F_REQUEST | NLM_F_DUMP, &[libc::AF_UNSPEC as u8, 0, 0, 0, 0, 0, 0, 0]);
+        report.check(
+            "netlink-route-getaddr-allowed",
+            matches!(&dump, Ok(replies) if replies.iter().any(|(ty, _)| *ty == RTM_NEWADDR)
+                && replies.iter().all(|(ty, _)| *ty != NLMSG_ERROR)),
+            json!({"replies": format!("{dump:?}")}),
+        );
+        // RTM_NEWADDR on interface 1 (lo): ifaddrmsg {family AF_INET, prefixlen 32, flags 0, scope 0, index 1}
+        // then IFA_LOCAL 10.9.9.9.
+        let mut newaddr = vec![libc::AF_INET as u8, 32, 0, 0, 1, 0, 0, 0];
+        newaddr.extend_from_slice(&[8, 0, 2, 0, 10, 9, 9, 9]);
+        let add = netlink_route(RTM_NEWADDR, NLM_F_REQUEST | NLM_F_ACK | NLM_F_CREATE | NLM_F_EXCL, &newaddr);
+        report.check(
+            "netlink-route-newaddr-refused",
+            matches!(&add, Ok(replies) if replies.iter().any(|(ty, err)| *ty == NLMSG_ERROR && *err == -libc::EPERM)),
+            json!({"replies": format!("{add:?}")}),
+        );
+        // RTM_NEWROUTE: rtmsg {family AF_INET, dst_len 32, src_len 0, tos 0, table main, protocol boot,
+        // scope link, type unicast, flags 0} then RTA_DST 10.9.9.9 and RTA_OIF 1.
+        let mut newroute = vec![libc::AF_INET as u8, 32, 0, 0, 254, 3, 253, 1, 0, 0, 0, 0];
+        newroute.extend_from_slice(&[8, 0, 1, 0, 10, 9, 9, 9, 8, 0, 4, 0, 1, 0, 0, 0]);
+        let route = netlink_route(RTM_NEWROUTE, NLM_F_REQUEST | NLM_F_ACK | NLM_F_CREATE | NLM_F_EXCL, &newroute);
+        report.check(
+            "netlink-route-newroute-refused",
+            matches!(&route, Ok(replies) if replies.iter().any(|(ty, err)| *ty == NLMSG_ERROR && *err == -libc::EPERM)),
+            json!({"replies": format!("{route:?}")}),
+        );
 
         // Each refused call runs in a forked child: under a weaker floor some of these
         // succeed (PTRACE_TRACEME, a new mount), and the probe itself must survive to

@@ -616,6 +616,9 @@ mod tests {
                 "userns-unshare-refused", "userns-clone-refused", "seccomp-filter-active",
                 "capabilities-all-zero", "web-app-positive-control", "seccomp-refused",
                 "prctl-set-seccomp-refused", "io_setup-refused", "vmsplice-refused",
+                "socket-netlink-generic-refused", "socket-netlink-kobject-uevent-refused",
+                "socket-netlink-netfilter-refused", "netlink-route-getaddr-allowed",
+                "netlink-route-newaddr-refused", "netlink-route-newroute-refused",
                 "set_mempolicy-refused", "hostname-sandbox", "dev-minimal", "rlimit-nofile-bounded",
             ] {
                 assert_eq!(held(&lines, check), Some(true), "{check}");
