@@ -587,11 +587,15 @@ tools-run.sh with `C=` that candidate, J14_TOOLS=1 J14_AWAIT=1, root `hroot-q2`;
   completed requests), so the test provider never takes its sandbox branch. Check whether bob's
   `ask lab ... in the sandbox` line reaches the resident's request scan (cursors per author in
   resident/requests.json) before the tools pass.
-- run 5 (`hb-q2-5`, candidate 2d8b7ed54 = main with hermes-b, fresh genesis; tree lane/hermes-b
-  7a831d07 = main + the fixes; PID file `/build/lanes/hermes-tier-run/hb-q2-5.pid`): filtered
-  tests then J14_TOOLS+J14_AWAIT. Read every row; take footprint.tsv (post-compaction) and
-  host-ops.txt (narrow `RESIDENT_OPERATIONS` to the used set plus the await rows' ops); then the
-  infra batch to ae95a4eac63b0715e.
+- run 5 (`hb-q2-5`, 2d8b7ed54, 180/214; J0-J5 PASS on main's harness): compaction ran (g 47 MiB /
+  10,039 inodes, down from 65 MiB / 13,745; two passes compacted 111 and 122 operations). The CPU
+  record still failed: no cpu.stat, because the stop's SIGTERM ends the unit before the read. The
+  180-turn charge left an unconfirmed compute payment, which refused every later pass (await,
+  redteam, dismiss: "recorded payment is not confirmed; exact recovery only"). Fixed in 56f6741a:
+  the record is read before the first signal. Host ops unchanged (1-5, 17, 19, 96-98, 144).
+  The sandbox ask still never reaches the tools brief (see run 4).
+- run 6 (`hb-q2-6`, candidate 7027e0ace, tree 56f6741a, PID file
+  `/build/lanes/hermes-tier-run/hb-q2-6.pid`): the same run again.
 - Every J14 pass runs from main's scripts and a candidate's source (coordinator); a J5 red from an
   older tree is a stale harness.
 
