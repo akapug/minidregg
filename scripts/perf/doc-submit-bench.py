@@ -16,6 +16,8 @@ host,mini,store,verifier=[bin_/n for n in ['minidregg-host','mini','minidregg-li
 if root.exists():raise SystemExit('root exists')
 root.mkdir(mode=0o700);T=root/'transcript';T.mkdir()
 TICK=os.sysconf('SC_CLK_TCK')
+# genesis.sh takes params.sh from the candidate set the binaries came from
+os.environ.setdefault('CANDIDATE',str(bin_.parent))
 def sh(tag,*cmd):
     r=subprocess.run([str(c) for c in cmd],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     (T/f'{tag}.err').write_bytes(r.stderr)
