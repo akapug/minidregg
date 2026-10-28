@@ -196,8 +196,11 @@ jq -e '.type == "resource" and .cell.entries == []' \
 
 # The same worker's ordinary bare birth has valid source-account authority,
 # but the installed factory law has no grain-backed mode slot on that route.
-# The public native submit boundary intentionally erases the internal refusal
-# reason; require that exact public admission refusal after a prepared call.
+# The factory law is judged at plan time (NativeHost.birthRefusal, law 10), so
+# the Host refuses at PREPARE, before anything is signed, and names the law:
+# a NO_RECORD (253) frame, retained by the client as pre-submit-refusal.frame.
+# Require that refusal, decoded by the Host itself: law-denied, by the factory
+# law's clause for subject 8 that wants the grain-backed mode slot.
 jq --slurpfile observed "$EVIDENCE/owner-bare-content/challenge.json" \
   '{subject:"8",nonce:"42000",
     birth:(.grainBirth.birth | .nonce="42000" |
@@ -209,17 +212,30 @@ jq --slurpfile observed "$EVIDENCE/owner-bare-content/challenge.json" \
     grants:[{kind:"object",target:"10",capability:"55"},
       {kind:"account",target:"8",capability:"42"}]}' \
   "$EVIDENCE/grain-birth-intent.json" >"$EVIDENCE/worker-bare-intent.json"
-if "$MINI" submit --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
+status=0
+"$MINI" submit --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
     --intent "$EVIDENCE/worker-bare-intent.json" --intent-kind birth-intent \
     --key "$EVIDENCE/tool.key" --dir "$EVIDENCE/worker-bare-attempt" \
-    >"$EVIDENCE/worker-bare.stdout" 2>"$EVIDENCE/worker-bare.stderr"; then
-  echo "worker bare birth unexpectedly accepted" >&2; exit 1
-fi
-test -s "$EVIDENCE/worker-bare-attempt/plan.bin"
-test -s "$EVIDENCE/worker-bare-attempt/call.bin"
-jq -e '.type == "refused" and .phase == "61646d697373696f6e" and
-  .detail == "726571756573742072656675736564"' \
-  "$EVIDENCE/worker-bare-attempt/outcome.json" >/dev/null
+    >"$EVIDENCE/worker-bare.stdout" 2>"$EVIDENCE/worker-bare.stderr" || status=$?
+[ "$status" -eq 3 ] || {
+  echo "worker bare birth: expected a refusal (exit 3), got exit $status" >&2; exit 1; }
+WB="$EVIDENCE/worker-bare-attempt"
+# Refused before signing: no plan, no call, no submitted outcome.
+test ! -e "$WB/plan.bin"
+test ! -e "$WB/call.bin"
+test ! -e "$WB/outcome.json"
+jq -e '.type == "minidregg-pre-submit-refusal-v1" and .stage == "prepare" and
+  .operation == 1' "$WB/pre-submit-refusal.json" >/dev/null
+[ "$(head -c 1 "$WB/pre-submit-refusal.frame" | od -An -tu1 | tr -d ' ')" = 253 ] || {
+  echo "worker bare birth: prepare refusal is not a NO_RECORD (253) frame" >&2; exit 1; }
+tail -c +2 "$WB/pre-submit-refusal.frame" >"$WB/prepare-refusal.bin"
+"$HOST" "$CONFIG" inspect outcome "$WB/prepare-refusal.bin" "$WB/prepare-refusal.json" \
+  >"$WB/prepare-refusal.inspect.out" 2>&1
+jq -e '.type == "refused" and .reason == "law-denied" and .effect == "no-record" and
+  (.leaf | type == "object") and
+  (.explain | type == "string" and contains("subject == 8") and
+    contains("slot \"birth/mode/grain-backed\" == 1"))' \
+  "$WB/prepare-refusal.json" >/dev/null
 query worker-bare-post 7 8303 103 "$EVIDENCE/controller.key" 42010
 jq -e --slurpfile before "$EVIDENCE/owner-bare-content/challenge.json" \
   '.worldRoot == $before[0].worldRoot' \
