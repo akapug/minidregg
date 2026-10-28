@@ -159,8 +159,7 @@ variable {Root : Type uRoot} (registry : TypeRegistry Root)
 /-- The stable envelope binds the Dregg marker, envelope version, registry tag,
 and exact canonical bytes of the selected materialized payload. -/
 def bytes (cell : PackedCell registry) : List UInt8 :=
-  [68, 82, 1, registry.tag cell.kind] ++
-    (registry.materializer cell.kind).codec.encode cell.payload.logical
+  [68, 82, 1, registry.tag cell.kind] ++ cell.payload.bytes
 
 /-- Decode without a runtime cast: matching `kindAtTag` refines the payload
 type to the exact layout selected by that kind. -/

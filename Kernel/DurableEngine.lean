@@ -14,8 +14,9 @@ the spec reads, it costs Θ(h) per record replayed at height h:
 * (until history went newest first, the history append copied the whole history);
 * admissibility enumerates the image's ids with an `eraseDups` (Θ(h·cells)).
 
-`Engine` holds the same snapshot as data: the cells as a `CellTable`, the
-spent nullifiers as a hash set, the journal with a hash-set index of its
+`Engine` holds the same snapshot as data: the cells as a `CellTable` with
+each cell's root carried beside it (`roots`: once per cell image, never per
+query), the spent nullifiers as a hash set, the journal with a hash-set index of its
 transaction ids. `view` is the
 snapshot it represents, field for field; `replay_view` says the engine's replay
 IS the protocol replay (`DurableReceiver.replay`) under `view`, and
@@ -82,10 +83,22 @@ theorem lookupRecorded_isSome (transactionId : TransactionId) :
         have : (transactionId == recordedId) = false := by simp [Ne.symm same]
         simp [this]
 
-/-- The durable snapshot as data. -/
-structure Engine where
+/-- Cell id value ↦ the cell's root, deferred: a checkpoint's cells are rooted
+on first read and once (the thunk caches), a written cell carries the root its
+write already bound (`DataIntent.postRootsBound`). -/
+abbrev RootTable := Std.ExtTreeMap Nat (Thunk Digest) compare
+
+/-- The durable snapshot as data. A cell's root is computed once per cell image
+(`roots`, exact by `rootsExact`), never per query. -/
+structure Engine (rootBytes : List UInt8 → Digest) where
   absent : List UInt8
   cells : CellTable
+  /-- The root of every tabled cell, beside its bytes. -/
+  roots : RootTable
+  rootsExact : ∀ key : Nat, roots[key]?.map Thunk.get = cells[key]?.map rootBytes
+  /-- The root of the fresh-identifier bytes. -/
+  absentRoot : Thunk Digest
+  absentRootExact : absentRoot.get = rootBytes absent
   available : Charge
   /-- The nullifiers consumed below the engine's base, as an oracle: nothing
   for a checkpoint's engine (its prefix sits in `spent`), a first-index lookup
@@ -107,53 +120,116 @@ structure Engine where
 
 namespace Engine
 
-variable (rootBytes : List UInt8 → Digest)
+section accessors
+
+variable {rootBytes : List UInt8 → Digest}
 
 /-- A cell's bytes: the table's, else the fresh-identifier bytes. -/
-def bytes (engine : Engine) (cellId : CellId) : List UInt8 :=
+def bytes (engine : Engine rootBytes) (cellId : CellId) : List UInt8 :=
   (engine.cells.get cellId).getD engine.absent
 
+/-- A cell's root: the table's carried root, else the fresh-identifier root.
+A lookup, not a hash (`root_eq`). -/
+def root (engine : Engine rootBytes) (cellId : CellId) : Digest :=
+  match engine.roots[cellId.value]? with
+  | some root => root.get
+  | none => engine.absentRoot.get
+
+/-- **The carried root is the root of the cell's bytes.** -/
+theorem root_eq (engine : Engine rootBytes) (cellId : CellId) :
+    engine.root cellId = rootBytes (engine.bytes cellId) := by
+  have exact := engine.rootsExact cellId.value
+  unfold root bytes CellTable.get
+  revert exact
+  cases engine.roots[cellId.value]? <;> cases engine.cells[cellId.value]? <;> intro exact
+  · exact engine.absentRootExact
+  · simp at exact
+  · simp at exact
+  · exact Option.some.inj exact
+
 /-- Whether a nullifier is consumed: installed here, or below the base. -/
-@[inline] def consumed (engine : Engine) (nullifier : StableNullifier) : Bool :=
+@[inline] def consumed (engine : Engine rootBytes) (nullifier : StableNullifier) : Bool :=
   engine.spent.contains nullifier || engine.spentBefore nullifier
 
 /-- Whether a transaction id is journaled: installed here, or below the base. -/
-@[inline] def isRecorded (engine : Engine) (transactionId : TransactionId) : Bool :=
+@[inline] def isRecorded (engine : Engine rootBytes) (transactionId : TransactionId) : Bool :=
   engine.recorded.contains transactionId || engine.recordedBefore transactionId
 
-/-- **The snapshot this engine is**, field for field. -/
-@[inline] def view (engine : Engine) : DataSnapshot rootBytes where
+end accessors
+
+variable (rootBytes : List UInt8 → Digest)
+
+/-- **The snapshot this engine is**, field for field; its roots are the carried ones. -/
+@[inline] def view (engine : Engine rootBytes) : DataSnapshot rootBytes where
   model :=
-    { roots := fun cellId => rootBytes (engine.bytes cellId)
+    { roots := engine.root
       consumed := fun nullifier => engine.consumed nullifier
       available := engine.available
       history := engine.historyRev.get
       journal := engine.journal.get }
   canonicalBytes := engine.bytes
-  coherent := fun _ => rfl
+  coherent := fun cellId => (engine.root_eq cellId).symm
 
 /-- The same snapshot without history and journal: all that preflight reads. -/
-@[inline] def light (engine : Engine) : DataSnapshot rootBytes where
+@[inline] def light (engine : Engine rootBytes) : DataSnapshot rootBytes where
   model :=
-    { roots := fun cellId => rootBytes (engine.bytes cellId)
+    { roots := engine.root
       consumed := fun nullifier => engine.consumed nullifier
       available := engine.available
       history := []
       journal := [] }
   canonicalBytes := engine.bytes
-  coherent := fun _ => rfl
+  coherent := fun cellId => (engine.root_eq cellId).symm
+
+/-- The carried roots of a cell table, each deferred to its first read. -/
+def rootsOf (cells : CellTable) : RootTable :=
+  cells.map fun _ bytes => Thunk.mk fun _ => rootBytes bytes
+
+theorem rootsOf_exact (cells : CellTable) (key : Nat) :
+    (rootsOf rootBytes cells)[key]?.map Thunk.get = cells[key]?.map rootBytes := by
+  unfold rootsOf
+  rw [Std.ExtTreeMap.getElem?_map, Option.map_map]
+  rfl
+
+/-- Each write's root, as its bound `exactPost`, installed beside its bytes. -/
+theorem rootsExact_foldr (writes : List DataWrite)
+    (bound : ∀ write, write ∈ writes → rootBytes write.canonicalPostBytes = write.exactPost)
+    (cells : CellTable) (roots : RootTable)
+    (exact : ∀ key : Nat, roots[key]?.map Thunk.get = cells[key]?.map rootBytes) (key : Nat) :
+    (writes.foldr (fun write table => table.insert write.cellId.value (Thunk.pure write.exactPost))
+        roots)[key]?.map Thunk.get =
+      (writes.foldr (fun write table => table.insert write.cellId write.canonicalPostBytes)
+        cells)[key]?.map rootBytes := by
+  induction writes with
+  | nil => exact exact key
+  | cons write rest ih =>
+      rw [List.foldr_cons, List.foldr_cons]
+      show (Std.ExtTreeMap.insert _ _ _)[key]?.map Thunk.get =
+        (Std.ExtTreeMap.insert _ _ _)[key]?.map rootBytes
+      rw [Std.ExtTreeMap.getElem?_insert, Std.ExtTreeMap.getElem?_insert]
+      by_cases same : compare write.cellId.value key = .eq
+      · rw [if_pos same, if_pos same]
+        exact congrArg some (bound write List.mem_cons_self).symm
+      · rw [if_neg same, if_neg same]
+        exact ih fun other member => bound other (List.mem_cons_of_mem _ member)
 
 /-- Preflight never reads history or journal. -/
-theorem preflight_light (engine : Engine) (intent : DataIntent rootBytes) :
+theorem preflight_light (engine : Engine rootBytes) (intent : DataIntent rootBytes) :
     intent.preflight (engine.light rootBytes) = intent.preflight (engine.view rootBytes) := rfl
 
 /-- One accepted record, installed as data: each write replaces its cell (the
 first write of a cell wins, as `lookupPostBytes` reads), each nullifier joins
 the set, the journal and history gain one cons each. -/
-def install (engine : Engine) (intent : DataIntent rootBytes) : Engine where
+def install (engine : Engine rootBytes) (intent : DataIntent rootBytes) : Engine rootBytes where
   absent := engine.absent
   cells := intent.writes.foldr (fun write table => table.insert write.cellId write.canonicalPostBytes)
     engine.cells
+  roots := intent.writes.foldr
+    (fun write table => table.insert write.cellId.value (Thunk.pure write.exactPost)) engine.roots
+  rootsExact := rootsExact_foldr rootBytes intent.writes intent.postRootsBound engine.cells
+    engine.roots engine.rootsExact
+  absentRoot := engine.absentRoot
+  absentRootExact := engine.absentRootExact
   -- Keep the ten remaining allowances as values. Retaining the subtraction
   -- closure would re-evaluate every prior intent's charge on each later check.
   available := (Charge.materialize fun lane =>
@@ -179,7 +255,7 @@ def install (engine : Engine) (intent : DataIntent rootBytes) : Engine where
 
 /-- Materializing the remaining budget preserves every lane, including exact
 exhaustion and natural-number subtraction at zero. -/
-theorem available_install (engine : Engine) (intent : DataIntent rootBytes) :
+theorem available_install (engine : Engine rootBytes) (intent : DataIntent rootBytes) :
     (engine.install rootBytes intent).available =
       fun lane => engine.available lane - intent.exactCharge lane + intent.credit lane :=
   Charge.materialize_eq _
@@ -218,7 +294,7 @@ theorem DataSnapshot.ext' {left right : DataSnapshot rootBytes} (model : left.mo
   rfl
 
 /-- **Install commutes with `view`**: the engine's install is the protocol's. -/
-theorem view_install (engine : Engine) (intent : DataIntent rootBytes) :
+theorem view_install (engine : Engine rootBytes) (intent : DataIntent rootBytes) :
     (engine.install rootBytes intent).view rootBytes =
       DataSnapshot.install (engine.view rootBytes) intent := by
   have bytesEq : (engine.install rootBytes intent).bytes =
@@ -229,10 +305,11 @@ theorem view_install (engine : Engine) (intent : DataIntent rootBytes) :
     rw [get_foldr]
     cases DataSnapshot.lookupPostBytes cellId intent.writes <;> rfl
   apply DataSnapshot.ext' rootBytes
-  · have rootsEq : (fun cellId => rootBytes ((engine.install rootBytes intent).bytes cellId)) =
+  · have rootsEq : (engine.install rootBytes intent).root =
         (DataSnapshot.install (engine.view rootBytes) intent).model.roots := by
       funext cellId
-      rw [← (DataSnapshot.install (engine.view rootBytes) intent).coherent cellId, bytesEq]
+      rw [root_eq, ← (DataSnapshot.install (engine.view rootBytes) intent).coherent cellId,
+        bytesEq]
     show Snapshot.mk _ _ _ _ _ = Snapshot.install (engine.view rootBytes).model intent.erase
     unfold Snapshot.install
     congr 1
@@ -250,30 +327,35 @@ theorem view_install (engine : Engine) (intent : DataIntent rootBytes) :
 /-- The engine at a checkpoint: the state's cells as a table, the prefix's
 nullifiers and transaction ids as sets, its journal and history as `State.snapshot`
 builds them (history kept newest first). -/
-def ofState (state : State) (prefixRecords : List IntentRecord) : Engine where
-  absent := state.absentBytes
-  cells := CellTable.ofList state.cells
-  available := state.available
-  spentBefore := fun _ => false
-  spent := Std.HashSet.ofList (prefixRecords.flatMap IntentRecord.nullifiers)
-  journal := Thunk.mk fun _ =>
-    (prefixRecords.map fun record => (record.transactionId, IntentRecord.erase record)).reverse
-  recordedBefore := fun _ => false
-  recorded := Std.HashSet.ofList (prefixRecords.map IntentRecord.transactionId)
-  recordedExact := by
-    intro transactionId
-    show ((Std.HashSet.ofList _).contains transactionId || false) =
-      (((prefixRecords.map fun record => (record.transactionId, IntentRecord.erase record)).reverse).map
-        Prod.fst).contains transactionId
-    rw [Bool.or_false, Std.HashSet.contains_ofList, List.map_reverse, List.map_map]
-    simp [Function.comp_def, IntentRecord.erase]
-  historyRev := Thunk.mk fun _ =>
-    (prefixRecords.map fun record => (IntentRecord.erase record).event).reverse
+def ofState (state : State) (prefixRecords : List IntentRecord) : Engine rootBytes :=
+  let cells := CellTable.ofList state.cells
+  { absent := state.absentBytes
+    cells := cells
+    roots := rootsOf rootBytes cells
+    rootsExact := rootsOf_exact rootBytes cells
+    absentRoot := Thunk.mk fun _ => rootBytes state.absentBytes
+    absentRootExact := rfl
+    available := state.available
+    spentBefore := fun _ => false
+    spent := Std.HashSet.ofList (prefixRecords.flatMap IntentRecord.nullifiers)
+    journal := Thunk.mk fun _ =>
+      (prefixRecords.map fun record => (record.transactionId, IntentRecord.erase record)).reverse
+    recordedBefore := fun _ => false
+    recorded := Std.HashSet.ofList (prefixRecords.map IntentRecord.transactionId)
+    recordedExact := by
+      intro transactionId
+      show ((Std.HashSet.ofList _).contains transactionId || false) =
+        (((prefixRecords.map fun record => (record.transactionId, IntentRecord.erase record)).reverse).map
+          Prod.fst).contains transactionId
+      rw [Bool.or_false, Std.HashSet.contains_ofList, List.map_reverse, List.map_map]
+      simp [Function.comp_def, IntentRecord.erase]
+    historyRev := Thunk.mk fun _ =>
+      (prefixRecords.map fun record => (IntentRecord.erase record).event).reverse }
 
 /-- **The engine at a checkpoint is the checkpoint's snapshot.** -/
 theorem view_ofState (state : State) (prefixRecords : List IntentRecord) :
-    (ofState state prefixRecords).view rootBytes = state.snapshot rootBytes prefixRecords := by
-  have bytesEq : (ofState state prefixRecords).bytes =
+    (ofState rootBytes state prefixRecords).view rootBytes = state.snapshot rootBytes prefixRecords := by
+  have bytesEq : (ofState rootBytes state prefixRecords).bytes =
       (state.snapshot rootBytes prefixRecords).canonicalBytes := by
     funext cellId
     show ((CellTable.ofList state.cells).get cellId).getD state.absentBytes = _
@@ -284,7 +366,7 @@ theorem view_ofState (state : State) (prefixRecords : List IntentRecord) :
     congr 1
     all_goals first
       | (funext cellId
-         rw [congrFun bytesEq cellId]
+         rw [root_eq, congrFun bytesEq cellId]
          exact (state.snapshot rootBytes prefixRecords).coherent cellId)
       | (funext nullifier
          show ((Std.HashSet.ofList _).contains nullifier || false) = _
@@ -303,25 +385,31 @@ def ofIndexed (state : State) (records : List IntentRecord) (height : Nat)
       decide (nullifier ∈ (records.take height).flatMap IntentRecord.nullifiers))
     (recordedBefore : TransactionId → Bool)
     (recordedExact : ∀ transactionId, recordedBefore transactionId =
-      ((records.take height).map IntentRecord.transactionId).contains transactionId) : Engine where
-  absent := state.absentBytes
-  cells := CellTable.ofList state.cells
-  available := state.available
-  spentBefore := spentBefore
-  spent := ∅
-  journal := Thunk.mk fun _ =>
-    ((records.take height).map fun record => (record.transactionId, IntentRecord.erase record)).reverse
-  recordedBefore := recordedBefore
-  recorded := ∅
-  recordedExact := by
-    intro transactionId
-    show ((∅ : Std.HashSet TransactionId).contains transactionId || recordedBefore transactionId) =
-      ((((records.take height).map fun record =>
-        (record.transactionId, IntentRecord.erase record)).reverse).map Prod.fst).contains transactionId
-    rw [Std.HashSet.contains_empty, Bool.false_or, recordedExact, List.map_reverse, List.map_map]
-    simp [Function.comp_def, IntentRecord.erase]
-  historyRev := Thunk.mk fun _ =>
-    ((records.take height).map fun record => (IntentRecord.erase record).event).reverse
+      ((records.take height).map IntentRecord.transactionId).contains transactionId) :
+    Engine rootBytes :=
+  let cells := CellTable.ofList state.cells
+  { absent := state.absentBytes
+    cells := cells
+    roots := rootsOf rootBytes cells
+    rootsExact := rootsOf_exact rootBytes cells
+    absentRoot := Thunk.mk fun _ => rootBytes state.absentBytes
+    absentRootExact := rfl
+    available := state.available
+    spentBefore := spentBefore
+    spent := ∅
+    journal := Thunk.mk fun _ =>
+      ((records.take height).map fun record => (record.transactionId, IntentRecord.erase record)).reverse
+    recordedBefore := recordedBefore
+    recorded := ∅
+    recordedExact := by
+      intro transactionId
+      show ((∅ : Std.HashSet TransactionId).contains transactionId || recordedBefore transactionId) =
+        ((((records.take height).map fun record =>
+          (record.transactionId, IntentRecord.erase record)).reverse).map Prod.fst).contains transactionId
+      rw [Std.HashSet.contains_empty, Bool.false_or, recordedExact, List.map_reverse, List.map_map]
+      simp [Function.comp_def, IntentRecord.erase]
+    historyRev := Thunk.mk fun _ =>
+      ((records.take height).map fun record => (IntentRecord.erase record).event).reverse }
 
 /-- **The indexed engine is the checkpoint's snapshot at that height.** -/
 theorem view_ofIndexed (state : State) (records : List IntentRecord) (height : Nat)
@@ -331,9 +419,10 @@ theorem view_ofIndexed (state : State) (records : List IntentRecord) (height : N
     (recordedBefore : TransactionId → Bool)
     (recordedExact : ∀ transactionId, recordedBefore transactionId =
       ((records.take height).map IntentRecord.transactionId).contains transactionId) :
-    (ofIndexed state records height spentBefore spentExact recordedBefore recordedExact).view rootBytes =
+    (ofIndexed rootBytes state records height spentBefore spentExact recordedBefore recordedExact).view
+      rootBytes =
       state.snapshot rootBytes (records.take height) := by
-  have bytesEq : (ofIndexed state records height spentBefore spentExact recordedBefore
+  have bytesEq : (ofIndexed rootBytes state records height spentBefore spentExact recordedBefore
       recordedExact).bytes = (state.snapshot rootBytes (records.take height)).canonicalBytes := by
     funext cellId
     show ((CellTable.ofList state.cells).get cellId).getD state.absentBytes = _
@@ -344,7 +433,7 @@ theorem view_ofIndexed (state : State) (records : List IntentRecord) (height : N
     congr 1
     all_goals first
       | (funext cellId
-         rw [congrFun bytesEq cellId]
+         rw [root_eq, congrFun bytesEq cellId]
          exact (state.snapshot rootBytes (records.take height)).coherent cellId)
       | (funext nullifier
          show ((∅ : Std.HashSet StableNullifier).contains nullifier || spentBefore nullifier) = _
@@ -354,7 +443,7 @@ theorem view_ofIndexed (state : State) (records : List IntentRecord) (height : N
 
 /-- Replay over the engine: the protocol's `replay`, with the journal guard
 read off the index and preflight read off the light snapshot. -/
-def replay (engine : Engine) : List IntentRecord → Option Engine
+def replay (engine : Engine rootBytes) : List IntentRecord → Option (Engine rootBytes)
   | [] => some engine
   | record :: records =>
       match record.bind? rootBytes with
@@ -367,7 +456,7 @@ def replay (engine : Engine) : List IntentRecord → Option Engine
             | .error _ => none
 
 /-- **The engine's replay is the protocol replay** under `view`. -/
-theorem replay_view (engine : Engine) (records : List IntentRecord) :
+theorem replay_view (engine : Engine rootBytes) (records : List IntentRecord) :
     DurableReceiver.replay rootBytes (engine.view rootBytes) records =
       (engine.replay rootBytes records).map (view rootBytes) := by
   induction records generalizing engine with
@@ -477,9 +566,9 @@ theorem admissibleFast_iff (image : Image) (state : State) :
 /-- The engine `resume` builds: admissibility off a hash set, the checkpoint's
 engine (`Engine.ofState`), the suffix replayed over it. -/
 def resumeEngine (rootBytes : List UInt8 → Digest) (image : Image) (height : Nat)
-    (state : State) : Option Engine :=
+    (state : State) : Option (Engine rootBytes) :=
   if admissibleFast image state then
-    (Engine.ofState state (image.accepted.take height)).replay rootBytes (image.accepted.drop height)
+    (Engine.ofState rootBytes state (image.accepted.take height)).replay rootBytes (image.accepted.drop height)
   else none
 
 /-- `resume`, compiled: the snapshot of the engine `resumeEngine` builds. -/
@@ -508,7 +597,7 @@ theorem resume_eq_resumeEngine (rootBytes : List UInt8 → Digest) (image : Imag
   rfl
 
 theorem resume_of_resumeEngine {rootBytes : List UInt8 → Digest} {image : Image} {height : Nat}
-    {state : State} {engine : Engine} (found : resumeEngine rootBytes image height state = some engine) :
+    {state : State} {engine : Engine rootBytes} (found : resumeEngine rootBytes image height state = some engine) :
     resume rootBytes image height state = some (engine.view rootBytes) := by
   rw [resume_eq_resumeEngine, found]
   rfl
@@ -522,7 +611,7 @@ variable (rootBytes : List UInt8 → Digest)
 /-- The executor over the engine: the journal guard off the index, preflight
 off the light snapshot. Only a recorded transaction id (a replay or a conflict)
 reaches the protocol's journal walk. -/
-def execute (engine : Engine) (intent : DataIntent rootBytes) : Outcome rootBytes :=
+def execute (engine : Engine rootBytes) (intent : DataIntent rootBytes) : Outcome rootBytes :=
   if engine.isRecorded intent.transactionId then
     DurableDataIntent.execute .complete (engine.view rootBytes) intent
   else
@@ -531,7 +620,7 @@ def execute (engine : Engine) (intent : DataIntent rootBytes) : Outcome rootByte
     | .ok () => .accepted (DataSnapshot.install (engine.view rootBytes) intent)
 
 /-- **The engine's executor is the protocol's** at the engine's snapshot. -/
-theorem execute_eq (engine : Engine) (intent : DataIntent rootBytes) :
+theorem execute_eq (engine : Engine rootBytes) (intent : DataIntent rootBytes) :
     engine.execute rootBytes intent =
       DurableDataIntent.execute .complete (engine.view rootBytes) intent := by
   unfold execute
