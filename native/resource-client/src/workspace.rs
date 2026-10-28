@@ -2894,7 +2894,7 @@ fn check_requested_root(target: &Value, actual: &str) -> Result<()> {
 
 /// Author a proposal from fresh signed reads. A Host `stale-root` on one read
 /// is re-observed inside that read; reads that disagree with each other are
-/// re-planned here, all of them, under the same `--replan-max` bound.
+/// re-planned here, all of them, under the same re-plan window (`replan`).
 pub(crate) fn propose(
     root: &Path,
     workspace: &Value,
@@ -4483,7 +4483,7 @@ fn retire_attempt_dir(attempt: &Path) -> Result<PathBuf> {
 /// retained observation from an earlier call refused now, is superseded once;
 /// a generation observed in this call is superseded only when `stale` finds
 /// the Host answering its own `stale-root` to that observation (the timer race
-/// at birth), at most `replan::max()` times (the shared `replan` loop).
+/// at birth), within the re-plan window (the shared `replan` loop).
 pub(crate) fn author_generations(
     base: &Path,
     reservation: &participant_namespace::Reservation,
@@ -7378,6 +7378,95 @@ mod tests {
         assert_eq!(super::append_recovery_class(Some(&HostDecision::Frame {
             command: "submit".into(), byte: 255, encoded: vec![1], decoded: None }), &source, true), None);
         assert_eq!(super::append_recovery_class(None, &source, true), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// K members append to one shared document at once against a fake Host
+    /// whose turn is slow (each call travels before it reaches the Host, and
+    /// the Host admits one call at a time, each taking a while), under the
+    /// production bound: no count ceiling, the default window, the real
+    /// recovery classifier. All K plan over the same root, so the first round
+    /// has one winner and K-1 named `stale-target` refusals; the losers keep
+    /// re-planning (more than the old fixed five between them) until every
+    /// text has landed exactly once, each call under its own nonce.
+    ///
+    /// The composed scenario's documents phase is this, live: every member of
+    /// a room appends one marker line to the room's notes at once (`documents`
+    /// in composed-scenario.py, `concurrency` parallel), then every member's
+    /// `doc show` must hold each marker exactly once. This test is its
+    /// deterministic, filtered stand-in for the client's half (the re-plan
+    /// loop); the scenario covers the Host's half under real load.
+    #[test]
+    fn append_contention_many_members_slow_turn_all_land_once() {
+        use crate::HostDecision;
+        use std::sync::{Arc, Barrier, Mutex};
+        use std::time::Duration;
+        const K: usize = 8;
+        let _lock = crate::replan::TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        crate::replan::set_max(crate::replan::DEFAULT_MAX);
+        crate::replan::set_window(crate::replan::DEFAULT_WINDOW);
+        let dir = std::env::temp_dir().join(format!("mini-append-contention-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("intent.json");
+        std::fs::write(&source, br#"{"purpose":{"draft":{"command":{"targets":[{"target":"10"}]}}}}"#).unwrap();
+        struct Host { root: u64, lines: Vec<String>, nonces: Vec<u64>, next_nonce: u64 }
+        let host = Arc::new(Mutex::new(Host { root: 0, lines: vec![], nonces: vec![], next_nonce: 0 }));
+        let stale = HostDecision::Frame {
+            command: "submit".into(), byte: 253, encoded: vec![],
+            decoded: Some(json!({"type":"refused","reason":"operation-rejected","phase":hex(b"stale-target"),
+                "detail":hex(b"target 10 moved since the plan was signed")})),
+        };
+        let barrier = Arc::new(Barrier::new(K));
+        let members: Vec<_> = (0..K).map(|index| {
+            let (host, barrier, source, stale) = (host.clone(), barrier.clone(), source.clone(), stale.clone());
+            std::thread::spawn(move || {
+                let text = format!("member-{index} text");
+                let mut first = true;
+                let mut replans = 0u32;
+                let result = crate::replan::replan("document append",
+                    || {
+                        let (planned, nonce) = { let mut h = host.lock().unwrap(); h.next_nonce += 1; (h.root, h.next_nonce) };
+                        if std::mem::take(&mut first) { barrier.wait(); }
+                        // The call travels (sign, seal, transport) before the Host sees it.
+                        std::thread::sleep(Duration::from_millis(30));
+                        let mut h = host.lock().unwrap();
+                        // The Host's turn: one admission at a time, each slow.
+                        std::thread::sleep(Duration::from_millis(20));
+                        h.nonces.push(nonce);
+                        if h.root != planned {
+                            crate::note_host_decision(stale.clone());
+                            return Err("host refused submit: target 10 moved since the plan was signed".into());
+                        }
+                        h.root += 1;
+                        h.lines.push(text.clone());
+                        Ok(())
+                    },
+                    |_, decision| match super::append_recovery_class(decision, &source, true) {
+                        Some("stale-target") => { replans += 1; true }
+                        _ => false,
+                    },
+                    |_| Ok(()));
+                (text, result, replans)
+            })
+        }).collect();
+        let outcomes: Vec<_> = members.into_iter().map(|member| member.join().unwrap()).collect();
+        for (text, result, _) in &outcomes {
+            assert!(result.is_ok(), "{text}: {result:?}");
+        }
+        let total: u32 = outcomes.iter().map(|(_, _, replans)| replans).sum();
+        assert!(total as usize >= K - 1, "the first round alone refuses K-1 members ({total})");
+        let h = host.lock().unwrap();
+        let mut lines = h.lines.clone(); lines.sort();
+        let mut expected: Vec<String> = (0..K).map(|index| format!("member-{index} text")).collect(); expected.sort();
+        assert_eq!(lines, expected, "every member's text landed exactly once");
+        assert_eq!(h.root, K as u64);
+        let mut nonces = h.nonces.clone(); nonces.sort(); nonces.dedup();
+        assert_eq!(nonces.len(), h.nonces.len(), "each call carried its own nonce");
+        assert_eq!(h.nonces.len(), K + total as usize, "one call per attempt");
+        drop(h);
+        let _ = crate::replan::take_count();
+        let _ = crate::take_host_decision();
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
