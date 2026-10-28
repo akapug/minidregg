@@ -16,6 +16,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import sys
 import time
 
 HERE=Path(__file__).resolve().parent
@@ -214,6 +215,41 @@ class Journey:
             'sourceCommit':os.environ.get('J14_ORACLE_ORCHESTRATION_COMMIT'),'driverSha256':sha(HERE/'j14-oracle.py')})
         j.restart_daemons=prior_daemons
         return j
+
+    @classmethod
+    def adopt_checkpoint_source(cls,path,reason):
+        """Explicit reviewed helper update before first controller staging."""
+        os.umask(0o077)
+        expected=Path(os.environ['JOURNEY_STEP_DIR'])/'oracle'
+        if path.parent!=expected or path.is_symlink():raise ValueError('source adoption needs retained checkpoint')
+        metadata=path.stat()
+        if metadata.st_uid!=os.getuid() or metadata.st_mode&0o077:raise ValueError('source adoption requires private checkpoint custody')
+        value=read(path)
+        if value.get('protocol')!='mini-j14-checkpoint-v1' or value.get('nextPhase') not in RESUMABLE:
+            raise ValueError('source adoption is limited to pre-worker checkpoints')
+        if value['state'].get('controller') or (expected/'worker').exists():
+            raise ValueError('source adoption cannot replace staged controller custody')
+        if not isinstance(reason,str) or not 1<=len(reason)<=400:raise ValueError('source adoption requires a bounded explanation')
+        j=cls.__new__(cls);j.root=expected;j.logs=expected/'commands';j.lock_root()
+        if j.frontier()[0]!=value['state']['counter']:raise ValueError('source adoption refuses newer native work')
+        for source,digest in value['pins'].items():
+            if sha(source)!=digest:raise ValueError('prior source/native input changed before adoption')
+        for proof in value['basis']:
+            if sha(proof['path'])!=proof['sha256']:raise ValueError('prior checkpoint evidence changed')
+        roles=['deploy/spk-host/install-user-world','deploy/spk-host/controller-world.py']
+        pins=dict(value['pins']);changed={}
+        for rel in roles:
+            old=[source for source in pins if source.endswith('/'+rel)]
+            if len(old)!=1:raise ValueError('source adoption role is ambiguous')
+            source=old[0];new=str(REPO/rel);digest=sha(new)
+            changed[rel]={'previousPath':source,'previousSha256':pins.pop(source),'path':new,'sha256':digest}
+            pins[new]=digest
+        value['pins']=pins;value['state']['installer']=str(REPO/'deploy/spk-host/install-user-world');value['state']['c']['repo']=str(REPO)
+        value['basis']=[*value['basis'],{'path':str(path),'sha256':sha(path)}]
+        value['sourceAdoption']={'previousCheckpoint':str(path),'sha256':sha(path),'reason':reason,'roles':changed}
+        value['sourceCommit']=os.environ.get('J14_ORACLE_ORCHESTRATION_COMMIT')
+        output=expected/f"checkpoint-{value['state']['counter']:04d}-source-successor.json"
+        write(output,value);return output
 
     def restore_services(self):
         for item in self.restart_daemons:
@@ -437,7 +473,11 @@ class Journey:
         path=Path(selected)
         if not path.is_absolute():raise ValueError('worker release path must be absolute')
         previous=sha(self.runtime);deadline=time.monotonic()+1800
-        write(self.root/'worker-wait.json',{'releasePath':str(path),'previousRuntimeSha256':previous,'maximumWaitSeconds':1800})
+        wait_record={'releasePath':str(path),'previousRuntimeSha256':previous,'maximumWaitSeconds':1800}
+        retained=self.root/'worker-wait.json'
+        if retained.exists():
+            if read(retained)!=wait_record:raise ValueError('retained worker release wait differs')
+        else:write(retained,wait_record)
         while not path.exists():
             if time.monotonic()>=deadline:raise TimeoutError('worker release not supplied; native Store and application attempts retained')
             time.sleep(1)
@@ -534,7 +574,7 @@ class Journey:
         for name in ['hhost','hermes','hprov','hdisp']:
             files.append({'source':str(self.homes/name/'keys/mini.key'),'destination':f'keys/{name}.key'})
         prepare=self.root/'worker-prepare.json';write(prepare,{'protocol':'mini-controller-worker-prepare-v1','task':self.task('controller'),
-            'files':files,'directories':['bootstrap/namespace','requests','requests/inbox','worker-work/.hermes','worker-work/.cache','worker-work/.config','worker-work/.local/share'],
+            'files':files,'directories':['bootstrap/namespace','requests','requests/inbox','requests/registrations','worker-work/.hermes','worker-work/.cache','worker-work/.config','worker-work/.local/share'],
             'launcherDirectory':str(launcher),'runtimeRoot':str(runtime)})
         self.fixed('controller-worker-prepare',prepare,self.bins,self.c['operatorSocket'],self.c['publicSocket'])
         self.controller=True
@@ -558,9 +598,10 @@ class Journey:
         home=Path(self.layout['controllerHome']);grain=Path(self.c['controllerRoot'])
         room=read(self.workspaces/'alice/refs/lab.json')
         registration=self.controller_run('mini',['hermes-handoff','--action','registration','--dir',grain/'state/resource-workspace',
-            '--task',self.task('controller'),'--room-cell',room['target'],'--inbox',home/'requests/inbox','--socket',home/'operator/mini.sock'])
-        regs=self.root/'registrations';regs.mkdir();shutil.copyfile(registration,regs/(self.task('controller')+'.json'))
-        registry=self.run('registry',[self.mini,'hermes-handoff','--action','registry','--registrations',regs,'--socket',self.c['operatorSocket']])
+            '--task',self.task('controller'),'--room-cell',room['target'],'--inbox',home/'requests/inbox','--socket',self.c['publicSocket']])
+        registry=self.controller_run('mini',['hermes-handoff','--action','registry','--registrations',home/'requests/registrations',
+            '--socket',self.c['publicSocket']],files=[{'source':str(registration),'destination':'requests/registrations/'+self.task('controller')+'.json'}])
+        if not read(registry)['residents']:raise ValueError('native registry found no eligible controller custody')
         (self.homes/'alice/hermes').mkdir(exist_ok=True);shutil.copyfile(registry,self.homes/'alice/hermes/registry.json')
         summoned=self.shell('alice','summon lab as librarian --budget 1000').read_text()
         match=re.search(r'hand-off in (.+)',summoned)
@@ -571,7 +612,7 @@ class Journey:
         update=self.root/'summoned-controller.json';write(update,config)
         self.fixed('controller-config',update);self.controller_config()
         dispatched=self.controller_run('mini',['hermes-handoff','--action','dispatch','--registration',home/'requests/registration.json',
-            '--bundle',home/'requests/handoff.json','--socket',home/'operator/mini.sock'],files=[
+            '--bundle',home/'requests/handoff.json','--socket',self.c['publicSocket']],files=[
                 {'source':str(registration),'destination':'requests/registration.json'},
                 {'source':str(outbox/'handoff.json'),'destination':'requests/handoff.json'}])
         self.inbox=read(dispatched)['inbox'];self.prompts=0
@@ -737,4 +778,7 @@ def main():
         raise
     finally:j.cleanup()
 
-if __name__=='__main__':main()
+if __name__=='__main__':
+    if len(sys.argv)==4 and sys.argv[1]=='adopt-checkpoint-source':
+        print(Journey.adopt_checkpoint_source(Path(sys.argv[2]),sys.argv[3]))
+    else:main()

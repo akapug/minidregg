@@ -54,6 +54,14 @@ class CheckpointTests(unittest.TestCase):
                 self.assertEqual(resumed.resume_phase,'prepare_application')
                 self.assertEqual(resumed.counter,7);self.assertEqual(resumed.processes,[])
                 resumed._lock.close()
+                adopted=driver.Journey.adopt_checkpoint_source(checkpoint,'reviewed helper relocation before staging')
+                successor=driver.read(adopted)
+                self.assertEqual(successor['pins'][str(binary)],retained['pins'][str(binary)])
+                self.assertEqual(successor['sourceAdoption']['sha256'],driver.sha(checkpoint))
+                staged=root/'staged-checkpoint.json';changed=driver.json.loads(driver.json.dumps(retained))
+                changed['state']['controller']=True;driver.write(staged,changed);staged.chmod(0o600)
+                with self.assertRaisesRegex(ValueError,'staged controller'):
+                    driver.Journey.adopt_checkpoint_source(staged,'must refuse installed custody')
                 binary.write_bytes(b'changed executable')
                 with self.assertRaisesRegex(ValueError,'input changed'):
                     driver.Journey.from_checkpoint(checkpoint)
