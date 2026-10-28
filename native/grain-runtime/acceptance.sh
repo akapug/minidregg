@@ -527,6 +527,13 @@ case $(uname -s) in
     CONTROLLER_UNIT=mini-grain-controller@7001.service
     CONTROLLER_MARKER="mini-grain-acceptance:$EVIDENCE"
     mkdir -m 700 "$EVIDENCE/worker-work" "$EVIDENCE/worker-runtime"
+    # The worker's Hermes profile (/workspace/.hermes in the sandbox). Hermes takes its MCP tool-call
+    # timeout only from this file (the ACP adapter drops session-supplied ones), and the runtime
+    # refuses to reserve a scoped prompt without one of at least the worker wall minus 60 s
+    # (provider_profile::require_worker_mcp_timeout), as hermes-journey writes it.
+    mkdir -m 700 "$EVIDENCE/worker-work/.hermes"
+    printf 'timeouts:\n  mcp:\n    tool_call: 600\n' >"$EVIDENCE/worker-work/.hermes/config.yaml"
+    chmod 600 "$EVIDENCE/worker-work/.hermes/config.yaml"
     cp "$GRAIN" "$EVIDENCE/worker-runtime/grain-runtime"
     cp "$HERE/fixture/hermes-acp" "$EVIDENCE/worker-runtime/hermes-acp"
     cp "$HERE/fixture/sleep-fixed" "$EVIDENCE/worker-runtime/sleep-fixed"
