@@ -32,12 +32,26 @@ fn operation_of(name: &str) -> Option<u64> {
 }
 
 /// Nothing is retained: no pending, held, attempted, owned, uncertain or
-/// unresolved work, no provider settlement or retry gate.
+/// unresolved work, and no provider retry gate.
 pub(crate) fn quiescent(journal: &Journal) -> bool {
     quiescence::retained(journal, quiescence::ResidentEvidence::NotConfigured)
         .iter().all(|field| *field == "connection_fenced")
-        && journal.provider_settlement.is_none()
         && journal.provider_retry_gate.is_none()
+}
+
+/// The first operation whose files stay even when quiescent: the latest
+/// provider settlement (the next model call's continuity anchor, which names
+/// its provider attempt and settle directories) and the current resident
+/// prompt's origin are kept with everything after them.
+fn keep_from(journal: &Journal) -> u64 {
+    let mut keep = journal.next_operation_id;
+    if let Some(s) = &journal.provider_settlement {
+        keep = keep.min(s.provider_attempt_id).min(s.operation_id);
+    }
+    if let Some(o) = &journal.resident_prompt_origin {
+        keep = keep.min(o.prompt_operation_id);
+    }
+    keep
 }
 
 fn outcome(path: &Path) -> Value {
@@ -95,7 +109,7 @@ fn transient(homes: &[&Path], workspaces: &[&Path]) -> Result<Vec<PathBuf>> {
 /// `attempts/`). A no-op unless the journal is quiescent.
 pub(crate) fn compact(journal: &Journal, state: &Path, workspaces: &[&Path], homes: &[&Path]) -> Result<Option<Summary>> {
     if !quiescent(journal) { return Ok(None); }
-    let end = journal.next_operation_id;
+    let end = keep_from(journal);
     let mut groups: BTreeMap<u64, Vec<String>> = BTreeMap::new();
     for entry in fs::read_dir(state).map_err(|e| format!("state: {e}"))? {
         let name = entry.map_err(|e| e.to_string())?.file_name();
@@ -246,6 +260,14 @@ mod tests {
         assert_eq!(compact(&journal, &state, &[], &[]).unwrap(), None, "an unresolved note blocks compaction");
         // Ids at or above nextOperationId are never touched.
         journal.unresolved_external.clear();
+        journal.next_operation_id = 2;
+        assert_eq!(keep_from(&journal), 2);
+        // The current resident prompt and everything after it stay.
+        journal.next_operation_id = 3;
+        journal.resident_prompt_origin = Some(resident_origin::ResidentPromptOrigin { resident_prompt_id: "a".repeat(64),
+            prompt_sha256: "b".repeat(64), prompt_operation_id: 2, session_id: None });
+        assert_eq!(keep_from(&journal), 2);
+        journal.resident_prompt_origin = None;
         journal.next_operation_id = 2;
         compact(&journal, &state, &[], &[]).unwrap().unwrap();
         assert!(!state.join("attempt-0000000000000001").exists() && state.join("attempt-0000000000000002").exists());

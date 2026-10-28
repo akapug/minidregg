@@ -112,9 +112,10 @@ def main():
     require(re.fullmatch('[0-9a-f]{16}',store) is not None and state==grains/store/'host', 'native Store root differs')
     require(config['unit']==args.expected_unit and config['grainsRoot']==str(grains)
             and config['journalDir']==str(resident.parent), 'resident coordinates differ')
-    endpoint=f.get('brokerSocket','/run/mini-spk-broker.sock')
-    require(endpoint in ('/run/mini-spk-broker.sock',str(grains/'broker.sock')) and
-            all(v.get('brokerSocket','/run/mini-spk-broker.sock')==endpoint for v in (broker,profile,config)),
+    # spk-host's broker_endpoint::resolve: the one endpoint is <grains>/runtime-<store>/broker.sock.
+    endpoint=str(grains/f'runtime-{store}'/'broker.sock')
+    require(grains.name==store and f.get('brokerSocket',endpoint)==endpoint and
+            all(v.get('brokerSocket')==endpoint for v in (broker,profile,config)),
             'fixture broker endpoint differs from native/root pins')
     tag=checked(grains/'broker/units'/args.expected_unit,private=True)
     require(tag.read_text()==store+'\n', 'root broker custody tag belongs to another Store')

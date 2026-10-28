@@ -155,10 +155,14 @@ def quoted_heap(view):
 
 
 def with_extra_heap(body, heap, payer):
-    """`body` declaring `heap` cells in its `extra` (other extra fields kept), paid by `payer`, the
-    submitter's (account, spend capability)."""
+    """`body` declaring `heap` cells in its `extra` (other extra fields kept). The added envelope is paid by
+    the account the body names; only a body naming none (`'0'`) is filled with `payer`, the submitter's
+    (account, spend capability). A row that names an account on purpose (a refusal row naming the purse)
+    keeps it: rewriting it to the submitter's own would turn the refusal into an ordinary paid turn."""
     extra = dict(body.get('extra') or {k: '0' for k in MAXIMUM})
     extra['heap'] = str(heap)
+    if str(body.get('account', '0')) not in ('', '0'):
+        return dict(body, extra=extra)
     return dict(body, extra=extra, account=str(payer[0]), accountCapability=str(payer[1]))
 
 

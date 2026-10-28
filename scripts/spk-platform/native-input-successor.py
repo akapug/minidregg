@@ -73,7 +73,7 @@ def adopt(adapter,old_path,target_path,reason):
         manifest,artifacts=adapter.validate(target_input)
         require(target_input["profileResult"]!=old_input["profileResult"],"retain original profile result; supply native rebind result")
         state,profile,profile_value=f.discover_profile(root,f.absolute(target_input["miniConfig"]),
-            f.absolute(target_input["grainsRoot"]),artifacts,target_input.get("brokerSocket","/run/mini-spk-broker.sock"),
+            f.absolute(target_input["grainsRoot"]),artifacts,target_input.get("brokerSocket"),
             f.absolute(target_input["profileResult"]),f.absolute(target_input["initStoreResult"]))
         rebound=load(target_input["profileResult"])
         require(rebound.get("protocol")=="mini-spk-profile-rebind-v1","native profile rebind result required")
