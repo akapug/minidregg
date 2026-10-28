@@ -2056,6 +2056,21 @@ mod tests {
     }
 
     #[test]
+    fn in_session_tools_are_the_operators_alone_and_need_a_payload() {
+        use mini_sdk::host_operations::{TOOL_AUTHOR, TOOL_INSPECT, TOOL_SIGNATURES};
+        for operation in [TOOL_AUTHOR, TOOL_INSPECT, TOOL_SIGNATURES] {
+            let valid = [operation, 4, 0, b'k', b'i', b'n', b'd', b'x'];
+            assert!(super::allowed_operator_operation(&valid), "operator route refused {operation}");
+            assert!(!super::allowed_operation(&valid, false) && !super::allowed_operation(&valid, true),
+                "a member's socket admitted {operation}");
+            assert!(!super::allowed_operator_operation(&[operation]), "{operation} with no payload");
+            let mut oversized = vec![0; super::HOST_MAX_FRAME + 1];
+            oversized[0] = operation;
+            assert!(!super::allowed_operator_operation(&oversized));
+        }
+    }
+
+    #[test]
     fn platform_install_is_the_operators_alone_and_meter_refill_stays_closed() {
         use mini_sdk::host_operations::{
             METER_REFILL_ASSEMBLE, METER_REFILL_LOOKUP, METER_REFILL_PLAN, METER_REFILL_SUBMIT,
