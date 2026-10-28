@@ -231,3 +231,23 @@ records. A started source operation without a validated native outcome is
 inspect-only; a wrapper's successful exit never establishes source admission.
 The retained final checkpoint is uncertain and is not eligible for automatic
 continuation.
+
+An abruptly terminated resident can leave its agent Unix socket behind. New
+listeners inspect that socket before START and reclaim it at bind only when its
+owner, permissions and controller ACL match exactly, a bounded connection is
+refused, and its inode has not changed. A private lock prevents competing
+listeners from reclaiming each other's endpoint. Live or uncertain endpoints
+are refused.
+
+For a retained world using an older pinned resident, a qualified newer helper
+can perform this transport repair separately:
+
+```sh
+spk-host grain reclaim-agent-socket ABSOLUTE_SOCKET CONTROLLER_UID
+```
+
+The command returns the removed socket's device, inode, owner and mode. It
+submits no Mini operation and changes no application journal or runtime pin.
+The caller must still establish the native lifecycle boundary and use its
+normal STOP/START or never-begun START continuation. Removing a dead socket
+does not settle an uncertain native operation.
