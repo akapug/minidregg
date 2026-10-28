@@ -30,8 +30,11 @@ What still holds for a commuting append, each by the existing code, not by this 
   (`DeclaredResourceController.readRequest` takes `before.payload.root`, and
   `ResourceTargetAdmission.observe` compares it with that same cell), never at the signed
   root;
-* replay: the command's operation marker is a nullifier, and independently a landed append
-  replayed at any later state is refused `duplicateAddress` (`ReplayRefused` below).
+* replay: the command's operation marker is a durable nullifier.  An admitted invocation's
+  data intent consumes it (`AdmittedConsumesMarker`), the durable engine never un-consumes a
+  nullifier (`DurableEngineSuffix.consumed_install`), and on a ground where it is spent the
+  same command never prepares (`ReplayRefused`), at every later state.  The root pin was
+  never the replay guard.
 
 ## What is stated
 
@@ -41,11 +44,14 @@ What still holds for a commuting append, each by the existing code, not by this 
   targets through): the same for `prepareTarget`, its post packed, its refusals alike.
 * Teeth: `KeptPin` (every other content command is still refused `staleTarget` away from
   its planned root), `CommutesExactly` (the exemption is exactly nonempty `createAtom`
-  lists), `ReplayRefused` (a landed append never lands again).
+  lists), `AdmittedConsumesMarker` and `ReplayRefused` (a landed append never lands again).
 * Satisfiable: `MovedRootAccepted` (an append planned over a root that is not the loaded
-  cell's lands, and its line is the document's).
+  cell's lands on a blinded document cell, its line is the document's, and the kernel's
+  ratchet runs from the cell it met).
 * Premise inhabitation: `TwoAppendersOneObservation` (two members plan from one
   observation; both land, in either order, each line once, in landing order).
+* `CommutingPrepare`'s accepting pole is the Effects one over `ContentProofs.blindedStore`
+  (`Effects.Revival.Statements.HostMovedRootAccepted`, through `PrepareFactors`).
 
 Scope, said in the same breath: per target, at the controller.  The Effects declaration of
 the same arm (`Effects.Revival.Statements.ContentAgreement`, `contentSpec.commutes`) states
@@ -53,7 +59,7 @@ the agreement and carries its own teeth (`ContentCommuteTeeth`).
 -/
 module
 
-public import Kernel.ResourceTransaction
+public import Kernel.DeclaredResourceController
 
 @[expose] public section
 
@@ -133,31 +139,38 @@ def CommutesExactly : Prop :=
     (content.actions ≠ [] ∧ ∀ action ∈ content.actions,
       ∃ atom kind payload, action = .createAtom atom kind payload)
 
-/-- **A landed append never lands again.**  Replayed at the post it produced, under any
-planned root, the same command is refused `duplicateAddress` (its first atom is present). -/
+/-- **An admitted invocation spends its operation marker.**  Its durable data intent carries
+the marker's replay nullifier, whatever its targets. -/
+def AdmittedConsumesMarker : Prop :=
+  ∀ {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {ground : Ground deployment}
+    {command : Command} {prepared : PreparedInvocation deployment profile ambient ground command}
+    {signed : SignedCommand} (accepted : AcceptedInvocation prepared signed)
+    (shape : PhysicalShape prepared),
+    invocationNullifier ground.authority.domain
+        (operationMarker ground.authority.domain profile.semantics command) ∈
+      (accepted.dataIntent shape).nullifiers
+
+/-- **A landed append never lands again.**  On any ground where a command's operation
+marker is spent, that command does not prepare: no root, current or planned, matters. -/
 def ReplayRefused : Prop :=
-  ∀ (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient) (command : Command)
-    (kind : ResourceKind) (id : Nat) (capability : CapabilityId) (version : Nat)
-    (root root' : Digest) (content : ContentResource.Command) (observe : Option CapabilityId)
-    (epoch : Option Nat) (roster : Option ObjectAudienceRoster.Roster)
-    (pre : ContentResource.ContentCell) (post : Store.Store Hyperdocument.layout),
-    content.commutes = true →
-    computeTarget snapshot semantics ambient command
-        (contentTarget kind id capability version root content observe epoch roster) pre = .ok post →
-    computeTarget snapshot semantics ambient command
-        (contentTarget kind id capability version root' content observe epoch roster)
-        (CellState.materialize _ post) = .error (.content .duplicateAddress)
+  ∀ {F : Type} [Field F] (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (ground : Ground deployment) (command : Command),
+    ground.markerSpent (operationMarker ground.authority.domain profile.semantics command) = some true →
+    IsEmpty (PreparedInvocation deployment profile ambient ground command)
 
 /-! ## Witness data -/
 
 /-- The witness document's root element. -/
 def witnessRoot : ElementId := ⟨⟨0⟩⟩
 
-/-- A cell holding one empty document, as `createDocument` leaves it. -/
+/-- A blinded cell holding one empty document, as birth (the blinding, `⟨0⟩`, the store of
+`Effects.Revival.ContentProofs.blindedStore`) and then `createDocument` leave it. -/
 def witnessStore (document : DocumentId) (author : PrincipalRef) (operation : OperationId) :
     ContentResource.ContentStore :=
-  ((0 : ContentResource.ContentStore).set ⟨.documents, document⟩
-      (some (⟨witnessRoot, ⟨0⟩, author, operation⟩ : DocumentRecord))).set ⟨.elements, witnessRoot⟩
+  (((0 : ContentResource.ContentStore).set ⟨.blinding, ()⟩ (some (⟨0⟩ : Digest))).set
+      ⟨.documents, document⟩ (some (⟨witnessRoot, ⟨0⟩, author, operation⟩ : DocumentRecord))).set
+    ⟨.elements, witnessRoot⟩
     (some (⟨document, none, .container [], author, operation, operation, none⟩ : ElementRecord))
 
 /-- The witness cell of target `id`, its document written by `command₀`'s author. -/
@@ -171,8 +184,9 @@ def witnessLine (n : Nat) : ContentResource.Command := ⟨[.createAtom ⟨⟨n�
 
 /-! ## Satisfiable and premise inhabitation -/
 
-/-- **Satisfiable.**  On the witness document, a line planned over some root that is not
-the loaded cell's lands, and it is the document's one line. -/
+/-- **Satisfiable.**  On the blinded witness document, a line planned over some root that is
+not the loaded cell's lands, it is the document's one line, and the post's blinding is one
+ratchet step of the blinding of the cell the line met. -/
 def MovedRootAccepted : Prop :=
   ∀ (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
     (command₀ command : Command) (id : Nat) (capability : CapabilityId)
@@ -182,7 +196,10 @@ def MovedRootAccepted : Prop :=
       computeTarget snapshot semantics ambient command
           (contentTarget .object id capability ContentResource.commandVersion root (witnessLine 1)
             observe epoch roster) (witnessCell snapshot semantics command₀ id capability) = .ok post ∧
-      ContentResource.childrenOf post witnessRoot = [ContentResource.atomElement ⟨⟨1⟩⟩]
+      ContentResource.childrenOf post witnessRoot = [ContentResource.atomElement ⟨⟨1⟩⟩] ∧
+      StoreCodec.blindingKey HyperdocumentCell.contentWire post =
+        some (HyperdocumentCell.contentBlinding.step ambient.height
+          ((HyperdocumentCell.contentWire.valueStream .blinding).encode (⟨0⟩ : Digest)))
 
 /-- **Premise inhabitation.**  Two members plan from ONE observation of the witness document
 (both name its root).  Either may land first; the other then lands over the moved cell; each

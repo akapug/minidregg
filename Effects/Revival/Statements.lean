@@ -386,6 +386,15 @@ def HostAccepted : Prop :=
   ∃ (op : ContentResource.Command) (ctx : HostCtx) (cell cell' : HostCell),
     hostTargetDispatch 1 (ContentResource.commandStream.encode op) ctx cell = .ok cell'
 
+/-- **Satisfiable (a moved root).**  A commuting content command whose plan names a root that
+is NOT the cell's (`contentFresh` false) is admitted by the host dispatch: the accepting pole
+of `Kernel.ContentCommutingAppend.CommutingPrepare` (through `PrepareFactors`), over the blinded
+sample cell. -/
+def HostMovedRootAccepted : Prop :=
+  ∃ (op : ContentResource.Command) (ctx : HostCtx) (cell cell' : HostCell),
+    op.commutes = true ∧ contentFresh ctx cell = false ∧
+    hostTargetDispatch 1 (ContentResource.commandStream.encode op) ctx cell = .ok cell'
+
 /-! ## §8. The deployed receiver factors through the dispatcher.
 
 `HostKeystone` is about `hostTargetDispatch`, a wrapper this file writes; its contract alone
