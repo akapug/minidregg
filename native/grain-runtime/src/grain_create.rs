@@ -101,6 +101,21 @@ struct ProviderPurse {
     gateway: serde_json::Map<String, Value>,
 }
 
+/// Application calls use their own grain and signer, independent of the
+/// foreground tool allowance and the provider purse. The transport contains
+/// the operator's socket and peer pins; identity and parent witnesses are
+/// filled from the admitted birth and delegation, as for the provider.
+#[derive(Deserialize, Serialize, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DispatchPurse {
+    key: Key,
+    task: String,
+    observe_capability: String,
+    control_capability: String,
+    budget: String,
+    transport: serde_json::Map<String, Value>,
+}
+
 #[derive(Deserialize, Serialize, Clone)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct Spec {
@@ -126,6 +141,8 @@ pub(crate) struct Spec {
     tool_charges: Charges,
     #[serde(default)]
     provider: Option<ProviderPurse>,
+    #[serde(default)]
+    dispatch: Option<DispatchPurse>,
     #[serde(default)]
     room: Option<Value>,
     /// `S`, `M` or `L`: grant upstream Hermes's sandbox toolsets up to the
@@ -248,13 +265,49 @@ impl Spec {
                 }
             }
         }
+        if let Some(d) = &self.dispatch {
+            for (value, what) in [(&d.key.subject, "dispatch.key.subject"), (&d.task, "dispatch.task"),
+                (&d.observe_capability, "dispatch.observeCapability"), (&d.control_capability, "dispatch.controlCapability"),
+                (&d.budget, "dispatch.budget")] {
+                canonical_decimal(value, what)?;
+            }
+            if [&self.task, &self.tool_task].contains(&&d.task)
+                || [&self.owner.subject, &self.worker_key.subject].contains(&&d.key.subject)
+                || [&self.owner.key, &self.worker_key.key].contains(&&d.key.key)
+                || self.provider.as_ref().is_some_and(|p| p.task == d.task || p.key.subject == d.key.subject || p.key.key == d.key.key) {
+                return Err("dispatch task, subject and key must be distinct from parent, tool and provider".into());
+            }
+            for owned in ["task", "subject", "capability", "queryCapability", "custodyKey", "parentCapability", "parentObserveCapability"] {
+                if d.transport.contains_key(owned) {
+                    return Err(format!("dispatch.transport must not set {owned}; create fills it"));
+                }
+            }
+            // Decode before signing a birth: unknown or incomplete transport
+            // fields must not leave a successfully born but unusable grain.
+            let task: DispatchTask = serde_json::from_value(d.controller("0"))
+                .map_err(|e| format!("dispatch.transport: {e}"))?;
+            for (value, name) in [(&task.reserve, "dispatch.reserve"), (&task.charge, "dispatch.charge")] {
+                canonical_decimal(value, name)?;
+            }
+            if task.reserve.parse::<u64>().ok().zip(task.charge.parse::<u64>().ok())
+                .is_none_or(|(r, c)| r == 0 || c > r) {
+                return Err("dispatch charge must fit a positive u64 reserve".into());
+            }
+            if task.host_uid == 0 || !task.socket_path.is_absolute()
+                || task.operator_socket.as_ref().is_none_or(|p| !p.is_absolute() || p == &self.host_socket || p == &task.socket_path)
+                || task.reserve_signer.is_none() {
+                return Err("dispatch requires an external non-root host, distinct operator socket and reserve signer".into());
+            }
+        }
         if self.task == self.tool_task {
             return Err("task and toolTask must differ".into());
         }
-        let caps = [&self.capabilities.parent_observe, &self.capabilities.parent_control,
+        let mut caps = vec![&self.capabilities.parent_observe, &self.capabilities.parent_control,
             &self.capabilities.tool_observe, &self.capabilities.tool_control];
+        if let Some(p) = &self.provider { caps.extend([&p.observe_capability, &p.control_capability]); }
+        if let Some(d) = &self.dispatch { caps.extend([&d.observe_capability, &d.control_capability]); }
         if caps.iter().collect::<std::collections::BTreeSet<_>>().len() != caps.len() {
-            return Err("the four capability IDs must be distinct".into());
+            return Err("all parent, tool, provider and dispatch capability IDs must be distinct".into());
         }
         if !matches!(self.worker.network.as_str(), "none" | "host") {
             return Err(format!("worker.network must be none or host, not {:?}", self.worker.network));
@@ -303,6 +356,9 @@ impl Spec {
         if let Some(p) = &self.provider {
             private_key(&p.key.key, "provider.key.key")?;
         }
+        if let Some(d) = &self.dispatch {
+            private_key(&d.key.key, "dispatch.key.key")?;
+        }
         executable(&self.worker.launcher, "worker.launcher")?;
         if self.worker.launcher.file_name().and_then(|n| n.to_str()) != Some("bwrap") {
             return Err("worker.launcher must be the bwrap launcher".into());
@@ -342,6 +398,11 @@ impl Spec {
             resources.push(json!({"kind":"object","storage":"grain","target":p.task,"owner":p.key.subject,
                 "ownerCapability":p.observe_capability,"controlCapability":p.control_capability,"budget":p.budget}));
         }
+        if let Some(d) = &self.dispatch {
+            workers.push(json!(d.key.subject));
+            resources.push(json!({"kind":"object","storage":"grain","target":d.task,"owner":d.key.subject,
+                "ownerCapability":d.observe_capability,"controlCapability":d.control_capability,"budget":d.budget}));
+        }
         resources[0]["workerSubjects"] = json!(workers);
         let resources = Value::Array(resources);
         json!({"subject":self.sponsor.subject,"nonce":self.nonce,
@@ -353,7 +414,7 @@ impl Spec {
             "grants":self.sponsor.grants})
     }
 
-    fn controller(&self, witness: &str, provider_witness: Option<&str>) -> Value {
+    fn controller(&self, witness: &str, provider_witness: Option<&str>, dispatch_witness: Option<&str>) -> Value {
         let state = self.root.join("state");
         let mut args = vec![
             "--workspace".to_owned(), self.worker.workspace.display().to_string(),
@@ -388,11 +449,27 @@ impl Spec {
             }
             config["providerTask"] = Value::Object(task);
         }
+        if let (Some(dispatch), Some(witness)) = (&self.dispatch, dispatch_witness) {
+            config["dispatchTask"] = dispatch.controller(witness);
+        }
         if let Some(class) = &self.sandbox {
             let sandbox = crate::sandbox_tools::Sandbox::for_class(class).expect("sandbox class checked in validate");
             config["sandbox"] = serde_json::to_value(sandbox).expect("sandbox serializes");
         }
         config
+    }
+}
+
+impl DispatchPurse {
+    fn controller(&self, witness: &str) -> Value {
+        let mut task = self.transport.clone();
+        for (key, value) in [("task", json!(self.task)), ("subject", json!(self.key.subject)),
+            ("capability", json!(self.observe_capability)), ("queryCapability", json!(self.observe_capability)),
+            ("custodyKey", json!(self.key.key)), ("parentCapability", json!(witness)),
+            ("parentObserveCapability", json!(witness))] {
+            task.insert(key.into(), value);
+        }
+        Value::Object(task)
     }
 }
 
@@ -574,6 +651,11 @@ pub(crate) fn create_phase(spec_path: &Path, phase: Phase) -> Result<Value> {
         None => None,
     };
 
+    let dispatch_witness = match &spec.dispatch {
+        Some(d) => Some(delegate_witness(&spec, &work, &owner_ws, "dispatch-witness", &d.key.subject)?),
+        None => None,
+    };
+
     // 3. The controller's private state and the tool subject's workspace.
     let state = spec.root.join("state");
     if !state.exists() {
@@ -592,7 +674,7 @@ pub(crate) fn create_phase(spec_path: &Path, phase: Phase) -> Result<Value> {
     }
 
     // 4. The controller config, decoded through the controller's own type.
-    let config = spec.controller(&witness, provider_witness.as_deref());
+    let config = spec.controller(&witness, provider_witness.as_deref(), dispatch_witness.as_deref());
     let typed: Config = serde_json::from_value(config.clone()).map_err(|e| format!("controller config refused by its own type: {e}"))?;
     // The same checks `serve` runs at open, so a bad config refuses here.
     crate::validate(&typed).map_err(|e| format!("controller config refused by the controller's validation: {e}"))?;
@@ -607,7 +689,7 @@ pub(crate) fn create_phase(spec_path: &Path, phase: Phase) -> Result<Value> {
     Ok(json!({"type":"mini-grain-created-v1","task":spec.task,"toolTask":spec.tool_task,
         "owner":spec.owner.subject,"worker":spec.worker_key.subject,"witnessCapability":witness,
         "config":config_path,"configSha256":sha256_bytes(&bytes)?,
-        "providerWitnessCapability":provider_witness,"birthOutcome":birth.join("outcome.json"),
+        "providerWitnessCapability":provider_witness,"dispatchWitnessCapability":dispatch_witness,"birthOutcome":birth.join("outcome.json"),
         "next":format!("install-controller --config {} ... (user shape) or --system --service-user ACCOUNT (root registration)", config_path.display())}))
 }
 
@@ -661,7 +743,7 @@ mod tests {
     #[test]
     fn create_writes_a_config_the_controller_type_accepts() {
         let spec: Spec = serde_json::from_value(spec_json()).unwrap();
-        let config = spec.controller("8790", None);
+        let config = spec.controller("8790", None, None);
         let typed: Config = serde_json::from_value(config.clone()).unwrap();
         assert_eq!(typed.task, "8751");
         assert_eq!(config["toolTask"]["parentCapability"], "8790");
@@ -681,12 +763,64 @@ mod tests {
         let intent = spec.birth_intent(&json!({}));
         assert_eq!(intent["birth"]["resources"][0]["workerSubjects"], json!(["9", "10"]));
         assert_eq!(intent["birth"]["resources"][2]["owner"], "10");
-        let config = spec.controller("8790", Some("8791"));
+        let config = spec.controller("8790", Some("8791"), None);
         assert_eq!(config["providerTask"]["parentCapability"], "8791");
         assert_eq!(config["providerTask"]["subject"], "10");
         serde_json::from_value::<Config>(config).unwrap();
         with["provider"]["gateway"]["task"] = json!("1");
         assert!(serde_json::from_value::<Spec>(with).unwrap().check_values().unwrap_err().contains("must not set task"));
+    }
+
+    fn with_dispatch() -> Value {
+        let mut spec = spec_json();
+        spec["dispatch"] = json!({"key":{"key":"/d","subject":"11","noPrerotation":true},
+            "task":"8754","observeCapability":"8783","controlCapability":"8784","budget":"50",
+            "transport":{"reserve":"2","charge":"1","socketPath":"/operator/reverse.sock",
+                "hostUid":1001,"operatorSocket":"/controller/operator.sock","operatorPeerUid":0,
+                "reserveSigner":{"role":"4","index":"0","publicKey":"00".repeat(32),
+                    "keyId":"1111","keyEpoch":"2"}}});
+        spec
+    }
+
+    #[test]
+    fn create_dispatch_binds_birth_witness_and_controller_to_same_purse() {
+        let spec: Spec = serde_json::from_value(with_dispatch()).unwrap();
+        spec.check_values().unwrap();
+        let birth = spec.birth_intent(&json!({}));
+        assert_eq!(birth["birth"]["resources"][0]["workerSubjects"], json!(["9", "11"]));
+        let resource = &birth["birth"]["resources"][2];
+        let typed: Config = serde_json::from_value(spec.controller("8790", None, Some("8792"))).unwrap();
+        let dispatch = typed.dispatch_task.unwrap();
+        assert_eq!(dispatch.task, resource["target"]);
+        assert_eq!(dispatch.subject, resource["owner"]);
+        assert_eq!(dispatch.capability, resource["ownerCapability"]);
+        assert_eq!(dispatch.parent_capability, "8792");
+        assert_eq!(dispatch.parent_observe_capability, "8792");
+        assert_ne!(dispatch.task, typed.tool_task.unwrap().task);
+        assert_eq!(dispatch.operator_peer_uid, Some(0));
+    }
+
+    #[test]
+    fn create_dispatch_refuses_role_aliases_and_transport_overrides_before_birth() {
+        for (field, value) in [("task", json!("8751")), ("task", json!("8752")),
+            ("observeCapability", json!("8761")), ("controlCapability", json!("8783"))] {
+            let mut bad = with_dispatch(); bad["dispatch"][field] = value;
+            assert!(serde_json::from_value::<Spec>(bad).unwrap().check_values().is_err(), "accepted {field}");
+        }
+        for (field, value) in [("subject", json!("8")), ("subject", json!("9")), ("key", json!("/w"))] {
+            let mut bad = with_dispatch(); bad["dispatch"]["key"][field] = value;
+            assert!(serde_json::from_value::<Spec>(bad).unwrap().check_values().is_err(), "accepted {field}");
+        }
+        for (field, value) in [("task", json!("999")), ("unknown", json!("x")),
+            ("charge", json!("3")), ("reserve", json!("0")), ("hostUid", json!(0)),
+            ("operatorSocket", json!("/s"))] {
+            let mut bad = with_dispatch(); bad["dispatch"]["transport"][field] = value;
+            assert!(serde_json::from_value::<Spec>(bad).unwrap().check_values().is_err(), "accepted {field}");
+        }
+        for field in ["socketPath", "hostUid", "reserveSigner", "operatorSocket"] {
+            let mut bad = with_dispatch(); bad["dispatch"]["transport"].as_object_mut().unwrap().remove(field);
+            assert!(serde_json::from_value::<Spec>(bad).unwrap().check_values().is_err(), "missing {field}");
+        }
     }
 
     #[test]
