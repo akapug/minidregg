@@ -922,7 +922,11 @@ class Journey:
 
     def resident(self,label):
         home=Path(self.layout['controllerHome']);grain=Path(self.c['controllerRoot']);self.prompts+=1
-        source=self.root/f'resident-{label}.json';destination=f'requests/resident-{label}.json'
+        # A resumed journey may reuse a test label, but its earlier source and
+        # controller-side copy remain evidence. Name each invocation by the
+        # retained command frontier instead of overwriting that evidence.
+        name=f'resident-{label}-{self.counter+1:04d}.json'
+        source=self.root/name;destination=f'requests/{name}'
         write(source,{'type':'mini-hermes-room-resident-v1','controller':str(grain/'controller.json'),'inbox':self.inbox,
             'state':str(grain/'state/resident'),'maxPrompts':self.prompts,'intervalSeconds':5})
         result=self.controller_run('grain-runtime',['hermes-room','resident',home/destination],files=[{'source':str(source),'destination':destination}])

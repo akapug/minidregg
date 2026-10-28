@@ -46,6 +46,28 @@ class ReadinessTests(unittest.TestCase):
             worker.join(timeout=4);self.assertFalse(worker.is_alive())
 
 class AttachmentContinuationTests(unittest.TestCase):
+    def test_resident_repeated_label_preserves_every_prior_request(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);world=root/'world';world.mkdir()
+            driver.write(world/'genesis.json',{'factoryControllerCapability':'17'})
+            legacy=root/'resident-refused.json';legacy.write_text('prior failed invocation')
+            j=driver.Journey.__new__(driver.Journey);j.root=root;j.prompts=0;j.counter=10
+            j.layout={'controllerHome':str(root/'home')};j.c={'controllerRoot':str(root/'home/grain'),
+                'world':str(world),'sponsorWorkspace':str(root/'sponsor')};j.inbox=str(root/'inbox');j.mini=root/'mini'
+            copied=[]
+            def controller_run(program,args,files):
+                copied.append(files[0]);j.counter+=1
+                self.assertEqual(str(args[-1]),str(root/'home'/files[0]['destination']))
+                return Path(files[0]['source'])
+            def run(*args,**kwargs):j.counter+=1
+            with patch.object(j,'controller_run',side_effect=controller_run),patch.object(j,'run',side_effect=run):
+                first=j.resident('refused');before=first.read_bytes();second=j.resident('refused')
+            self.assertNotEqual(first,second)
+            self.assertEqual(first.read_bytes(),before)
+            self.assertEqual(legacy.read_text(),'prior failed invocation')
+            self.assertEqual([driver.read(f['source'])['maxPrompts'] for f in copied],[1,2])
+            self.assertEqual(len({f['destination'] for f in copied}),2)
+
     def test_later_phase_uses_exact_retained_orchestrator_and_refuses_changed_bytes(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);helper=root/'retained.py';helper.write_text('# retained implementation')
