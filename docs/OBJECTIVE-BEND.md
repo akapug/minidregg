@@ -8,10 +8,9 @@ calculus, **Core4**; the proof-producing checker types that term; the demand mac
 runs it. Mini supplies what the language does not: durable identity (objects), current
 authority, admission, funding and the laws that judge every write.
 
-This page is the overview. It is written against the code; where it names a theorem, the
-theorem is pinned in its module's contract manifest, `scripts/gates/objective-manifest/<Module>.tsv`
-(Core4, kernel and front end alike). Companion
-documents:
+This page is the overview, written against the code. A theorem it names is checked by
+`lake build ObjectiveProofs` (`scripts/check-objective-proofs.sh proofs`), and its axioms are
+pinned in its module by `#guard_msgs` over `#print axioms`. Companion documents:
 
 - [OBJECTIVE-BEND-TUTORIAL.md](OBJECTIVE-BEND-TUTORIAL.md): the language from zero, every
   result re-run by a gate.

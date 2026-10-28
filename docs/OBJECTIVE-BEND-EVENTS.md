@@ -3,8 +3,8 @@
 Reference for activities: the language construct, its semantics and typing, and the kernel
 that persists activities on objects, delivers their responses, and runs calls and sends
 between objects. The overview is [OBJECTIVE-BEND.md](OBJECTIVE-BEND.md); the original design
-record is [EVENTS-DESIGN.txt](../EVENTS-DESIGN.txt). Theorems are cited by name; each is pinned in its module's contract manifest,
-`scripts/gates/objective-manifest/<Module>.tsv`.
+record is [EVENTS-DESIGN.txt](../EVENTS-DESIGN.txt). Theorems are cited by name; their axioms are pinned in their modules by `#guard_msgs` over
+`#print axioms`.
 
 ## The construct
 
