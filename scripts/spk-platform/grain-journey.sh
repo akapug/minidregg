@@ -32,6 +32,13 @@ HOST=${GRAIN_HOST:-$BIN/minidregg-host}
 GRAINS_ROOT=${GRAINS_ROOT:?store-specific grains root required}
 # Explicit native CLI/profile pin; never a native environment-selected endpoint.
 BROKER_SOCKET=${BROKER_SOCKET:?store-specific broker socket required}
+# Every resident `mini` starts (consent, codec) keeps its socket, lock and PID file in the world's
+# own anchor directory, never in the operator's shared $HOME: worlds share no state, and
+# stop-residents.sh stops a world's residents from these PID files alone. Short on purpose:
+# a Unix socket path is bounded.
+MINI_CONSENT_ANCHOR_DIR=${MINI_CONSENT_ANCHOR_DIR:-$RUN/a}
+mkdir -p -m 700 "$MINI_CONSENT_ANCHOR_DIR"
+export MINI_CONSENT_ANCHOR_DIR
 MINI=$BIN/mini
 SPK_HOST=$BIN/spk-host
 STORE=$RUN/store
@@ -589,8 +596,9 @@ enroll() (
       --dir "$EV/$label-close-g$gen-attempt" >"$EV/$label-close-g$gen.stdout"
     confirmed "$EV/$label-close-g$gen-attempt/outcome.json"
   fi
-  # The ticket was issued by the share under the base label (a), not by this repeat (a2).
-  anchor=$EV/${label%[0-9]}-ticket-$ticket/issue/receipt-anchor.json
+  # The share issued the ticket under the label this enrollment carries (a repeat enrolls under
+  # the base label a; the second session shares and enrolls as b2).
+  anchor=$EV/$label-ticket-$ticket/issue/receipt-anchor.json
   [ -s "$anchor" ] || fail "enroll $label: the ticket's issue receipt anchor is missing: $anchor"
   count=$(jq -er .receipt.acceptedCount "$anchor") || fail "enroll $label: $anchor has no acceptedCount"
   jq -n --argjson basis "$ROLE_BASIS" --arg index "$((count - 1))" --arg ticket "$ticket" --arg pkg "$((app + 1))" \
