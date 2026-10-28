@@ -297,7 +297,7 @@ Rough total: **100–150K lines** — half the budget, for the whole re-expressi
    soundness argument amenable to full Lean mechanization with an honest, *inhabited*
    floor, (b) **recursion support** (hard requirement — light-client aggregation is the
    product), (c) transparency, (d) field faithfulness we can commit to at line one.
-   Survey in flight → `docs/PROOF-SYSTEM-SURVEY.md`.
+   Survey: `docs/PROOF-SYSTEM-SURVEY.md`; decision: Selvage (`docs/decisions/D-0004-why-selvage.md`).
 3. **Hyperedge-as-primitive design pass: approved.** Forests as tree-shaped instances;
    delegation edges as executed attenuations to be re-examined in the pass.
 4. **Frontier items: undecided** — refusal-reason export, trace-shaped guards,

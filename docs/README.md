@@ -115,7 +115,7 @@ read the declaration it names.
 ## Proof systems
 
 - [Selvage recomposition](SELVAGE-RECOMPOSITION.md): the design ledger and its obligations.
-- [Selvage completeness](SELVAGE-COMPLETE.md), [receipt encoding (OB-3)](OB3-RECEIPT-ENCODING.md),
+- [Selvage completeness](SELVAGE-COMPLETE.md), [native prover plan](PROVER-PLAN.md), [receipt encoding (OB-3)](OB3-RECEIPT-ENCODING.md),
   [proof-system survey](PROOF-SYSTEM-SURVEY.md).
 - Decisions: [authenticated column history](decisions/D-0001-authenticated-column-history.md),
   [canonical hyperedge kernel](decisions/D-0002-canonical-hyperedge-kernel.md),
