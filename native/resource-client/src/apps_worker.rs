@@ -479,7 +479,7 @@ impl Worker {
             return Err(refused("classRefused", "class is S, M, L or auto"));
         }
         let mut docs = Map::new();
-        for key in ["birthSource", "birthReceipt", "delegation"] {
+        for key in ["birthSource", "birthReceipt", "delegation", "shareDelegation"] {
             let Some(doc) = request.get(key).filter(|d| d.is_object()) else {
                 return Err(refused("birthRequired", format!("the request carries no {key} document; the install is a member turn (docs/APP-MARKET-2026-10-27.md §3)")));
             };
@@ -545,7 +545,8 @@ impl Worker {
                 let source = work.join("birth-source.json");
                 let receipt = work.join("birth-outcome.json");
                 let delegation = work.join("delegation.json");
-                for (path, doc) in [(&source, &docs["birthSource"]), (&receipt, &docs["birthReceipt"]), (&delegation, &docs["delegation"])] {
+                let share = work.join("share-delegation.json");
+                for (path, doc) in [(&source, &docs["birthSource"]), (&receipt, &docs["birthReceipt"]), (&delegation, &docs["delegation"]), (&share, &docs["shareDelegation"])] {
                     if !path.exists() {
                         if let Err(e) = write_json(path, doc) {
                             return undecided("stateUnavailable", e, &retry);
@@ -1096,6 +1097,18 @@ impl ProcessWorld {
     }
 }
 
+/// The capability a share ticket is issued under. The issuer is the management subject (the dispatch
+/// admission requires it), so the capability must be HELD by the manager: the child of the member's
+/// app owner capability that the member delegated to the manager at install, not the owner capability
+/// itself (the member holds that one).
+pub(crate) fn share_delegate_capability(delegated: &Value, app: &str, manager: &str) -> Result<String> {
+    let field = |k: &str| delegated.get(k).and_then(Value::as_str).unwrap_or("");
+    if field("type") != "minidregg-delegated-reference-v1" || field("target") != app || field("recipient") != manager || field("capability").is_empty() {
+        return Err(format!("shareDelegationRefused: the retained delegation must be a minidregg-delegated-reference-v1 of app {app} to the manager {manager}"));
+    }
+    Ok(field("capability").to_owned())
+}
+
 /// The genesis facts a worker session birth cites.
 #[derive(Debug, PartialEq)]
 pub(crate) struct WorldShape { pub factory: String, pub factory_observe: String, pub spend: String, pub template: Value, pub tariff: Value }
@@ -1182,6 +1195,7 @@ impl World for ProcessWorld {
         let launch = read_json(&state_app.join("install").join("launch-descriptor").join("launch-inspection.json"))?;
         let birth_source = read_json(&work.join("birth-source.json"))?;
         let appcap = birth_source.pointer("/applicationGrainBirth/applicationBirth/application/appOwnerCapability").and_then(Value::as_str).ok_or("birth source lacks appOwnerCapability")?.to_owned();
+        let app_delegate = share_delegate_capability(&read_json(&work.join("share-delegation.json")).map_err(|e| format!("shareDelegationRequired: the install retained no share delegation ({e}); reinstall"))?, app, &self.management_subject)?;
         let pkgcap = birth_source.pointer("/applicationGrainBirth/applicationBirth/application/packageOwnerCapability").and_then(Value::as_str).ok_or("birth source lacks packageOwnerCapability")?.to_owned();
         let (app_state, _) = self.query(work, &format!("{label}-app-state"), app, &appcap, base + 300, "resource")?;
         let pversion = app_state["cell"]["entries"].as_array().and_then(|e| e.iter().find(|x| x["key"]["field"] == "2")).and_then(|x| x["value"].as_str()).unwrap_or("0").to_owned();
@@ -1200,7 +1214,7 @@ impl World for ProcessWorld {
                     "sessionCapability":cap.to_string(),"appObserveCapability":appcap,"ticketObserveCapability":(tcap + 2).to_string()},
                 "ceiling":{"basis":role_basis(&self.role_basis, &schema),"added":[],"removed":[],"roleSchemaRoot":schema["root"],"roleVersion":schema["version"]},
                 "issueNonce":(base + 500).to_string(),"notAfter":"1000000000"},
-                "issuer":m,"appDelegateCapability":appcap,"ticketOwnerCapability":tcap.to_string(),"ticketControlCapability":(tcap + 1).to_string()},
+                "issuer":m,"appDelegateCapability":app_delegate,"ticketOwnerCapability":tcap.to_string(),"ticketControlCapability":(tcap + 1).to_string()},
                 "payer":m,"funding":[],"sourceCapabilities":[self.world_shape(&read_json(&self.genesis)?)?.spend],
                 "tool":{"task":self.tool_task,"capability":self.tool_capability,"observeCapability":self.tool_capability},
                 "parent":{"task":self.parent_task,"capability":self.parent_capability,"observeCapability":self.parent_capability}});
@@ -1394,6 +1408,16 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_share_is_issued_under_the_capability_the_manager_holds() {
+        let delegated = json!({"type":"minidregg-delegated-reference-v1","recipient":"8","kind":"object","target":"13827490942341725565","capability":"777"});
+        assert_eq!(super::share_delegate_capability(&delegated, "13827490942341725565", "8").unwrap(), "777");
+        for (wrong_app, wrong_manager) in [("1", "8"), ("13827490942341725565", "9")] {
+            assert!(super::share_delegate_capability(&delegated, wrong_app, wrong_manager).unwrap_err().starts_with("shareDelegationRefused"));
+        }
+        assert!(super::share_delegate_capability(&json!({"type":"minidregg-delegated-reference-v1","recipient":"8","target":"1"}), "1", "8").is_err());
+    }
 
     #[test]
     fn world_shape_is_read_from_the_genesis_not_the_workroom_constants() {
