@@ -46,27 +46,71 @@ passes 16–21 on lane/audit-platform.
 
 ### Build status (read this first)
 
-Nothing on this lane has gone green yet.
-- dregg-ref: build 3 of e2dae30ee is queued on closure-lock behind the nightly's m7_reference.
-  - PID file /build/lanes/lean-audit-c-build.pid, log /build/lanes/lean-audit-c-build3.log.
-  - The box tree is 138320fbe with the diff to e2dae30ee applied uncommitted. `git fetch` fails
-    there because of object dirs owned by another user; don't chown them.
-- hbox: a build of b7412f32a, the tip, is running. On the coordinator's instruction it was
-  seeded with the warm base's `.lake/packages` only, so our modules build cold.
-  - Tree: /othersys/lanes/lean-audit-c/src (`git archive`, `LANE_SHA`).
+Nothing on this lane has gone green yet. The green candidate before the merge is d95bf65ea
+(b7412f32a plus the build-3 red fixes). The successor starts from the conversion's landing
+sha (see the order below).
+- dregg-ref, build 3 of e2dae30ee: red in two places, both fixed in d95bf65ea.
+  - `enrolObserve` call sites still passed `profile`.
+  - ParticipantFactoryProvisioning lacked an import.
+- dregg-ref, build 4: queued on closure-lock.
+  - PID file /build/lanes/lean-audit-c-build.pid, log /build/lanes/lean-audit-c-build4.log,
+    script /build/lanes/lean-audit-c-build.sh, run as `lanes`.
+  - Box tree /build/lanes/lean-audit-c: 138320fbe plus the diff to e2dae30ee, with d95bf65ea's
+    four fixed files copied in, all uncommitted.
+  - `git fetch` fails there because of object dirs owned by another user; don't chown them.
+    Infra (aed5ecf506cf840af) has the closure.pid permission problem.
+- hbox: a build of d95bf65ea's content.
+  - Tree /othersys/lanes/lean-audit-c/src, from `git archive` of b7412f32a plus the four
+    fixes, with `LANE_SHA`.
   - Script build.sh, PID file build.pid, log build.log, `SWARM_MEM_MAX=40G`.
-  - Targets: build 3's list plus every module L1d touched.
-  - Fix reds forward there with `lake env lean FILE`, then send the integrator the green sha.
-  - Remove /othersys/lanes/lean-audit-c when the lane ends (the README there says so).
-- Not covered by the targets, so `lake env lean` them after a green:
-  - tests/lean/LifetimeGrantSourceAdversary.lean;
-  - the share-issue and lifetime-grant Host/*Authoring files.
-- Likely reds:
-  - L1c's list: PayEnrolReceiver.ambientCurrent_iff's `cases`; the anonymous constructors of the
-    grain Pending, the pay Planned structures and provisioning; the provisioning
-    `let ⟨record, recordExact⟩ ←`; `_root_` payEnrolAmbient.
-  - L1d's: `CompletionCustodianKey.select_pinned`'s split chain; the four Cores' `rcases … split at`;
-    `Read.current`'s split.
+  - Seeded with the warm base's packages only, so our modules build cold.
+  - Remove /othersys/lanes/lean-audit-c when the lane ends.
+- Not covered by the targets: tests/lean/LifetimeGrantSourceAdversary.lean and the
+  share-issue and lifetime-grant Host/*Authoring files.
+- Likely reds still to come:
+  - the anonymous constructors of the grain Pending, the pay Planned structures and provisioning;
+  - `CompletionCustodianKey.select_pinned`'s split chain;
+  - the four Cores' `rcases … split at`.
+
+### Item 5 ruling
+
+The coordinator ruled: `Intent.credit` persists in `IntentRecord` (durable log frame v3,
+`DREGG.DURABLE.IMAGE` v3). It ships with the module conversion's re-genesis, so the
+StoreEpoch moves once, and the codec-shape pins move only through the integrator's regen.
+The auditor accepted the design (pass 21) and the deployed keystones (pass 21 addendum).
+M2 is on lane/lean-audit-c-m2, unbuilt.
+
+### Order with the module conversion (agreed with iter-speed, a0fd127abfb9aac75)
+
+1. The module conversion lands on main first.
+2. L1d merges iter-speed's landing sha into lane/lean-audit-c.
+   - Header conflicts are expected in the 7 files whose imports L1d changed: the four
+     completion admissions, ParticipantFactoryProvisioning, NativeHostContext and
+     ResourceBirthPolicyController.
+   - Take L1d's side of the HEADER hunks only and merge body hunks normally.
+   - Then run `python3 scripts/lean-modularize.py <those files> Kernel/CompletionCustodianKey.lean`.
+     Never hand-edit a converted header.
+3. Check each changed file and its direct importers with `scripts/pipeline/lane-check FILE`
+   on a box tree, never with `lake env lean`.
+   - A hidden-body failure: run `scripts/module-hidden-bodies.sh FILE` and add its lines to
+     PER_FILE in lean-modularize.py, then re-convert.
+4. Re-prove green on the merged tree and send that sha to the integrator.
+5. Then put the M2 commits on top and run the same modularize step for
+   Kernel/MeterRefillReceiver.lean and NativeHostReplay.
+   - In the converted NativeHostReplay every `Derived` literal names each defaulted field
+     (`… := none`). That works around Lean 4.30's private-ctor-plus-defaults bug. Rewrite
+     M2's `meterRefill` Derived literal the same way.
+6. M2 lands in one integration build with the integrator's codec-shapes regen, so the
+   StoreEpoch moves once.
+
+The M2 commits, on lane/lean-audit-c-m2 (pushed, unbuilt):
+- f21407b2e: the protocol.
+- a7f17b12d and ab030d544: the refill family, the registry and K3.
+- e870fd03e: the spec twin retired and the deployed teeth.
+
+The auditor accepted the deployed K1/K2/K3 (pass 21 and its addendum). K3's proof needs
+per-arm work on a box: about 25 arms carry the intent as a structure field with an
+`intentExact`.
 
 ### Done since L1c (all unbuilt)
 
