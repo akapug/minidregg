@@ -116,7 +116,7 @@ for attempt in $(seq 1 100); do [[ ! -S $broker ]] || break; sleep 0.1; done
 # The grain-host profile over the EXISTING config (no genesis, no services).
 jq -n --arg manifest "$out/manifest.json" --arg commit "$(jq -r .sourceCommit "$manifest")" --arg config "$config" --arg sha "$(sha256sum "$config" | cut -d ' ' -f1)" \
   --arg private "$private_socket" --arg grains "$grains" --arg broker "$broker" --arg semantics "$(jq -r .expectedSemantics "$genesis")" \
-  --arg cseed "$completion_seed" --arg cpub "$completion_pub" --arg bwrap "$bwrap" --arg root "$out/profile" \
+  --arg cseed "$completion_seed" --arg cpub "$completion_pub" --arg bwrap "$bwrap" --arg root "$out/evidence/profile" \
   --arg ms "$management_subject" --arg mk "$management_key" --arg mseed "$mgmt_seed" --arg mpub "$mgmt_pub" '
   {protocol:"mini-spk-same-store-profile-input-v1",manifest:$manifest,expectedSourceCommit:$commit,miniConfig:$config,miniConfigSha256:$sha,
    privateSocket:$private,grainsRoot:$grains,brokerSocket:$broker,semantics:$semantics,completionSeed:$cseed,completionPublicKey:$cpub,bwrap:$bwrap,root:$root,
