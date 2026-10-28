@@ -513,7 +513,7 @@ fn request_id() -> Result<String> {
 
 /// `install`: the member's choice, retained under the workspace before it is
 /// sent, so a lost reply is answered by the exact retry of the same id.
-fn install(mut args: Args, paths: &Paths, as_json: bool, dir: Option<OsString>) -> Result<()> {
+fn install(mut args: Args, paths: &Paths, as_json: bool, dir: Option<std::ffi::OsString>) -> Result<()> {
     let selector = text_flag(&mut args, "app")?.ok_or("install requires --app APP-ID|PACKAGE-ID")?;
     let class = text_flag(&mut args, "class")?.unwrap_or_else(|| "auto".into());
     if !matches!(class.as_str(), "S" | "M" | "L" | "auto") {
