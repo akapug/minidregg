@@ -210,6 +210,8 @@ struct FilePin {
     size: u64,
     modified_seconds: i64,
     modified_nanoseconds: i64,
+    changed_seconds: i64,
+    changed_nanoseconds: i64,
 }
 
 fn file_pin(path: &Path) -> Result<FilePin> {
@@ -230,6 +232,8 @@ fn file_pin(path: &Path) -> Result<FilePin> {
         size: metadata.len(),
         modified_seconds: metadata.mtime(),
         modified_nanoseconds: metadata.mtime_nsec(),
+        changed_seconds: metadata.ctime(),
+        changed_nanoseconds: metadata.ctime_nsec(),
     })
 }
 
@@ -249,7 +253,9 @@ fn codec_host_pin(config: &Config, environment: Option<&std::ffi::OsStr>) -> Res
     let configured = file_pin(&config.host)?;
     let selected = file_pin(&selected_path)?;
     let sha256 = sha256_file(&config.host)?;
-    if selected.size != configured.size || sha256_file(&selected_path)? != sha256 {
+    if selected.size != configured.size
+        || (selected.identity != configured.identity && sha256_file(&selected_path)? != sha256)
+    {
         return Err("selected local codec Host differs from configured Host bytes".into());
     }
     if file_pin(&config.host)? != configured || file_pin(&selected_path)? != selected {
@@ -261,6 +267,20 @@ fn codec_host_pin(config: &Config, environment: Option<&std::ffi::OsStr>) -> Res
         selected,
         sha256,
     })
+}
+
+fn codec_host_unchanged(
+    config: &Config,
+    environment: Option<&std::ffi::OsStr>,
+    original: &CodecHostPin,
+) -> Result<bool> {
+    // Hash both images once at admission; subsequent snapshots retain their
+    // file identity, size, mode and mtime/ctime instead of rereading the images.
+    let selected_path = mini_sdk::local::select_semantic_host(None, environment, &config.host)
+        .map_err(|e| e.to_string())?;
+    Ok(selected_path == original.selected_path
+        && file_pin(&config.host)? == original.configured
+        && file_pin(&selected_path)? == original.selected)
 }
 
 fn process_ids(root: &File) -> Result<Vec<u32>> {
@@ -449,7 +469,7 @@ pub(super) fn prove_quiescent_controller(config: &Config) -> Result<()> {
         if identity(&open_root(&path)?)? != expected_root
             || file_pin(&config.mini)? != mini
             || std::env::var_os("MINI_LOCAL_HOST") != local_host_environment
-            || codec_host_pin(config, local_host_environment.as_deref())? != host
+            || !codec_host_unchanged(config, local_host_environment.as_deref(), &host)?
             || file_pin(&config.host_config)? != settings
             || sha256_bytes(&bounded_regular_file(&config.host_config, 1_048_576)?)?
                 != settings_hash
@@ -587,6 +607,8 @@ mod tests {
             size: 123,
             modified_seconds: 1,
             modified_nanoseconds: 0,
+            changed_seconds: 1,
+            changed_nanoseconds: 0,
         };
         let mini = pin(1);
         let host = pin(2);
@@ -689,6 +711,8 @@ mod tests {
         fs::set_permissions(&config.host_config, fs::Permissions::from_mode(0o600)).unwrap();
         let host = codec_host_pin(&config, Some(local_host.as_os_str())).unwrap();
         let mini = file_pin(&config.mini).unwrap();
+        assert!(codec_host_unchanged(&config, Some(local_host.as_os_str()), &host).unwrap());
+        assert!(!codec_host_unchanged(&config, None, &host).unwrap());
         assert_eq!(host.selected_path, local_host);
         assert_ne!(host.configured.identity, host.selected.identity);
         let bytes = |path: &Path| path.as_os_str().as_bytes().to_vec();
@@ -736,6 +760,7 @@ mod tests {
         fs::rename(&replacement, &local_host).unwrap();
         let replaced = codec_host_pin(&config, Some(local_host.as_os_str())).unwrap();
         assert_ne!(replaced, host);
+        assert!(!codec_host_unchanged(&config, Some(local_host.as_os_str()), &host).unwrap());
         assert!(validate_codec_pair(
             &pair,
             &config,
@@ -749,6 +774,7 @@ mod tests {
         fs::set_permissions(&local_host, fs::Permissions::from_mode(0o700)).unwrap();
         // Same length defeats an accidental size-only equivalence check.
         fs::write(&local_host, b"evil reviewed executable").unwrap();
+        assert!(!codec_host_unchanged(&config, Some(local_host.as_os_str()), &replaced).unwrap());
         assert!(codec_host_pin(&config, Some(local_host.as_os_str()))
             .unwrap_err()
             .contains("differs from configured Host bytes"));
