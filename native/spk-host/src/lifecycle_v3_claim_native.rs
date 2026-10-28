@@ -2,6 +2,7 @@
 //! committed callback inspection. Physical INSTALL/START remains gated until
 //! the linked source receiver, completion, and volume joins qualify.
 
+use crate::io_context::IoContext;
 use crate::dispatch_author::SignerPin;
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
 use crate::hostd::VerifiedBegin;
@@ -530,8 +531,8 @@ fn checked_assembled(
         .parent()
         .ok_or_else(|| invalid("v3 claim attempt parent absent"))?;
     private_dir(parent)?;
-    if fs::read(parent.join("lifecycle-claim-v3-active.json"))? != assembled.active_marker
-        || fs::read(attempt_dir.join("claim-v3.bin"))? != assembled.ingress
+    if fs::read(parent.join("lifecycle-claim-v3-active.json")).ctx("read", &(parent.join("lifecycle-claim-v3-active.json")))? != assembled.active_marker
+        || fs::read(attempt_dir.join("claim-v3.bin")).ctx("read", &(attempt_dir.join("claim-v3.bin")))? != assembled.ingress
         || assembled.begin_sha256 != hex(&Sha256::digest(&begin.ingress))
         || assembled.descriptor_sha256 != hex(&Sha256::digest(&launch.descriptor().canonical))
     {
