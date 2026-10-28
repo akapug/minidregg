@@ -69,6 +69,10 @@ impl IdView {
             overflow_uid: n("/proc/sys/fs/overflowuid"), overflow_gid: n("/proc/sys/fs/overflowgid") })
     }
 }
+/// Two recorded limits. Inside the namespace every unmapped owner reads as the overflow id, so a
+/// root-owned pin re-owned to a different UNMAPPED uid still reads as unchanged here; the provenance
+/// key (dev, ino, mode, and for files the whole stable state) and the mode check still catch a
+/// replaced inode or a widened mode. A mapped non-overflow id is refused (a chown seen from inside).
 /// `current` and `observed` are in-namespace views and must agree; the pin's `original`
 /// owner (taken before entry) must translate to exactly that view.
 fn owners_agree(original: (u32,u32), current: (u32,u32), observed: (u32,u32), view: &IdView) -> bool {
