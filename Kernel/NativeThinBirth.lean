@@ -619,6 +619,8 @@ section Completeness
 
 open private Minidregg.Kernel.NativeHost.slot from Kernel.NativeHost
 
+local notation "hostSlot" => Minidregg.Kernel.NativeHost.slot
+
 variable {F : Type} [Field F] {profile : CanonicalRuntimeProfile.Profile F}
   {deployment : CanonicalCellRegistry.Deployment} {pins : FactoryPins}
   {durable : ResourceBirthController.Concrete.Durable} {d : Descriptor Registry}
@@ -682,10 +684,10 @@ theorem slot_checked
     (policy : (⟨deployed.factory⟩ : PolicyId) = pins.policyId)
     {snapshot : CredentialAuthorityDomain.Snapshot} {marker role index : Nat}
     {built : NativeHostCodec.SigningSlot}
-    (ok : slot snapshot marker role index (branchRequest prepared height branch) = .ok built) :
+    (ok : hostSlot snapshot marker role index (branchRequest prepared height branch) = .ok built) :
     built.role = role ∧ built.index = index ∧
       ∀ n, checkHeader n marker (birthValues deployed d branch).2 built.header = .ok () := by
-  unfold slot at ok
+  unfold Minidregg.Kernel.NativeHost.slot at ok
   cases signed : CredentialSignatureAdmission.signingHeader snapshot marker
       (branchRequest prepared height branch) with
   | error reason => simp [signed, bind, Except.bind, Except.mapError] at ok
@@ -752,12 +754,10 @@ theorem validateChecks_pins {config : NativeHost.Config} {seed : DurableReceiver
     (validated : NativeHost.validateChecks config seed logStart directory? logical? lawful? = .ok built) :
     built.federation = config.federation ∧ built.policyId = ⟨config.deployment.factoryId⟩ := by
   unfold NativeHost.validateChecks at validated
-  simp only [bind, Except.bind, pure, Except.pure] at validated
-  repeat' split at validated
+  repeat' (first | split at validated | (simp only [bind, Except.bind] at validated))
   all_goals first
-    | (simp only [Except.ok.injEq] at validated; subst validated; exact ⟨rfl, rfl⟩)
-    | cases validated
-    | skip
+    | (cases validated; done)
+    | (simp only [pure, Except.pure, Except.ok.injEq] at validated; subst validated; exact ⟨rfl, rfl⟩)
 
 private theorem map_ok {α β ε : Type} {f : α → β} {value : Except ε α} {result : β}
     (mapped : value.map f = .ok result) : ∃ a, value = .ok a ∧ f a = result := by
@@ -836,21 +836,21 @@ theorem honest_plan_accepted : HonestPlanAcceptedStatement := by
   simp only [prep, Except.mapError, NativeHost.check] at planned
   split at planned
   · cases planned
-  cases fac : slot prepared.prepared.authority.snapshot prepared.descriptor.authorityNullifier 0 0
+  cases fac : hostSlot prepared.prepared.authority.snapshot prepared.descriptor.authorityNullifier 0 0
       (branchRequest prepared.prepared height .factory) with
   | error reason => simp [fac] at planned
   | ok factorySlot =>
-  cases aut : slot prepared.prepared.authority.snapshot prepared.descriptor.authorityNullifier 1 0
+  cases aut : hostSlot prepared.prepared.authority.snapshot prepared.descriptor.authorityNullifier 1 0
       (branchRequest prepared.prepared height .authority) with
   | error reason => simp [fac, aut] at planned
   | ok authoritySlot =>
   cases alloc : (List.finRange prepared.descriptor.createRequests.length).mapM (fun index =>
-      slot prepared.prepared.authority.snapshot prepared.descriptor.authorityNullifier 2 index.val
+      hostSlot prepared.prepared.authority.snapshot prepared.descriptor.authorityNullifier 2 index.val
         (branchRequest prepared.prepared height (.allocation index))) with
   | error reason => simp [fac, aut, alloc] at planned
   | ok allocationSlots =>
   cases src : (List.finRange prepared.descriptor.resourceBatch.operations.length).mapM (fun index =>
-      slot prepared.prepared.authority.snapshot prepared.descriptor.authorityNullifier 3 index.val
+      hostSlot prepared.prepared.authority.snapshot prepared.descriptor.authorityNullifier 3 index.val
         (branchRequest prepared.prepared height (.source index))) with
   | error reason => simp [fac, aut, alloc, src] at planned
   | ok sourceSlots =>
