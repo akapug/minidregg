@@ -255,7 +255,8 @@ class ComposedTests(unittest.TestCase):
         scenario = c.Scenario(value, "spec.json")
         scenario.state["connectorResultPin"] = {"path": str(connector), "sha256": c.sha(connector)}
         scenario.persist()
-        with mock.patch.object(c.subprocess, "run", side_effect=run):
+        # The binding is a stand-in; the adapter boundary is mocked, so is its preflight.
+        with mock.patch.object(c.subprocess, "run", side_effect=run), mock.patch.object(c, "preflight", return_value={}):
             result = scenario.run()
         self.assertEqual(result["phases"], {"residents": "pass", "restart": "pass"})
         self.assertEqual([argv[argv.index("--through") + 1] for argv in calls], ["verify", "retain"])
@@ -267,7 +268,7 @@ class ComposedTests(unittest.TestCase):
     def test_typed_resident_cannot_run_without_actual_connector_result(self):
         binding = self.root / "resident-binding.json"; binding.write_text("{}")
         value = self.spec(phases=["residents"], residents={"binding": str(binding)})
-        with mock.patch.object(c.subprocess, "run") as native:
+        with mock.patch.object(c.subprocess, "run") as native, mock.patch.object(c, "preflight", return_value={}):
             result = c.Scenario(value, "spec.json").run()
         self.assertIn("requires retained actual connector", result["phases"]["residents"])
         native.assert_not_called()
@@ -292,8 +293,8 @@ class ComposedTests(unittest.TestCase):
         shell = Shell(self.value["members"])
         shell.fail[r"submit t1-overlap-invite-ada"] = "undecided-after-attempt"
         first = self.scenario(self.spec(), shell).run()
-        self.assertTrue(first["phases"]["rooms"].startswith("stopped"))
-        self.assertEqual(first["pending"]["name"], "room:overlap:invite:ada:submit")
+        self.assertTrue(first["phases"]["rooms"].startswith("fail:"))
+        self.assertEqual(first["pending"]["rooms"]["name"], "room:overlap:invite:ada:submit")
         shell.receipts[("bo", "t1-overlap-invite-ada")] = "confirmed"
         second = self.scenario(self.spec(), shell).run()
         self.assertEqual(second["phases"], {"rooms": "pass"})
@@ -315,7 +316,7 @@ class ComposedTests(unittest.TestCase):
         shell.fail[r"submit t1-overlap-invite-ada"] = "undecided-after-attempt"
         self.scenario(self.spec(), shell).run()
         again = self.scenario(self.spec(), shell).run()
-        self.assertTrue(again["phases"]["rooms"].startswith("stopped"))
+        self.assertTrue(again["phases"]["rooms"].startswith("fail:"))
         self.assertIn("undecided", again["phases"]["rooms"])
         s = self.scenario(self.spec(), shell)
         pending = s.ledger.pending()
@@ -380,13 +381,13 @@ class ComposedTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "member inventory changed"):
             c.plan(value)
 
-    def test_a_stopped_phase_reports_later_phases_as_not_reached(self):
+    def test_a_red_phase_blocks_its_dependents_by_name(self):
         shell = Shell(self.value["members"])
         shell.fail[r"submit t1-overlap-invite-ada"] = "undecided-after-attempt"
         result = self.scenario(self.spec(phases=["rooms", "apps", "residents"]), shell).run()
-        self.assertTrue(result["phases"]["rooms"].startswith("stopped"))
-        self.assertTrue(result["phases"]["apps"].startswith("not reached: stopped at rooms; would be blocked"))
-        self.assertTrue(result["phases"]["residents"].startswith("not reached: stopped at rooms; would be blocked"))
+        self.assertTrue(result["phases"]["rooms"].startswith("fail:"))
+        self.assertTrue(result["phases"]["apps"].startswith("blocked: prerequisite rooms has not passed"))
+        self.assertTrue(result["phases"]["residents"].startswith("blocked: prerequisite rooms"))
 
     def connector_spec(self):
         journey = self.root / "journey-input.json"
@@ -431,8 +432,8 @@ class ComposedTests(unittest.TestCase):
                 self.adapter_response(self.saved_export(status="source-uncertain")),
                 self.adapter_response(self.saved_export())]) as run:
             first = c.Scenario(value, "spec.json").run()
-            self.assertTrue(first["phases"]["connector"].startswith("stopped:"))
-            self.assertEqual(first["pending"]["name"], "connector:journey")
+            self.assertTrue(first["phases"]["connector"].startswith("fail:"))
+            self.assertEqual(first["pending"]["connector"]["name"], "connector:journey")
             second = c.Scenario(value, "spec.json").run()
             self.assertEqual(second["phases"]["connector"], "pass")
             names = [Path(call.args[0][1]).name for call in run.call_args_list]
@@ -444,17 +445,18 @@ class ComposedTests(unittest.TestCase):
         with mock.patch.object(c.subprocess, "run", side_effect=[
                 self.adapter_response({}), self.adapter_response(self.saved_export(status="uncertain"))]) as run:
             first = c.Scenario(value, "spec.json").run()
-        self.assertEqual(first["pending"]["name"], "connector:journey")
+        self.assertEqual(first["pending"]["connector"]["name"], "connector:journey")
         Path(value["connector"]["journeyInput"]).write_text(json.dumps({"operation": "export-2"}))
         with mock.patch.object(c.subprocess, "run") as run:
             second = c.Scenario(value, "spec.json").run()
         run.assert_not_called()
         self.assertIn("journey input changed", second["phases"]["connector"])
-        self.assertEqual(second["pending"]["name"], "connector:journey")
+        self.assertEqual(second["pending"]["connector"]["name"], "connector:journey")
 
     def test_old_provision_only_pass_must_receive_the_export_before_passing(self):
         value = self.connector_spec()
         scenario = c.Scenario(value, "spec.json")
+        scenario.current = "connector"
         scenario.ledger.step("connector", lambda: None, scenario.attempt("old-provision"), reentrant=True)
         scenario.state["phases"]["connector"] = "pass"
         scenario.persist()
@@ -471,8 +473,8 @@ class ComposedTests(unittest.TestCase):
                          self.saved_export(callSha256="")):
             with mock.patch.object(c.subprocess, "run", return_value=self.adapter_response(response)):
                 result = c.Scenario(value, "spec.json").run()
-            self.assertTrue(result["phases"]["connector"].startswith("stopped:"))
-            self.assertEqual(result["pending"]["name"], "connector:journey")
+            self.assertTrue(result["phases"]["connector"].startswith("fail:"))
+            self.assertEqual(result["pending"]["connector"]["name"], "connector:journey")
 
     def documents_binding(self):
         path = self.root / "documents-binding.json"
