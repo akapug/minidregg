@@ -148,6 +148,7 @@ theorem fresh_retirement_steps_permanently :
         (by intro n hn; simp [freshRetirementIntent, intentOf, sealing] at hn)
         (by intro lane ne; cases lane <;> decide +kernel)
         (by decide +kernel)
+        (fun _ uncredited => absurd rfl uncredited)
         (by
           intro wr hw
           simp only [freshRetirementIntent, intentOf, List.map_cons, List.map_nil,

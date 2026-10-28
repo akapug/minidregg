@@ -100,7 +100,7 @@ def representsCheck {rootBytes : List UInt8 → Theory.TypedAuthorization.Digest
   txs.all (fun x => (w.journal x).isSome) &&
   -- the clock and the meter
   (match w.head with | some (h, _) => h == image.accepted.length | none => false) &&
-  allLanes.all (fun l => w.meter l == snap.model.available l)
+  allLanes.all (fun l => w.allowanceOf l == some (snap.model.available l))
 
 theorem lookupRecorded_isSome {C N E : Type} (x : TransactionId) :
     ∀ (l : List (TransactionId × DurableCommitProtocol.Intent TransactionId C N E)),

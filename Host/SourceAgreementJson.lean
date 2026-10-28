@@ -1499,12 +1499,40 @@ structure BirthEpochs where
 def BirthEpochs.ofAuthority (authority : AuthState) : BirthEpochs :=
   ⟨authority.issuerEpoch, authority.policyEpoch⟩
 
+/-- The platform-record terms a birth carries: its root grants' owner budget (`maxCost`) and
+lifetime (`notAfter - notBefore`), and its creation fee (collector, asset, amount) for the
+descriptor it prices. Loaded authoring takes them from the image's platform record
+(`ofRecord`: the record's creation tariff quotes the fee); thin consent re-authors at the terms a
+proposed draft carries (`Host.ThinBirthConsent`), which the receiver checks against the record
+of the image it commits against (`ResourceBirthReceiver.ReceiverReadsCurrent`). -/
+structure BirthTerms where
+  ownerBudget : Nat
+  lifetime : Nat
+  price : ResourceBirth.Descriptor CanonicalCellRegistry.registry →
+    CanonicalResourceKernel.AccountId × CanonicalResourceKernel.AssetId × Nat
+
+def BirthTerms.ofRecord (record : PlatformCellLayout.Platform) : BirthTerms :=
+  ⟨record.ownerBudget, record.lifetime, fun descriptor =>
+    (record.creation.collector, record.creation.asset, descriptor.quotedFee record.creation)⟩
+
+/-- Offline authoring retains the genesis epochs and the genesis template. Loaded birth
+authoring substitutes the two epochs from the verified authority image the receiver uses,
+and the owner budget and lifetime from that image's platform record (`current`), the
+template the receiver binds the birth by
+(`ResourceBirthPolicyController.Concrete.birthTemplate`). -/
 private def birthRootCapabilityAt {kind : ResourceKind}
     (profile : CanonicalRuntimeProfile.Profile NativeHostProfile.Field)
     (source : NativeHostGenesis.Config) (height : Nat)
-    (authority : Option BirthEpochs) (identifier : CapabilityId)
+    (authority : Option BirthEpochs) (current : Option BirthTerms)
+    (identifier : CapabilityId)
     (owner : SubjectId) (target : Nat) (verbs : Finset (Verb kind)) : Capability kind :=
-  let grant := birthRootCapability profile source height identifier owner target verbs
+  let authored := birthRootCapability profile source height identifier owner target verbs
+  let grant := match current with
+    | none => authored
+    | some record =>
+        { authored with
+          notAfter := height + record.lifetime
+          scope := { authored.scope with maxCost := record.ownerBudget } }
   match authority with
   | none => grant
   | some current =>
@@ -1533,7 +1561,8 @@ private def birthParts (path : String)
     (source : NativeHostGenesis.Config) (height : Nat) (json : Lean.Json)
     (authority : Option BirthEpochs := none)
     (providerRoutes : List (Nat × ProviderMetering.Schedule) := [])
-    (lineage : Option (CapabilityId → Option (Finset CapabilityId)) := none) : Result BirthParts := do
+    (lineage : Option (CapabilityId → Option (Finset CapabilityId)) := none)
+    (current : Option BirthTerms := none) : Result BirthParts := do
   let raw ← object path json
   let storage ← string (path ++ ".storage") (← field path "storage" raw)
   let worker ← if storage = "grain" then grainWorker path raw else pure none
@@ -1654,13 +1683,13 @@ private def birthParts (path : String)
   let asRoom {kind : ResourceKind} (cap : Capability kind) : Capability kind :=
     { cap with scope := { cap.scope with targets := .under target } }
   let ownerGrant : ResourceBirth.AuthorityGrant := match kind with
-    | .object => ⟨.object, ⟨asRoom (birthRootCapabilityAt profile source height authority
+    | .object => ⟨.object, ⟨asRoom (birthRootCapabilityAt profile source height authority current
         ownerId owner target (ResourceBirthPolicyController.Concrete.ownerVerbs .object)), []⟩⟩
-    | .account => ⟨.account, ⟨asRoom (birthRootCapabilityAt profile source height authority
+    | .account => ⟨.account, ⟨asRoom (birthRootCapabilityAt profile source height authority current
         ownerId owner target (ResourceBirthPolicyController.Concrete.ownerVerbs .account)), []⟩⟩
-    | .program => ⟨.program, ⟨asRoom (birthRootCapabilityAt profile source height authority
+    | .program => ⟨.program, ⟨asRoom (birthRootCapabilityAt profile source height authority current
         ownerId owner target (ResourceBirthPolicyController.Concrete.ownerVerbs .program)), []⟩⟩
-  let control : Capability .program := birthRootCapabilityAt profile source height authority
+  let control : Capability .program := birthRootCapabilityAt profile source height authority current
     controlId owner target {.installPolicy, .revokeCapability}
   -- A room birth's grants carry the creator's placing capability and its
   -- ancestors (`ResourceBirthPolicyController.Concrete.BornLineage`): a kick
@@ -1684,7 +1713,8 @@ private def birth (path : String) (json : Lean.Json)
     (currentHeight : Option Nat := none)
     (authority : Option BirthEpochs := none)
     (providerRoutes : List (Nat × ProviderMetering.Schedule) := [])
-    (lineage : Option (CapabilityId → Option (Finset CapabilityId)) := none) : Result Draft := do
+    (lineage : Option (CapabilityId → Option (Finset CapabilityId)) := none)
+    (current : Option BirthTerms := none) : Result Draft := do
   let raw ← object path json
   let obj ← exactObject path (["genesis", "template", "creator", "nonce", "resources",
     "sourceCapabilities", "funding", "feePayer"] ++
@@ -1727,10 +1757,19 @@ private def birth (path : String) (json : Lean.Json)
   let nonce ← nat (path ++ ".nonce") (← field path "nonce" obj)
   let parts ← list (path ++ ".resources")
     (fun itemPath value => birthParts itemPath profile source height value authority
-      providerRoutes lineage)
+      providerRoutes lineage (current := current))
     (← field path "resources" obj)
   let movements ← list (path ++ ".funding") funding (← field path "funding" obj)
   let payer ← nat (path ++ ".feePayer") (← field path "feePayer" obj)
+  -- The quote: the loaded image's platform record's creation tariff, the one the opened
+  -- pins carry (`NativeHost.pinnedTariff`), or the terms a thin-consent draft states;
+  -- offline authoring quotes the genesis tariff.
+  let price : ResourceBirth.Descriptor CanonicalCellRegistry.registry →
+      CanonicalResourceKernel.AccountId × CanonicalResourceKernel.AssetId × Nat :=
+    match current with
+    | some terms => terms.price
+    | none => fun descriptor =>
+        (source.tariff.collector, source.tariff.asset, descriptor.quotedFee source.tariff)
   let identity := ResourceBirthController.Concrete.sourceIdentity profile.compilerProfile
     source.deployment creator nonce
   let descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry := {
@@ -1738,8 +1777,9 @@ private def birth (path : String) (json : Lean.Json)
     transactionId := identity, nonce := nonce, births := parts.map (·.item), auxiliaryCreates := [],
     grants := parts.flatMap fun part => [part.ownerGrant, part.controlGrant],
     initialPolicies := parts.map (·.policy), authorityNullifier := identity.value,
-    funding := movements, fee := ⟨payer, source.tariff.collector, source.tariff.asset, 0⟩ }
-  let priced := { descriptor with fee := { descriptor.fee with amount := descriptor.quotedFee source.tariff } }
+    funding := movements, fee := ⟨payer, payer, 0, 0⟩ }
+  let (collector, asset, amount) := price descriptor
+  let priced := { descriptor with fee := ⟨payer, collector, asset, amount⟩ }
   let capabilities ← list (path ++ ".sourceCapabilities")
     (fun p value => CapabilityId.mk <$> nat p value) (← field path "sourceCapabilities" obj)
   pure (.birth ((ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode priced) capabilities)
@@ -2232,12 +2272,13 @@ private def decoded {α : Type} (path : String) (codec : IndexedProgram.LawfulCo
   | none => failAt path "noncanonical or wrong-family binary input"
 
 /-- An ordinary resource birth with the Store-read inputs as data: the authoring height, the two
-epoch projections and the placement lineage (the loaded image's in `birthCurrent`; in thin
-consent, the coordinates a proposed draft carries, `Host.ThinBirthConsent`). The supplied genesis
-is checked against the pinned seed before it is used for immutable deployment coordinates. -/
+epoch projections, the placement lineage and the platform terms (the loaded image's in
+`birthCurrent`; in thin consent, the coordinates a proposed draft carries,
+`Host.ThinBirthConsent`). The supplied genesis is checked against the pinned seed before it is
+used for immutable deployment coordinates. -/
 def birthAt (path : String) (json : Lean.Json)
     (deployed : NativeHost.Config) (height : Nat) (epochs : BirthEpochs)
-    (lineage : CapabilityId → Option (Finset CapabilityId)) :
+    (lineage : CapabilityId → Option (Finset CapabilityId)) (terms : BirthTerms) :
     Result Draft := do
   let raw ← object path json
   let source ← genesis (path ++ ".genesis") (← field path "genesis" raw)
@@ -2246,13 +2287,16 @@ def birthAt (path : String) (json : Lean.Json)
   unless NativeHost.seedIdentity built.seed == deployed.expectedSeed do
     throw s!"{path}.genesis: differs from the pinned seed"
   birth path json none (some deployed) (some height) (some epochs) [] (some lineage)
+    (some terms)
 
-/-- `birthAt` at a verifier-loaded image's height, authority epochs and lineage. -/
+/-- `birthAt` at a verifier-loaded image's height, authority epochs, lineage and platform
+record. -/
 def birthCurrent (path : String) (json : Lean.Json)
     (deployed : NativeHost.Config) (height : Nat) (authority : AuthState)
-    (lineage : CapabilityId → Option (Finset CapabilityId)) :
+    (lineage : CapabilityId → Option (Finset CapabilityId))
+    (current : PlatformCellLayout.Platform) :
     Result Draft :=
-  birthAt path json deployed height (.ofAuthority authority) lineage
+  birthAt path json deployed height (.ofAuthority authority) lineage (.ofRecord current)
 
 def subjectKeyStatusJson (subject : Nat) (status : SubjectKeyRotation.Status) : Lean.Json := .mkObj
   [("type", "subject-key-status-v1"),

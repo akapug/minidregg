@@ -6,9 +6,28 @@ lane/audit-platform; nothing here changes a statement): the engine keystone, the
 completeness keystone, and every satisfiable / teeth / premise witness of the two-entry pole,
 plus the materialize lemma the live content handler's soundness needs.
 -/
-import Effects.Revival.Engine
-import Theory.CellState
-import Theory.AssertAxioms
+module
+
+public import Effects.Revival.Engine
+public import Theory.CellState
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Effects.Revival
 
@@ -267,13 +286,136 @@ theorem completenessTeeth : CompletenessTeeth := by
   exact absurd written (by decide)
 
 theorem completenessPremise : CompletenessPremise :=
-  ⟨⟨[(0, toyEntry entryASpec)], by simp,
+  ⟨⟨[(0, toyEntry entryASpec)], by simp, by simp,
     fun code e found => by
       rcases code with _ | code
       · simp [List.lookup] at found; subst found; exact entryA_lawful
       · simp [List.lookup] at found⟩, rfl⟩
 
+/-! ## Step 4: the legacy census, one source, and registry extension. -/
+
+/-- The ghost pole reads code 0 differently from the pole (`5` lands as `6`). -/
+theorem toyGhostDispatch5 :
+    dispatch toyGhostPole 0 (StreamCodec.nat.encode 5) () toyEmpty ≠
+      .ok (Store.set toyEmpty ⟨false, ()⟩ (some (5 : Nat))) := by
+  intro agree
+  simp [dispatch, toyGhostPole, decode_encode_op, Handler.fire, toyEntry,
+    EffectSpec.exec, entryASpec, ghostASpec, toyWrite, toyEmpty, EffectSpec.InFrame,
+    Substrate.footprint, Substrate.run, storeSubstrate, Op.Enabled, Op.apply, Store.Fresh,
+    toyField, Op.writeAddress?, Op.address, Except.map] at agree
+  have at0 := congrArg (fun c : ToyStore => c ⟨false, ()⟩) agree
+  simp at at0
+
+theorem legacyCensusSatisfiable : LegacyCensusSatisfiable := by
+  intro p
+  cases p
+  simp [toyLegacyTag, toyPole]
+
+theorem legacyCensusTeeth : LegacyCensusTeeth := fun census => census () (by simp [toyPole])
+
+theorem oneSourceSatisfiable : OneSourceSatisfiable := by
+  refine ⟨fun code _ _ _ => .error (.unregistered code), ?_⟩
+  funext code bytes ctx cell
+  unfold composeDispatch
+  cases found : toyPole.lookup code with
+  | none => simp [dispatch, found]
+  | some e => rfl
+
+theorem oneSourceTeeth : OneSourceTeeth := by
+  rintro ⟨legacy, same⟩
+  have at0 := congrFun (congrFun (congrFun (congrFun same 0) (StreamCodec.nat.encode 5)) ()) toyEmpty
+  simp only [composeDispatch, show toyPole.lookup 0 = some (toyEntry entryASpec) from rfl,
+    toyDispatchA5] at at0
+  exact toyGhostDispatch5 at0
+
+theorem extensionPreserves (Ctx Cell : Type) : ExtensionPreserves Ctx Cell := by
+  intro R R' ext code present bytes ctx cell
+  cases found : R.lookup code with
+  | none => exact absurd found present
+  | some e => simp only [dispatch, ext code e found, found]
+
+theorem extensionSatisfiable : ExtensionSatisfiable := by
+  refine ⟨?_, by simp⟩
+  intro code e found
+  rcases code with _ | code
+  · simp [List.lookup] at found; subst found; rfl
+  · simp [List.lookup] at found
+
+theorem extensionTeeth : ExtensionTeeth := by
+  refine ⟨fun ext => ?_, fun safe => ?_⟩
+  · have same := extensionPreserves Unit ToyStore toyPole toyGhostPole ext 0
+      (by simp [toyPole]) (StreamCodec.nat.encode 5) () toyEmpty
+    rw [toyDispatchA5] at same
+    exact toyGhostDispatch5 same
+  · have retired := safe.2 1 (by simp)
+    simp [toyPole, List.lookup] at retired
+
+/-! ## Step 5: prefix consumption. -/
+
+theorem uint8_toNat_ofNat_small {n : Nat} (small : n < 256) : (UInt8.ofNat n).toNat = n := by
+  simp only [UInt8.toNat_ofNat']
+  exact Nat.mod_eq_of_lt small
+
+theorem readPrefix_consumes {Ctx Cell : Type} (R : Registry Ctx Cell) :
+    ConsumesPrefix R (readPrefix R) where
+  consume code e found small op suffix := by
+    simp [readPrefix, uint8_toNat_ofNat_small small, found, StreamCodec.decodePrefix_encode]
+  refuse tag rest missing := by
+    simp [readPrefix, missing]
+  canonical bytes code opBytes suffix read := by
+    rcases bytes with _ | ⟨tag, rest⟩
+    · cases read
+    · simp only [readPrefix] at read
+      cases found : R.lookup tag.toNat with
+      | none => simp [found] at read
+      | some e =>
+        simp only [found] at read
+        cases decoded : e.spec.opStream.decodePrefix rest with
+        | none => simp [decoded] at read
+        | some pair =>
+          obtain ⟨op, after⟩ := pair
+          simp only [decoded, Option.map_some, Option.some.injEq, Prod.mk.injEq] at read
+          obtain ⟨rfl, rfl, rfl⟩ := read
+          refine ⟨e, found, UInt8.toNat_lt tag, ⟨op, rfl⟩, ?_⟩
+          rw [StreamCodec.encode_decodePrefix _ _ _ _ decoded, UInt8.ofNat_toNat]
+
+theorem prefixKeystone (Ctx Cell : Type) : PrefixKeystone Ctx Cell := by
+  refine ⟨readPrefix_consumes, ?_⟩
+  intro R R' ext code present small rest
+  cases found : R.lookup code with
+  | none => exact absurd found present
+  | some e =>
+    simp only [readPrefix, uint8_toNat_ofNat_small small, found, ext code e found]
+
+theorem prefixSatisfiable : PrefixSatisfiable :=
+  ⟨readPrefix_consumes toyPole,
+    (readPrefix_consumes toyPole).consume 0 (toyEntry entryASpec) rfl (by decide) (5 : Nat) [7]⟩
+
+theorem prefixTeeth : PrefixTeeth := by
+  refine ⟨fun consumes => ?_, fun consumes => ?_, ?_⟩
+  · have read := consumes.consume 0 (toyEntry entryASpec) rfl (by decide) (5 : Nat) [7]
+    simp [readWhole, toyPole, toyEntry, entryASpec, StreamCodec.toLawful,
+      StreamCodec.decodePrefix_encode] at read
+  · have read := consumes.refuse 2 (StreamCodec.nat.encode 5) (by simp [toyPole])
+    simp [readFailOpen, readPrefix, toyPole, toyEntry, entryASpec, List.lookup] at read
+    rw [show StreamCodec.nat.encode 5 = StreamCodec.nat.encode 5 ++ [] from
+      (List.append_nil _).symm, StreamCodec.decodePrefix_encode] at read
+    cases read
+  · simp [readPrefix, toyRebindPole, toyPole, toyEntry, entryASpec, entryBSpec, StreamCodec.nat,
+      StreamCodec.bool, StreamCodec.decodeNatPrefix, List.lookup]
+
 /-! ## Axiom pins. -/
+
+#assert_axioms prefixKeystone
+#assert_axioms prefixSatisfiable
+#assert_axioms prefixTeeth
+#assert_axioms legacyCensusSatisfiable
+#assert_axioms legacyCensusTeeth
+#assert_axioms oneSourceSatisfiable
+#assert_axioms oneSourceTeeth
+#assert_axioms extensionPreserves
+#assert_axioms extensionSatisfiable
+#assert_axioms extensionTeeth
 
 #assert_axioms engineKeystone
 #assert_axioms completenessKeystone

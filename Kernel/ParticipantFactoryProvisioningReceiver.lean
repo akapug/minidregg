@@ -116,7 +116,7 @@ theorem AcceptedProvisioning.sound [DecidableEq F] {ingress : DecodedIngress}
     accepted.accepted.receipt.envelopeBytes = ingress.ingress.sponsorEnvelope ∧
       Nonempty (Authorized (ParticipantFactoryProvisioning.policyConfig accepted.prepared).portal
         accepted.prepared.authority.snapshot.authState
-        (ParticipantFactoryProvisioning.request deployment profile.template accepted.prepared.authority.snapshot
+        (ParticipantFactoryProvisioning.request deployment accepted.prepared.template accepted.prepared.authority.snapshot
           profile.semantics ambient ingress.command)) ∧
       PhysicalShape accepted.prepared :=
   ⟨accepted.accepted.envelopeExact, ⟨accepted.accepted.semantic.authorization⟩, accepted.physical⟩

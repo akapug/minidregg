@@ -30,6 +30,27 @@ class AttachTests(unittest.TestCase):
             self.c['keys'][subject]={'keyId':str(int(subject)+1000000),'keyEpoch':'11','seedPath':str(seed),'publicKeyPath':str(public)}
         fields=['session','descriptor','cap','sessionControlCapability','descriptorOwnerCapability','descriptorControlCapability','ticket','appObserve','pkgObserve','ticketOwner','ticketControl','ticketObserve']
         self.c['delegates']={label:dict({key:str(100000+index*1000+offset*13) for offset,key in enumerate(fields)},subject=subject,expectedHost=label+'.localhost:18450') for index,(label,subject) in enumerate([('member-one','123123'),('member-two','987987')])}
+    def test_prepared_application_carries_exact_native_bootstrap_attempt(self):
+        x=Mock();x.app='400';x.path=Path('/private/fixture.json');x.profile=Path('/private/profile.json');x.pkg=Path('/private/package-v1')
+        x.f={'applicationSource':'/private/app-author/source.json','applicationReceipt':'/private/app-attempt/outcome.json',
+             'delegates':{'bootstrap':{'issueRequest':'/private/ticket-request.json','issue':'/private/ticket-attempt'}}}
+        result=app.prepared_application(x)
+        self.assertEqual(result['applications']['bootstrap'],{'birthSource':'/private/app-author/source.json',
+            'birthAttempt':'/private/app-attempt','packageDirectory':'/private/package-v1',
+            'bootstrapTicketRequest':'/private/ticket-request.json','bootstrapTicketAttempt':'/private/ticket-attempt'})
+        del x.f['delegates']['bootstrap']['issueRequest']
+        with self.assertRaisesRegex(RuntimeError,'never reissue'):app.prepared_application(x)
+    def test_prepare_does_not_start_or_enroll_and_reuses_step_ledger(self):
+        root=self.root/'prepared';root.mkdir()
+        x=Mock();x.m={'spkHost':{'path':'/native/spk-host'}};x.f={'delegates':{'bootstrap':{}}}
+        x.step.side_effect=lambda name,action,**kwargs: None
+        result={'protocol':'mini-spk-same-store-prepared-v1'}
+        with patch.object(app,'enter',return_value=({},root,x)),patch.object(app,'prepared_application',return_value=result):
+            self.assertEqual(app.attach('input',prepare_only=True),result)
+        steps=[call.args[0] for call in x.step.call_args_list]
+        self.assertIn('install',steps);self.assertIn('member:bootstrap:route',steps)
+        self.assertNotIn('start',steps);self.assertNotIn('member:bootstrap:enrollment',steps)
+        self.assertEqual(f.load(root/'prepared-application.json'),result)
     def validate(self):
         with patch.object(f,'protected_parent'):return app.validate(self.c)
     def test_arbitrary_members_descriptors_and_signing_epochs(self):

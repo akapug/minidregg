@@ -140,6 +140,73 @@ impl Anchor {
         }
     }
 }
+/// The one reserve-and-receipt step behind a preparation burn and a one-use
+/// output reservation, recoverable after a lost reply the way a transition
+/// journal step is. Under `lock_path`: persist the exact request (`receipt`
+/// prefix and `request`) at `local.intent` before sending it; read the anchor.
+/// If the anchor already holds this batch for exactly this generation and
+/// purpose AND the retained intent is this very request, the earlier reply was
+/// lost: the anchor's own journal is the answer and nothing is sent or recorded
+/// again. A batch held without a matching retained intent is somebody else's
+/// (a replaced descriptor, a relabel) and refuses as before. A retained intent
+/// that differs, with nothing yet reserved, is superseded. Then check the
+/// journal retains every row unconsumed and only extends what was read,
+/// persist `prefix || journal` at `local`, read it back, and re-read the anchor.
+pub(crate) fn reserve_with_receipt(
+    lock_path: &Path,
+    request: &[u8],
+    ids: &[Correlation],
+    g: &Generation,
+    purpose: Purpose,
+    mut receipt: Vec<u8>,
+    anchor: &Path,
+    local: &Path,
+    what: &str,
+) -> Result<(Journal, Vec<u8>)> {
+    let _guard = lock(lock_path)?;
+    let intent_path = local.with_extension("intent");
+    let mut intent = receipt.clone();
+    bytes(request, &mut intent);
+    let retained = fs::read(&intent_path).ok();
+    let before = Journal::decode(&rpc(anchor, &[0])?)?;
+    let held = before.holds_batch(ids, g, purpose);
+    let confirmed = if held && retained.as_deref() == Some(&intent[..]) {
+        before.clone()
+    } else {
+        if !held {
+            if retained.as_deref() != Some(&intent[..]) {
+                snapshot(&intent_path, &intent)?;
+            }
+        }
+        before.reserve_batch(ids, g.clone(), purpose)?;
+        Journal::decode(&rpc(anchor, request)?)?
+    };
+    let indexed = confirmed
+        .allocations
+        .iter()
+        .map(|a| (&a.id, a))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    if !confirmed.extends(&before)
+        || !confirmed.preserves_allocations(&before)
+        || ids.iter().any(|id| {
+            indexed
+                .get(id)
+                .is_none_or(|a| a.generation != *g || a.purpose != purpose || a.consumed)
+        })
+    {
+        return Err(bad(&format!("{what} allocation binding/retention")));
+    }
+    bytes(&confirmed.encode(), &mut receipt);
+    snapshot(local, &receipt)?;
+    if fs::read(local)? != receipt {
+        return Err(bad(&format!("{what} durable readback")));
+    }
+    let latest = Journal::decode(&rpc(anchor, &[0])?)?;
+    if !latest.extends(&confirmed) || !latest.preserves_allocations(&confirmed) {
+        return Err(bad(&format!("{what} anchor regression")));
+    }
+    Ok((confirmed, receipt))
+}
 /// The one anchor loop. Accept blocks; `stop` is checked after every accept, so
 /// a stopper sets it and then connects once to the listener's own address (the
 /// wake connection is dropped unread). On return the Anchor, and with it the
@@ -387,5 +454,88 @@ mod tests {
         let p = temp("lock");
         let _a = Anchor::open(&p).unwrap();
         assert!(Anchor::open(&p).is_err());
+    }
+    fn ids(n: u64) -> Vec<Correlation> {
+        (0..n)
+            .map(|row| Correlation {
+                pool: Nat::new(42),
+                row: Nat::new(row),
+            })
+            .collect()
+    }
+    /// A reserve whose reply was lost leaves the anchor holding the batch and
+    /// the caller without a receipt. Resubmitting the retained request returns
+    /// the same receipt and records nothing again, for a batch burn and for a
+    /// single one-use reserve. Fault that must turn this red: make the held
+    /// batch fall through to `reserve_batch` (the old unconditional preflight).
+    fn lost_reply_case(label: &str, rows: Vec<Correlation>, purpose: Purpose, single: bool) {
+        let root = temp("lost-reply");
+        fs::create_dir_all(&root).unwrap();
+        let anchor = AnchorHandle::new(&root);
+        {
+            let local = root.join(label);
+            let mut req = vec![if single { 1 } else { 2 }];
+            req.extend(if single {
+                request(&rows[0], &g(), purpose)
+            } else {
+                batch_request(&rows, &g(), purpose)
+            });
+            let go = || {
+                reserve_with_receipt(
+                    &root.join(format!("{label}.lock")),
+                    &req,
+                    &rows,
+                    &g(),
+                    purpose,
+                    b"PREFIX".to_vec(),
+                    anchor.socket(),
+                    &local,
+                    label,
+                )
+            };
+            let (_, first) = go().unwrap();
+            let spent = Journal::decode(&rpc(anchor.socket(), &[0]).unwrap()).unwrap().spent.len();
+            // The reply never reached the caller: no receipt on disk.
+            fs::remove_file(&local).unwrap();
+            let (_, again) = go().unwrap();
+            assert_eq!(again, first, "{label}: the same receipt");
+            assert_eq!(fs::read(&local).unwrap(), first);
+            let after = Journal::decode(&rpc(anchor.socket(), &[0]).unwrap()).unwrap();
+            assert_eq!(after.spent.len(), spent, "{label}: nothing recorded twice");
+            // A held batch with no matching retained request is not ours.
+            fs::remove_file(local.with_extension("intent")).unwrap();
+            fs::remove_file(&local).unwrap();
+            assert!(go().is_err(), "{label}: held without a retained request refuses");
+            // Nor is a relabelled generation.
+            let mut other = g();
+            other.attempt = Nat::new(77);
+            let mut relabelled = vec![req[0]];
+            relabelled.extend(if single {
+                request(&rows[0], &other, purpose)
+            } else {
+                batch_request(&rows, &other, purpose)
+            });
+            assert!(reserve_with_receipt(
+                &root.join(format!("{label}.lock")),
+                &relabelled,
+                &rows,
+                &other,
+                purpose,
+                b"PREFIX".to_vec(),
+                anchor.socket(),
+                &local,
+                label,
+            )
+            .is_err());
+        }
+    }
+    #[test]
+    fn lost_reply_on_burn_is_recovered_without_a_second_record() {
+        lost_reply_case("burn", ids(3), Purpose::Triple, false);
+    }
+    #[test]
+    fn lost_reply_on_reserve_is_recovered_without_a_second_record() {
+        let one = vec![Correlation { pool: Nat::new(77), row: Nat::new(0) }];
+        lost_reply_case("reserve", one, Purpose::HolderPad, true);
     }
 }

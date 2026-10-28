@@ -17,6 +17,7 @@ public import Compiler.CanonicalRuntimeProfileCore
 public import Compiler.CanonicalAccountView
 public import Compiler.PhysicalLawResolution
 public import Compiler.WorldKindLawDependencies
+public import Kernel.PlatformCellDomain
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -101,6 +102,12 @@ inductive Reject where
   not name (`ReceivingLaw.namesBirth`): an extra birth, a substituted post, or a
   create the step left out. -/
   | neutralBirthUnjudged (cell : Nat)
+  /-- The image the birth is prepared against holds no decodable platform cell or record,
+  so the birth has no factory template (`birthTemplate`). -/
+  | platformUnavailable
+  /-- The factory pins carry a creation tariff other than that record's: the birth would be
+  priced from a tariff the platform cell does not hold. -/
+  | platformStale
   deriving DecidableEq, Repr
 
 /-- The checkable part of the existing factory authorization. All fields
@@ -373,6 +380,41 @@ abbrev Legs (descriptor : Descriptor Registry) := Incidence descriptor.createReq
 def creation (descriptor : Descriptor Registry) (index : Fin descriptor.createRequests.length) :=
   descriptor.createRequests.get index
 
+/-- The factory template under a platform record: the record's owner budget and lifetime, the
+profile's issuer and birth slack. The profile's own template stays inside the semantics
+digest every request pins, so the record's terms enter beside it, never inside it. -/
+def templateAt (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (record : PlatformCellLayout.Platform) : CanonicalRuntimeProfile.FactoryTemplate :=
+  { template with ownerBudget := record.ownerBudget, lifetime := record.lifetime }
+
+@[simp] theorem templateAt_issuer (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (record : PlatformCellLayout.Platform) : (templateAt template record).issuer = template.issuer :=
+  rfl
+
+@[simp] theorem templateAt_birthSlack (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (record : PlatformCellLayout.Platform) :
+    (templateAt template record).birthSlack = template.birthSlack := rfl
+
+@[simp] theorem templateAt_ownerBudget (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (record : PlatformCellLayout.Platform) :
+    (templateAt template record).ownerBudget = record.ownerBudget := rfl
+
+@[simp] theorem templateAt_lifetime (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (record : PlatformCellLayout.Platform) :
+    (templateAt template record).lifetime = record.lifetime := rfl
+
+/-- The platform record `durable` holds at `deployment`'s platform cell. -/
+def platformRecordAt (deployment : Deployment) (durable : Durable) :
+    Option PlatformCellLayout.Platform :=
+  PlatformCellDomain.recordOn deployment durable.snapshot
+
+/-- The factory template a birth prepared against `durable` is bound by
+(`Pending.templateExact`): `templateAt` of that image's platform record. -/
+def birthTemplate {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
+    (deployment : Deployment) (durable : Durable) :
+    Option CanonicalRuntimeProfile.FactoryTemplate :=
+  (platformRecordAt deployment durable).map (templateAt profile.template)
+
 section Receiving
 
 variable {F : Type} [Field F] {profile : CanonicalRuntimeProfile.Profile F}
@@ -548,11 +590,6 @@ def checkTemplateAt (template : CanonicalRuntimeProfile.FactoryTemplate)
       grant.capability.head.notBefore + template.birthSlack < height then
     .error .birthStale
   else require (TemplateBound template authority height descriptor) .grantTemplate
-
-def checkTemplate (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
-    (height : Height) : Except Reject (PLift (TemplateBound profile.template
-      (oldAuthority prepared) height descriptor)) :=
-  checkTemplateAt profile.template (oldAuthority prepared) height descriptor
 
 /-! ### Explicit reservation-enabled factory method
 
@@ -1386,36 +1423,102 @@ structure Pending
     (height : Height) : Type where
   checked : Checked pins CanonicalCellRegistry.sourceEncoding (oldAuthority prepared) descriptor
   method : FactoryMethod
-  templateBound : MethodTemplateBound method profile.template (oldAuthority prepared) height descriptor
+  /-- The platform record of the image the birth is prepared against. -/
+  record : PlatformCellLayout.Platform
+  recordExact : platformRecordAt deployment durable = some record
+  /-- The factory pins carry the record's creation tariff: the birth is priced from it. -/
+  priced : pins.tariff = record.creation
+  templateBound : MethodTemplateBound method (templateAt profile.template record)
+    (oldAuthority prepared) height descriptor
   bornLineage : BornLineage (placementLineage prepared.authority.snapshot.cell) descriptor
   cellIdsDistinct : Function.Injective (layout prepared).cellId
   requestsDistinct : Function.Injective (branchIdentity prepared height)
+
+/-- The factory template a pending birth is bound by: `templateAt` of its record. -/
+def Pending.template
+    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {height : Height} (pending : Pending prepared height) :
+    CanonicalRuntimeProfile.FactoryTemplate :=
+  templateAt profile.template pending.record
+
+theorem Pending.templateExact
+    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {height : Height} (pending : Pending prepared height) :
+    birthTemplate profile deployment durable = some pending.template := by
+  unfold birthTemplate
+  rw [pending.recordExact]
+  rfl
+
+/-- Teeth: no birth is pending against a record whose creation tariff its pins do not carry.
+`preparePending` refuses it as `platformStale`. -/
+theorem pending_stale_empty
+    (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
+    (height : Height) (record : PlatformCellLayout.Platform)
+    (recorded : platformRecordAt deployment durable = some record)
+    (stale : pins.tariff ≠ record.creation) : IsEmpty (Pending prepared height) :=
+  ⟨fun pending => by
+    have same := pending.recordExact
+    rw [recorded] at same
+    have exact := Option.some.inj same
+    subst exact
+    exact stale pending.priced⟩
 
 def preparePending
     (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
     (height : Height) (method : FactoryMethod := .ordinary) : Except Reject (Pending prepared height) := do
   let checked ← check pins CanonicalCellRegistry.sourceEncoding (oldAuthority prepared) descriptor
-  let templateCheck : Except Reject (PLift (MethodTemplateBound method profile.template
-      (oldAuthority prepared) height descriptor)) := by
-    cases method with
-    | ordinary => exact checkTemplate prepared height
-    | reserve => exact require (ReserveTemplateBound profile.template
-        (oldAuthority prepared) height descriptor) .grantTemplate
-    | lifetimeGrant => exact require (LifetimeGrantTemplateBound profile.template
-        (oldAuthority prepared) height descriptor) .grantTemplate
-  let templateBound ← templateCheck
-  let bornLineage ← require (BornLineage (placementLineage prepared.authority.snapshot.cell)
-    descriptor) .roomLineage
-  letI : Decidable (Function.Injective (branchIdentity prepared height)) :=
-    decidable_of_iff
-      (((policyBranches descriptor.createRequests.length descriptor.resourceBatch.operations.length).map
-        (branchIdentity prepared height)).Nodup)
-      (mapped_policyBranches_nodup_iff (branchIdentity prepared height))
-  if cells : Function.Injective (layout prepared).cellId then
-    if requests : Function.Injective (branchIdentity prepared height) then
-      .ok ⟨checked.down, method, templateBound.down, bornLineage.down, cells, requests⟩
-    else .error .ambiguousRequests
-  else .error .duplicateCell
+  match recorded : platformRecordAt deployment durable with
+  | none => .error .platformUnavailable
+  | some record =>
+    let priced ← require (pins.tariff = record.creation) .platformStale
+    let template := templateAt profile.template record
+    let templateCheck : Except Reject (PLift (MethodTemplateBound method template
+        (oldAuthority prepared) height descriptor)) := by
+      cases method with
+      | ordinary => exact checkTemplateAt template (oldAuthority prepared) height descriptor
+      | reserve => exact require (ReserveTemplateBound template
+          (oldAuthority prepared) height descriptor) .grantTemplate
+      | lifetimeGrant => exact require (LifetimeGrantTemplateBound template
+          (oldAuthority prepared) height descriptor) .grantTemplate
+    let templateBound ← templateCheck
+    let bornLineage ← require (BornLineage (placementLineage prepared.authority.snapshot.cell)
+      descriptor) .roomLineage
+    letI : Decidable (Function.Injective (branchIdentity prepared height)) :=
+      decidable_of_iff
+        (((policyBranches descriptor.createRequests.length descriptor.resourceBatch.operations.length).map
+          (branchIdentity prepared height)).Nodup)
+        (mapped_policyBranches_nodup_iff (branchIdentity prepared height))
+    if cells : Function.Injective (layout prepared).cellId then
+      if requests : Function.Injective (branchIdentity prepared height) then
+        .ok ⟨checked.down, method, record, recorded, priced.down, templateBound.down,
+          bornLineage.down, cells, requests⟩
+      else .error .ambiguousRequests
+    else .error .duplicateCell
+
+/-- The stale case is refused by name (law 10): past the factory checks, a record whose
+creation tariff the pins do not carry is refused `platformStale`, never another reason. -/
+theorem preparePending_stale
+    (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
+    (height : Height) (method : FactoryMethod) (record : PlatformCellLayout.Platform)
+    (recorded : platformRecordAt deployment durable = some record)
+    (stale : pins.tariff ≠ record.creation)
+    (checked : PLift (Checked pins CanonicalCellRegistry.sourceEncoding (oldAuthority prepared)
+      descriptor))
+    (passes : check pins CanonicalCellRegistry.sourceEncoding (oldAuthority prepared) descriptor =
+      .ok checked) :
+    preparePending prepared height method = .error .platformStale := by
+  unfold preparePending
+  simp only [bind, Except.bind, passes]
+  split
+  · rename_i missing
+    rw [recorded] at missing
+    cases missing
+  · rename_i found holds
+    rw [recorded] at holds
+    cases holds
+    simp [require, stale, bind, Except.bind]
+
+#assert_axioms pending_stale_empty preparePending_stale
 
 def Pending.tuple
     {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
@@ -2524,19 +2627,23 @@ def AcceptedBirth.descriptor {height : Height}
 
 /-- **An accepted birth is bound to its indices.** `pins` is `deployment`'s factory pin
 and `profile`'s compiler semantics pin; every write the birth commits expects `durable`'s
-exact root; the descriptor obeys the ingress method's factory template of `profile` over the
-loaded authority at `height`; and every birth write is named by the admitted factory step. -/
+exact root; the descriptor obeys the ingress method's factory template over the loaded
+authority at `height`, that template being `durable`'s platform record's (`birthTemplate`:
+the record's owner budget and lifetime, the profile's issuer and birth slack); and every
+birth write is named by the admitted factory step. -/
 theorem AcceptedBirth.indexed {height : Height}
     (accepted : AcceptedBirth profile deployment pins durable height) :
     ResourceBirthController.Concrete.PinsBound deployment pins ∧
       ResourceBirthController.Concrete.ProfileBound profile.compilerProfile pins ∧
       (∀ write ∈ accepted.prepared.writes,
         write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
-      MethodTemplateBound accepted.ingress.method profile.template
-        (oldAuthority accepted.prepared) height accepted.descriptor ∧
+      (∃ template, birthTemplate profile deployment durable = some template ∧
+        MethodTemplateBound accepted.ingress.method template
+          (oldAuthority accepted.prepared) height accepted.descriptor) ∧
       ResourceBirthController.Concrete.Named accepted.factoryStep accepted.prepared.writes := by
   refine ⟨accepted.prepared.pinsBound, accepted.prepared.profileBound,
-    accepted.prepared.writePreExact, ?_, accepted.named⟩
+    accepted.prepared.writePreExact, ⟨accepted.pending.template, accepted.pending.templateExact, ?_⟩,
+    accepted.named⟩
   have shape := accepted.pending.templateBound
   rw [accepted.methodExact] at shape
   exact shape
@@ -2557,11 +2664,12 @@ source-selected reservation method shape over the actual installed descriptor. -
 theorem AcceptedBirth.reserve_shape {height : Height}
     (accepted : AcceptedBirth profile deployment pins durable height)
     (method : accepted.ingress.method = .reserve) :
-    ReserveTemplateBound profile.template (oldAuthority accepted.prepared) height
-      accepted.descriptor := by
+    ∃ template, birthTemplate profile deployment durable = some template ∧
+      ReserveTemplateBound template (oldAuthority accepted.prepared) height
+        accepted.descriptor := by
   have shape := accepted.pending.templateBound
   rw [accepted.methodExact, method] at shape
-  exact shape
+  exact ⟨accepted.pending.template, accepted.pending.templateExact, shape⟩
 
 /-- **`birth_under_room_requires_grant`** at the native admission: an admitted
 birth of an item into room `R` names the creator's placing capability, stored in

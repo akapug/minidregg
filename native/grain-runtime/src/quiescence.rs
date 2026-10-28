@@ -459,6 +459,8 @@ impl ResidentGuard {
         })
     }
 
+    pub(crate) fn evidence(&self) -> ResidentEvidence { self.evidence }
+
     pub(crate) fn path(&self) -> Result<&Path> {
         self.path
             .as_deref()

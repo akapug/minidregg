@@ -131,6 +131,33 @@ still need the separately retained source/build evidence. Deploy executable
 artifacts in immutable, administrator-owned locations before starting a
 friend's controller.
 
+### Creating an agent that can call applications
+
+`grain-runtime create SPEC.json` accepts an optional `dispatch` purse alongside
+its parent, tool and provider tasks. This births a separate funded task and
+delegates its parent witness through ordinary Mini operations. It does not
+install an application or issue an application grant.
+
+The `dispatch` object contains `key` (the enrolled subject, private key path and
+`noPrerotation`, as for `provider`), `task`, `observeCapability`,
+`controlCapability`, `budget`, and `transport`. The transport supplies
+`reserve`, `charge`, `socketPath`, `hostUid`, `operatorSocket`,
+`operatorPeerUid` when needed, and `reserveSigner` using the controller's
+existing dispatch format. `create` derives the identity and witness fields;
+transport cannot override them. Task IDs, subjects, keys and capability IDs
+must not collide with the other configured roles.
+
+The application operator and controller run as separate Unix accounts. The
+controller's ordinary Host socket and private dispatch operator socket are
+separate endpoints. Create the transport directories and operator route before
+running the controller's part of `create`; its normal validation checks the
+socket ownership and peer restrictions. The existing `--birth-socket` phase
+lets the operator fund the grains before the resident takes custody.
+
+The resulting `controller.json` includes `dispatchTask`. Application attachment
+then adds the routes and service catalogue backed by that same world's accepted
+grants. A route copied from another controller or Store is not an attachment.
+
 For two controllers sharing one Mini content page, run
 `check-hosted-pair ABS_CONFIG_A ABS_CONFIG_B` after both JSON files and worker
 directories are staged, before installing either unit. This read-only check

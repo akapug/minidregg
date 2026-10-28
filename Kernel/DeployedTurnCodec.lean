@@ -235,13 +235,13 @@ theorem decodeCreate_createBytes (c : CellId × Cell deployedR × Option CellId)
 /-! ## The turn -/
 
 /-- **The inverse of `encodeTurn`.**  The absence pins, then exactly the
-thirteen `turnFields` slots (the last the digest pins), each consumed whole. -/
+fourteen `turnFields` slots (the digest pins, then the meter credit), each consumed whole. -/
 def decodeTurn (bytes : List UInt8) : Option (DTurn deployedR Digest) := do
   let (absent, fields) ← full (StreamCodec.product (StreamCodec.list StreamCodec.nat)
     (StreamCodec.list bytesStream)) bytes
   match fields with
   | [fTx, fCreates, fLegs, fRetires, fEvent, fNull, fCharge, fSubject, fEpoch, fCap,
-      fBefore, fUntil, fPins] =>
+      fBefore, fUntil, fPins, fCredit] =>
     let txId ← full digestStream fTx
     let createsRaw ← full (StreamCodec.list bytesStream) fCreates
     let creates ← createsRaw.mapM decodeCreate
@@ -257,8 +257,9 @@ def decodeTurn (bytes : List UInt8) : Option (DTurn deployedR Digest) := do
     let notBefore ← full StreamCodec.nat fBefore
     let validUntil ← full (StreamCodec.option StreamCodec.nat) fUntil
     let pins ← full (StreamCodec.list (StreamCodec.product StreamCodec.nat digestStream)) fPins
+    let credit ← full DurableReceiverCodec.chargeStream fCredit
     some { txId, creates, legs, retires, event, nullifiers, charge, subject, keyEpoch,
-           capability, notBefore, validUntil, absent, pins }
+           capability, notBefore, validUntil, absent, pins, credit }
   | _ => none
 
 theorem mapM_decodeCreate (cs : List (CellId × Cell deployedR × Option CellId)) :
@@ -293,6 +294,17 @@ theorem decodeTurn_encodeTurn (t : DTurn deployedR Digest) :
 
 #assert_axioms decodeOps_encode
 #assert_axioms decodeCreate_createBytes
+/-- **Teeth: the credit is in the turn's bytes.** Two turns that differ only in their meter
+credit encode differently, so the journal digest binds the credit; a codec that dropped
+the field would fail here by name instead of roundtripping a defaulted credit. -/
+theorem encodeTurn_credit_ne (t : DTurn deployedR Digest) {credit : Minidregg.Theory.ResourceCost.Charge}
+    (other : credit ≠ t.credit) : encodeTurn { t with credit } ≠ encodeTurn t := by
+  intro same
+  have h := congrArg decodeTurn same
+  rw [decodeTurn_encodeTurn, decodeTurn_encodeTurn] at h
+  exact other (congrArg Turn.credit (Option.some.inj h))
+
 #assert_axioms decodeTurn_encodeTurn
+#assert_axioms encodeTurn_credit_ne
 
 end Minidregg.Kernel.DeployedTurnCodec

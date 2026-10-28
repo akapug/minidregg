@@ -8,7 +8,7 @@ ROUTE_DIR holds http.sock and browser.token (the custodian-minted participant se
 Prints one JSON line; exit 0 only when the server acknowledged the write. The read-back is the
 caller's (HTTP GET) except for wekan, which reads the card back from its own subscription.
 """
-import base64, json, os, socket, struct, sys, time
+import base64, importlib.util, json, os, socket, struct, sys, time
 
 COOKIE = "__Host-mini_spk_session"
 
@@ -148,10 +148,30 @@ def wekan(route, title):
     ws.send(json.dumps({"msg": "connect", "version": "1", "support": ["1", "pre2", "pre1"]}))
     while json.loads(ws.recv()).get("msg") != "connected":
         pass
-    login = call("login", [{"sandstorm": True}])
+    # Wekan 12.65 logs in as TextEditor does (wekan-accounts-sandstorm): loginWithSandstorm plus the
+    # POST /.sandstorm-login rendezvous, one shared path (sandstorm-login.py). The old {sandstorm: true}
+    # `login` method has no handler in this version ("Unrecognized options for login request").
+    here = os.path.dirname(os.path.abspath(__file__))
+    spec = importlib.util.spec_from_file_location("sandstormlogin", os.path.join(here, "sandstorm-login.py"))
+    sl = importlib.util.module_from_spec(spec); spec.loader.exec_module(sl)
+
+    def send(msg):
+        ws.send(json.dumps(msg))
+
+    def wait(pred, seconds):
+        end = time.time() + seconds
+        while time.time() < end:
+            m = json.loads(ws.recv())
+            if m.get("msg") == "ping":
+                ws.send(json.dumps({"msg": "pong"}))
+            elif pred(m):
+                return m
+        return None
+
+    login, posted = sl.login(send, wait, route)
     if not login or "error" in login:
-        print(json.dumps({"ok": False, "refused": "loginRefused", "result": login})); return 1
-    uid = login["result"]["id"]
+        print(json.dumps({"ok": False, "refused": "loginRefused", "result": login, "post": posted[:100]})); return 1
+    uid = login["result"]["userId"]
     now = {"$date": int(time.time() * 1000)}
     rid = lambda: os.urandom(8).hex()  # noqa: E731
     board, lst, swim, card = rid(), rid(), rid(), rid()

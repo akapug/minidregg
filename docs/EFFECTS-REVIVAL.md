@@ -206,8 +206,12 @@ The commits that follow the opening.  The Host arm belongs to the platform lane 
 2. **Transfer (activity `Effect.transfer`).**  The substrate is the Book: `Prim =
    CanonicalResourceKernel.Operation`, `step` the floor-guarded posting, `writes = {(source,
    asset), (destination, asset)}`, `field = balance asset`.  `sem` is `transferVerdict`
-   over `(config, funds, reserve, written)` as `Ctx`, returning
-   `Except EffectRefusal (List Operation)` with `unfunded`, `reserved`, `closed` by name.
+   over `(config, funds, reserve, written)` as `Ctx`.  A refused verdict (`unfunded`,
+   `reserved`, `closed`) is NOT the declaration's refusal.  It is an accepted yield whose
+   await records `.performed (.refused reason)` and that commits nothing, so `sem` returns
+   `.ok []` with the verdict in the emitted await, never `.error`.  The gate is `TwoLevels`
+   (`ActivityStatements.lean`, proved of today's `commitYield`) for the derived executor
+   projected to a `YieldCommit`.
    `commitYield`'s `performed` branch dispatches through an activity registry (the same
    `Handler` type, over the activity's turn cell).  Deleted in the same commit:
    `Effect.transfer`, `effectOps`, `withEffect`, the transfer branch of `commitYield`, and
@@ -265,75 +269,98 @@ the tree's root:
 `Effects/Revival/Statements.lean` is not yet imported by `Effects.lean`.  It joins the CI
 closure (law 5) in the commit after it elaborates.
 
-## 8. Continuation (for a successor; present state, 2026-10-27)
+## 8. Continuation (for a successor; present state, 2026-10-28)
 
-**Gates.**  Proofs start once two gates are back.
-- Audit: **CLEARED.**  The auditor (`af7a93e7b8ba729d4`) wrote pass 19 on
-  `lane/audit-platform` (`3fc181cae`) and an addendum (`260fceaed`).  It accepted
-  `3dac92b91`.
-- Elaboration: **CLEARED** (rc=0, no diagnostics, 22 s).  It ran in dregg-ref
-  `/build/minidregg` (infra's warm copy of main `da4a7645e`) under `/build/lock/closure.lock`,
-  through the script `/build/lanes/effects-revival-scratch/check.sh`, which writes its own
-  PID file and puts `/build/home-lanes/.elan/bin` on PATH.  It checks the file copied to
-  that directory, so infra's tree is never edited.  The first check found two syntax
-  problems, both fixed with no change in meaning: `seal` is a Lean keyword (the fields are
-  now `rotate`/`rotated`), and `_` cannot be a binder in a `where` field (those fields are
-  now `fun _ => …`).  Never run Lean on the Mac, and never start a cold closure.
+**Where the lane stands.**  Every statement is auditor-accepted (passes 19-28 on
+`lane/audit-platform`), and every proof of them is accepted too.  All are kernel-checked
+(`#assert_axioms`).  `Effects/Revival` holds no `native_decide`, `#assert_compiled` or
+`sorry`.  On main through `ae0c78a01` (merge `ac4247487`).  `f46beaa46` (PrepareFactors) was
+sent to the integrator and the auditor on 10-28.
 
-**Branch.**  `lane/effects-revival` in the worktree
-`/Users/ember/dev/minidregg-lanes/effects-revival`.  Main has the statements at
-`f3361d17`.  `Effects.lean` now imports `Effects.Revival.Statements` (law 5: it is in the
-CI closure).
+**Files** (all `module`s written by `scripts/lean-modularize.py`, never hand-edited headers;
+`Effects.lean`, `Effects/EffectSpec.lean`, `Effects/Placeholder.lean` stay non-module because
+EffectSpec imports the non-module `Kernel.State`; both old files die at the migration commit):
+- `Engine.lean`: the kernel-free engine (substrate, declaration, registry, dispatcher,
+  `Dispatches`, keystones, toy pole, census/one-source/extension, prefix consumption).
+- `EngineProofs.lean`: engine, completeness, census, one-source, extension, prefix proofs.
+- `Statements.lean`: the live content declaration, `ContentAgreement`, `HostKeystone`,
+  `PrepareFactors`, `HostLegacyCensus`, live prefix agreement.
+- `ContentProofs.lean`: `contentComplete`, `contentAgreement`, `contentAccepted`,
+  `contentTeeth`, `hostAccepted`, `contentPrefixAgreement`/`Accepts`/`Teeth`,
+  `hostLegacyCensusRefutedToday`.  The witnesses are hand-built cells: a link at a store that
+  holds only its blinding (`blindedStore`, `sampleDeployment`, `sampleHostCtx`).
+- `HostTeethProofs.lean`: `hostTeeth`.  The cSHAKE256 fact `ratchet_moves` is decided by
+  `decide +kernel`, in under a minute.
+- `PrepareProofs.lean`: `prepareFactors : PrepareFactors contentSpec`.
+- `ActivityStatements.lean` / `ActivityProofs.lean`: `TwoLevels` (with `verdict`, `ok`,
+  `turn`) and its satisfiable, premise and teeth poles.
 
-**Keystones and their witnesses** (all `def … : Prop` in `Statements.lean`; nothing proved):
+**So:** `LiveKeystone` holds with its poles.  `HostKeystone` has its poles, and the keystone
+itself is known false until the migration (it is that commit's gate, with `HostLegacyCensus`).
+`PrepareFactors` holds today, so rewiring `prepareTarget`'s content branch through `dispatch`
+preserves behaviour.
 
-| keystone | satisfiable | teeth | premise |
-|---|---|---|---|
-| `EngineKeystone` | `EngineSatisfiable` | `EngineTeeth` (ghost, fail-open, unframed, twin) | `EnginePremise` |
-| `CompletenessKeystone` | `CompletenessSatisfiable` | `CompletenessTeeth` | `CompletenessPremise` |
-| `LiveKeystone` = `ContentAgreement contentSpec ∧ ContentComplete` | `ContentAccepted` (fixture owed) | `ContentTeeth` (`contentGhost`, `contentNarrowed`) | `ContentAccepted` |
-| `HostKeystone` (known false today, by clause; it gates the migration commit) | `HostAccepted` (fixture owed) | `HostTeeth` | `HostPremise` = `contentHandler.Lawful` |
+**Checking.**  hbox private tree `/tank/lanes/effects-revival/src` was synced to the merged
+lane (main `d6f0372d8` plus the lane) on 10-28 and has the whole `Effects` closure built as
+modules.  To check files: `scratchpad/effects-revival/hcheck.sh <module>...` (rsyncs `Effects/`
+and `Effects.lean`, runs `check.sh`, which writes `check.pid`, `swarm-build lake build`).
+After a main merge that touches the closure, re-sync the tree with
+`rsync -a --delete --exclude=.lake --exclude=.git --exclude=target --exclude=.claude ./
+hbox:/tank/lanes/effects-revival/src/`, then start `/tank/lanes/effects-revival/rebuild.sh`
+detached.  It writes `rebuild.pid` and `rebuild.log`, builds kernels, then `lake build Effects`.
+Lean never runs on the Mac.
 
-**Files.**  `Effects/Revival/Engine.lean` (§1-§5: substrate, declaration, registry,
-dispatcher, engine and completeness keystones and the toy pole; kernel-free, imports only
-`Theory.Store`, `Theory.TypedAuthorization`, `Compiler.Tower256ConcreteBackend`).
-`Effects/Revival/Statements.lean` (§6-§7: the live content declaration, `ContentAgreement`,
-`HostKeystone`; imports Engine and `Kernel.DeclaredResourceController`).
-`Effects/Revival/EngineProofs.lean` (proofs of everything in Engine, plus the materialize
-lemma).  The split exists because Statements' kernel import is a 294-module project closure
-while Engine needs about 50: an abstraction seam (the engine does not depend on the
-controller) worth keeping for the inversion work.
+**Owed, in order.**
+1. **Doc-write fixture regeneration** (the integrator's assignment; it is no longer a witness
+   here).  `Fixtures/NativeDocWriteFixture*` is red: its recorded seed and record frames no
+   longer decode (first evidence 10-28), and the integrator's new umbrellas stage reds a
+   candidate on it.  Regenerate from the FIRST READY candidate carrying the module conversion
+   plus lean-audit-c's M2 (it moves the turn digest).  The integrator names that candidate.
+   Steps:
+   1. On dregg-build, in your own run directory, run
+      `native/resource-client/doc-write-native-acceptance.py --bin <cand>/bin --root <new dir>`.
+      It stops its own servers at exit; check none are left running.
+   2. Copy the world to the hbox tree, merged to that main.
+   3. Run `scripts/native-doc-write-fixture/generate.sh WORLD` there (the verifier comes from
+      the candidate's bin).
+   4. Build `Fixtures.NativeDocWriteFixture`, and send the integrator the sha.
+2. **The migration commit** (§5 step 1; post-demo; prepare, never land without the
+   coordinator's word).  The gate is `HostKeystone` and `HostLegacyCensus` (both provable
+   only after it) plus the already-proved `PrepareFactors`.  Its shape:
+   - `Payload` loses `content` and gains `registered (code : UInt8) (op : List UInt8)`, with
+     canonical op bytes.  `payloadStream` reads tag octet 1 through `readPrefix` of the content
+     registry: `ContentPrefixAgreement` says no byte changes.
+   - `prepareTarget`'s registered branch becomes `dispatch` then `genericChecks`; this is
+     `PrepareFactors`' right side.
+   - The content arms of `computeTarget`, `targetPatch`, `targetField`, `targetAmount`,
+     `targetRatchet`, `targetFullFootprint`, `targetProjection`, `Target.layout`,
+     `Target.materializer`, `packTarget`, `selectTarget`, `Target.contentStore?`,
+     `targetWrites` and the `Repr` are deleted in the same commit.
+   - About 25 Lean consumers construct or match `.content cmd`.  The heaviest are
+     `Kernel/NativeHost.lean` (about 20 sites), `HyperdocumentPublication`,
+     `HyperdocumentMergePublication`, `CanonicalCellRegistry`, the Fn consumers and
+     `Assurance/HyperdocumentQueryDeployment`.  They build the registered payload from
+     `ContentResource.commandStream.encode`.
+   - The Host presentation arms (`Host/Json.lean:1380`, `SourceAgreementJson.lean:1082`,
+     `GrainOriginSource.lean:167`, `InspectRender.draftLines`, `FnInboxView.targetJson`) need
+     the declaration's JSON face.  It is still open which: a `json` codec field, or JSON over
+     canonical op bytes.  Without it those arms stay as twins, and step 1 is not done.
+   - `Effects/EffectSpec.lean` and `Effects/Placeholder.lean` are deleted.  `Effects.lean`
+     then converts to a module.
+   - Persisted identities move: `payloadStream` and the transaction frame.  The integrator
+     plans the raw-octet bump; this is a re-genesis by the whole-epoch design (§8 item 4
+     below), which re-genesis at the homelab absorbs.
+3. **Migration step 2 (transfer)** must satisfy `TwoLevels` for its derived executor projected
+   to a `YieldCommit` (§5 step 2, corrected 10-28: a refused verdict is an accepted yield).
+4. **Whole-epoch compatibility** (design only; no local handler upgrade is promised until it is
+   built).  Today `StoreEpoch.current.schemaRefs` hashes the whole persisted corpus, and opening
+   is equality, so every registry change is a re-genesis.  The design:
+   - the seed carries the corpus itself;
+   - opening becomes "H ⊇ S, one fingerprint per identity, a `SafeExtension` registry delta",
+     where `ExtensionPreserves` and `PrefixKeystone` give old-byte preservation;
+   - a codec change is a new `/v(N+1)` identity, and the old one stays readable;
+   - the first record under a code outside S appends an epoch step;
+   - the theorem to prove then is "EpochCompatible S H implies replay under H equals replay
+     under S".
 
-**Proved** (EngineProofs, `#assert_axioms` pinned; built green on hbox):
-`materialize_logical`, `storeSubstrate_framed`, `Substrate.run_frame`, `engineKeystone`,
-`completenessKeystone`, `enginePremise`, `engineSatisfiable`, `engineTeeth`,
-`entryA_lawful`, `completenessSatisfiable`, `completenessTeeth`, `completenessPremise`.
-
-**Where to check.**  The kernel-free files: hbox `/tank/lanes/effects-revival/src`, a
-private small-closure tree (packages a real copy of the warm base's, `.lake/native` built by
-`scripts/build-mini-kernels.sh`).  `scratchpad/effects-revival/hcheck.sh <module>` rsyncs
-`Effects/` there and runs `/tank/lanes/effects-revival/check.sh` (`swarm-build lake build`,
-PID file `check.pid`, log `check.log`); seconds per file.  The live file (kernel closure):
-dregg-ref, via the concatenation check in `/build/lanes/effects-revival-scratch/` under
-the closure lock (contended by host builds; expect waits).
-
-**Proof order (remaining).**
-1. `ContentComplete`, action by action over the write sites of `ContentResource.step`.
-   **Risk:** `contentActionFrame` is a declared table.  If an action writes a field the
-   table omits, fix the table, not the statement's meaning, and tell the auditor.  This
-   needs the kernel closure: either build `Kernel.ContentResource`'s closure on hbox once
-   (it is smaller than the controller's) or check on dregg-ref.
-2. The doc-write fixture inhabitant (`Fixtures/NativeDocWriteFixture*`).  It needs a
-   non-empty rotation and serves `ContentAccepted`, `HostAccepted` and the ghost clauses of
-   `ContentTeeth`/`HostTeeth`.
-3. `ContentAgreement contentSpec`: unfold the content arm of `computeTarget`, then
-   `ContentResource.prepareCell_ok_of_run`, `Patch.run_append`, the validate semantics,
-   and `(storeSubstrate L).run s ps = some s' ↔ Patch.ValidFrom s ps ∧ Patch.run s ps = s'`.
-   For the header clauses, case on the kind (the match in `payloadVerb`).
-4. `HostKeystone` lands with the migration commit, not before (§5 step 1).  Coordinate it
-   with the platform lane (L1).
-
-**Not done, not this lane's:**
-- the migration itself (§5);
-- the census/regen changes (§6); the integrator plans the raw-octet bump separately;
-- the open item in step 1, a JSON face for the Host presentation arms.
+**Not this lane's:** the census and regen changes (§6); the raw-octet bump (the integrator's).

@@ -53,7 +53,8 @@ def extraGuards {config : Config} {store : StoreIdentity} {head : Head store} {g
     {ingress : ApplicationLifecycleCompletionIngress.Ingress}
     (accepted : ApplicationLifecycleCompletionAdmission.Candidate config head ground ingress) :
     List ReadGuard :=
-  if ingress.source.needsPackageWrite then [] else [packageGuard accepted]
+  accepted.custodian.guard ::
+    if ingress.source.needsPackageWrite then [] else [packageGuard accepted]
 
 theorem extraGuards_readonly {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
     {ingress : ApplicationLifecycleCompletionIngress.Ingress}
@@ -61,11 +62,14 @@ theorem extraGuards_readonly {config : Config} {store : StoreIdentity} {head : H
     (guard : ReadGuard) (member : guard ∈ extraGuards accepted) :
     guard.cellId ∉ (DeclaredResourceController.writes accepted.prepared).map DataWrite.cellId := by
   unfold extraGuards at member
-  split at member
-  · simp at member
-  · simp only [List.mem_singleton] at member
-    subst guard
-    exact accepted.packageGuardReadOnly (by simp_all)
+  rcases List.mem_cons.mp member with platform | rest
+  · subst guard
+    exact accepted.platformReadOnly
+  · split at rest
+    · simp at rest
+    · simp only [List.mem_singleton] at rest
+      subst guard
+      exact accepted.packageGuardReadOnly (by simp_all)
 
 theorem extraGuards_current {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
     {ingress : ApplicationLifecycleCompletionIngress.Ingress}
@@ -73,11 +77,14 @@ theorem extraGuards_current {config : Config} {store : StoreIdentity} {head : He
     (guard : ReadGuard) (member : guard ∈ extraGuards accepted) :
     guard.expectedRoot = ground.view.model.roots guard.cellId := by
   unfold extraGuards at member
-  split at member
-  · simp at member
-  · simp only [List.mem_singleton] at member
-    subst guard
-    exact accepted.packageRead.physicalCurrent
+  rcases List.mem_cons.mp member with platform | rest
+  · subst guard
+    exact accepted.custodian.guard_current
+  · split at rest
+    · simp at rest
+    · simp only [List.mem_singleton] at rest
+      subst guard
+      exact accepted.packageRead.physicalCurrent
 
 /-- Storage charge is the DRC's actual output write bytes plus the special
 event ingress and new nullifier bytes. The ordinary event does not occupy a
@@ -160,5 +167,28 @@ theorem intent_package_guard_current {config : Config} {store : StoreIdentity} {
     apply List.mem_append_right
     simp [extraGuards, readOnly]
   · exact accepted.packageRead.physicalCurrent
+
+
+/-- **The completion custodian key is the platform record's on the guarded ground.** The
+physical report is checked under `accepted.custodian.key` (the type of `physical`); that key
+is the platform record's on `ground.view`, and the platform cell's root on that ground is one
+of the completion's read guards, so an install that rotates the key between preparation and
+commit makes the completion stale. Teeth: `CompletionCustodianKey.Read.stale` (no other key)
+and `CompletionCustodianKey.select_unavailable` (an absent cell refuses by name). -/
+theorem keyCurrent {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
+    {ingress : ApplicationLifecycleCompletionIngress.Ingress}
+    (accepted : ApplicationLifecycleCompletionAdmission.Candidate config head ground ingress) :
+    PlatformCellDomain.recordOn config.deployment ground.view = some accepted.custodian.record ∧
+      accepted.custodian.record.completionCustodianKey = some accepted.custodian.key ∧
+      accepted.custodian.guard ∈ (intent accepted).readGuards ∧
+      accepted.custodian.guard.cellId = PlatformCellDomain.cellIdOf config.deployment ∧
+      accepted.custodian.guard.expectedRoot =
+        ground.view.model.roots (PlatformCellDomain.cellIdOf config.deployment) := by
+  refine ⟨accepted.custodian.current.1, accepted.custodian.current.2, ?_, rfl, rfl⟩
+  change accepted.custodian.guard ∈
+    DeclaredResourceController.readGuards accepted.prepared ++ extraGuards accepted
+  exact List.mem_append_right _ (List.mem_cons.mpr (Or.inl rfl))
+
+#assert_axioms keyCurrent
 
 end Minidregg.Kernel.ApplicationLifecycleCompletionCore

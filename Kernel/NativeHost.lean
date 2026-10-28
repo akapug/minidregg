@@ -168,8 +168,6 @@ theorem durableRefusal_tailBound (head certified bound : Nat) :
 private def birthRejection : ResourceBirthReceiver.Reject → String
   | .malformedIngress => "malformed ingress"
   | .transactionConflict => "transaction identity conflict"
-  | .platformUnavailable => "platform cell unavailable: an ordinary birth has no price"
-  | .platformStale => "stale creation tariff: the pins are not the platform record's"
   | .admission reason => s!"admission: {repr reason}"
   | .durable (.tailBound head certified bound) => s!"head {head} certified {certified} bound {bound}"
   | .durable reason => s!"durable: {repr reason}"
@@ -188,8 +186,6 @@ private def grainBirthRejection : GrainResourceBirthReceiver.Reject → String
 private def birthReason : ResourceBirthReceiver.Reject → RefusalReason
   | .malformedIngress => .malformed
   | .transactionConflict => .conflict
-  | .platformUnavailable => .operationRejected
-  | .platformStale => .operationRejected
   | .admission _ => .operationRejected
   | .durable (.tailBound ..) => .tailBound
   | .durable (.overBound ..) => .overBound
@@ -546,7 +542,7 @@ def provisionPlanLoaded (config : Config) (opened : Opened config)
     opened.durable command).mapError (fun reason => s!"provisioning preparation: {repr reason}")
   let selected ← (CredentialSignatureAdmission.signingHeader prepared.authority.snapshot
     (ParticipantFactoryProvisioning.marker config.deployment.domain config.profile.semantics command)
-    ⟨.program, ParticipantFactoryProvisioning.request config.deployment config.profile.template
+    ⟨.program, ParticipantFactoryProvisioning.request config.deployment prepared.template
       prepared.authority.snapshot config.profile.semantics ambient command⟩).mapError
         (fun reason => s!"provisioning sponsor key: {repr reason}")
   pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
@@ -1493,12 +1489,12 @@ def fleetFinalize (config : Config) (opened : Opened config) (draft : FleetTurn.
         (FleetTurn.streamDigest config.deployment.domain draft.payer publication.topic)
       { publication with sequence := head.nextSeq }
     else publication
-  { draft with fee := config.tariff.base, publication := publication }
+  { draft with fee := opened.pins.tariff.base, publication := publication }
 
 def fleetPlanLoaded (config : Config) (opened : Opened config) (command : FleetTurn.Command) :
     Except String FleetTurn.SigningPlan := do
   let ambient : FleetTurn.Ambient := ⟨config.federation, logicalHeight config opened.durable⟩
-  let prepared ← (FleetTurn.prepare config.deployment config.profile config.tariff ambient
+  let prepared ← (FleetTurn.prepare config.deployment config.profile opened.pins.tariff ambient
     opened.durable command).mapError (fun reason => s!"fleet turn preparation: {repr reason}")
   let selected ← (CredentialSignatureAdmission.signingHeader prepared.authority.snapshot
     (FleetTurn.marker config.deployment.domain config.profile.semantics command)
@@ -1555,7 +1551,7 @@ def fleetSubmitLoaded (config : Config) (opened : Opened config)
     (bytes : List UInt8)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) :
     IO Outcome := do
-  match ← FleetTurnReceiver.receiveLoaded config.deployment config.profile config.tariff
+  match ← FleetTurnReceiver.receiveLoaded config.deployment config.profile opened.pins.tariff
       ⟨config.federation, logicalHeight config opened.durable⟩ config.signature
       config.transport opened.durable bytes with
   | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
@@ -2130,6 +2126,61 @@ def platformLookupLoaded (config : Config) (opened : Opened config) (bytes : Lis
           | some original => .confirmed .replayed original
           | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
 
+/-! ## The seed-meter refill (M2): session operations 244–247
+
+The controller's refill of the commit protocol's meter: plan, assembly, submission and a
+receipt-only lookup, as the platform install (240–243). The plan reuses the platform
+signing-plan frame (domain, semantics, command bytes, header). -/
+
+def meterRefillPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
+    Except String PlatformCellDomain.SigningPlan := do
+  let some command := MeterRefillReceiver.commandCodec.decode commandBytes
+    | .error "noncanonical meter refill command"
+  let header ← MeterRefillReceiver.signingHeader config.deployment config.profile.semantics
+    ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable command
+  pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
+    CredentialSignedEnvelopeController.headerCodec.encode header⟩
+
+/-- Assembly transports the controller's detached signature over the plan's header;
+submission rechecks the signature, the capability, the controller and the exact authority
+root. -/
+def meterRefillAssemble (plan : PlatformCellDomain.SigningPlan) (signature : List UInt8) :
+    Except String (List UInt8) := do
+  check (decide (signature.length = 64)) "meter refill signature must be 64 bytes"
+  check (MeterRefillReceiver.commandCodec.decode plan.commandBytes).isSome
+    "noncanonical meter refill plan command"
+  let header ← need "noncanonical meter refill header"
+    (CredentialSignedEnvelopeController.headerCodec.decode plan.header)
+  let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
+  pure (MeterRefillReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
+
+def meterRefillSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config)
+    (bytes : List UInt8) : IO Outcome := do
+  match ← MeterRefillReceiver.receiveLoaded config.deployment config.profile.semantics
+      ⟨config.federation, logicalHeight config opened.durable⟩ config.signature config.transport
+      opened.durable bytes with
+  | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
+  | .rejected reason => return refused .operationRejected "meter-refill" s!"{repr reason}"
+  | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
+  | .durableRejected reason => return durableRefusal reason
+  | .contention => return .contention
+  | .unavailable detail => return .unavailable detail.toUTF8.toList
+  | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+/-- Receipt-only historical lookup of a meter refill. Absence never submits fresh work. -/
+def meterRefillLookupLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) : Outcome :=
+  match MeterRefillReceiver.decodeIngress bytes with
+  | none => refused .malformed "meter-refill" "noncanonical signed ingress"
+  | some ingress =>
+      match MeterRefillReceiver.replay config.deployment.domain config.profile.semantics
+          opened.durable ingress with
+      | none => .absent
+      | some (.error _) => refused .conflict "replay" "transaction identity conflict"
+      | some (.ok receipt) =>
+          match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
+          | some original => .confirmed .replayed original
+          | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
+
 /-- The public view of the pay cell (no assignment map). -/
 def payViewLoaded (config : Config) (opened : Opened config) : Except String PayCellDomain.View := do
   let pay ← need "pay cell unavailable" (PayCellDomain.load config.deployment opened.durable.snapshot)
@@ -2148,7 +2199,7 @@ def payViewLoaded (config : Config) (opened : Opened config) : Except String Pay
 receipt as `replayed`). The well ledger is the operator-local CLI `well-ledger`. -/
 
 def wellAmbient (config : Config) (opened : Opened config) : RealmWellReceiver.Ambient :=
-  ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset⟩
+  ⟨config.federation, logicalHeight config opened.durable, opened.pins.tariff.asset⟩
 
 /-- The header the subject signs over this opened image. It discloses no
 decision; a signer key the authority cell does not hold is refused. -/
@@ -2220,7 +2271,7 @@ def wellLedgerLoaded (config : Config) (opened : Opened config) : Except String 
     let holdersSum := (holders.map Prod.snd).sum
     ({ asset, realm, well := logical.balance asset asset, holders, holdersSum,
        total := logical.balance asset asset + holdersSum } : WellLedgerRow)
-  let credit := config.tariff.asset
+  let credit := opened.pins.tariff.asset
   pure ⟨book.payload.root, credit, logical.balance credit credit, logical.totalAsset credit, wells⟩
 
 def wellLedger (config : Config) : IO (Except String WellLedger) := do
@@ -2334,8 +2385,6 @@ P6's.)  The plan asks the Receiver's verifier about the memo's two possession
 signatures (`PayEnrolReceiver.observations`), because the decision the observer
 signs depends on both bits. -/
 
-def payEnrolAmbient (config : Config) (opened : Opened config) : PayEnrolReceiver.Ambient :=
-  ⟨config.federation, logicalHeight config opened.durable, config.tariff⟩
 
 def payEnrolPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
     IO (Except String PayCellDomain.SigningPlan) := do
@@ -2533,7 +2582,7 @@ a memo, so it changes no decision: `ObjectiveActivity.LoadMemo.replay_eq`). -/
 def activityAmbient (config : Config) (opened : Opened config) (held : ObjectiveActivity.LoadMemo) :
     ObjectiveKernelConfig.Ambient :=
   { federation := config.federation, height := logicalHeight config opened.durable,
-    asset := config.tariff.asset, collector := config.tariff.collector, held }
+    asset := opened.pins.tariff.asset, collector := opened.pins.tariff.collector, held }
 
 def activityPlanLoaded (config : Config) (opened : Opened config) (held : ObjectiveActivity.LoadMemo)
     (commandBytes : List UInt8) : Except String ObjectiveActivityReceiver.SigningPlan := do
@@ -2661,7 +2710,7 @@ nothing the view does not. -/
 
 def seatAmbient (config : Config) (opened : Opened config) : ObjectiveKernelConfig.Ambient :=
   { federation := config.federation, height := logicalHeight config opened.durable,
-    asset := config.tariff.asset, collector := config.tariff.collector }
+    asset := opened.pins.tariff.asset, collector := opened.pins.tariff.collector }
 
 def seatPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
     Except String SeatReceiver.SigningPlan := do
@@ -3236,7 +3285,7 @@ def submitLoadedVia (transport : DurableReceiverIO.Transport) (config : Config)
         config.signature light.opening (light.basisVia transport) bytes confirm
   | .birth bytes =>
       if (GrainResourceBirthPolicyController.decodeIngress bytes).isSome then
-        let tariff := config.grainBirthTariffValue.toOption
+        let tariff := GrainResourceBirthAdmission.grainTariffAt config.deployment opened.durable
         let ambient : DeclaredResourceController.Ambient := ⟨config.federation, height⟩
         match ← GrainResourceBirthReceiver.receiveLoaded config.profile config.deployment
             opened.pins tariff ambient config.signature transport

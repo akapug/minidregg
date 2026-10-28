@@ -22,7 +22,7 @@ Realizer slots (law 1):
   (`Deployment.keyOf`, the authority snapshot). Unforgeability itself is the verifier's, not
   a Lean theorem: the statements are relative to the transcript, and no transcript entry is
   ever invented here.
-* `Deployment.holdsInstall` / `holdsRefill` are `capabilityEvidenceChecked` in capability mode
+* `Deployment.holdsInstall` is `capabilityEvidenceChecked` in capability mode
   under the factory's current law (PayBookReceiver's authority).
 * The controller is the deployment's `factoryController`; the genesis record is
   `genesisRecord` of the deployment's `NativeHost.Config`, not any valid record.
@@ -34,13 +34,16 @@ Realizer slots (law 1):
   record, subject and capability or form a `PinCollision` of the two compared source byte
   strings (`Context.binds`). A relay cannot swap a field under a valid signature short of
   that collision.
-* `BirthView.platformAt` decodes the platform cell in the store the birth commits against
-  (`none`: missing or undecodable, and the birth is refused); the quote is
-  `ResourceBirth.Descriptor.quotedFee` (`Host/Json.lean:2341`).
-* The meter is `DurableCommitProtocol.Snapshot.available` under the EXTENDED install
-  (`installAvailable`: the proof phase adds `Intent.credit`, default zero, which only the
-  refill family sets); `Meter.consumed` is `Snapshot.consumed`, and every nullifier carries
+* Births read the platform record of the image they commit against at the deployed receiver
+  (`ResourceBirthReceiver.ReceiverReadsCurrent`); the client quote is
+  `ResourceBirth.Descriptor.quotedFee` over that record's creation tariff (`Json.birthCurrent`).
+* The meter is `DurableCommitProtocol.Snapshot.available` under the extended install
+  (`Snapshot.install` adds `Intent.credit`, default zero, which only the refill family sets;
+  `protocol_install_matches`); `Meter.consumed` is `Snapshot.consumed`, and every nullifier carries
   its family tag.
+* The meter is unbounded by design: every persisted form of it is ten unbounded naturals
+  (`DurableReceiverCodec.chargeStream`), so no fit bound applies to a refill. A future
+  fixed-width emitter of `available` carries its own bound at that emitter (audit pass 21).
 
 Known boundaries (recorded by the third audit pass, not closed here):
 * the controller may name its OWN key as the first custodian (`CustodianStep none _`), so
@@ -103,7 +106,6 @@ structure Deployment where
   genesis : Config
   keyOf : SubjectId → Option (List UInt8)
   holdsInstall : SubjectId → CapabilityId → Bool
-  holdsRefill : SubjectId → CapabilityId → Bool
   transcript : CredentialSignatureIO.Transcript
 
 def Deployment.controller (d : Deployment) : SubjectId := d.genesis.factoryController.subject
@@ -352,39 +354,13 @@ theorem decides_authenticated (ctx : Context) (decide : History → Install → 
   have := (decides h i).mp admitted
   exact ⟨this.2.1, this.2.2.1⟩
 
-/-! ### L1-d: births read the platform of the store they commit against -/
+/-! ### L1-d and L1-e: births read the platform of the store they commit against
 
-structure Terms where
-  creation : CreationTariff
-  grainBirth : Option NativeHost.GrainBirthTariffPin
-  completionCustodianKey : Option (List UInt8)
-  ownerBudget : Nat
-  windowFrom : Nat
-  windowUntil : Nat
-  deriving DecidableEq, Repr
-
-def termsAt (p : Platform) (height : Nat) : Terms :=
-  ⟨p.creation, p.grainBirth, p.completionCustodianKey, p.ownerBudget, height, height + p.lifetime⟩
-
-structure BirthView (Store : Type) where
-  platformAt : Store → Option Platform
-  heightOf : Store → Nat
-  platformCell : Nat
-
-/-- **L1-d.** A birth reads the platform of the very store it commits against, at that
-store's height, every field and the window; it read-guards the platform cell; and a store
-whose platform cell is missing or undecodable yields no terms (the birth is refused). -/
-def BirthsReadCurrent {Store : Type} (view : BirthView Store) (terms : Store → Option Terms)
-    (guards : Store → List Nat) : Prop :=
-  ∀ store, match view.platformAt store with
-    | some p => terms store = some (termsAt p (view.heightOf store)) ∧ view.platformCell ∈ guards store
-    | none => terms store = none
-
-/-- **L1-e.** The birth fee is the deployed quote over the current creation tariff; no
-platform, no quote. -/
-def BirthQuoteCurrent {Store : Type} {registry : TypeRegistry Digest} (view : BirthView Store)
-    (quote : Store → Descriptor registry → Option Nat) : Prop :=
-  ∀ store d, quote store d = (view.platformAt store).map fun p => d.quotedFee p.creation
+Stated at the deployed receiver, where the birth is admitted:
+`ResourceBirthReceiver.ReceiverReadsCurrent` (the record of the committed image prices the
+birth, bounds its fee, binds its owner budget and lifetime, and is read-guarded), with
+`unpriced_empty` and `stale_unadmitted`. A store-only `terms` function here would hold by
+`rfl` and constrain no deployed reader, so none is stated. -/
 
 /-! ### Poles of L1 -/
 
@@ -431,7 +407,6 @@ def toyDeployment (host : NativeHost.Config) (genesis : Config) (key : List UInt
   genesis := genesis
   keyOf s := if s = genesis.factoryController.subject then some key else none
   holdsInstall s _ := decide (s = genesis.factoryController.subject)
-  holdsRefill s _ := decide (s = genesis.factoryController.subject)
   transcript := ⟨verified⟩
 
 def toyContext (d : Deployment) : Context where
@@ -597,70 +572,19 @@ theorem sorted_load_bearing (host : NativeHost.Config) (genesis : Config) (key :
   have := above { base with version := 5 } (by simp [h, History.records])
   simp [next, h, History.current, History.records] at this
 
-/-- Births, satisfiable: the reader of the store's own platform reads current. -/
-def currentReader {Store : Type} (view : BirthView Store) (store : Store) : Option Terms :=
-  (view.platformAt store).map (termsAt · (view.heightOf store))
-
-theorem currentReader_reads_current {Store : Type} (view : BirthView Store) :
-    BirthsReadCurrent view (currentReader view) (fun _ => [view.platformCell]) := by
-  intro store
-  unfold currentReader
-  cases view.platformAt store <;> simp
-
-def historyView : BirthView (History × Nat) := ⟨fun s => some s.1.current, (·.2), 0⟩
-
-def paidRecord : Platform := ⟨1, ⟨1, 0, 0, 0, 0, 0⟩, none, none, 0, 1⟩
-def freeRecord : Platform := ⟨0, ⟨0, 0, 0, 0, 0, 0⟩, none, none, 0, 1⟩
-
-/-- Births, teeth: a reader of the GENESIS record does not read current once an install
-changed the creation tariff. -/
-def genesisReader (s : History × Nat) : Option Terms := some (termsAt s.1.genesis s.2)
-
-theorem genesisReader_stale :
-    ¬ BirthsReadCurrent historyView genesisReader (fun _ => [0]) := by
-  intro reads
-  have := (reads (⟨freeRecord, [paidRecord]⟩, 0)).1
-  simp [genesisReader, historyView, termsAt, History.current, History.records, paidRecord,
-    freeRecord] at this
-
-/-- Births, teeth: a reader that prices without a platform cell is refused by the statement. -/
-theorem pricing_without_platform_refused {Store : Type} (view : BirthView Store) (store : Store)
-    (missing : view.platformAt store = none) (t : Terms)
-    (guards : Store → List Nat) (terms : Store → Option Terms) (priced : terms store = some t) :
-    ¬ BirthsReadCurrent view terms guards := by
-  intro reads
-  have := reads store
-  rw [missing] at this
-  rw [priced] at this
-  cases this
-
-/-- Quote, satisfiable: the deployed quote over the store's own platform. -/
-def currentQuote {Store : Type} {registry : TypeRegistry Digest} (view : BirthView Store)
-    (store : Store) (d : Descriptor registry) : Option Nat :=
-  (view.platformAt store).map fun p => d.quotedFee p.creation
-
-theorem currentQuote_current {Store : Type} {registry : TypeRegistry Digest}
-    (view : BirthView Store) : BirthQuoteCurrent (registry := registry) view (currentQuote view) :=
-  fun _ _ => rfl
-
-/-- Quote, teeth: a quote over the genesis tariff is stale once an install raised the base. -/
-def genesisQuote {registry : TypeRegistry Digest} (s : History × Nat) (d : Descriptor registry) :
-    Option Nat := some (d.quotedFee s.1.genesis.creation)
-
-theorem genesisQuote_stale {registry : TypeRegistry Digest} (d : Descriptor registry) :
-    ¬ BirthQuoteCurrent historyView (genesisQuote (registry := registry)) := by
-  intro current
-  have := current (⟨freeRecord, [paidRecord]⟩, 0) d
-  simp [genesisQuote, historyView, History.current, History.records, paidRecord, freeRecord,
-    Descriptor.quotedFee] at this
-
 /-! ## M2: the seed-meter refill
 
-The meter is the commit protocol's `Snapshot.available`, not a cell. Today `install` sets
-`available := available - exactCharge` and no intent can raise it; the proof phase adds
-`Intent.credit` (default zero) and `installAvailable` below is the extended install's meter.
+The meter is the commit protocol's `Snapshot.available`, not a cell. `install` sets
+`available := available - exactCharge + credit` with `Intent.credit` (default zero), and
+`installAvailable` below is that install's meter as a spec.
 Only the refill family sets a nonzero credit; its exact charge is zero (a nullifier-only
-intent, which `preflight` admits), so it is admitted at an exhausted meter. -/
+intent, which `preflight` admits), so it is admitted at an exhausted meter.
+
+The keystones are the deployed ones (audit pass 21 addendum): M2-c is
+`MeterRefillReceiver.AcceptedRefill.sound` with `intent_install_refilled`, M2-b is
+`NativeHostReplay.NativeAdmission.credit_confined`, M2-d is `protocol_install_matches`
+below. This section keeps the meter's shape (`Refill`, `refilled`, `installAvailable`) that
+they are read against. -/
 
 inductive Family
   | meterRefill
@@ -737,65 +661,9 @@ structure Meter where
   remaining : ResourceCost.Charge
   consumed : Nullifier → Bool
 
-structure RefillContext where
-  deployment : Deployment
-  encode : Refill → List UInt8
-  covers : ∀ r s, encode r = encode s →
-    r.subject = s.subject ∧ r.capability = s.capability ∧ r.nonce = s.nonce ∧ r.amount = s.amount
-  /-- The meter's fixed-width artifact layout (`ResourceCost.WordLayout`). -/
-  layout : ResourceCost.WordLayout
-
-def RefillAdmits (ctx : RefillContext) (m : Meter) (r : Refill) : Prop :=
-  r.subject = ctx.deployment.controller ∧
-    ctx.deployment.verifies ctx.deployment.controller (ctx.encode r) r.envelope = true ∧
-    ctx.deployment.holdsRefill ctx.deployment.controller r.capability = true ∧
-    m.consumed r.nullifier = false ∧
-    ctx.layout.fitsCheck (raised m.remaining r.amount) = true
-
-instance (ctx : RefillContext) (m : Meter) (r : Refill) : Decidable (RefillAdmits ctx m r) := by
-  unfold RefillAdmits; infer_instance
-
-/-- **M2-b, credit has an admitted refill behind it.** Over the intents a deployment commits
-(`committed`: every `Receiving.Family.intent` with `credit := 0`, and the refill receiver's),
-a nonzero credit IS the intent of a refill admitted on some meter. The family label alone
-grants nothing. -/
-def CreditConfined (ctx : RefillContext) (committed : MeterIntent → Prop) : Prop :=
-  ∀ intent, committed intent → intent.credit ≠ 0 → ∃ m r, RefillAdmits ctx m r ∧ intent = r.intent
-
-/-- Satisfiable: committing only admitted refills' intents is confined. -/
-theorem admitted_refills_confined (ctx : RefillContext) :
-    CreditConfined ctx (fun intent => ∃ m r, RefillAdmits ctx m r ∧ intent = r.intent) :=
-  fun _ behind _ => behind
-
-/-- Teeth: an intent tagged `.meterRefill` with a credit and no refill behind it (no
-nullifier, which every refill intent carries) is not confined. -/
-theorem tagged_mint_refused (ctx : RefillContext) (minted : MeterIntent)
-    (noNullifier : minted.nullifiers = []) (lane : ResourceCost.Lane)
-    (positive : 0 < minted.credit lane) :
-    ¬ CreditConfined ctx (fun intent => intent = minted) := by
-  intro confined
-  obtain ⟨m, r, -, same⟩ := confined minted rfl (fun zero => by
-    have := congrFun zero lane
-    simp at this; omega)
-  have := congrArg MeterIntent.nullifiers same
-  rw [noNullifier] at this
-  simp [Refill.intent] at this
-
 /-- The post-state of an admitted refill: the extended install of its intent. -/
 def refilled (m : Meter) (r : Refill) : Meter :=
   ⟨installAvailable m.remaining r.intent, fun n => decide (n = r.nullifier) || m.consumed n⟩
-
-/-- **M2-c.** A lawful refill receiver admits exactly `RefillAdmits` and yields the extended
-install of the refill's intent. -/
-def RefillLawful (ctx : RefillContext) (post : Meter → Refill → Option Meter) : Prop :=
-  ∀ m r, (RefillAdmits ctx m r → post m r = some (refilled m r)) ∧
-    (¬ RefillAdmits ctx m r → post m r = none)
-
-def refillReference (ctx : RefillContext) (m : Meter) (r : Refill) : Option Meter :=
-  if RefillAdmits ctx m r then some (refilled m r) else none
-
-theorem refillReference_lawful (ctx : RefillContext) : RefillLawful ctx (refillReference ctx) :=
-  fun m r => ⟨fun ok => by simp [refillReference, ok], fun no => by simp [refillReference, no]⟩
 
 /-- Liveness: the refill's zero charge is funded by an exhausted meter. -/
 theorem refill_funded_at_exhaustion (r : Refill) :
@@ -812,27 +680,6 @@ theorem charged_refill_refused_at_exhaustion (c : ResourceCost.Charge)
       have := ((ResourceCost.Charge.fundedCheck_eq_true_iff c 0).mp h) .turnBytes
       simp at this; omega
 
-/-- One refill never lowers a lane. -/
-theorem lawful_monotone (ctx : RefillContext) (post : Meter → Refill → Option Meter)
-    (lawful : RefillLawful ctx post) (m next : Meter) (r : Refill)
-    (admitted : post m r = some next) : ∀ lane, m.remaining lane ≤ next.remaining lane := by
-  intro lane
-  by_cases ok : RefillAdmits ctx m r
-  · rw [(lawful m r).1 ok] at admitted
-    cases admitted
-    simp [refilled, installAvailable, Refill.intent]
-  · rw [(lawful m r).2 ok] at admitted
-    cases admitted
-
-/-- Replay: a consumed refill nullifier is refused. -/
-theorem replay_refused (ctx : RefillContext) (post : Meter → Refill → Option Meter)
-    (lawful : RefillLawful ctx post) (m : Meter) (r : Refill) (spent : m.consumed r.nullifier = true) :
-    post m r = none :=
-  (lawful m r).2 fun admitted => by
-    have fresh := admitted.2.2.2.1
-    rw [spent] at fresh
-    cases fresh
-
 /-- The family tag separates: another family's nullifier on the same subject and nonce is
 not the refill's. -/
 theorem family_tag_separates (r : Refill) (family : Family) (other : family ≠ .meterRefill) :
@@ -840,24 +687,13 @@ theorem family_tag_separates (r : Refill) (family : Family) (other : family ≠ 
   intro same
   exact other (congrArg Nullifier.family same).symm
 
-/-- Overflow: a refill whose raised meter does not fit the layout is refused. -/
-theorem overflow_refused (ctx : RefillContext) (post : Meter → Refill → Option Meter)
-    (lawful : RefillLawful ctx post) (m : Meter) (r : Refill) (lane : ResourceCost.Lane)
-    (overflow : ctx.layout.capacity lane ≤ m.remaining lane + r.amount lane) :
-    post m r = none := by
-  apply (lawful m r).2
-  rintro ⟨-, -, -, -, fits⟩
-  have := ((ResourceCost.WordLayout.fitsCheck_eq_true_iff _ _).mp fits) lane
-  simp [raised] at this
-  omega
-
 /-! ## M2: the copy is the protocol's install
 
 `installAvailable`, `Meter` and the tagged `Nullifier` are the SPEC; the protocol is
-`DurableCommitProtocol.Snapshot.install`, instantiated at the tagged `Nullifier`. Today's
-install equals the spec at zero credit (proved); the proof phase's install, carrying
-`Intent.credit`, must equal it at every credit (`ProtocolInstallMatches`), and then a
-refill's meter IS the protocol's post-state (`refilled_is_protocol_install`). -/
+`DurableCommitProtocol.Snapshot.install`, instantiated at the tagged `Nullifier`, which
+carries `Intent.credit`. The protocol's install equals the spec at every credit
+(`protocol_install_matches`, keystone M2-d), and then a refill's meter IS the protocol's
+post-state (`refilled_is_protocol_install`). -/
 
 def meterIntentOf {TxId CellId Event : Type} (family : Family) (credit : ResourceCost.Charge)
     (intent : DurableCommitProtocol.Intent TxId CellId Nullifier Event) : MeterIntent :=
@@ -867,23 +703,17 @@ def meterOf {TxId CellId Event : Type}
     (snapshot : DurableCommitProtocol.Snapshot TxId CellId Nullifier Event) : Meter :=
   ⟨snapshot.available, snapshot.consumed⟩
 
-theorem protocol_install_is_spec_at_zero_credit {TxId CellId Event : Type} [DecidableEq CellId]
+theorem protocol_install_consumed {TxId CellId Event : Type} [DecidableEq CellId]
     (before : DurableCommitProtocol.Snapshot TxId CellId Nullifier Event)
-    (intent : DurableCommitProtocol.Intent TxId CellId Nullifier Event) (family : Family) :
-    (DurableCommitProtocol.Snapshot.install before intent).available =
-        installAvailable before.available (meterIntentOf family 0 intent) ∧
-      (DurableCommitProtocol.Snapshot.install before intent).consumed =
-        fun n => decide (n ∈ intent.nullifiers) || before.consumed n := by
-  constructor
-  · funext lane
-    simp [DurableCommitProtocol.Snapshot.install, installAvailable, meterIntentOf]
-  · funext n
-    by_cases member : n ∈ intent.nullifiers <;>
-      simp [DurableCommitProtocol.Snapshot.install, member]
+    (intent : DurableCommitProtocol.Intent TxId CellId Nullifier Event) :
+    (DurableCommitProtocol.Snapshot.install before intent).consumed =
+      fun n => decide (n ∈ intent.nullifiers) || before.consumed n := by
+  funext n
+  by_cases member : n ∈ intent.nullifiers <;>
+    simp [DurableCommitProtocol.Snapshot.install, member]
 
-/-- **M2-d, the proof phase's install is the spec.** `installed` is the extended protocol's
-meter (`fun b i => (Snapshot.install b i).available` once `Intent` carries `credit`),
-`creditOf` the new field. -/
+/-- **M2-d, the proof phase's install is the spec.** `installed` is a protocol meter,
+`creditOf` the credit it reads off an intent. -/
 def ProtocolInstallMatches {TxId CellId Event : Type}
     (installed : DurableCommitProtocol.Snapshot TxId CellId Nullifier Event →
       DurableCommitProtocol.Intent TxId CellId Nullifier Event → ResourceCost.Charge)
@@ -892,31 +722,47 @@ def ProtocolInstallMatches {TxId CellId Event : Type}
   ∀ before intent family,
     installed before intent = installAvailable before.available (meterIntentOf family (creditOf intent) intent)
 
-/-- Satisfiable: today's install matches the spec when no intent carries credit. -/
-theorem today_install_matches_zero {TxId CellId Event : Type} [DecidableEq CellId] :
+/-- **Keystone M2-d, discharged.** The deployed install, `Snapshot.install`, is the spec's
+extended install at the intent's own `credit`. -/
+theorem protocol_install_matches {TxId CellId Event : Type} [DecidableEq CellId] :
     ProtocolInstallMatches (TxId := TxId) (CellId := CellId) (Event := Event)
       (fun before intent => (DurableCommitProtocol.Snapshot.install before intent).available)
-      (fun _ => 0) :=
-  fun before intent family => (protocol_install_is_spec_at_zero_credit before intent family).1
+      (·.credit) := by
+  intro before intent family
+  funext lane
+  simp [DurableCommitProtocol.Snapshot.install, installAvailable, meterIntentOf]
 
-/-- Teeth: today's install does not match once any funded intent carries a credit, so the
-refill needs the protocol extension, not a second meter. -/
-theorem today_install_mismatch_with_credit {TxId CellId Event : Type} [DecidableEq CellId]
+/-- The install before M2 (no credit): the teeth's reference. -/
+def installUncredited {TxId CellId Event : Type}
+    (before : DurableCommitProtocol.Snapshot TxId CellId Nullifier Event)
+    (intent : DurableCommitProtocol.Intent TxId CellId Nullifier Event) : ResourceCost.Charge :=
+  fun lane => before.available lane - intent.exactCharge lane
+
+/-- Satisfiable: the uncredited install matches the spec when no intent carries credit. -/
+theorem uncredited_install_matches_zero {TxId CellId Event : Type} :
+    ProtocolInstallMatches (TxId := TxId) (CellId := CellId) (Event := Event)
+      installUncredited (fun _ => 0) := by
+  intro before intent family
+  funext lane
+  simp [installUncredited, installAvailable, meterIntentOf]
+
+/-- Teeth: the uncredited install does not match once any funded intent carries a credit,
+so the refill needs the protocol extension, not a second meter. -/
+theorem uncredited_install_mismatch_with_credit {TxId CellId Event : Type}
     (creditOf : DurableCommitProtocol.Intent TxId CellId Nullifier Event → ResourceCost.Charge)
     (before : DurableCommitProtocol.Snapshot TxId CellId Nullifier Event)
     (intent : DurableCommitProtocol.Intent TxId CellId Nullifier Event)
     (lane : ResourceCost.Lane) (positive : 0 < creditOf intent lane)
     (funded : intent.exactCharge ≤ before.available) :
-    ¬ ProtocolInstallMatches
-      (fun before intent => (DurableCommitProtocol.Snapshot.install before intent).available) creditOf := by
+    ¬ ProtocolInstallMatches installUncredited creditOf := by
   intro agrees
   have := congrFun (agrees before intent .meterRefill) lane
   have le := (ResourceCost.Charge.le_iff _ _).mp funded lane
-  simp [DurableCommitProtocol.Snapshot.install, installAvailable, meterIntentOf] at this
+  simp [installUncredited, installAvailable, meterIntentOf] at this
   omega
 
-/-- The link: under a matching extended install, a refill's protocol intent (no charge,
-the posting as credit, its one tagged nullifier) leaves exactly `refilled`. -/
+/-- The link: under a matching install, a refill's protocol intent (no charge, the posting
+as credit, its one tagged nullifier) leaves exactly `refilled`. -/
 theorem refilled_is_protocol_install {TxId CellId Event : Type} [DecidableEq CellId]
     (installed : DurableCommitProtocol.Snapshot TxId CellId Nullifier Event →
       DurableCommitProtocol.Intent TxId CellId Nullifier Event → ResourceCost.Charge)
@@ -929,7 +775,7 @@ theorem refilled_is_protocol_install {TxId CellId Event : Type} [DecidableEq Cel
     (⟨installed before intent, (DurableCommitProtocol.Snapshot.install before intent).consumed⟩ : Meter) =
       refilled (meterOf before) r := by
   have available := agrees before intent .meterRefill
-  have consumed := (protocol_install_is_spec_at_zero_credit before intent .meterRefill).2
+  have consumed := protocol_install_consumed before intent
   simp only [refilled, meterOf, available, consumed, single]
   congr 1
   · funext lane
@@ -937,17 +783,26 @@ theorem refilled_is_protocol_install {TxId CellId Event : Type} [DecidableEq Cel
   · funext n
     simp
 
+/-- The deployed instance of the link: the protocol's own install of a refill's intent is
+`refilled`. -/
+theorem refilled_is_deployed_install {TxId CellId Event : Type} [DecidableEq CellId]
+    (before : DurableCommitProtocol.Snapshot TxId CellId Nullifier Event)
+    (intent : DurableCommitProtocol.Intent TxId CellId Nullifier Event) (r : Refill)
+    (free : intent.exactCharge = 0) (credited : intent.credit = r.amount)
+    (single : intent.nullifiers = [r.nullifier]) :
+    meterOf (DurableCommitProtocol.Snapshot.install before intent) = refilled (meterOf before) r :=
+  refilled_is_protocol_install _ _ protocol_install_matches before intent r free credited single
+
 #assert_axioms expired_refused
 #assert_axioms lawful_injective installWire_covers wireEncode_covers toy_admits premises_inhabited
   forged_refused relay_swap_refused trustsSubjectField_not_decides stale_version_refused
   invalid_refused zero_lifetime_invalid custodian_drop_refused uncosigned_rotation_refused
-  cosigned_rotation_admitted sorted_load_bearing currentReader_reads_current genesisReader_stale
-  pricing_without_platform_refused currentQuote_current genesisQuote_stale
-  install_conserves_with_credit installToday_loses_credit admitted_refills_confined tagged_mint_refused
-  installAvailable_refill refillReference_lawful refill_funded_at_exhaustion
-  charged_refill_refused_at_exhaustion lawful_monotone replay_refused family_tag_separates
-  overflow_refused protocol_install_is_spec_at_zero_credit today_install_matches_zero
-  today_install_mismatch_with_credit refilled_is_protocol_install
+  cosigned_rotation_admitted sorted_load_bearing
+  install_conserves_with_credit installToday_loses_credit
+  installAvailable_refill refill_funded_at_exhaustion
+  charged_refill_refused_at_exhaustion family_tag_separates
+  protocol_install_consumed protocol_install_matches uncredited_install_matches_zero
+  uncredited_install_mismatch_with_credit refilled_is_protocol_install refilled_is_deployed_install
   records_push current_push chain_le_last staysSorted reachable_sorted versionMonotone recordsValid
   custodianCheck_iff decideInstall_decides decides_authenticated
 

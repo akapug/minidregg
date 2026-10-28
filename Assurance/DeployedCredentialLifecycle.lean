@@ -804,10 +804,11 @@ theorem first_use_exact_charge :
   change guardedUseIntent.erase.exactCharge +
       (Snapshot.install durableBefore.model guardedUseIntent.erase).available =
         durableBefore.model.available
-  apply Snapshot.install_exact_debit
-  intro lane
-  change 1 ≤ 10
-  exact (by decide : (1 : Nat) ≤ 10)
+  apply Snapshot.install_exact_debit_uncredited
+  · intro lane
+    change 1 ≤ 10
+    exact (by decide : (1 : Nat) ≤ 10)
+  · rfl
 
 @[simp] theorem installed_use_bytes :
     durableAfterUse.canonicalBytes resultCellId = resultAfterBytes := by
