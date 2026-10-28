@@ -1,4 +1,4 @@
-# Untouched-areas deputy: state (rewritten whole; 2026-10-28 morning: bf5ead3fa on main)
+# Untouched-areas deputy: state (rewritten whole; 2026-10-28 09:40: japps w6 inconclusive, waits for the 7280f9db8 candidate)
 
 Inputs: docs/review/2026-10-27-untouched-areas/{LEAN,NATIVE}.md, docs/review/2026-10-27-blind-spots/BLIND-SPOTS.md Sweep 1.
 Each lane: /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>.
@@ -11,6 +11,13 @@ Each lane: /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>.
 - Integration is continuous (no cuts). Re-genesis is free (flag days are not held).
 - Never kill by pattern; no PID file: tell the coordinator.
 - Context (ember, COORDINATION 3a6aafdca): a continuation file by about 580k tokens, distill or hand off at about 600k, for the deputy and every faerie it briefs.
+
+## Boxes after the 08:57 dregg-build OOM (coordinator)
+- dregg-build (30 GB) OOM-killed the integrator's host stage at load 76. It is the integration box only now: nothing heavy beside the integrator's builds.
+- Every faerie world run and box build goes to hbox under /tank/lanes/<lane>, `flock -o /tank/lanes/world-up.lock` around world-up, PID file, staging deleted after. All told and acknowledged: B3, B5, B7, B8, un-assurance (idle), japps faerie.
+- japps w6 FINISHED, INCONCLUSIVE for the Hacker Slides write (its box tree was on the old overlay 55510fca2, without the repeat-suffix and anchor fixes): 25/27, co-edit PASS, the two FAILs cascade from the stale enroll-a2. w1-w6 and bin2 removed; logs in /build/lanes/un-stream-continuity-evidence. Nothing of it runs on dregg-build. Next run: hbox, on the first candidate of main 7280f9db8 (carries 391311929 + bf5ead3fa), a clean checkout verified by ancestry; continuation file docs/review/2026-10-27-untouched-areas/JAPPS-STATE.md landed on lane/un-stream-continuity 4cd145c7f (rows owed: Hacker Slides write after restart -> renew; fresh-world bootstrap -> install with the parent's `reserve 1` checked; the hbox recipe; a dregg-build-only sudoers need is reported, not worked around).
+- (history) japps w6 (a4e312352a7091f59, /build/lanes/un-stream-continuity/job7.pid, started 08:31) survived the OOM and finishes there; nothing new starts there. Its next run (391311929 + bf5ead3fa candidate) goes to hbox /tank/lanes/un-stream-continuity. Open risk it will name if hit: `japps --box` may need install-user-world's lanes sudoers rules, which exist only on dregg-build (hbox's passwordless rule covers only /tank/dregg-build/claude-lanes/*/src).
+- japps faerie context ~493k: continuation file by ~580k.
 
 ## Landed (all on main as of e05a19fe)
 un-verify (Generic Simplex gate), un-bend (bend verb + lost reply), un-world (Tally/call/send native; DOMAINS.md), un-assurance (census, Door 11, StoryHistory, Kernel/StoryLaw), un-native-rows, un-moves, un-fixtures, un-seats, un-pb-codec (R8), un-pb-exec (R7/P9), un-pb-seal (R3 whole), un-pb-wal (R2 + five two-step dealers), un-pb-twins 134535c2 (§5.3 deletions, Pool/Cut, AnchorFixture -> real serve, P6 verifier), un-pb-helpers 353a6d11d (Lagrange, Horner, PRG/urandom, Nat cursors, outbox/phase codecs), un-web-front 0da04999, un-effects 2acd8acf (effect Plan kernel, keystone 5e116ec9, pass-11 additions, world apps on the kernel protocol), un-pred-census 44479e30 (Vouchers sweep: every receiver a Kernel.Receiving.Family at receiverVerifier, Ran private with one mint, gate rows receiver-verifier and ran-mint), un-stream-continuity 6544ea37 (hot-route op154 fixed at the cause; statement accepted e0916a53).
@@ -89,9 +96,10 @@ Its hbox worlds: /tank/rows-2d8b7ed5-apps/w-{featured,b1,b2,b4,b6,rt,fixups}. Mi
 - PASS: EtherCalc lifecycle + write, DokuWiki lifecycle + write, Datasette lifecycle + recorded read, HedgeDoc/Davros/HledgerWeb lifecycles.
 - HedgeDoc write "close frame" (socket.io): same family as IPython's kernel websocket; given to B8 (a13f0bc9626b1320a), fix at the cause for both.
 - Davros write, HledgerWeb write and sntfy lifecycle: ONE cause (B7 abf203f357754001b): featured-qualify gave the owner session role 0, the package's weakest (sntfy `api` lacks administration -> 401/400; Davros and hledger-web `viewer`). Fixed at 817e8c7f1 (owner basis allAccess, which a grain owner holds and the Lean enrollment admits; failing write rows now print status + 160 body bytes; failing lifecycle rows name the phase). Rerun of l/m/o queued behind the B7 table (job2.pid under /tank/lanes/app-market-b7). Sha to the integrator once green.
-- spk-host io errors must name operation + path (coordinator): OWNED by a6603277e4ffe2d70 on lane/un-spk-ioctx (7ec878215: IoContext::ctx, 21 sites in broker_endpoint.rs + grain.rs, missing operator/broker socket and grain file tests). Told to finish whole (hostd, http_entrance, www_publish, broker...), one module per commit with the grep, then one sha. B3 (a85d12892ea6de3ca) told to stay out.
+- TextEditor write (b1 on 76758dba6, 7/8): `Client did not complete authentication handshake` (Meteor DDP). Given to B7 (abf203f357754001b) after its l/m/o rerun: reuse the japps DDP client, fix recipe or spk-host and say which, one row on a fresh hbox world.
+- spk-host io errors name operation + path: DONE (coordinator). lane/un-spk-ioctx 5cb33bbdf, IoContext::ctx at ~365 sites in 49 files, red-proofed on the final tip, 231/0 filtered; merged by the integrator into main 7280f9db8 (building). Nothing remains for a6603277e4ffe2d70 on it.
 
 ## Next three
 1. Read B3/B5/B7/B8 on 76758dba6 (each serial under the world-up flock); fix reds (recipes or spk-host); every app green on lifecycle + write into FEATURED in apps.rs (B3 does its own commit; DiagramsNet stays out); target 2-3 dozen.
-2. japps w5 verdict (a4e312352a7091f59) -> validator for ROWS-OWED §0; the first candidate carrying bf5ead3fa confirms restart -> renew -> write and a fresh-world bootstrap -> install (the parent's `reserve 1` checked).
+2. When the integrator names the 7280f9db8 candidate: hand it to a4e312352a7091f59 (one japps run on hbox per JAPPS-STATE.md; context ~500k, it hands off by its file if it nears 580k); verdict -> validator for ROWS-OWED §0. That run confirms restart -> renew -> write and a fresh-world bootstrap -> install (the parent's `reserve 1` checked).
 3. Owed after the demo: revive Effects/ so transfer/commit come from the derivation engine (EFFECTS.md); private-backend P6 lost reply; the child() twin check.
