@@ -14,7 +14,7 @@
   },
   "operations": {
     "contents.get": {
-      "description": "Read a notebook, file, or directory using the browser\u2019s Contents API.",
+      "description": "Read a notebook, file, or directory from this member\u2019s notebook workspace.",
       "input": {
         "type": "object",
         "properties": {
@@ -267,7 +267,7 @@
       }
     },
     "kernels.list": {
-      "description": "List running kernels without starting or executing one.",
+      "description": "List running computation kernels.",
       "input": {
         "type": "object",
         "properties": {},
@@ -309,7 +309,7 @@
       }
     },
     "kernels.start": {
-      "description": "Start a named computation kernel; execution requires a separately supported channels protocol.",
+      "description": "Start a named computation kernel for subsequent execution.",
       "input": {
         "type": "object",
         "properties": {
@@ -431,6 +431,248 @@
           "content": "1"
         }
       }
+    },
+    "kernels.execute": {
+      "description": "Execute code in a running kernel and return user-expression results or kernel errors after execution finishes. Printed and rich outputs are not included.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "kernelId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "code": {
+            "type": "string",
+            "maxLength": 65536
+          },
+          "userExpressions": {
+            "type": "object",
+            "maxProperties": 128,
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 4096
+            }
+          }
+        },
+        "required": [
+          "kernelId",
+          "code",
+          "userExpressions"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "reply": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "enum": [
+                  "ok",
+                  "error",
+                  "abort"
+                ]
+              },
+              "execution_count": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "user_expressions": {
+                "type": "object"
+              },
+              "ename": {
+                "type": "string"
+              },
+              "evalue": {
+                "type": "string"
+              },
+              "traceback": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "status"
+            ],
+            "additionalProperties": true
+          },
+          "idle": {
+            "type": "object",
+            "properties": {
+              "execution_state": {
+                "const": "idle"
+              }
+            },
+            "required": [
+              "execution_state"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "reply",
+          "idle"
+        ],
+        "additionalProperties": false
+      },
+      "write": true,
+      "binding": {
+        "protocol": "conversation",
+        "wire": "json-v1",
+        "path": [
+          "api/kernels/",
+          {
+            "arg": "kernelId",
+            "encoding": "segment"
+          },
+          "/channels"
+        ],
+        "steps": [
+          {
+            "send": {
+              "header": {
+                "msg_id": {
+                  "context": "operationId"
+                },
+                "username": "member",
+                "session": {
+                  "context": "operationId"
+                },
+                "msg_type": "execute_request",
+                "version": "5.0",
+                "date": {
+                  "context": "nowIso"
+                }
+              },
+              "parent_header": {},
+              "metadata": {},
+              "channel": "shell",
+              "content": {
+                "code": {
+                  "arg": "code"
+                },
+                "silent": false,
+                "store_history": true,
+                "user_expressions": {
+                  "arg": "userExpressions"
+                },
+                "allow_stdin": false,
+                "stop_on_error": true
+              }
+            }
+          },
+          {
+            "receiveAll": [
+              {
+                "id": "reply",
+                "where": [
+                  {
+                    "path": [
+                      "parent_header",
+                      "msg_id"
+                    ],
+                    "equals": {
+                      "context": "operationId"
+                    }
+                  },
+                  {
+                    "path": [
+                      "header",
+                      "msg_type"
+                    ],
+                    "equals": "execute_reply"
+                  }
+                ]
+              },
+              {
+                "id": "idle",
+                "where": [
+                  {
+                    "path": [
+                      "parent_header",
+                      "msg_id"
+                    ],
+                    "equals": {
+                      "context": "operationId"
+                    }
+                  },
+                  {
+                    "path": [
+                      "header",
+                      "msg_type"
+                    ],
+                    "equals": "status"
+                  },
+                  {
+                    "path": [
+                      "content",
+                      "execution_state"
+                    ],
+                    "equals": "idle"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "result": {
+          "reply": {
+            "result": [
+              "reply",
+              "content"
+            ]
+          },
+          "idle": {
+            "result": [
+              "idle",
+              "content"
+            ]
+          }
+        }
+      }
+    },
+    "kernels.specifications": {
+      "description": "Read installed kernel specifications and the default kernel name.",
+      "input": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "default": {
+            "type": "string"
+          },
+          "kernelspecs": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "default",
+          "kernelspecs"
+        ],
+        "additionalProperties": true
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "api/kernelspecs"
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ]
+      }
     }
   },
   "qualification": [
@@ -484,6 +726,77 @@
           "equals": "Mini typed notebook"
         }
       ]
+    },
+    {
+      "id": "specs",
+      "op": "kernels.specifications",
+      "args": {}
+    },
+    {
+      "id": "kernel",
+      "op": "kernels.start",
+      "args": {
+        "name": {
+          "result": [
+            "specs",
+            "default"
+          ]
+        }
+      }
+    },
+    {
+      "id": "execute",
+      "op": "kernels.execute",
+      "args": {
+        "kernelId": {
+          "result": [
+            "kernel",
+            "id"
+          ]
+        },
+        "code": "answer = 6 * 7",
+        "userExpressions": {
+          "answer": "answer"
+        }
+      },
+      "assert": [
+        {
+          "path": [
+            "reply",
+            "status"
+          ],
+          "equals": "ok"
+        },
+        {
+          "path": [
+            "reply",
+            "user_expressions",
+            "answer",
+            "data",
+            "text/plain"
+          ],
+          "equals": "42"
+        },
+        {
+          "path": [
+            "idle",
+            "execution_state"
+          ],
+          "equals": "idle"
+        }
+      ]
+    },
+    {
+      "id": "stopKernel",
+      "op": "kernels.stop",
+      "args": {
+        "id": {
+          "result": [
+            "kernel",
+            "id"
+          ]
+        }
+      }
     }
   ],
   "auth": {
@@ -492,7 +805,8 @@
   "sources": [
     "https://github.com/jupyter/notebook/blob/4.2.2/notebook/services/contents/handlers.py",
     "https://github.com/jupyter/notebook/blob/4.2.2/notebook/services/kernels/handlers.py",
-    "scripts/spk-platform/market-writes/b8.sh"
+    "scripts/spk-platform/market-writes/b8.sh",
+    "docs/app-interfaces/NOTEBOOK-CHANNELS-2026-10-28.md"
   ],
   "$defs": {
     "ContentModel": {
