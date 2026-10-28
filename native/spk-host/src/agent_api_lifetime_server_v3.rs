@@ -216,8 +216,10 @@ impl ResidentLifetimeAgent<'_> {
             path_and_query: &path_and_query,
             ordered_headers: &ordered_headers,
             body: &body,
-            route: Route::Api {
-                signed_path: self.signed_api_path,
+            route: match &binding.route {
+                Some(crate::agent_api_lifetime_v3::HostedRoute::Web { .. }) => Route::Browser,
+                Some(crate::agent_api_lifetime_v3::HostedRoute::Api { signed_prefix }) => Route::Api { signed_path: signed_prefix },
+                None => Route::Api { signed_path: self.signed_api_path },
             },
         };
         let (app_path, _) = app_route_path(&http)?;
@@ -289,8 +291,12 @@ impl ResidentLifetimeAgent<'_> {
         )?;
         write_new(&client_dir, "op76-fresh-v3.json", b"fresh-installed-op76")?;
         let matched = matched_v3(&permit, &reserve, method, &app_path, query)?;
+        let web_origin = match &binding.route {
+            Some(crate::agent_api_lifetime_v3::HostedRoute::Web { origin }) => origin.as_str(),
+            _ => "",
+        };
         let physical =
-            physical_web_input(&matched, &http, self.display_name, self.preferred_handle, "")?;
+            physical_web_input(&matched, &http, self.display_name, self.preferred_handle, web_origin)?;
         caller_still_present(stream, cancelled)?;
         let record = self
             .journal

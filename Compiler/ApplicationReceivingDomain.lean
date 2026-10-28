@@ -78,6 +78,8 @@ def receivingContract : List UInt8 :=
    "managed-app-package-exact-same-owner-manager-source-linkage;" ++
    "dispatch-owner-issuer-preserved-manager-derived-from-authenticated-app-law;" ++
    "dav-api-destination-exact-relative-signed-prefix-browser-same-origin;" ++
+   "hosted-route-v4-api-exact-signed-prefix-or-web-protected-same-member-origin;" ++
+   "hosted-route-kind-matches-current-source-enrollment-before-physical-delivery;" ++
    "dav-method-specific-parameters-and-exact-values:").toUTF8.toList ++
    Minidregg.Effects.Revival.HostedDav.contract
 
