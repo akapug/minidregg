@@ -24,11 +24,7 @@ pub struct Message {
     pub dealer: u16,
     pub message: private_send::Message,
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Send {
-    pub to: u16,
-    pub message: Message,
-}
+pub type Send = crate::codec::Packet<Message>;
 #[derive(Clone)]
 pub struct RecipientResult {
     context: [u8; 32],

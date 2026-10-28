@@ -295,11 +295,7 @@ pub struct Message {
     pub context: [u8; 32],
     pub body: Body,
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Send {
-    pub to: u16,
-    pub message: Message,
-}
+pub type Send = crate::codec::Packet<Message>;
 #[derive(Clone)]
 struct Payload {
     values: Vec<Field>,

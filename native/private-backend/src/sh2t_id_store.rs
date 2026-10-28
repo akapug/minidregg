@@ -2,9 +2,8 @@
 //! authenticated received frames, source request events and recursive outboxes
 //! commit before visibility. Honest crash storage only, no rollback/release authority.
 use crate::{
-    asks::PhaseMessage,
     codec::{bad, bytes, Generation, Nat},
-    consensus_wire::Cursor,
+    consensus_wire::{get_phase, put_phase, Cursor},
     private_send_store,
     reconstruction::Field,
     sh2t_id::{Body, Message, Send, Sh2tId},
@@ -14,25 +13,6 @@ use std::{
     io::Result,
     path::Path,
 };
-pub(crate) fn put_phase(p: &PhaseMessage, b: &mut Vec<u8>) {
-    let (t, v) = match p {
-        PhaseMessage::Init(v) => (0, v),
-        PhaseMessage::Echo(v) => (1, v),
-        PhaseMessage::Ready(v) => (2, v),
-    };
-    b.push(t);
-    bytes(v, b);
-}
-pub(crate) fn phase(c: &mut Cursor) -> Result<PhaseMessage> {
-    let tag = c.byte()?;
-    let b = c.bytes()?;
-    match tag {
-        0 => Ok(PhaseMessage::Init(b)),
-        1 => Ok(PhaseMessage::Echo(b)),
-        2 => Ok(PhaseMessage::Ready(b)),
-        _ => Err(bad("Sh2t phase")),
-    }
-}
 pub(crate) fn put_fields(v: &[Field], b: &mut Vec<u8>) {
     Nat::new(v.len() as u64).put(b);
     for x in v {
@@ -120,30 +100,30 @@ pub fn decode_message(b: &[u8]) -> Result<Message> {
     }
     let context = c.fixed32()?;
     let body = match c.byte()? {
-        0 => Body::Commitment(phase(&mut c)?),
+        0 => Body::Commitment(get_phase(&mut c)?),
         1 => Body::Private {
             holder: c.u16()?,
             message: private_send_store::decode_message(&c.bytes()?)?,
         },
-        2 => Body::Termination(phase(&mut c)?),
+        2 => Body::Termination(get_phase(&mut c)?),
         3 => Body::Complaint {
             holder: c.u16()?,
-            phase: phase(&mut c)?,
+            phase: get_phase(&mut c)?,
         },
         4 => Body::OpenRequest {
             holder: c.u16()?,
             requester: c.u16()?,
-            phase: phase(&mut c)?,
+            phase: get_phase(&mut c)?,
         },
         5 => Body::ReconRequest {
             group: c.count()?,
             receiver: c.u16()?,
             requester: c.u16()?,
-            phase: phase(&mut c)?,
+            phase: get_phase(&mut c)?,
         },
         6 => Body::AgreementAccusation {
             holder: c.u16()?,
-            phase: phase(&mut c)?,
+            phase: get_phase(&mut c)?,
         },
         7 => Body::Point {
             group: c.count()?,
@@ -161,36 +141,10 @@ pub fn decode_message(b: &[u8]) -> Result<Message> {
     Ok(m)
 }
 fn outbox(ps: &[Send]) -> Vec<u8> {
-    let mut b = vec![];
-    Nat::new(ps.len() as u64).put(&mut b);
-    for p in ps {
-        b.extend(p.to.to_le_bytes());
-        bytes(&encode_message(&p.message), &mut b);
-    }
-    b
+    crate::consensus_wire::put_outbox(ps, encode_message)
 }
 pub(crate) fn parse_outbox(b: &[u8], n: usize) -> Result<Vec<Send>> {
-    let mut c = Cursor::new(b)?;
-    let len = c.count()?;
-    if len > crate::codec::MAX / 40 {
-        return Err(bad("Sh2t outbox capacity"));
-    }
-    let mut ps = vec![];
-    for _ in 0..len {
-        let to = c.u16()?;
-        if to as usize >= n {
-            return Err(bad("Sh2t outbox recipient"));
-        }
-        ps.push(Send {
-            to,
-            message: decode_message(&c.bytes()?)?,
-        });
-    }
-    c.finish()?;
-    if outbox(&ps) != b {
-        return Err(bad("Sh2t outbox canonical"));
-    }
-    Ok(ps)
+    crate::consensus_wire::get_outbox(b, n, crate::codec::MAX / 40, "Sh2t", decode_message, encode_message)
 }
 /// Tag 5: commit the dealing seed and inputs durably, publishing nothing.
 pub(crate) fn commit_event(seed: [u8; 32], polys: &[Vec<Field>]) -> Vec<u8> {
@@ -589,22 +543,5 @@ mod pin_wire {
         crate::codec::Nat::new(crate::codec::MAX as u64).put(&mut huge);
         let b = huge;
         assert!(parse_outbox(&b, 4).is_err(), "an absurd count refuses");
-    }
-    #[test]
-    fn pin_phase_wire() {
-        for (tag, p) in [
-            (0u8, PinPhase::Init(vec![9, 8])),
-            (1, PinPhase::Echo(vec![9, 8])),
-            (2, PinPhase::Ready(vec![9, 8])),
-        ] {
-            let mut b = vec![];
-            put_phase(&p, &mut b);
-            assert_eq!(b, vec![tag, 2, 255, 9, 8]);
-            let mut c = crate::consensus_wire::Cursor::new(&b).unwrap();
-            assert_eq!(phase(&mut c).unwrap(), p);
-            c.finish().unwrap();
-        }
-        let mut c = crate::consensus_wire::Cursor::new(&[3, 0, 255]).unwrap();
-        assert!(phase(&mut c).is_err());
     }
 }
