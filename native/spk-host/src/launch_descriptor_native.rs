@@ -6,6 +6,7 @@
 //! canonical descriptor codec and root.
 #![allow(dead_code)] // Resident v3 START caller follows the source-qualified route.
 
+use crate::io_context::IoContext;
 use sandstorm_package::manifest::Command as SpkCommand;
 use sandstorm_package::SpkManifest;
 use serde_json::{json, Value};
@@ -53,7 +54,7 @@ fn read_private(path: &Path, bound: u64) -> io::Result<Vec<u8>> {
 
 impl OfflineSourceHost {
     fn check_pin(&self) -> io::Result<()> {
-        let named = fs::symlink_metadata(&self.host)?;
+        let named = fs::symlink_metadata(&self.host).ctx("inspect", &self.host)?;
         if !self.host.is_absolute()
             || !named.is_file()
             || named.permissions().mode() & 0o022 != 0
@@ -64,7 +65,7 @@ impl OfflineSourceHost {
         let mut host = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW)
-            .open(&self.host)?;
+            .open(&self.host).ctx("open", &self.host)?;
         let opened = host.metadata()?;
         if !opened.is_file() || (named.dev(), named.ino()) != (opened.dev(), opened.ino()) {
             return Err(invalid("offline Mini Host image changed before hash"));
@@ -149,8 +150,8 @@ impl OfflineSourceHost {
         let mut file = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW)
-            .open(output)?;
-        let named = fs::symlink_metadata(output)?;
+            .open(&output).ctx("open", &output)?;
+        let named = fs::symlink_metadata(&output).ctx("inspect", &output)?;
         let opened = file.metadata()?;
         let output_bound = if command == "inspect" {
             MAX_SOURCE_INSPECTION
