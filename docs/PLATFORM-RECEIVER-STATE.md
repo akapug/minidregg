@@ -108,24 +108,12 @@ The auditor is af7a93e7b8ba729d4; passes 16–23 are on lane/audit-platform.
 - **53d66406f, sent green, landing with the integrator:** the birth-authoring twin is collapsed.
   Host.Json's copy is deleted; every author calls SourceAgreementJson. `birthCurrent_eq_birthAt`
   is rfl.
-- **In progress: the reader collapse (coordinator ruling).** `NativeHost.platformRecordIn`
-  folds into PlatformCellDomain, uncommitted in /Users/ember/dev/minidregg-lanes/lean-audit-c
-  (on main 44ea63dbf + 53d66406f).
-  - `PlatformCellDomain.recordAt deployment canonicalBytes` is the one reader. It reads bytes,
-    so the served shape uses it.
-  - `recordOn d physical := recordAt d physical.canonicalBytes`.
-  - `recordOn_load` (the old load-based definition) is the agreement lemma. The three proofs
-    that unfolded `recordOn` now rewrite with it: CompletionCustodianKey :96 and :132,
-    ResourceBirthReceiver :646. `recordOn_congr` is two lines.
-  - Callers redirected: NativeHostContext, NativeHostServed, NativeHostReplay, and
-    Host.CurrentResourceBirthAuthoring (now `recordOn … opened.durable.snapshot`).
-  - `platformRecordIn` and `platformRecordIn_load` are deleted.
-  - No keystone statement moved.
-  - The umbrella build is on hbox: /othersys/lanes/lean-audit-c/build-umb.sh, **PID file
-    /othersys/lanes/lean-audit-c/build.pid**, log build-reader.log.
-  - If it shows only the known reds (codec shape pins, the two fixtures), commit the seven files
-    and send the integrator the sha. The ruling: land it after A12c, or before if A12c is still
-    waiting.
+- **75fee3810, sent green:** the reader collapse (coordinator ruling).
+  - `NativeHost.platformRecordIn` folds into `PlatformCellDomain.recordAt`, the one reader. It
+    reads bytes, so the served shape uses it; `recordOn` is `recordAt` of the snapshot's bytes.
+  - `recordOn_load` is the agreement lemma. No keystone statement moved.
+  - Built warm on hbox; only the known reds remain.
+  - It lands after A12c, or before if A12c is still waiting (the integrator decides).
 - **Item 7, the signed poles, still owed (audit pass 24).** They go over a recorded transcript:
   `CheckedSignature` with Oracle `.recorded`, CredentialSignatureAdmission.lean:287-296.
   - Needed: a birth admission parameterized by the oracle (today `admitDecodedNative` is IO),
