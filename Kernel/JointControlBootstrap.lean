@@ -2,10 +2,30 @@
 cross-record atomicity claim: absent → canonical empty native content → initialized.
 No unrelated ordinary operation receives an exception before initialization.
 -/
-import Kernel.NativeHostContext
-import Kernel.ResourceBirthReceiver
-import Kernel.DeclaredResourceController
-import Kernel.NativeHostServed
+module
+
+public import Kernel.NativeHostContext
+public import Kernel.ResourceBirthReceiver
+public import Kernel.DeclaredResourceController
+public import Kernel.NativeHostServed
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Kernel.JointControlBootstrap
 open Minidregg.Theory
 open Minidregg.Theory.TypedAuthorization

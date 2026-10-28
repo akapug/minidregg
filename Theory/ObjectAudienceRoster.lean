@@ -1,6 +1,11 @@
 /- Canonical retained key-holder roster. Completeness is established by admitted
 package enrollment, not by discovering online readers. -/
-import Theory.ObjectAudience
+module
+
+public import Theory.ObjectAudience
+
+@[expose] public section
+
 namespace Minidregg.Theory.ObjectAudienceRoster
 set_option autoImplicit false
 structure Entry where

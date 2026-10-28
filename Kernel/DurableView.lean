@@ -18,8 +18,27 @@ the view on those reads gives the same outcome, and on acceptance the same
 roots, canonical bytes and allowance. Nothing else about the full history can
 change the result.
 -/
-import Kernel.DurableDataIntent
-import Theory.AssertAxioms
+module
+
+public import Kernel.DurableDataIntent
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.DurableView
 

@@ -3,8 +3,27 @@ all public resource envelopes. v4: the source enters only through its own
 signed query envelope (no command position). They contain neither a caller-selected term nor
 a claimed result. Native admission independently loads the current source and
 constructs observations from the same authorized snapshot. -/
-import Theory.AssertAxioms
-import Compiler.NativeInvocationStatement
+module
+
+public import Theory.AssertAxioms
+public import Compiler.NativeInvocationStatement
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.ObjectiveInvocationClaim
 open Minidregg.Compiler.Tower256ConcreteBackend

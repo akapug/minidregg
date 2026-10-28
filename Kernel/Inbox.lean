@@ -21,9 +21,28 @@ under, the postage (the public price of that envelope) the sending turn moved
 into the purse of the queue holding it, and the account the postage returns to
 if the message is never delivered. Its id is `H(sending turn, index of the send
 in that turn)` (`sendId`), and it is also the name of its reply slot. -/
-import Kernel.ObjectiveActivityWire
-import Kernel.ObjectiveActivityCell
-import Compiler.ObjectiveInvocationClaim
+module
+
+public import Kernel.ObjectiveActivityWire
+public import Kernel.ObjectiveActivityCell
+public import Compiler.ObjectiveInvocationClaim
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.Inbox
 open Minidregg.Theory Minidregg.Compiler

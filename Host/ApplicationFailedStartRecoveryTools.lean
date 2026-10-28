@@ -1,7 +1,11 @@
 /- Source-owned JSON lowering/presentation for the narrow physical recovery report. -/
-import Host.ApplicationFailedStartRecoveryAuthoring
-import Host.ApplicationFailedStartRecoveryInspection
-import Lean.Data.Json
+module
+
+public import Host.ApplicationFailedStartRecoveryAuthoring
+public import Host.ApplicationFailedStartRecoveryInspection
+public import Lean.Data.Json
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationFailedStartRecoveryTools
 open Lean

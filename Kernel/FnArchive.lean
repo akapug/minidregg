@@ -28,8 +28,29 @@ only (the operator's archive profile and the committed log records), N1.
   skip. `render` refuses a block over the profile's maximum block size and a
   source over the bound, by name, before anything is signed.
 -/
-import Kernel.FnReplyPublication
-import Kernel.Base64
+module
+
+public import Kernel.FnReplyPublication
+public import Kernel.Base64
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnArchive
 
@@ -357,7 +378,7 @@ def notCrlf (byte : UInt8) : Bool := byte != 10 && byte != 13
 
 theorem b64Char_not_crlf (n : Nat) : notCrlf (Base64.b64Char n) = true := by
   unfold Base64.b64Char notCrlf
-  split_ifs <;> simp [UInt8.ext_iff] <;> omega
+  split_ifs <;> simp [← UInt8.toNat_inj] <;> omega
 
 theorem pad_not_crlf : notCrlf Base64.pad = true := by decide
 

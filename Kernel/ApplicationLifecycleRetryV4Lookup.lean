@@ -4,7 +4,11 @@ claim and event72 completion. The same verifier walk that admitted the
 complete historical image supplies records and receipts; these selectors never
 mint a launch reservation and never resubmit.
 -/
-import Kernel.NativeHostReplay
+module
+
+public import Kernel.NativeHostReplay
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleRetryV4Lookup
 

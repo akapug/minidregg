@@ -1,14 +1,33 @@
 /- Scalar action lowering used by the joint resource receiver. This module has no signed ingress or durable receiving path. Its command is an internal projection of one scalar target; joint authority and policy are checked only by DeclaredResourceController.
 
 The target is a declared-effect cell (`Compiler.DeclaredEffectCell`): a store over `effectLayout`. Preparation validates the command's own guarded patch against the cell at the quoted root and runs it; the post is `Patch.run`. There is no page, no shard, no capacity: the reject reasons `invalidPage`, `pageMutation` (with its `overflow`/`unsupportedAddress`) and `pageValidation` are removed, and a failed guard is `guardRejected i`, naming the first disabled operation. -/
-import Compiler.CredentialAuthorityDomainReceiver
-import Compiler.CredentialAuthorityPolicyRegistry
-import Compiler.CredentialAuthorityReplay
-import Compiler.DeclaredEffectCell
-import Compiler.CanonicalRuntimeProfileCore
-import Kernel.MultiCellHyperedge
-import Kernel.ResourceBirthController
-import Kernel.DeclaredResourceProjection
+module
+
+public import Compiler.CredentialAuthorityDomainReceiver
+public import Compiler.CredentialAuthorityPolicyRegistry
+public import Compiler.CredentialAuthorityReplay
+public import Compiler.DeclaredEffectCell
+public import Compiler.CanonicalRuntimeProfileCore
+public import Kernel.MultiCellHyperedge
+public import Kernel.ResourceBirthController
+public import Kernel.DeclaredResourceProjection
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.DeclaredResourceScalar
 

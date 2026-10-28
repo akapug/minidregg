@@ -6,9 +6,28 @@ only a session witness and optional agent-parent witness. The accepted special
 event/nullifier is the durable pending request, not a generic content atom.
 Merely decoding this carrier is not authority to hand HTTP to a process.
 -/
-import Kernel.ApplicationDispatchCodec
-import Compiler.NativeHostCodec
-import Kernel.DurableDataIntent
+module
+
+public import Kernel.ApplicationDispatchCodec
+public import Compiler.NativeHostCodec
+public import Kernel.DurableDataIntent
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationDispatchIngress
 

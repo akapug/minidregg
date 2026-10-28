@@ -6,10 +6,31 @@ the current admitted history. NativeHostReplay must mint that chronological
 membership during its replay walk before a dispatch event can be admitted;
 the upper live receiver uses the verifier-selected original prefix.
 -/
-import Kernel.ApplicationDispatchPending
-import Kernel.ApplicationShareIssueReceiver
-import Kernel.ApplicationShareIssueGrainReceiver
-import Kernel.NativeHostContext
+module
+
+public import Kernel.ApplicationDispatchPending
+public import Kernel.ApplicationShareIssueReceiver
+public import Kernel.ApplicationShareIssueGrainReceiver
+public import Kernel.NativeHostContext
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationDispatchHistoricalCore
 

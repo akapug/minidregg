@@ -1,8 +1,12 @@
 /- Source-owned presentation of a stored capability returned by an authorized
 query. The resource kind is supplied by that signed query, not inferred from
 the bytes. This structural view does not establish current authority. -/
-import Compiler.CredentialAuthorityEntryCodec
-import Lean.Data.Json
+module
+
+public import Compiler.CredentialAuthorityEntryCodec
+public import Lean.Data.Json
+
+@[expose] public section
 
 namespace Minidregg.Host.CapabilityInspection
 

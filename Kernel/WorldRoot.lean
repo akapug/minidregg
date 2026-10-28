@@ -32,11 +32,31 @@ every hash) and `tampered_checkpoint_accepted` (a tampered world with the
 honest root: the check passes, the resume disagrees with the fold, and the
 carrier fails).
 -/
-import Theory.AuthMap
-import Theory.AuthTrieCache
-import Kernel.World
-import Compiler.Tower256ConcreteBackend
-import Compiler.PersistedCodecTags
+module
+
+public import Theory.AuthMap
+public import Theory.AuthTrieCache
+public import Kernel.World
+public import Compiler.Tower256ConcreteBackend
+public import Compiler.PersistedCodecTags
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Mathlib.Data.List.Sort
+
+@[expose] public section
 
 namespace Minidregg.Kernel.WorldRoot
 

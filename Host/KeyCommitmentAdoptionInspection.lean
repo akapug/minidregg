@@ -1,7 +1,11 @@
 /- Narrow JSON edge for first next-key commitment planning and inspection.
 The wire command and both signed frames remain source-owned. -/
-import Kernel.NativeHostKeyCommitmentAdoption
-import Host.CarryInspection
+module
+
+public import Kernel.NativeHostKeyCommitmentAdoption
+public import Host.CarryInspection
+
+@[expose] public section
 
 namespace Minidregg.Host.KeyCommitmentAdoptionInspection
 open Lean Minidregg.Compiler Minidregg.Kernel Minidregg.Theory

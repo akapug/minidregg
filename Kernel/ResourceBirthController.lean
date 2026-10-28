@@ -11,17 +11,36 @@ source, construct their accepted incidences from the same Descriptor, and bind
 the old authority cell. Nothing here manufactures those semantic proofs or calls
 a host verdict; it is not a public raw-DataIntent endpoint.
 -/
-import Compiler.ResourceBirthCodec
-import Compiler.CredentialAuthorityReplay
-import Compiler.CredentialAuthorityDomainReceiver
-import Compiler.GrainResourceBirthAuthority
-import Theory.ResourceBirthAuthority
-import Kernel.CanonicalResourceEffect
-import Kernel.DurableDataIntent
-import Kernel.RoomBirthGate
-import Kernel.BirthExportAdmission
-import Kernel.BirthCandidateAdmission
-import Kernel.ReceivingLaw
+module
+
+public import Compiler.ResourceBirthCodec
+public import Compiler.CredentialAuthorityReplay
+public import Compiler.CredentialAuthorityDomainReceiver
+public import Compiler.GrainResourceBirthAuthority
+public import Theory.ResourceBirthAuthority
+public import Kernel.CanonicalResourceEffect
+public import Kernel.DurableDataIntent
+public import Kernel.RoomBirthGate
+public import Kernel.BirthExportAdmission
+public import Kernel.BirthCandidateAdmission
+public import Kernel.ReceivingLaw
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ResourceBirthController
 

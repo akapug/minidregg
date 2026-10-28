@@ -48,11 +48,30 @@ or product range. Larger integer promises require a bounded-limb extension.
 `witnessed` remains distinct from first-party semantics; new source vocabulary must
 be lowered here rather than added through a second policy verifier.
 -/
-import Pred.Core
-import Pred.HashEq
-import Compiler.PredOrderGadget
-import Mathlib.Data.List.Dedup
-import Std.Data.HashSet
+module
+
+public import Pred.Core
+public import Pred.HashEq
+public import Compiler.PredOrderGadget
+public import Mathlib.Data.List.Dedup
+public import Std.Data.HashSet
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler
 

@@ -31,9 +31,28 @@ exceeds its start plus the sum of the burns that funded it.  The Book's side,
 `−well` moving by exactly the credits minted minus the credits burned (into
 purses and into jobs) plus the jobs' payouts, is `PayLedger.ledger_identity`.
 -/
-import Kernel.AgentGrain
-import Kernel.PayAssignmentReceiver
-import Kernel.PayObservationProofs
+module
+
+public import Kernel.AgentGrain
+public import Kernel.PayAssignmentReceiver
+public import Kernel.PayObservationProofs
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PurseRefill
 

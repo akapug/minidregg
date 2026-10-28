@@ -5,9 +5,30 @@ observation checks; this layer binds the reusable v2 command descriptor and
 the grain-specific volume/action choice. Verified history must additionally
 check the create/continue selection before treating the intent as accepted.
 -/
-import Kernel.ApplicationLifecycleBeginV3Ingress
-import Kernel.ApplicationLifecycleClaimV3Ingress
-import Kernel.ApplicationLifecycleBeginReceiver
+module
+
+public import Kernel.ApplicationLifecycleBeginV3Ingress
+public import Kernel.ApplicationLifecycleClaimV3Ingress
+public import Kernel.ApplicationLifecycleBeginReceiver
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleBeginV3Admission
 

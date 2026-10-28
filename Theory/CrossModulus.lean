@@ -12,8 +12,27 @@ theorems below prove exact recomposition, quotient bounds, uniqueness of each vi
 uniqueness in `[0,Q*P)`.  The final teeth show why congruence without that interval, and
 limbs without canonicity, cannot identify an integer.
 -/
-import Theory.Bignum
-import Mathlib.Data.Nat.ChineseRemainder
+module
+
+public import Theory.Bignum
+public import Mathlib.Data.Nat.ChineseRemainder
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Theory.CrossModulus
 

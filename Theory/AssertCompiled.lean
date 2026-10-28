@@ -1,7 +1,12 @@
 /- Compiled-evaluation audit adapted from Bread metatheory/Dregg2/Tactics.lean.
 Re-runs actual closed Boolean oracle claims; rejects arbitrary named axioms.
 This marks compiler trust and does not certify general source refinement. -/
-import Theory.AssertAxioms
+module
+
+public import Theory.AssertAxioms
+meta import Theory.AssertAxioms
+
+@[expose] public section
 
 /-- The two axioms LEAN ITSELF declares for proof-by-compiled-evaluation (`Lean.ofReduceBool`,
 `Lean.ofReduceNat`, both `Init.Core`). Recognising THESE by name is sound in the way a name

@@ -2,7 +2,11 @@
 Historical event27 lookup returns only a verifier-minted original. It cannot
 issue a new grant, reinterpret the old ticket, or authorize a later dispatch.
 -/
-import Kernel.ApplicationAgentLifetimeGrantReceiver
+module
+
+public import Kernel.ApplicationAgentLifetimeGrantReceiver
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationAgentLifetimeGrantLookup
 

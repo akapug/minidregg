@@ -20,10 +20,29 @@ is built in: `RootBindingPremise` is the explicit optional deployment premise.
 Likewise the transitions below are logical transitions only;
 `PersistenceRefinement` states the separate obligation of a durable handler.
 -/
-import Theory.CausalVersionDag
-import Theory.CellState
-import Theory.EffectDeclaration
-import Theory.Hyperdocument
+module
+
+public import Theory.CausalVersionDag
+public import Theory.CellState
+public import Theory.EffectDeclaration
+public import Theory.Hyperdocument
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Theory.CellRegistry
 

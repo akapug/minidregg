@@ -2,11 +2,15 @@
 select paths, executables, a historical semantic implementation, or a trust key.
 The immutable capsule must remain in operator custody throughout dispatch.
 This initial registry supports one old segment, not arbitrary carry chains. -/
-import Compiler.CarriedSegmentIO
-import Host.CarryInspection
-import Compiler.DurableHistoryStore
-import Compiler.ReceiptContinuityIO
-import Kernel.NativeHistorySelection
+module
+
+public import Compiler.CarriedSegmentIO
+public import Host.CarryInspection
+public import Compiler.DurableHistoryStore
+public import Compiler.ReceiptContinuityIO
+public import Kernel.NativeHistorySelection
+
+@[expose] public section
 
 namespace Minidregg.Host.RetainedSegmentInspection
 

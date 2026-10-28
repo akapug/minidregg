@@ -1,9 +1,13 @@
 /- Lower registration admission. Replay supplies any named v1 original from its
 same-walk accepted record/receipt; a public caller's `Legacy` is not history
 authority. Live Host must use a Verified wrapper before constructing an intent. -/
-import Kernel.FnConsumerNamespaceRegistration
-import Kernel.FnConsumerFrontierGateway
-import Kernel.FnConsumerProgressHistory
+module
+
+public import Kernel.FnConsumerNamespaceRegistration
+public import Kernel.FnConsumerFrontierGateway
+public import Kernel.FnConsumerProgressHistory
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnConsumerNamespaceAdmissionAt
 

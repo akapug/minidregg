@@ -3,16 +3,37 @@ Shared source-owned host configuration and structural validation. Semantic
 history verification imports this module; ordinary host APIs import the verifier.
 There is one profile, one world-root commitment, and one validation path.
 -/
-import Compiler.NativeHostCodec
-import Kernel.PlatformCellLayout
-import Compiler.GenericSimplexSourceAnchor
-import Compiler.GrainResourceBirthController
+module
 
-import Compiler.JointControlFrame
-import Kernel.ProtectedContentGate
-import Kernel.ObjectiveActivityGate
-import Compiler.NativeInvocationProfile
-import Compiler.GenericSimplexCodec
+public import Compiler.NativeHostCodec
+public import Kernel.PlatformCellLayout
+public import Compiler.GenericSimplexSourceAnchor
+public import Compiler.GrainResourceBirthController
+public import Compiler.JointControlFrame
+public import Kernel.ProtectedContentGate
+public import Kernel.ObjectiveActivityGate
+public import Compiler.NativeInvocationProfile
+public import Compiler.GenericSimplexCodec
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
+
 namespace Minidregg.Kernel.NativeHost
 
 open Minidregg.Theory

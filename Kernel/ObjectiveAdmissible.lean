@@ -1,11 +1,32 @@
 /- Stage-0 certificates bind the exact source intent and its derived Turn.
 The durable log still encodes the intent; World-indexed host state is FD-1.
 -/
-import Kernel.ObjectiveActivityReceiverCore
-import Kernel.SeatReceiverCore
-import Kernel.HostRefinesWorldCore
-import Kernel.DeployedHistory
-import Kernel.ObjectiveCheckpointInvariant
+module
+
+public import Kernel.ObjectiveActivityReceiverCore
+public import Kernel.SeatReceiverCore
+public import Kernel.HostRefinesWorldCore
+public import Kernel.DeployedHistory
+public import Kernel.ObjectiveCheckpointInvariant
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ObjectiveAdmissible
 

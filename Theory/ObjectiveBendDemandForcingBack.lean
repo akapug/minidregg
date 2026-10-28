@@ -17,7 +17,27 @@ given ENOUGH of each resource. The difference between the two runs is resources 
   that commits alike, to the same Data, under every resource vector above a threshold
   (`LimitsLe L0 L`, ticks `≥ T0`, extraction ticks `≥ E0`), with the SAME output nodes and
   bytes, ending again related (the continuation states, not only the Data). -/
-import Theory.ObjectiveBendDemandForcingExtract
+module
+
+public import Theory.ObjectiveBendDemandForcingExtract
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Theory.ObjectiveBendDemandForcing
 open Minidregg.Theory.ObjectiveBendOpenRecursion
 open Minidregg.Theory.ObjectiveBendDemandMachine

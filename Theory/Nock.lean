@@ -24,8 +24,27 @@ has no fuel, so exhaustion says nothing about the term
 (`exhausted_says_nothing`, `loop_diverges`), while `crash` is a property of
 the term: `run_crash_iff`.
 -/
-import Theory.Noun
-import Theory.Eval
+module
+
+public import Theory.Noun
+public import Theory.Eval
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Theory
 namespace Nock

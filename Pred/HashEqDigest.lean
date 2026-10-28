@@ -29,8 +29,27 @@ Imports: Init and the leaf `Theory.Sp800185Cshake256Core` (itself Init only, no 
 code). The cSHAKE256 definition lives in the Theory tier, so `Pred` imports no `Compiler` module
 (the Pred row of scripts/check-import-boundary.sh no longer admits one).
 -/
-import Theory.Sp800185Cshake256Core
-import Theory.HashBytes
+module
+
+public import Theory.Sp800185Cshake256Core
+public import Theory.HashBytes
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Pred.HashEqDigest
 

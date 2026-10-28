@@ -15,12 +15,31 @@ other noncanonical spelling accepted by a primitive stream decoder. The
 universal round-trip and canonical-decoding laws below are kernel proofs.
 The cSHAKE address is executable but is not claimed to be injective.
 -/
-import Compiler.CanonicalPolicyAdmission
-import Compiler.IntStream
-import Compiler.ObjectAudienceCodec
-import Compiler.Sp800185Cshake256
-import Compiler.Tower256ConcreteBackend
-import Mathlib.Data.Char
+module
+
+public import Compiler.CanonicalPolicyAdmission
+public import Compiler.IntStream
+public import Compiler.ObjectAudienceCodec
+public import Compiler.Sp800185Cshake256
+public import Compiler.Tower256ConcreteBackend
+public import Mathlib.Data.Char
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.PolicyRecordCodec
 

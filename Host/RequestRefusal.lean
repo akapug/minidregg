@@ -22,11 +22,32 @@ from the MAC'd checkpoint) and a handler that throws after its reply frame has
 already been written (a second frame would desynchronise the pipe).
 `mini serve` restarts the Host in both cases.
 -/
-import Compiler.NativeHostCodec
-import Compiler.NativeHostEffectClass
-import Host.HostOperations
-import Kernel.Bounds
-import Theory.AssertAxioms
+module
+
+public import Compiler.NativeHostCodec
+public import Compiler.NativeHostEffectClass
+public import Host.HostOperations
+public import Kernel.Bounds
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Host.RequestRefusal
 

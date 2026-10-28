@@ -17,11 +17,35 @@ not collision resistance, a random-oracle theorem, PCS soundness, or any Rust
 semantics.
 -/
 
-import Compiler.BinaryTower256Profile
-import Compiler.Sp800185Cshake256
-import Compiler.NatDigits255Fast
-import Theory.Bignum
-import Theory.AssertAxioms
+module
+
+public import Compiler.BinaryTower256Profile
+public import Compiler.Sp800185Cshake256
+public import Compiler.NatDigits255Fast
+public import Theory.Bignum
+public import Theory.AssertAxioms
+meta import Compiler.BinaryTower256Profile
+meta import Compiler.Sp800185Cshake256
+meta import Compiler.NatDigits255Fast
+meta import Theory.Bignum
+meta import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.Tower256ConcreteBackend
 

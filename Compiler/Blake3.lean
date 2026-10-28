@@ -1,3 +1,7 @@
+module
+
+@[expose] public section
+
 /-
 # Compiler.Blake3 — BLAKE3-256 (hash mode) in Lean
 

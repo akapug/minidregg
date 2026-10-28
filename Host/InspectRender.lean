@@ -6,9 +6,28 @@ holds (hex), decodes every frame with the Host's own codecs, runs the pure view
 of `Host.InspectViews`, and returns JSON whose `text` field is the plain-text
 rendering. Nothing here opens a Store or reads anything but its input.
 -/
-import Host.InspectViews
-import Kernel.NativeHost
-import Lean.Data.Json
+module
+
+public import Host.InspectViews
+public import Kernel.NativeHost
+public import Lean.Data.Json
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Host.InspectRender
 

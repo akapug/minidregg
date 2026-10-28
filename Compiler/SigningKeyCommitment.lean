@@ -1,7 +1,11 @@
 /- Shared source commitment leaf for pre-rotation and paid enrollment memos.
 It contains no registry/receiver dependency, so cell codecs can use exactly the
 same commitment without importing the receiving runtime back into themselves. -/
-import Compiler.Sp800185Cshake256
+module
+
+public import Compiler.Sp800185Cshake256
+
+@[expose] public section
 
 namespace Minidregg.Compiler.SigningKeyCommitment
 open Minidregg.Theory.TypedAuthorization (Digest)

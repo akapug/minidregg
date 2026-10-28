@@ -1,6 +1,10 @@
-import Kernel.GenericSimplex
-import Kernel.GenericSimplexQuorum
-import Mathlib.Data.List.Basic
+module
+
+public import Kernel.GenericSimplex
+public import Kernel.GenericSimplexQuorum
+public import Mathlib.Data.List.Basic
+
+@[expose] public section
 
 /- Global safety of causally justified 1/3-VA events. LocalFaithful contains ONLY
 local send guards, receive provenance and output causes. It does not assume VA

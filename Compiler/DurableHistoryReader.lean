@@ -38,11 +38,32 @@ Rules for port lanes:
   checks, `StateAt` carries its base's MAC and its records' verification.
   `scripts/kn2/check-planted-api-faults.sh` keeps that true.
 -/
-import Compiler.DurableHistory
-import Compiler.DurableIndex
-import Compiler.DurableReceiverCodec
-import Compiler.DurableCheckpointCodec
-import Kernel.DurableView
+module
+
+public import Compiler.DurableHistory
+public import Compiler.DurableIndex
+public import Compiler.DurableReceiverCodec
+public import Compiler.DurableCheckpointCodec
+public import Kernel.DurableView
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Compiler.DurableHistoryReader
 

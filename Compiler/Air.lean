@@ -28,10 +28,29 @@ preserves semantics; `[AIR-sumcheck]` — retiring the emitted polynomial constr
 make a note-spend, grown on this rung. This file proves the RUNG (a DSL whose constraint reading
 is a drift-free fold + a first gadget), not the note-spend.
 -/
-import Compiler.Signature
-import Mathlib.Algebra.Field.Basic
-import Mathlib.Data.ZMod.Basic
-import Mathlib.FieldTheory.Finite.Basic
+module
+
+public import Compiler.Signature
+public import Mathlib.Algebra.Field.Basic
+public import Mathlib.Data.ZMod.Basic
+public import Mathlib.FieldTheory.Finite.Basic
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler
 

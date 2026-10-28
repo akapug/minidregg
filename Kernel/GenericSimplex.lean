@@ -7,7 +7,28 @@ Deviation from the paper's known-Delta timer: a view's timeout doubles with each
 consecutive view entered since this replica's last local commit, up to
 2^backoffCap (backoffCap = 0 is the paper's fixed timer). The deadline only
 decides when this replica sends CANDIDATE(⊥); no safety rule reads it. -/
-import Std
+module
+
+public import Std
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.Util
+
+@[expose] public section
+
 namespace Minidregg.Kernel.GenericSimplex
 set_option autoImplicit false
 abbrev Bytes := List UInt8

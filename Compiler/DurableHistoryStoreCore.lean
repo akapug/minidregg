@@ -8,8 +8,29 @@ MAC-bound `Head`, spent answers by `DurableIndex.lookupRows` against the head's
 index root, states by `openSealed` + verified records + `replay`. The types
 make anything else unrepresentable; this module only does the IO.
 -/
-import Compiler.DurableHistoryReader
-import Compiler.DurableReceiverCore
+module
+
+public import Compiler.DurableHistoryReader
+public import Compiler.DurableReceiverCore
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Compiler.DurableHistoryStore
 

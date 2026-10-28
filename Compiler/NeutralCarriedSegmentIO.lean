@@ -3,9 +3,13 @@ replacement data, grants or a claimed equivalence flag. It names retained
 artifacts and independent operator custody; actual old audit, source-derived
 mapping, native target validation and detached authorization are all required.
 Publication still belongs to the quiesced, atomic infra switch. -/
-import Compiler.CarriedSegmentIO
-import Compiler.NeutralPolicyCarry
-import Compiler.CarryConfiguration
+module
+
+public import Compiler.CarriedSegmentIO
+public import Compiler.NeutralPolicyCarry
+public import Compiler.CarryConfiguration
+
+@[expose] public section
 
 namespace Minidregg.Compiler.NeutralCarriedSegmentIO
 

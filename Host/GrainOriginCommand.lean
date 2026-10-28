@@ -4,9 +4,13 @@ preparation command. The input names article bytes, signed target selection,
 and whole-prefix disclosure intent; it does not convey signing keys or invoke
 fn transport. The output describes exact prepared bytes, not publication.
 -/
-import Host.GrainOriginPreparation
-import Host.Json
-import Lean.Data.Json
+module
+
+public import Host.GrainOriginPreparation
+public import Host.Json
+public import Lean.Data.Json
+
+@[expose] public section
 
 namespace Minidregg.Host.GrainOriginCommand
 

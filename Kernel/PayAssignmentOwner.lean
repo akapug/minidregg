@@ -1,5 +1,9 @@
 /- Account ownership predicate shared by the pay and OB receivers. -/
-import Theory.CredentialAuthorityEffects
+module
+
+public import Theory.CredentialAuthorityEffects
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PayAssignmentReceiver
 open Minidregg.Theory

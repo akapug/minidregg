@@ -8,7 +8,29 @@ and a same-opening disclosure declaration.  Carrier, codec, and bridge vocabular
 is registered here, but no proof dialect is admitted without a concrete Lean
 controller supplied by an extension manifest.
 -/
-import Compiler.SemanticArtifactBundle
+module
+
+public import Compiler.SemanticArtifactBundle
+meta import Compiler.SemanticArtifactBundle
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Compiler.MinidreggV1Artifact
 

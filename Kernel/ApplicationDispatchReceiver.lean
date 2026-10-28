@@ -4,10 +4,31 @@ special event 11 committed by CAS and confirmed against the exact complete
 post-image bytes. Historical receipt recovery, generic DRC event 3, a
 concurrent suffix, and an uncertain CAS response are not delivery permits.
 -/
-import Compiler.ApplicationReceivingDomain
-import Kernel.ApplicationDispatchProjection
-import Kernel.ApplicationDispatchLookup
-import Kernel.ApplicationRouteAdmission
+module
+
+public import Compiler.ApplicationReceivingDomain
+public import Kernel.ApplicationDispatchProjection
+public import Kernel.ApplicationDispatchLookup
+public import Kernel.ApplicationRouteAdmission
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationDispatchReceiver
 

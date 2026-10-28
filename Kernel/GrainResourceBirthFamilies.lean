@@ -4,8 +4,12 @@ bare birth families remain unchanged. This module supplies no authorization:
 its evidence is indexed to the composite factory request and the exact old
 Book, and must be constructed by the joint receiving admission.
 -/
-import Kernel.GrainResourceBirthPolicyController
-import Kernel.CanonicalResourceEffect
+module
+
+public import Kernel.GrainResourceBirthPolicyController
+public import Kernel.CanonicalResourceEffect
+
+@[expose] public section
 
 namespace Minidregg.Kernel.GrainResourceBirthFamilies
 

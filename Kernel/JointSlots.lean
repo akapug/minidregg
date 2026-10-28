@@ -10,8 +10,27 @@ on an absent slot, so a law that asserts a fact about position `i` refuses a
 command without it. A `not` around such an atom is TRUE on absence; a clause of
 the form `any [not (… joint/index/i …), …]` is vacuous on a short command unless
 another clause requires position `i`. -/
-import Kernel.ResourceTransaction
-import Compiler.ResourceAuthorityProjection
+module
+
+public import Kernel.ResourceTransaction
+public import Compiler.ResourceAuthorityProjection
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.DeclaredResourceController
 open Minidregg.Compiler

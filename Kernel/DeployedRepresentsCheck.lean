@@ -12,9 +12,28 @@ Every field is read from what the resumed snapshot is (`resume_model`: its
 journal and consumed set are the log's; `resume_outside_support`: a cell id the
 image never names holds the absent bytes) and from the World's finite supports.
 -/
-import Kernel.SnapRepresents
-import Kernel.DeployedBridge
-import Theory.AssertAxioms
+module
+
+public import Kernel.SnapRepresents
+public import Kernel.DeployedBridge
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.HostRefinesWorld
 

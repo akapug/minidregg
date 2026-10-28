@@ -4,12 +4,33 @@ This joins the verified original versioned retry claim, the separately pinned ph
 custodian, current installed law and capabilities, and exact current app and
 package content. It produces no CAS or host permit by itself.
 -/
-import Kernel.ApplicationLifecycleRetryCompletionV4History
-import Kernel.ApplicationLifecycleRetryCompletionV4Ingress
-import Kernel.ApplicationLifecycleRetryCompletionV4Policy
-import Kernel.ApplicationLifecycleClaimCurrent
-import Kernel.PhysicalResourceReadGuard
-import Kernel.ResourceObservationAdmission
+module
+
+public import Kernel.ApplicationLifecycleRetryCompletionV4History
+public import Kernel.ApplicationLifecycleRetryCompletionV4Ingress
+public import Kernel.ApplicationLifecycleRetryCompletionV4Policy
+public import Kernel.ApplicationLifecycleClaimCurrent
+public import Kernel.PhysicalResourceReadGuard
+public import Kernel.ResourceObservationAdmission
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission
 
