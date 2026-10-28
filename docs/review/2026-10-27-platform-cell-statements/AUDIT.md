@@ -1100,3 +1100,33 @@ first.
 Either form meets law 2 only if the module is built by the merge gate with its pin checked, so a broken
 witness turns the gate red. An executed script does not count. `neutral-birth.lean` stays as the
 end-to-end run.
+
+## 2026-10-28, twenty-fifth pass: JDISCLOSE scalar oracle and installed-law explanation (lane/red-jdisclose-scalar, statements)
+
+**Verdict: REVISE A, accept B with one transfer lemma.**
+
+**A. Revise.**
+1. **The `none` branch keeps the oracle open.** `scalarScopeCheck` returns `true` when the authority cell
+   holds no such capability, so `prepareCell`'s guards still run before admission refuses
+   `capabilityRejected`, and `guardRejected` versus the later refusal is an equality oracle for a
+   requester with *no* grant at all. "Observation-phase authority precedes prepare" is a claim about the
+   plan channel, and no statement here proves it. Close it fail-safe: `none => .error .capabilityRejected`,
+   refused before any guard. That is the same name admission would give, only earlier. Then
+   `computeTarget_scalar_unnamed_refused` has a sibling for the `none` case, equally quantified over every
+   `pre`.
+2. **The teeth cover guards only. State the non-interference.**
+   `computeTarget_scalar_unnamed_refused` shows that a guard on an unnamed field refuses independently of
+   values. But if `prepareCell` reads any other field (a cross-field invariant, a balance check, an
+   existence test outside `guardKeys`), a fully named action can still refuse differently on unnamed
+   values. The property the row needs: when `scalarScopeCheck = true`, the *error* `computeTarget …
+   pre` returns is a function of the named fields alone, that is, `pre` and `pre'` agreeing on
+   `NamedBy stored…fields` give the same refusal. `computeTarget_scalar_named_as_before` is the accepting
+   pole, not a confinement statement.
+
+**B. Accepted.** Dropping the neutral guard in `explained` is display-only (the decision is unchanged).
+`owner_told_value_installed` is the satisfiable witness. `narrowed_hides_uncovered_installed` (4242 and 5
+both give `none`) is the right teeth, but it is a closed instance (law 9 permits it as a witness). Add
+`narrowed_installed_le : narrowed fs (Pred.all [(neutralComponent law).guarded]) old new = some r →
+narrowed fs law old new = some r` (the installed law tells nothing the raw law does not). The existing
+general non-leak results for raw laws then carry over to every installed law, and the known coverage limit
+(installed hides more) is consistent with it.
