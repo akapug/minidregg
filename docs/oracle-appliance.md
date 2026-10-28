@@ -113,7 +113,7 @@ records the failure and scope.
 The fresh v7 qualification admitted an agent session and its persistent lifetime
 grant, migrated the payer route and completed native STOP and successor START.
 Its physical world was subsequently removed by unrelated cleanup while recovery
-was paused. The logical Store and admission evidence are preserved; that run is
+was paused. Its logical Store and admission evidence survived that cleanup; the run is
 not a complete receiving result and its removed physical identity cannot resume.
 A replacement qualification reached genesis. The Hermes composition passed
 controller enrollment and signed readiness, but its completed model turn still
@@ -124,7 +124,8 @@ open; no qualification process remains on that deleted server.
 The detached build volume still exists, but its contents have not been mounted
 or verified after the deletion. Old remote evidence paths are historical
 locations, not a guarantee of recoverable installed worlds. Earlier stopped
-v5 and v7 runs have a [recovery record](evidence/oracle-hosted-recovery-2026-10-27.json) names the exact
+v5 and v7 runs have a
+[recovery record](evidence/oracle-hosted-recovery-2026-10-27.json) that names their
 outstanding custody and results. The lifetime-grant repair now admits the
 source's owner, controller and read-only observer through a dedicated frame;
 ordinary births retain their own restriction. The
