@@ -80,6 +80,49 @@ pub(crate) fn framed_payload<'a>(reply: &'a [u8], opcode: u8, tag: &[u8]) -> io:
     Ok(&reply[5..])
 }
 
+/// A Host refusal of one BEGIN step, by name. A NO_RECORD (253) or HOST_OUTCOME (255) reply
+/// carries the Host's encoded outcome instead of the step's payload; it is retained beside the
+/// step's frame and decoded by the Host's own decoder (`inspect outcome`), never here, and
+/// the error carries that decoding (reason, and the law clause or detail). NO_RECORD is a
+/// decided no-append refusal; HOST_OUTCOME is the undecided envelope and says so. Any other
+/// reply is left to `framed_payload`.
+pub(crate) fn host_refusal(
+    operator: &PrivateOperator,
+    attempt_dir: &Path,
+    step: &str,
+    reply: &[u8],
+) -> io::Result<()> {
+    use crate::host_operations::{RESPONSE_HOST_OUTCOME, RESPONSE_NO_RECORD};
+    if reply.len() < 6 || (reply[4] != RESPONSE_NO_RECORD && reply[4] != RESPONSE_HOST_OUTCOME) {
+        return Ok(());
+    }
+    let decided = reply[4] == RESPONSE_NO_RECORD;
+    let outcome = write_new(attempt_dir, &format!("{step}-refusal-outcome.bin"), &reply[5..])?;
+    let named = operator
+        .tool("inspect", "outcome", &outcome, &attempt_dir.join(format!("{step}-refusal-outcome.json")))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .map(|view| {
+            let field = |name: &str| view.get(name).and_then(Value::as_str).unwrap_or("").to_owned();
+            let kind = field("type");
+            let reason = field("reason");
+            let clause = match field("explain") {
+                explain if !explain.is_empty() => explain,
+                _ => view.get("detail").map(Value::to_string).unwrap_or_default(),
+            };
+            format!("{kind}: {reason}: {clause}")
+        })
+        .unwrap_or_else(|| "the Host's outcome did not decode".to_owned());
+    Err(io::Error::new(
+        io::ErrorKind::PermissionDenied,
+        if decided {
+            format!("Host refused v3 BEGIN {step} (no record; nothing was appended): {named}")
+        } else {
+            format!("Host answered v3 BEGIN {step} undecided: {named}")
+        },
+    ))
+}
+
 pub(crate) const BEGIN_ACTIVE_MARKER: &str = "lifecycle-begin-v3-active.json";
 pub(crate) const BEGIN_INGRESS_FILE: &str = "begin-v3.bin";
 
@@ -412,6 +455,7 @@ pub(crate) fn submit_once(
     hold_begin_attempt(parent, &active)?;
     let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_BEGIN_PLAN, &fixed.selector.framed(&request)?)?;
     write_new(attempt_dir, "op66-frame.bin", &reply)?;
+    host_refusal(operator, attempt_dir, "op66-plan", &reply)?;
     let plan = framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_PLAN, PLAN_TAG)?;
     let plan_path = write_new(attempt_dir, "plan.bin", plan)?;
     let inspection = operator.tool(
@@ -441,6 +485,7 @@ pub(crate) fn submit_once(
     write_new(attempt_dir, "op67-requested.bin", &pair)?;
     let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_BEGIN_ASSEMBLE, &pair)?;
     write_new(attempt_dir, "op67-frame.bin", &reply)?;
+    host_refusal(operator, attempt_dir, "op67-assemble", &reply)?;
     let ingress = framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_ASSEMBLE, BEGIN_TAG)?.to_vec();
     write_new(attempt_dir, BEGIN_INGRESS_FILE, &ingress)?;
     let marker = json!({
@@ -457,6 +502,7 @@ pub(crate) fn submit_once(
     )?;
     let reply = operator.invoke(crate::host_operations::APPLICATION_LIFECYCLE_BEGIN_SUBMIT, &ingress)?;
     write_new(attempt_dir, "op22-frame.bin", &reply)?;
+    host_refusal(operator, attempt_dir, "op22-submit", &reply)?;
     let outcome = framed_payload(&reply, crate::host_operations::APPLICATION_LIFECYCLE_BEGIN_SUBMIT, b"DREGG/NATIVE-HOST/OUTCOME/v8")?;
     let outcome_path = write_new(attempt_dir, "op22-outcome.bin", outcome)?;
     let inspection = operator.tool(

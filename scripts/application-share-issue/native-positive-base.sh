@@ -16,6 +16,8 @@ GENESIS_PARAMS_TREE=${GENESIS_PARAMS_TREE:-$(CDPATH='' cd -- "$(dirname -- "$0")
 export GENESIS_PARAMS_TREE
 PROVISION_SOURCE=${PROVISION_SOURCE:?set exact reviewed provision.sh}
 MEMBER_SOURCE=${MEMBER_SOURCE:?set exact reviewed native-share-member.sh}
+# The member script sources its birth acceptance from beside itself.
+ACCEPTANCE_SOURCE=${ACCEPTANCE_SOURCE:-$(dirname -- "$MEMBER_SOURCE")/birth-acceptance.sh}
 APP_SOURCE=${APP_SOURCE:?set exact reviewed native-share-base.sh}
 MINI=${MINI:?set source-matched Mini}
 STORE_BINARY=${STORE_BINARY:?set source-matched SQLite Store helper}
@@ -24,25 +26,28 @@ SIGNATURE_BINARY=${SIGNATURE_BINARY:?set source-matched signature helper}
 [ ! -e "$EVIDENCE.source-stage" ] || {
   echo "source stage already exists" >&2; exit 2;
 }
-for file in "$PROVISION_SOURCE" "$MEMBER_SOURCE" "$APP_SOURCE"; do
+for file in "$PROVISION_SOURCE" "$MEMBER_SOURCE" "$ACCEPTANCE_SOURCE" "$APP_SOURCE"; do
   [ -f "$file" ] || { echo "missing reviewed source: $file" >&2; exit 2; }
 done
 STAGE=$EVIDENCE.source-stage
 mkdir -m 700 "$STAGE"
 sha256sum "$0" "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY" \
-  "$PROVISION_SOURCE" "$MEMBER_SOURCE" "$APP_SOURCE" \
+  "$PROVISION_SOURCE" "$MEMBER_SOURCE" "$ACCEPTANCE_SOURCE" "$APP_SOURCE" \
   >"$STAGE/input-sha256.txt"
 sha256sum -c "$STAGE/input-sha256.txt" >"$STAGE/input-precheck.txt"
 mkdir -p "$STAGE/scripts/workroom" "$STAGE/scripts/grain-birth" \
   "$STAGE/scripts/application-current-birth"
 cp "$PROVISION_SOURCE" "$STAGE/scripts/workroom/provision.sh"
 cp "$MEMBER_SOURCE" "$STAGE/scripts/grain-birth/native-share-member.sh"
+cp "$ACCEPTANCE_SOURCE" "$STAGE/scripts/grain-birth/birth-acceptance.sh"
 cp "$APP_SOURCE" "$STAGE/scripts/application-current-birth/native-share-base.sh"
 chmod 700 "$STAGE/scripts/workroom/provision.sh" \
   "$STAGE/scripts/grain-birth/native-share-member.sh" \
+  "$STAGE/scripts/grain-birth/birth-acceptance.sh" \
   "$STAGE/scripts/application-current-birth/native-share-base.sh"
 sha256sum "$STAGE/scripts/workroom/provision.sh" \
   "$STAGE/scripts/grain-birth/native-share-member.sh" \
+  "$STAGE/scripts/grain-birth/birth-acceptance.sh" \
   "$STAGE/scripts/application-current-birth/native-share-base.sh" \
   >"$STAGE/private-source-sha256.txt"
 sha256sum -c "$STAGE/private-source-sha256.txt" \

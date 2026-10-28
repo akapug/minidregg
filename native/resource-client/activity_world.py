@@ -155,10 +155,14 @@ def quoted_heap(view):
 
 
 def with_extra_heap(body, heap, payer):
-    """`body` declaring `heap` cells in its `extra` (other extra fields kept), paid by `payer`, the
-    submitter's (account, spend capability)."""
+    """`body` declaring `heap` cells in its `extra` (other extra fields kept). The added envelope is paid by
+    the account the body names; only a body naming none (`'0'`) is filled with `payer`, the submitter's
+    (account, spend capability). A row that names an account on purpose (a refusal row naming the purse)
+    keeps it: rewriting it to the submitter's own would turn the refusal into an ordinary paid turn."""
     extra = dict(body.get('extra') or {k: '0' for k in MAXIMUM})
     extra['heap'] = str(heap)
+    if str(body.get('account', '0')) not in ('', '0'):
+        return dict(body, extra=extra)
     return dict(body, extra=extra, account=str(payer[0]), accountCapability=str(payer[1]))
 
 
@@ -207,6 +211,9 @@ def unhex(text):
         return bytes.fromhex(text).decode(errors='replace')
     except (ValueError, TypeError):
         return str(text)
+
+
+OWNER_BUDGET = '1000000'
 
 
 class World:
@@ -288,7 +295,10 @@ class World:
                 self.mini, self.store, self.verifier, self.W, self.sock,
                 env={'OBJECTIVE_INVOCATION_POLICY': (root / 'policy.hex').read_text().strip(),
                      'NEWPARTICIPANT_EXTRA_SUBJECTS': str(root / 'enrollment-second.json'),
-                     'NEWPARTICIPANT_SPONSOR_BALANCE': sponsor_balance})
+                     'NEWPARTICIPANT_SPONSOR_BALANCE': sponsor_balance,
+                     # every owner capability's maxCost is the template's ownerBudget, and a publish costs its own
+                     # byte length: the world apps' packages (104-150 KB) exceed the default 100000 (`notAccountOwner`)
+                     'NEWPARTICIPANT_OWNER_BUDGET': OWNER_BUDGET})
         self.config = self.W / 'deployment' / 'pinned-config.json'
         self.sponsor = self.W / 'sponsor'
         self.second = root / 'second'

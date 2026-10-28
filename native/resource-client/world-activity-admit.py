@@ -74,6 +74,11 @@ def modules_of(method, repo):
 
 KERNEL_APPS = ('bounty', 'play', 'ballot', 'story', 'commons')
 APP_REWARD = 200000000
+# The six apps' steps replay more of a package than the tally-sized default envelope (3000 source ticks) runs: a
+# delivery of bounty's `claim` was `exhausted` at 3000. A tick is priced at 1 and the package's bytes dominate the
+# price, so the envelope is raised well below the policy's per-turn maximum (200000).
+APP_TICKS = 100000
+ticks = int(a.ticks or (APP_TICKS if a.scenario in KERNEL_APPS else aw.TICKS))
 
 
 def field_of(state, name):
@@ -148,7 +153,10 @@ try:
     if a.scenario in ('call', 'send'):
         code = two_object_route(w, a, method)
         sys.exit(code)
-    w.bring_up(['obj', 'lawful'] if a.scenario in ('effect', 'ballot', 'story', 'commons') else ['obj'])
+    # a further birth on `obj` would write a state that already exists (`blindWrite`): a row that births again
+    # (the underfunded teeth, the law teeth) births its own second object
+    w.bring_up(['obj', 'lawful'] if a.scenario in ('effect', 'ballot', 'story', 'commons')
+               else ['obj', 'poor'] if a.scenario in ('bounty', 'play') else ['obj'])
     if a.scenario == 'effect':
         # world/activity/Effects.obend: commit {total: set 5}, then transfer 1 to the second subject's account
         a.birth_input = json.dumps(record(init=variant('set', nat(5)), to=nat(int(w.SECOND)), amount=nat(1)))
@@ -207,12 +215,21 @@ try:
     pin, art = w.publication('publication', mods, str(len(mods) - 1), a.entry)
     w.PIN = pin
     pub = {'payer': w.SPONSOR_ACCOUNT, 'payerCapability': w.SPONSOR_SPEND}
+
+    def halt_if_red():
+        """A setup step that is red ends the scenario there, with its red row: the steps after it would only
+        fail on what it did not leave behind."""
+        if any(not r['ok'] for r in w.results):
+            sys.exit(w.finish({'pin': w.PIN}))
+
     with w.group('publish'):
         w.turn('publish', w.sponsor, dict(art, kind='publish', **pub), 'installed')
+    halt_if_red()
     with w.group('create'):
         state_type = json.loads(a.state_type) if a.state_type else None
         seed = json.loads(a.seed) if a.seed else None
         w.create('create', w.sponsor, 'obj', aw.PERMIT_ALL, 'installed', state_type=state_type, seed=seed)
+    halt_if_red()
     with w.group('birth'):
         o = w.objects['obj']
         body = {'kind': 'birth', 'object': o['object'], 'objectCapability': o['capability'],
@@ -224,6 +241,7 @@ try:
         w.born = v
         print(json.dumps({'record': v.get('record'), 'state': v.get('state'), 'purse': v.get('purse'),
                           'height': v.get('height')})[:1500])
+    halt_if_red()
     if a.scenario == 'tally':
         # Tally law (world/activity/Tally.obend): a reply of `amount` is an ADD to the state the activity was
         # resumed with; only the named decider may decide the slot; each delivery advances the generation.
@@ -261,10 +279,13 @@ try:
             w.check('commit-performed-at-birth', source_of(v) == {'kind': 'performed', 'verdict': 'settled', 'reason': None}
                     and World.total_of(v) == 5, {'source': source_of(v), 'state': v.get('state')})
             second0 = bal(v, w.SECOND)
-            # FundsAgree's kernel check: a delivery whose submitter account is the purse itself is refused by name
-            # (its added envelope would be paid from the purse the transfer is judged against)
+            # A delivery naming the activity's own purse as the account that pays its added envelope is refused.
+            # The receiver refuses it first, `notAccountOwner` (a payer is admitted only for its owner, and no
+            # member owns a purse); the kernel's `Delivery.purseApart` (`payerInvalid`) is the proved second line
+            # behind it. The sponsor signs with a spend capability it really holds, on its own account.
             w.turn('deliver-from-the-purse-refused', w.sponsor, {'kind': 'deliver', 'record': rec,
-                   'await': World.await_of(v)['id'], 'account': rec, 'accountCapability': '0'}, 'refused', 'payerInvalid')
+                   'await': World.await_of(v)['id'], 'account': rec, 'accountCapability': str(w.SPONSOR_SPEND)},
+                   'refused', 'notAccountOwner')
             deliver('deliver-commit', v, rec)
             v1 = w.state('obj', 'after-transfer', tx)
             w.check('transfer-performed-moves-exactly-1',
@@ -295,7 +316,7 @@ try:
         # (admitted), the delivery's transfer writes `total add 1` = 6, which the law refuses: every earlier
         # step of that delivery is admitted and the whole turn is refused `objectWrite`, nothing moves or is written.
         with w.group('effect-law-refuses-delivery'):
-            w.create('create-lawful', w.sponsor, 'lawful', aw.le('total', 5), 'installed')
+            w.create('create-lawful', w.sponsor, 'lawful', aw.le('state/total', 5), 'installed')
             lo = w.objects['lawful']
             body = {'kind': 'birth', 'object': lo['object'], 'objectCapability': lo['capability'],
                     'account': w.SPONSOR_ACCOUNT, 'accountCapability': w.SPONSOR_SPEND, 'pin': pin,
@@ -406,16 +427,17 @@ try:
         # Teeth: a purse below the reward cannot pay the poster's refund at the deadline: the transfer is refused
         # `unfunded` at the yield, nothing moves and nothing is written, and the bounty waits for the next event.
         with w.group('bounty-teeth-unfunded'):
-            tx2, b = birth_of('obj', json.loads(a.birth_input), APP_REWARD // 2, 'birth-underfunded')
+            w.create('create-poor', w.sponsor, 'poor', aw.PERMIT_ALL, 'installed', state_type=json.loads(a.state_type))
+            tx2, b = birth_of('poor', json.loads(a.birth_input), APP_REWARD // 2, 'birth-underfunded')
             rec2 = b['recordCell']
-            mid2, after = drive('obj', 'expire-underfunded', tx2, rec2, b, ev('expire', now=nat(100)))
+            mid2, after = drive('poor', 'expire-underfunded', tx2, rec2, b, ev('expire', now=nat(100)))
             w.check('refund-refused-unfunded-moves-nothing',
                     source_of(after) == performed('refused', 'unfunded') and bal(after, w.SECOND) == bal(mid2, w.SECOND)
                     and after.get('stateVersion') == b.get('stateVersion')
                     and field_of(after.get('state'), 'moves') == field_of(b.get('state'), 'moves'),
                     {'source': source_of(after), 'version': [b.get('stateVersion'), after.get('stateVersion')],
                      'state': after.get('state')})
-            again = deliver_only('obj', 'refused-underfunded', tx2, rec2, after)
+            again = deliver_only('poor', 'refused-underfunded', tx2, rec2, after)
             w.check('refused-disbursement-waits-for-the-next-event', waits_again(again), {'source': source_of(again)})
     if a.scenario == 'play':
         # Pot law natively (world/play/README.md:20 "Every settlement pays out exactly the pot, once"; CommitReveal.obend
@@ -446,18 +468,19 @@ try:
         # forfeits A: `toB` is the pot): B's transfer is refused `unfunded`, nothing moves or is written, and the
         # game waits for the next event (the payout is tried again).
         with w.group('play-teeth-unfunded'):
-            tx2, b = birth_of('obj', json.loads(a.birth_input), APP_REWARD // 2, 'birth-underfunded')
+            w.create('create-poor', w.sponsor, 'poor', aw.PERMIT_ALL, 'installed', state_type=json.loads(a.state_type))
+            tx2, b = birth_of('poor', json.loads(a.birth_input), APP_REWARD // 2, 'birth-underfunded')
             rec2 = b['recordCell']
-            _, c1 = drive('obj', 'commit-a-underfunded', tx2, rec2, b, commit_(sponsor_acct, 22, 2))
-            _, c2 = drive('obj', 'commit-b-underfunded', tx2, rec2, c1, commit_(second_acct, 14, 4))
-            mid2, after = drive('obj', 'timeout-underfunded', tx2, rec2, c2, ev('timeout', now=nat(10)))
+            _, c1 = drive('poor', 'commit-a-underfunded', tx2, rec2, b, commit_(sponsor_acct, 22, 2))
+            _, c2 = drive('poor', 'commit-b-underfunded', tx2, rec2, c1, commit_(second_acct, 14, 4))
+            mid2, after = drive('poor', 'timeout-underfunded', tx2, rec2, c2, ev('timeout', now=nat(10)))
             w.check('payout-refused-unfunded-moves-nothing',
                     source_of(after) == performed('refused', 'unfunded') and bal(after, w.SECOND) == bal(mid2, w.SECOND)
                     and after.get('stateVersion') == c2.get('stateVersion')
                     and field_of(after.get('state'), 'moves') == field_of(c2.get('state'), 'moves'),
                     {'source': source_of(after), 'version': [c2.get('stateVersion'), after.get('stateVersion')],
                      'state': after.get('state')})
-            again = deliver_only('obj', 'refused-underfunded', tx2, rec2, after)
+            again = deliver_only('poor', 'refused-underfunded', tx2, rec2, after)
             w.check('refused-payout-waits-for-the-next-event', waits_again(again), {'source': source_of(again)})
     if a.scenario == 'ballot':
         # Ballot law natively (world/ballot/README.md:9-10 "TALLY ...: anyone closes the poll, once; the result is
@@ -492,7 +515,7 @@ try:
         # Teeth: an object whose law is `yes <= 0` refuses the publication of a result with a yes vote: the tally's
         # delivery is refused `objectWrite` as a whole turn, nothing is written and the activity stays at its yield.
         with w.group('ballot-teeth-law-refuses-publication'):
-            w.create('create-lawful', w.sponsor, 'lawful', aw.le('yes', 0), 'installed', state_type=BALLOT_STATE)
+            w.create('create-lawful', w.sponsor, 'lawful', aw.le('state/yes', 0), 'installed', state_type=BALLOT_STATE)
             tx3, b = birth_of('lawful', BALLOT_SPEC(), a.deposit, 'birth-lawful')
             rec3 = b['recordCell']
             _, c1 = drive('lawful', 'commit-1-lawful', tx3, rec3, b, cast(1, 222003, 10))
@@ -536,7 +559,7 @@ try:
         # Teeth: an object whose law is `chapters <= 0` refuses the seal's chapter write: the seal's delivery is
         # refused `objectWrite` as a whole turn, the shelf stays empty and the activity stays at its yield.
         with w.group('story-teeth-law-refuses-seal'):
-            w.create('create-lawful', w.sponsor, 'lawful', aw.le('chapters', 0), 'installed', state_type=STORY_STATE)
+            w.create('create-lawful', w.sponsor, 'lawful', aw.le('state/chapters', 0), 'installed', state_type=STORY_STATE)
             tx3, b = birth_of('lawful', STORY_OPENING(), a.deposit, 'birth-lawful')
             rec3 = b['recordCell']
             _, c1 = drive('lawful', 'propose-lawful', tx3, rec3, b, propose(1, 'a light on the rock', 1))
@@ -593,7 +616,7 @@ try:
         # refused `objectWrite` as a whole turn, the object stays `vacant` and the activity stays at its yield
         # (cohort row CommonsLifecycleRefusedAdmissionStaysAtYield).
         with w.group('commons-teeth-law-refuses-admission'):
-            w.create('create-lawful', w.sponsor, 'lawful', aw.le('admissions', 0), 'installed', state_type=COMMONS_STATE)
+            w.create('create-lawful', w.sponsor, 'lawful', aw.le('state/admissions', 0), 'installed', state_type=COMMONS_STATE)
             tx3, b = birth_of('lawful', record(keeper=nat(second_acct), fresh=boolean(True)), a.deposit, 'birth-lawful')
             rec3 = b['recordCell']
             w.turn('resolve-reserve-lawful', w.second, {'kind': 'resolve', 'slot': source_of(b)['slot'],

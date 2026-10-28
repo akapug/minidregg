@@ -78,7 +78,7 @@ which is not committed.
 - Cohort gate (Mac or any box with bun): `bash scripts/check-world-cohorts.sh` (subset: `WORLD_COHORTS_ONLY="world/dues world/bounty world/play world/ballot world/story world/commons"`).
 - Native (dregg-build, worktree at the candidate's commit, under `swarm-build`, PID file, one box-wait):
   - `scripts/world-native-admit.sh activity --route activity --scenario effect --method world/activity/Effects.obend --entry effects --deposit 100000000`
-  - `scripts/world-native-admit.sh dues --route activity --scenario dues --entry dues --deposit 300000000`
+  - `scripts/world-native-admit.sh dues --route activity --scenario dues --method world/dues/StandingDues.obend --entry dues --deposit 300000000`
   - `scripts/world-native-admit.sh bounty --route activity --scenario bounty --method world/bounty/BountyBoard.obend --entry bounty --deposit 300000000`
   - `scripts/world-native-admit.sh play --route activity --scenario play --entry play --deposit 300000000`
   - `scripts/world-native-admit.sh ballot --route activity --scenario ballot --entry ballot --deposit 100000000`
