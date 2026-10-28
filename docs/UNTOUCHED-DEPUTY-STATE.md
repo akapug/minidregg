@@ -105,6 +105,7 @@ Its hbox worlds: /tank/rows-2d8b7ed5-apps/w-{featured,b1,b2,b4,b6,rt,fixups}. Mi
 - lane/app-market-b5-featured 0aff6334e (on 0b0cbbf2f; cherry-picks 7ba911ef0): FEATURED 17 -> 21, filtered test green on hbox; sent to the integrator.
 - OwnTracks: Lean safeApiTail now admits a prefix with no trailing slash, matching Rust checked_prefix (84938f78c on lane/app-market-b5, elaborated on dregg-ref); held by the integrator until after the module conversion; re-qualify on the first candidate carrying it.
 - Staging on hbox and dregg-ref removed.
+- ON MAIN (integrator): FEATURED 21 at f573a47c4; OwnTracks 84938f78c at 3a943f85e (converted header intact). Neither is in the b26630168 conversion candidate (fresh genesis, building); the next main build carries both and is the first elaboration of safeApiTail; OwnTracks re-qualifies on it.
 
 ## Featured on 76758dba6 (validator a373556d56d56744d): 9 PASS of 13
 - PASS: EtherCalc lifecycle + write, DokuWiki lifecycle + write, Datasette lifecycle + recorded read, HedgeDoc/Davros/HledgerWeb lifecycles.
