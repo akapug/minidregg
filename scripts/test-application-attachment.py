@@ -127,12 +127,23 @@ class AttachmentTests(unittest.TestCase):
         self.assertNotIn("sessionOwner", family["namespace"])
         self.assertEqual(len(delegated), 6)
         self.assertEqual(delegated[-1][-1], self.a["controller"]["subject"])
-        self.assertEqual(result["nextTool"]["arguments"]["application"], "oracle-app-bootstrap")
+        self.assertEqual(result["nextTool"]["arguments"]["application"], "oracle-bootstrap-app")
         self.assertEqual(M.read(self.contract["paths"]["controllerConfig"])["toolTask"]["registeredSharedApplications"], [{"name": "other-app"}])
+
+    def test_bootstrap_reference_keeps_native_application_suffix_and_bound(self):
+        self.contract["names"] = {"application": "weather-app"}
+        self.rewrite(self.path, self.contract)
+        op = M.Attachment(self.path, "prepare-config")
+        self.assertEqual(op.bootstrap_name, "weather-bootstrap-app")
+        self.assertTrue(op.bootstrap_name.endswith("-app"))
+        self.contract["names"]["application"] = "x" * 60 + "-app"
+        self.rewrite(self.path, self.contract)
+        with self.assertRaisesRegex(ValueError, "native 64-byte"):
+            M.Attachment(self.path, "prepare-config")
 
     def test_existing_name_collision_refuses_before_native_delegation(self):
         config = M.read(self.contract["paths"]["controllerConfig"])
-        config["toolTask"]["registeredSharedApplications"].append({"name": "oracle-app-bootstrap"})
+        config["toolTask"]["registeredSharedApplications"].append({"name": "oracle-bootstrap-app"})
         self.rewrite(self.contract["paths"]["controllerConfig"], config)
         op = M.Attachment(self.path, "prepare-config")
         with patch.object(op, "delegate_observe") as delegated:

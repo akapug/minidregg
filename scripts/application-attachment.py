@@ -135,7 +135,6 @@ class Attachment:
         self.names = {"application": "oracle-app", "family": "oracle-session", "route": "oracle-agent-v1",
                       "display": "Oracle agent", "handle": "oracle-agent", "serviceProtocol": "oracle-operations-v1"}
         self.names.update(c.get("names", {}))
-        self.bootstrap_name = self.names["application"] + "-bootstrap"
         # Names enter private artifact paths as well as native route selectors.
         for field in ("application", "family", "route", "handle"):
             name = self.names[field]
@@ -143,6 +142,9 @@ class Attachment:
                 raise ValueError("attachment names require ASCII letters, digits or hyphens")
         if not self.names["application"].endswith("-app"):
             raise ValueError("application route name must end in -app")
+        self.bootstrap_name = self.names["application"][:-4] + "-bootstrap-app"
+        if len(self.bootstrap_name) > 64:
+            raise ValueError("bootstrap application reference exceeds native 64-byte name bound")
         config = read(paths["controllerConfig"])
         self.validate_controller(config)
         if sha(config["host"]) != sha(self.host) or sha(config["mini"]) != sha(self.mini):
