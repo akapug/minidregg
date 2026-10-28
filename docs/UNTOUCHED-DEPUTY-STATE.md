@@ -27,6 +27,8 @@ After that, report only new events.
 - Owed after the demo (ember): kernel effects come from a revived Effects/ derivation engine; un-effects' transfer/commit are hand-written (EFFECTS.md has the Phase-3 design).
 
 ## Candidates
+- Next build (after 9bd52317c, starts at main's tip): first to carry the ifaddrs shim b62ccb0f5, story de75c40a8 + 81b631818, verdict key 78c9e1984, bend seed 4bd64332d. When named: B8 runs the IPython execute-and-read-back row, story faerie runs JSGM, B5 re-qualifies OwnTracks + recipe reds, infra re-checks demo-dry.
+- 9bd52317c (building): first with the share-issue stage names (9c4db6a19); its composed store.log line decides B3's composed fix.
 - b26630168 (conversion, fresh genesis): /build/candidates/b26630168b63024c9c46311745fa0b25fa09c13f. Runs below are on it.
 - 349e59ef1 READY: /build/candidates/349e59ef1647fb04bd9cb051012d14f6bf86d271 (fresh genesis; the rehearsal candidate). Carries hosted install + pinned read (7007d5068), HackerCMS /var/www hop (efdb8563d), public reader, `delegate observe 0`, FEATURED 27. Gate running (integrator sends the verdict). Handed to B5 (OwnTracks + b2/b4/b6 recipe reds), B8 (IPython strace), japps-rows confirming run, infra demo-dry confirmations.
 
@@ -50,7 +52,7 @@ After that, report only new events.
 - infra demo-dry on 349e59ef1: hosted install now refused `store key or app id refused` (the app-id bound, acec1de6f1c53a04c, bd9318540 pending elaboration + red-proof); public reader and story seed reported next. Verdict cache: DONE, lane/app-verdict-key 78c9e1984 (verdict carries ingestKey = sha256 of the driven spk-host; other/missing key reads as absent; test red with the check planted out, restored byte-identical, green on hbox), sent to the integrator by B5. clock-tick staleAuthority intermittent: not ours.
 
 - Qualification lead ab292a1cd5ddfbbe5 (rehearsal #3 board), 8 items from a static read of main 65309b427, routed (each owner sends its sha to the lead):
-  1 share-issue window taken at PLAN height (ApplicationShareIssueSource.lean:215) vs SUBMIT-height byte equality (GrainAdmission:139-165) -> B3 a85d12892ea6de3ca, statement first, planted plan/tick/submit row.
+  1 share-issue window taken at PLAN height (ApplicationShareIssueSource.lean:215) vs SUBMIT-height byte equality (GrainAdmission:139-165) -> B3 a85d12892ea6de3ca, statement first, planted plan/tick/submit row. STATUS: statement drafted UNELABORATED at lane/un-share-window-statement c0f41c830 (scratch/ShareIssueWindowStatement.lean: PlannedWithinWindow = exists p <= h < p + lifetime with signed = descriptorPlannedAt p; poles after-one-tick, expired, altered, future-plan; premise). RULED (deputy): p stays existential (no signed field, no wire change) plus a determinacy lemma (the descriptor's notBefore fixes p); the app-delegation leg gets the same window if it reads ambient.height at submit; the `True` placeholder is replaced by the drafted Accepted field before the auditor. B3 (~500k) writes B3-STATE.md first, elaborates in its own dregg-ref worktree as lanes, then sha + file:line to the auditor af7a93e7b8ba729d4 copying the deputy.
   2 worker hard-codes workroom shape (apps_worker.rs:1068-1072) + 3 refused birth never releases the tool-task reserve (:1063/:1188) + 4 confirm overflow sites + 7 push 6566216c8 -> acec1de6f1c53a04c.
   5 serial worker loop + inline 1600 s install vs 120 s CLI -> NEW faerie ab368e520ce312b3c, lane/un-worker-concurrency (threads, narrow lock, async idempotent install).
   6 NOT TAKEN (management-subject routes are the product's ruled shape).
