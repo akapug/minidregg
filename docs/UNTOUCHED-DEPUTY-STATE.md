@@ -1,4 +1,4 @@
-# Untouched-areas deputy: state (rewritten whole; 2026-10-28 morning, later)
+# Untouched-areas deputy: state (rewritten whole; 2026-10-28 morning, quiet)
 
 Inputs: docs/review/2026-10-27-untouched-areas/{LEAN,NATIVE}.md, docs/review/2026-10-27-blind-spots/BLIND-SPOTS.md Sweep 1.
 Each lane: /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>.
@@ -43,6 +43,9 @@ Sources: docs/APP-MARKET-2026-10-27.md "State at hand-off"; docs/ROWS-OWED.md §
 
 ## Decided
 fn out; private-backend stays; Effects/ registry is Phase 3 (EFFECTS.md); dues and six more ride the effect Plan; DreggNet lease cluster parked; Contracts Cuts/Snapshot/Refinements/Futures kept; Pred BoundedQuantifiedView/CoordinationDial kept; twin conflict on un-pb-twins resolved to un-pb-wal 68d9f28e's design (82f3710b).
+
+## Coordinator status
+The coordinator has the whole batch (b3/b5/b7/b8 recipes, app-market-w11 d5b8b7ac6 on main 1b2764235, shared-names e4acc9df0 on main 18f44f8db, tale-welcome, un-effects-rows 20f28ac31, un-pb-helpers 353a6d11d); do not resend it. Ruling: quiet, no faeries running, until the integrator names the candidate carrying 25cfb86bd and 621aded18; the next report carries that run's results.
 
 ## Next three
 1. On the first candidate carrying 25cfb86bd: tell the three market faeries and a4e312352a7091f59 to run; read the validator's batch tables; fix reds; add every green app to FEATURED.
