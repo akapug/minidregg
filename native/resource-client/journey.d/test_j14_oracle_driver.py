@@ -213,13 +213,15 @@ class OperatorTransportTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,'outside retained'):j.prepare_operator_relocation()
 
     def test_relocation_refuses_active_profile_or_changed_store_before_metadata_write(self):
-        for control in ['active','store','later','daemon']:
+        for control in ['active','store','later','daemon','archive-link']:
             with self.subTest(control=control), tempfile.TemporaryDirectory(prefix='j14-operator-',dir='/tmp') as temp:
                 j,request,paths=self.fixture(temp);before=[path.read_bytes() for path in paths]
                 if control=='active':(paths[0].parent/'active-profile.json').write_text('{}')
                 elif control=='store':Path(j.c['hostConfig']).write_text('{"store":"foreign"}')
                 elif control=='later':j.application_unit='already-started.service'
                 elif control=='daemon':j.restart_daemons[0]['argv'][-1]='/foreign.sock'
+                elif control=='archive-link':
+                    foreign=Path(temp)/'foreign';foreign.mkdir(mode=0o700);(Path(temp)/'operator-transport').symlink_to(foreign)
                 with patch.dict(driver.os.environ,{'J14_ORACLE_OPERATOR_RELOCATION':str(request)}):
                     with self.assertRaises(ValueError):j.prepare_operator_relocation()
                 self.assertEqual([path.read_bytes() for path in paths],before)
@@ -241,6 +243,8 @@ class OperatorTransportTests(unittest.TestCase):
                 with patch.object(j,'run') as run:
                     j.restore_public_socket_access(path)
                     self.assertEqual(run.call_args.args,('public-socket-acl',['setfacl','-m',f"u:{j.layout['controllerUid']}:-w-",'--',path]))
+                j.layout['controllerUid']=True
+                with self.assertRaisesRegex(ValueError,'recipient or custody'):j.restore_public_socket_access(path)
                 j.layout['controllerUid']=driver.os.getuid()
                 with self.assertRaisesRegex(ValueError,'recipient or custody'):j.restore_public_socket_access(path)
 

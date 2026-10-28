@@ -337,6 +337,10 @@ class Journey:
         if operator!=1 or public!=1:raise ValueError('operator relocation requires one recorded operator and public proxy')
         self.private_operator_socket()
         archive=self.root/'operator-transport';archive.mkdir(mode=0o700,exist_ok=True)
+        metadata=archive.lstat()
+        if (not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid!=os.getuid()
+                or stat.S_IMODE(metadata.st_mode)!=0o700):
+            raise ValueError('operator transport archive custody differs')
         plan_path=archive/'transition.json'
         if plan_path.exists():
             plan=json.loads(self.private_metadata_bytes(plan_path))
@@ -397,7 +401,7 @@ class Journey:
         metadata=Path(path).lstat()
         uid=self.layout['controllerUid']
         if (not stat.S_ISSOCK(metadata.st_mode) or metadata.st_uid!=os.getuid()
-                or not isinstance(uid,int) or uid==0 or uid==os.getuid()):
+                or type(uid) is not int or uid==0 or uid==os.getuid()):
             raise ValueError('public socket ACL recipient or custody differs')
         self.run('public-socket-acl',['setfacl','-m',f'u:{uid}:-w-','--',path])
         after=Path(path).lstat()
