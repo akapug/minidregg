@@ -132,22 +132,31 @@ def checkCurrent (config : Config) (opened : Opened config)
     else return .error "dispatch reserve context differs from app or issued ticket"
   else return .error "dispatch reserve context differs from admitted original"
 
+/-- The paid-agent tariff over the already-derived human candidate intent. `base` is a parameter,
+never a `let` under the lane binder: the compiler eta-expands a charge-returning definition, and a
+`let` in its body would re-derive the whole human candidate intent on every lane query
+(see `ApplicationDispatchPending.chargeOf`). -/
+def chargeOf {config : Config} {opened : Opened config}
+    {ingress : ApplicationDispatchAgentIngress.Ingress}
+    (base : DataIntent rootBytes) : Charge :=
+  fun dimension => match dimension with
+    | .incidences => base.exactCharge .incidences + 1
+    | .turnBytes => ingress.canonicalBytes.length
+    | .witnessBytes => ingress.canonicalBytes.length
+    | .proofWork => base.exactCharge .proofWork + 1
+    | .memoryTouches => base.exactCharge .memoryTouches + 1
+    | .storageBytes => DeployedCharge.storageCharge opened.ground.view
+        base.writes
+        (ApplicationDispatchAgentIngress.event ingress)
+    | other => base.exactCharge other
+
 def charge {config : Config} {opened : Opened config}
     {ingress : ApplicationDispatchAgentIngress.Ingress}
     {issued : ApplicationDispatchHistoricalCore.IssuedEvidence config}
     {reserved : ReservedEvidence config}
     (checked : Checked config opened ingress issued reserved) : Charge :=
-  let base := (ApplicationDispatchPending.candidateIntent checked.base.checked).exactCharge
-  fun dimension => match dimension with
-    | .incidences => base .incidences + 1
-    | .turnBytes => ingress.canonicalBytes.length
-    | .witnessBytes => ingress.canonicalBytes.length
-    | .proofWork => base .proofWork + 1
-    | .memoryTouches => base .memoryTouches + 1
-    | .storageBytes => DeployedCharge.storageCharge opened.ground.view
-        (ApplicationDispatchPending.candidateIntent checked.base.checked).writes
-        (ApplicationDispatchAgentIngress.event ingress)
-    | other => base other
+  chargeOf (config := config) (opened := opened) (ingress := ingress)
+    (ApplicationDispatchPending.candidateIntent checked.base.checked)
 
 /-- The app mutation is unchanged, but the event is version21, the physical
 purse read guard joins its CAS, and the original reserve receipt is claimed
@@ -172,11 +181,21 @@ def candidateIntent {config : Config} {opened : Opened config}
       writes := base.writes
       readGuards := base.readGuards ++ [purseGuard checked.payer]
       nullifiers := base.nullifiers ++ [claimNullifier reserved]
-      exactCharge := charge checked
+      exactCharge := (Charge.materialize
+        (chargeOf (config := config) (opened := opened) (ingress := ingress) base)).toCharge
       event := ApplicationDispatchAgentIngress.event ingress
       subject := base.subject
       postRootsBound := base.postRootsBound
       guardsReadOnly := guarded }
+
+/-- The held charge is the specified charge. -/
+theorem candidateIntent_exactCharge {config : Config} {opened : Opened config}
+    {ingress : ApplicationDispatchAgentIngress.Ingress}
+    {issued : ApplicationDispatchHistoricalCore.IssuedEvidence config}
+    {reserved : ReservedEvidence config}
+    (checked : Checked config opened ingress issued reserved) :
+    (candidateIntent checked).exactCharge = charge checked :=
+  Charge.materialize_eq _
 
 theorem candidate_event_version {config : Config} {opened : Opened config}
     {ingress : ApplicationDispatchAgentIngress.Ingress}
