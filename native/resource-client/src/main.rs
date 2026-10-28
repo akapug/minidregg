@@ -692,6 +692,24 @@ fn workspace_host_pin(host: &Path) -> Option<String> {
     WORKSPACE_HOST_PIN.get().filter(|(path, _)| path == host).map(|(_, sha)| sha.clone())
 }
 
+/// The op-8 inspect kinds that read the admitted history (`object-audience`,
+/// `object-audience-roster`): the Host session answers these frames from its
+/// walked history, and the storeless codec refuses them
+/// (`Host.Main.sessionInspectKind`). They travel the same `u16(len) ‖ kind ‖
+/// source` framing as codec frames, addressed to the session itself.
+#[cfg(unix)]
+fn session_inspect_kind(operation: u8, payload: &[u8]) -> bool {
+    if operation != mini_sdk::host_operations::INSPECT {
+        return false;
+    }
+    let Some(header) = payload.get(..2).and_then(|bytes| <[u8; 2]>::try_from(bytes).ok()) else {
+        return false;
+    };
+    let width = usize::from(u16::from_le_bytes(header));
+    let kind = payload.get(2..2 + width).and_then(|bytes| std::str::from_utf8(bytes).ok());
+    matches!(kind, Some("object-audience") | Some("object-audience-roster"))
+}
+
 #[cfg(unix)]
 fn session_invoke(
     host: &Path,
@@ -700,7 +718,7 @@ fn session_invoke(
     operation: u8,
     payload: &[u8],
 ) -> Result<Vec<u8>> {
-    if (7..=11).contains(&operation) {
+    if (7..=11).contains(&operation) && !session_inspect_kind(operation, payload) {
         return client_consent::codec_frame(host, config, operation, payload);
     }
     let selected_sha = host_image_sha256(host)?;
@@ -3861,6 +3879,23 @@ mod tests {
             }
         }
         assert!(hidden.is_empty(), "commands the dispatcher runs that USAGE never names: {hidden:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn object_audience_inspects_are_session_frames_not_codec_frames() {
+        let frame = |kind: &str| mini_sdk::local::kind(kind, b"source").unwrap();
+        let inspect = mini_sdk::host_operations::INSPECT;
+        assert!(session_inspect_kind(inspect, &frame("object-audience")));
+        assert!(session_inspect_kind(inspect, &frame("object-audience-roster")));
+        // The kinds the storeless codec still answers stay codec frames.
+        assert!(!session_inspect_kind(inspect, &frame("object-roster-inspect")));
+        assert!(!session_inspect_kind(inspect, &frame("outcome")));
+        // No other opcode is redirected, whatever its payload.
+        assert!(!session_inspect_kind(mini_sdk::host_operations::AUTHOR, &frame("object-audience")));
+        // A truncated kind header is not a session frame.
+        assert!(!session_inspect_kind(inspect, &[1]));
+        assert!(!session_inspect_kind(inspect, &[]));
     }
 
     #[test]
