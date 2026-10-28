@@ -216,6 +216,8 @@ a silent twin), every entry lawful — the floor obligations as proof FIELDS. -/
 structure LawfulRegistry (Ctx Cell : Type) : Type 1 where
   entries : Registry Ctx Cell
   nodup : (entries.map Prod.fst).Nodup
+  /-- Codes are one octet: the payload tag on the wire (`payloadStream`'s tag byte). -/
+  octet : ∀ entry ∈ entries, entry.1 < 256
   lawful : ∀ code e, entries.lookup code = some e → e.Lawful
 
 /-! ## §4. `Dispatches` — a predicate on ANY candidate dispatcher. -/
@@ -416,5 +418,68 @@ def CompletenessTeeth : Prop := ¬ (toyEntry entryBSpec).Lawful
 /-- **Premise inhabitation.**  A lawful registry exists: entry A's. -/
 def CompletenessPremise : Prop :=
   ∃ L : LawfulRegistry Unit ToyStore, L.entries = [(0, toyEntry entryASpec)]
+
+/-! ## §6. One dispatch source by construction, and registry extension.
+
+**One source.**  `noTwin` alone only says a supplied legacy list is disjoint from the
+registry; it cannot see a hand arm that still exists beside a registered code (two equal
+implementations are extensionally indistinguishable).  `composeDispatch R legacy` is the
+only shape the host dispatcher may have: the registry decides every registered code and the
+legacy arm sees ONLY codes the registry lacks, so a hand arm for a registered code is
+unreachable by construction.  The structural half of the rule is not a `Prop`: at each
+migration step the legacy arm's input type loses the migrated constructor (the `Payload`
+inductive drops `content`), so the old arm no longer typechecks, and a build census checks
+that the replaced computation has no remaining production caller (docs/EFFECTS-REVIVAL.md §8).
+
+**Extension.**  Adding entries must not change what any old code means: every byte string
+under an old code is decoded, interpreted and executed exactly as before (`Extends`,
+`ExtensionPreserves`).  Accepting a previously unregistered code is an intentional
+compatibility change; `SafeExtension` makes the policy explicit: a retired code is never
+rebound. -/
+
+/-- The host dispatcher's one permitted shape. -/
+def composeDispatch {Ctx Cell : Type} (R : Registry Ctx Cell)
+    (legacy : Nat → List UInt8 → Ctx → Cell → Except DispatchRefusal Cell) :
+    Nat → List UInt8 → Ctx → Cell → Except DispatchRefusal Cell :=
+  fun code bytes ctx cell =>
+    match R.lookup code with
+    | none => legacy code bytes ctx cell
+    | some _ => dispatch R code bytes ctx cell
+
+/-- `d` has the one permitted shape over `R`. -/
+def OneSource {Ctx Cell : Type} (R : Registry Ctx Cell)
+    (d : Nat → List UInt8 → Ctx → Cell → Except DispatchRefusal Cell) : Prop :=
+  ∃ legacy, d = composeDispatch R legacy
+
+/-- **One-source satisfiable**: the pole's own dispatcher is one-source (legacy refuses). -/
+def OneSourceSatisfiable : Prop := OneSource toyPole (dispatch toyPole)
+
+/-- **One-source teeth**: a dispatcher that reads registered code 0 by another arm (the
+ghost) is not one-source over the pole, whatever its legacy arm. -/
+def OneSourceTeeth : Prop := ¬ OneSource toyPole (dispatch toyGhostPole)
+
+/-- `R'` extends `R`: every old code keeps its handler. -/
+def Extends {Ctx Cell : Type} (R R' : Registry Ctx Cell) : Prop :=
+  ∀ code e, R.lookup code = some e → R'.lookup code = some e
+
+/-- **EXTENSION KEYSTONE.**  Under an extension, every byte string under an old code is
+dispatched exactly as before: decoding, header, selection, interpretation and execution,
+acceptances and refusals alike. -/
+def ExtensionPreserves (Ctx Cell : Type) : Prop :=
+  ∀ R R' : Registry Ctx Cell, Extends R R' → ∀ code, R.lookup code ≠ none →
+    ∀ bytes ctx cell, dispatch R' code bytes ctx cell = dispatch R code bytes ctx cell
+
+/-- The explicit policy for newly accepted codes: an extension that never rebinds a
+retired code. -/
+def SafeExtension {Ctx Cell : Type} (R R' : Registry Ctx Cell) (retired : List Nat) : Prop :=
+  Extends R R' ∧ ∀ code ∈ retired, R'.lookup code = none
+
+/-- **Extension satisfiable**: the pole extends entry A's registry, adding code 1. -/
+def ExtensionSatisfiable : Prop := SafeExtension [(0, toyEntry entryASpec)] toyPole []
+
+/-- **Extension teeth**: rebinding an old code is not an extension (the ghost pole
+rebinds code 0), and a safe extension may not rebind a retired code. -/
+def ExtensionTeeth : Prop :=
+  ¬ Extends toyPole toyGhostPole ∧ ¬ SafeExtension [(0, toyEntry entryASpec)] toyPole [1]
 
 end Minidregg.Effects.Revival

@@ -333,16 +333,51 @@ and `Effects.lean` (and any Revival file the conversion missed) with
 `scripts/lean-modularize.py`, re-check on hbox (`hcheck.sh Effects.Revival.ContentProofs`),
 push, and send the integrator the sha.
 
-**Proof order (remaining).**
-1. The doc-write fixture inhabitant (`Fixtures/NativeDocWriteFixture*`).  It needs a
-   non-empty rotation and serves `ContentAccepted`, `HostAccepted` and the ghost clauses of
-   `ContentTeeth`/`HostTeeth`.
-2. `ContentAgreement contentSpec`: unfold the content arm of `computeTarget`, then
-   `ContentResource.prepareCell_ok_of_run`, `Patch.run_append`, the validate semantics,
-   and `(storeSubstrate L).run s ps = some s' ↔ Patch.ValidFrom s ps ∧ Patch.run s ps = s'`.
-   For the header clauses, case on the kind (the match in `payloadVerb`).
-3. `HostKeystone` lands with the migration commit, not before (§5 step 1).  Coordinate it
-   with the platform lane (L1).
+**Owed, in order** (the astra architecture review's Effects gaps, 2026-10-28, are items 2-6;
+its text: `scratchpad/astra/arch.out.md`, final section; it read `c7d983746`, before the
+Engine/Statements split).
+1. The module-conversion merge above.
+2. **One dispatch source by construction** (review gap 1).  `noTwin` only proves a supplied
+   legacy list disjoint from the registry.  Stated now (Engine §6): `composeDispatch R legacy`
+   is the host dispatcher's only permitted shape (the legacy arm sees only unregistered
+   codes); `OneSource`, `OneSourceSatisfiable`, `OneSourceTeeth` (proofs owed).  The
+   structural half lands with each migration step: the legacy arm's input type loses the
+   migrated constructor (`Payload` drops `content`), so the old arm cannot typecheck, plus a
+   build census (an elaboration command in the style of `PersistedCodecTagCensus`) asserting
+   that the replaced computation has no production caller outside the declaration.
+3. **The bridge to the deployed receiver** (gap 2).  `HostKeystone` is about a wrapper this
+   lane wrote.  Stated now (Statements §8): `PrepareBridge E`, against
+   `ResourceTransaction.prepareTarget` itself, final-post law, policy source and audience
+   freshness included (`ControllerGeneric` names those three): an accepted preparation's post
+   IS the dispatched post; an accepted dispatch is refused by the receiver only by a
+   controller-generic check; every dispatch refusal is the receiver's, by name.  Proof owed;
+   it needs `ContentAgreement` and `ContentComplete`.  At the migration commit
+   `prepareTarget`'s registered branch calls `dispatch`, and this is that commit's gate.
+4. **Registry extension** (gap 3).  Stated now (Engine §6): `Extends`, `ExtensionPreserves`
+   (every byte string under an old code dispatches exactly as before: decode, header,
+   selection, interpretation, execution, refusals), `SafeExtension` (the explicit policy for
+   newly accepted codes: a retired code is never rebound), with satisfiable and teeth;
+   `LawfulRegistry` gains `octet` (every code < 256, the payload tag byte).  Proofs owed.
+   Still to state: prefix consumption (the outer target decoder reads the tag octet, then the
+   handler's `opStream.decodePrefix`; an extension preserves `decodePrefix` on every old
+   code), and a whole-epoch compatibility design: the persisted corpus feeds
+   `StoreEpoch.current`, so moving one handler's identity moves the epoch; local handler
+   upgrades are not promised until that design exists.
+5. **The generic engine is a leaf** (gap 4): done.  `Effects/Revival/Engine.lean` imports
+   only `Theory.Store`, `Theory.TypedAuthorization` and the stream codecs; controllers import
+   it at migration.  `Statements.lean` (the live content instance) is the only file importing
+   the controller.
+6. **Activity refusals have two levels** (review, §6).  A refused transfer is recorded as the
+   await's verdict inside an ACCEPTED turn (`ObjectiveActivity` transfer-refused branch returns
+   `.ok`), not a turn rejection.  The transfer declaration (migration step 2) must keep that:
+   its `sem` returns the turn's `Except` with the verdict inside the emitted descriptor, not
+   `refused`.  State it before step 2.
+7. The doc-write fixture inhabitant (`Fixtures/NativeDocWriteFixture*`), with a non-empty
+   rotation: `ContentAccepted`, `HostAccepted`, the ghost halves of `ContentTeeth`/`HostTeeth`.
+8. `ContentAgreement contentSpec`: unfold `computeTarget`'s content arm, then
+   `ContentResource.prepareCell_ok_of_run`, `Patch.run_append`, validate, `store_run_validFrom`.
+9. `HostKeystone` and `PrepareBridge` land with the migration commit (§5 step 1), with the
+   platform lane (L1).
 
 **Not done, not this lane's:**
 - the migration itself (§5);

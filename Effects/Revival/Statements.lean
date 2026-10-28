@@ -356,4 +356,54 @@ def HostAccepted : Prop :=
   ∃ (op : ContentResource.Command) (ctx : HostCtx) (cell cell' : HostCell),
     hostTargetDispatch 1 (ContentResource.commandStream.encode op) ctx cell = .ok cell'
 
+/-! ## §8. The bridge to the deployed receiver: `prepareTarget`.
+
+`HostKeystone` is about `hostTargetDispatch`, a wrapper this file writes; its contract alone
+is not the receiver's.  `PrepareBridge` ties the content handler to the controller's own
+per-target preparation, `ResourceTransaction.prepareTarget` (slot read, `selectTarget`,
+`computeTarget`, patch validation, the final-post law, the policy source, audience
+freshness): an accepted preparation's post IS the handler's dispatched post; an accepted
+dispatch is refused by the receiver only by one of its controller-generic checks; and every
+dispatch refusal is the receiver's refusal, by name.  At the migration commit,
+`prepareTarget`'s registered branch calls the dispatcher and this bridge is its gate. -/
+
+/-- The host context of a content target. -/
+def hostCtxOf (ctx : LiveCtx) (deployment : DeclaredResourceController.Deployment)
+    (version : Nat) (root : Digest) (observe : Option CapabilityId) (epoch : Option Nat)
+    (roster : Option ObjectAudienceRoster.Roster) : HostCtx :=
+  { ctx with deployment, version, root, observe, epoch, roster }
+
+/-- The receiver's checks after the target computation that are not the effect's: the
+final-post law, the policy source, audience freshness. -/
+def ControllerGeneric : DeclaredResourceController.Reject → Prop
+  | .invalidPost => True
+  | .policyUnavailable => True
+  | .audience _ => True
+  | _ => False
+
+/-- **THE RECEIVER BRIDGE.** -/
+def PrepareBridge (E : ContentSpec) : Prop :=
+  ∀ (deployment : DeclaredResourceController.Deployment)
+    (directory : CellRegistry.Directory Nat DeclaredResourceController.Registry)
+    (ctx : LiveCtx) (command : ContentResource.Command) (version : Nat) (root : Digest)
+    (observe : Option CapabilityId) (epoch : Option Nat)
+    (roster : Option ObjectAudienceRoster.Roster) (before : HostCell),
+    directory.slots ctx.target = .present before →
+    let T := contentTarget ctx version root command observe epoch roster
+    let hctx := hostCtxOf ctx deployment version root observe epoch roster
+    let routed := dispatch [(1, contentHandlerOf E)] 1 (ContentResource.commandStream.encode command)
+      hctx before
+    (∀ prepared, DeclaredResourceController.prepareTarget deployment directory ctx.snapshot
+        ctx.semantics ctx.ambient ctx.command T = .ok prepared →
+      routed = .ok (DeclaredResourceController.packTarget T prepared.candidate.post)) ∧
+    (∀ cell', routed = .ok cell' →
+      (∃ prepared, DeclaredResourceController.prepareTarget deployment directory ctx.snapshot
+          ctx.semantics ctx.ambient ctx.command T = .ok prepared ∧
+        DeclaredResourceController.packTarget T prepared.candidate.post = cell') ∨
+      (∃ r, DeclaredResourceController.prepareTarget deployment directory ctx.snapshot
+          ctx.semantics ctx.ambient ctx.command T = .error r ∧ ControllerGeneric r)) ∧
+    (∀ d, routed = .error d →
+      ∃ r, DeclaredResourceController.prepareTarget deployment directory ctx.snapshot
+          ctx.semantics ctx.ambient ctx.command T = .error r ∧ ofReject 1 r = d)
+
 end Minidregg.Effects.Revival

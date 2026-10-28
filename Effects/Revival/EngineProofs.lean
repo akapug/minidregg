@@ -267,7 +267,7 @@ theorem completenessTeeth : CompletenessTeeth := by
   exact absurd written (by decide)
 
 theorem completenessPremise : CompletenessPremise :=
-  ⟨⟨[(0, toyEntry entryASpec)], by simp,
+  ⟨⟨[(0, toyEntry entryASpec)], by simp, by simp,
     fun code e found => by
       rcases code with _ | code
       · simp [List.lookup] at found; subst found; exact entryA_lawful
