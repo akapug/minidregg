@@ -418,12 +418,16 @@ def thinRefusal (refusal : NativeThinConsent.Refusal) : String :=
       s!"thin consent cannot display this turn: target {target}: {what} unsigned"
   | other => s!"thin consent refused: {repr other}"
 
+/-- A write's display: the post's bytes at every address the opening discloses, and its root only
+when the opening seals nothing (`NativeThinConsent.Display`). -/
 def displayJson (display : NativeThinConsent.Display) : Json :=
   match display.post with
   | none => Json.mkObj [("target", toJson (toString display.target)), ("read", true)]
-  | some (bytes, root) => Json.mkObj [("target", toJson (toString display.target)),
-      ("postRoot", toJson (toString root.value)),
-      ("postBytes", toJson (SourceAgreementJson.encodeHex bytes))]
+  | some (bytes, root) => Json.mkObj ([("target", toJson (toString display.target))] ++
+      (match root with
+        | some root => [("postRoot", toJson (toString root.value))]
+        | none => []) ++
+      [("postBytes", toJson (SourceAgreementJson.encodeHex bytes))])
 
 /-- A delegation's display: the signed parent id, target and child capability
 bytes. The child's lineage is the kernel's copy of that parent, not shown. -/

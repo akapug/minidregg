@@ -12,17 +12,37 @@ capability controllers. The default oracle refuses with the named
 `Reject.noReadOracle`. The command-free `Core` is what quotation reuses.
 A closed registered policy selects source/input/output and resource envelopes;
 actual full writes and guards are checked before an AcceptedInvocation exists. -/
-import Kernel.ObjectiveBendNativeInput
-import Kernel.ObjectiveBendPublishedPackage
-import Compiler.ObjectiveBendPublication
-import Kernel.ObjectiveBendPreparedOutput
-import Compiler.ObjectiveBendCombinedResult
-import Compiler.ObjectiveBendGenericResult
-import Compiler.ObjectiveInvocationClaim
-import Compiler.NativeInvocationProfile
-import Theory.ResourceCost
-import Compiler.Evaluator
-import Kernel.ObjectiveTariff
+module
+
+public import Kernel.ObjectiveBendNativeInput
+public import Kernel.ObjectiveBendPublishedPackage
+public import Compiler.ObjectiveBendPublication
+public import Kernel.ObjectiveBendPreparedOutput
+public import Compiler.ObjectiveBendCombinedResult
+public import Compiler.ObjectiveBendGenericResult
+public import Compiler.ObjectiveInvocationClaim
+public import Compiler.NativeInvocationProfile
+public import Theory.ResourceCost
+public import Compiler.Evaluator
+public import Kernel.ObjectiveTariff
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Kernel.ObjectiveBendNativeAdmission
 open Minidregg.Kernel.ObjectiveTariff
 open Minidregg.Compiler Minidregg.Theory

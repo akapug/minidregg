@@ -39,8 +39,27 @@ and the teeth conclude their claim or that collision (`EffectsCollision`), takin
   re-authoring fixed point (an intent the Store-reading authoring produced re-authors to itself at
   its own coordinates) is a JOURNEY ROW (jpriv2 row 19), not a theorem.
 -/
-import Kernel.NativeThinConsent
-import Kernel.NativeHost
+module
+
+public import Kernel.NativeThinConsent
+public import Kernel.NativeHost
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.NativeThinBirth
 

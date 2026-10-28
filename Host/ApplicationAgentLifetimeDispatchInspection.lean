@@ -4,8 +4,12 @@ mint the fresh-CAS permit; decoding this frame or JSON is not delivery
 authority. Historical session origin and current execution generation are
 shown separately.
 -/
-import Kernel.ApplicationAgentLifetimeDispatchReceiver
-import Lean.Data.Json
+module
+
+public import Kernel.ApplicationAgentLifetimeDispatchReceiver
+public import Lean.Data.Json
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationAgentLifetimeDispatchInspection
 

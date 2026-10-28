@@ -6,14 +6,35 @@ target native state, and verifies an independently pinned operator's edge.
 No old Host starts a public socket here. Staging is distinct from active service
 publication, which requires the infra writer-quiescence/atomic-switch protocol.
 -/
-import Kernel.CarriedSegment
-import Kernel.NativeHostContext
-import Compiler.RetainedArtifactIO
-import Compiler.CredentialSignatureIO
-import Compiler.ReceiptContinuityIO
-import Compiler.DurableHistoryStore
-import Kernel.NativeHistorySelection
-import Lean
+module
+
+public import Kernel.CarriedSegment
+public import Kernel.NativeHostContext
+public import Compiler.RetainedArtifactIO
+public import Compiler.CredentialSignatureIO
+public import Compiler.ReceiptContinuityIO
+public import Compiler.DurableHistoryStore
+public import Kernel.NativeHistorySelection
+public import Lean
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Compiler.CarriedSegmentIO
 

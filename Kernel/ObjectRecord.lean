@@ -49,15 +49,34 @@ value, a boolean 0 or 1, a record's fields nest by `.`, a variant sets
 projects nothing. A field or variant name containing `.`, `@` or `/` does not
 project (no two paths can alias). The request facts sit under `request/`, with
 the names `CanonicalRuntimeProfileCore.requestSlots` uses for the same facts. -/
-import Pred.Core
-import Pred.Leaf
-import Compiler.RefusalReason
-import Kernel.ObjectiveActivityWire
-import Theory.CanonicalResourceKernel
-import Theory.AssertAxioms
-import Kernel.ObjectStateType
-import Compiler.ObjectiveInvocationClaim
-import Compiler.ObjectiveBendLawCodec
+module
+
+public import Pred.Core
+public import Pred.Leaf
+public import Compiler.RefusalReason
+public import Kernel.ObjectiveActivityWire
+public import Theory.CanonicalResourceKernel
+public import Theory.AssertAxioms
+public import Kernel.ObjectStateType
+public import Compiler.ObjectiveInvocationClaim
+public import Compiler.ObjectiveBendLawCodec
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ObjectRecord
 open Minidregg.Compiler

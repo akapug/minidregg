@@ -7,8 +7,27 @@ converters pin old descriptors and are used only after retained-source audit.
 Transform2 begins each retained hiding key's target ratchet at the carry height;
 it does not assert that historical Store2 writes already followed that ratchet.
 -/
-import Compiler.CanonicalCellRegistry
-import Kernel.PayCellUpgrade
+module
+
+public import Compiler.CanonicalCellRegistry
+public import Kernel.PayCellUpgrade
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.LegacyStoreCarry
 

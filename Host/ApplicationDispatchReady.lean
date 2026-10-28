@@ -6,10 +6,14 @@ headers. Readiness reuses the ordinary receiver's exact verified admission,
 including chronological ticket evidence. Neither path receives a physical
 permit, calls a receiver, appends, checkpoints, or invokes the app.
 -/
-import Kernel.ApplicationDispatchAuthoring
-import Kernel.ApplicationDispatchReceiver
-import Kernel.CarriedApplicationDispatchReceiver
-import Lean.Data.Json
+module
+
+public import Kernel.ApplicationDispatchAuthoring
+public import Kernel.ApplicationDispatchReceiver
+public import Kernel.CarriedApplicationDispatchReceiver
+public import Lean.Data.Json
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationDispatchReady
 

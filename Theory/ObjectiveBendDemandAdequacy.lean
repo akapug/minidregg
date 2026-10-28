@@ -4,9 +4,29 @@ normally finished closed computation, through rawRun or runBounded at any
 limits, has an independent source evaluation to the same ground observation.
 This module does not yet inhabit Representation: administrative progress and
 source-to-machine completeness remain separate substantive obligations. -/
-import Theory.ObjectiveBendDemandInvariant
-import Theory.AxiomPin
-import Theory.ObjectiveBendStepCases
+module
+
+public import Theory.ObjectiveBendDemandInvariant
+public import Theory.AxiomPin
+public import Theory.ObjectiveBendStepCases
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Theory.ObjectiveBendDemandAdequacy
 open Minidregg.Theory.ObjectiveBendOpenRecursion
 open Minidregg.Theory.ObjectiveBendDemandMachine

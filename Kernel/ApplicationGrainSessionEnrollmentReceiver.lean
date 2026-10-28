@@ -1,5 +1,9 @@
 /- One event28 CAS and receipt-only recovery, after the verifier's original event22 ticket join. -/
-import Kernel.NativeHost
+module
+
+public import Kernel.NativeHost
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationGrainSessionEnrollmentReceiver
 

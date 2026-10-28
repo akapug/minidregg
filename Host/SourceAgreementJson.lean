@@ -1,14 +1,18 @@
 /- Ordinary author/inspect projection of the existing Host.Json source.
 Supported branches preserve original grammar and canonical codecs. Unsupported
 families fail closed. Native source admission remains in NativeHost. -/
-import Kernel.NativeHost
-import Kernel.NativeHostGenesis
-import Kernel.ProviderRoute
-import Host.BirthRuntimeProfile
-import Host.SourceAgreementLegacyView
-import Host.SourceAgreementContextInspection
-import Host.CapabilityInspection
-import Lean.Data.Json
+module
+
+public import Kernel.NativeHost
+public import Kernel.NativeHostGenesis
+public import Kernel.ProviderRoute
+public import Host.BirthRuntimeProfile
+public import Host.SourceAgreementLegacyView
+public import Host.SourceAgreementContextInspection
+public import Host.CapabilityInspection
+public import Lean.Data.Json
+
+@[expose] public section
 
 namespace Minidregg.Host.SourceAgreementJson
 open Lean Minidregg Minidregg.Pred Minidregg.Theory

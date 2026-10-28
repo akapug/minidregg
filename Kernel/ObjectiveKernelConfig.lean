@@ -9,8 +9,12 @@ pins: `maximum`, `tariff`, `sourceBytes`). An operator who disabled Core4
 (`objective-core4`) disables both with it. Fees are in the deployment's
 creation-tariff asset, paid to its collector.
 -/
-import Kernel.ObjectiveActivity
-import Kernel.ObjectiveBendNativeAdmission
+module
+
+public import Kernel.ObjectiveActivity
+public import Kernel.ObjectiveBendNativeAdmission
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ObjectiveKernelConfig
 

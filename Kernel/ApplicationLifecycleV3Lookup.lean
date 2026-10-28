@@ -3,7 +3,11 @@ Receipt-only lookup for launch-bound event23 BEGIN and event24 claim. The same
 verifier walk that admitted the complete historical image supplies records
 and receipts; these selectors never mint a physical launch reservation.
 -/
-import Kernel.NativeHostReplay
+module
+
+public import Kernel.NativeHostReplay
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleV3Lookup
 

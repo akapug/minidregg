@@ -1,10 +1,14 @@
 /- Exact current-law failed-START recovery endpoint. Native custody observes the
 OS; this source boundary admits the historical claim, current authenticated law,
 signed dead-incarnation evidence and exact durable state transition. -/
-import Host.ApplicationFailedStartRecoveryAuthoring
-import Host.ApplicationFailedStartRecoveryTools
-import Kernel.ApplicationFailedStartRecoveryReceiver
-import Kernel.ApplicationFailedStartRecoveryLookup
+module
+
+public import Host.ApplicationFailedStartRecoveryAuthoring
+public import Host.ApplicationFailedStartRecoveryTools
+public import Kernel.ApplicationFailedStartRecoveryReceiver
+public import Kernel.ApplicationFailedStartRecoveryLookup
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationFailedStartEndpoint
 open Minidregg.Compiler.NativeHostCodec

@@ -57,8 +57,7 @@ impl Acs {
         b.extend((n as u64).to_le_bytes());
         b.extend((f as u64).to_le_bytes());
         let context = hash(&b);
-        let mut vg = g.clone();
-        vg.invocation = Nat::from_be(&context);
+        let vg = g.derived(&context);
         let vaba = Vaba::new(me, n, f, &vg)?;
         Ok(Self {
             me,

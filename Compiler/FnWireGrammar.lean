@@ -31,8 +31,27 @@ exceeds the caller's bound; refused before any decoding work).
 The base64 is `Kernel.Base64` (the tree's one codec, with its own two round trips); the
 frame digest is `Compiler.Blake3.hash`, used here only through its length.
 -/
-import Kernel.Base64
-import Compiler.Blake3
+module
+
+public import Kernel.Base64
+public import Compiler.Blake3
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.FnWire
 

@@ -1,7 +1,11 @@
 /- Read-only custody presentation for a retry-CREATE event72 completion plan. -/
-import Host.ApplicationLifecycleRetryCompletionV4Authoring
-import Host.ApplicationLifecycleRetryBeginV4Inspection
-import Lean.Data.Json
+module
+
+public import Host.ApplicationLifecycleRetryCompletionV4Authoring
+public import Host.ApplicationLifecycleRetryBeginV4Inspection
+public import Lean.Data.Json
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationLifecycleRetryCompletionV4Inspection
 

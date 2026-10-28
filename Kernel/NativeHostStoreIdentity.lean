@@ -11,8 +11,14 @@ root takes a fresh tag by construction, with no nonce for a copy tool to mint; a
 Store moved to a new root is, to the platform, a new Store. The seed alone, the
 identity before this module, named every such pair alike.
 -/
-import Kernel.NativeHostContext
-import Kernel.ApplicationLifecycleResidentProfile
+module
+
+public import Kernel.NativeHostContext
+public import Kernel.ApplicationLifecycleResidentProfile
+meta import Kernel.NativeHostContext
+meta import Kernel.ApplicationLifecycleResidentProfile
+
+@[expose] public section
 
 namespace Minidregg.Kernel.NativeHost
 

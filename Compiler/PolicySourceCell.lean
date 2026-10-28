@@ -12,8 +12,27 @@ identity, version zero, absent predecessor, deployment domain and the actual
 receiving compiler profile. It cannot obtain its profile from the submitted
 record. There is no policy interpreter or mutation operation in this module.
 -/
-import Compiler.PolicyRecordCodec
-import Theory.ResourceBirth
+module
+
+public import Compiler.PolicyRecordCodec
+public import Theory.ResourceBirth
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.PolicySourceCell
 

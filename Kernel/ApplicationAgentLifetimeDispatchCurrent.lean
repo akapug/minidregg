@@ -4,8 +4,27 @@ session origin intact, while checking the currently reserved parent as a
 separate execution witness. The grant and ticket certificates supplied to
 this component still require chronological admission in NativeHostReplay.
 -/
-import Kernel.ApplicationAgentLifetimeDispatchIngress
-import Kernel.ApplicationDispatchAdmission
+module
+
+public import Kernel.ApplicationAgentLifetimeDispatchIngress
+public import Kernel.ApplicationDispatchAdmission
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationAgentLifetimeDispatchCurrent
 

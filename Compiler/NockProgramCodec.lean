@@ -43,9 +43,28 @@ the program's sample and decode its writes (NOCK §2.1, §2.3).
 * **Immutability.** The single address is ROM: after birth no patch changes it
   (`program_immutable`), and the registry's final-post law pins its bytes.
 -/
-import Compiler.PolicyRecordCodec
-import Theory.ResourceBirth
-import Theory.Noun
+module
+
+public import Compiler.PolicyRecordCodec
+public import Theory.ResourceBirth
+public import Theory.Noun
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.NockProgramCodec
 

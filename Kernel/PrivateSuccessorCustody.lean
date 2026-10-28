@@ -4,8 +4,27 @@ This is an executable journal model, not MPC, disk durability or a sharing proof
 The exact native IntentRecord is retained. Holder/private-output qualification
 and physical monotonic persistence are explicit obligations at the receiving seam.
 -/
-import Kernel.DurableReceiver
-import Theory.AssertAxioms
+module
+
+public import Kernel.DurableReceiver
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PrivateSuccessorCustody
 

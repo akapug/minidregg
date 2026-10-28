@@ -20,7 +20,26 @@ cell of this kind (`UserShape` is false), no birth may choose an id at or above
 kernel refuses a funding or payee account in that space, so no one can own,
 squat or pre-fund a seat account: the offerer never names it.
 -/
-import Kernel.ProtectedCell
+module
+
+public import Kernel.ProtectedCell
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.SeatCell
 

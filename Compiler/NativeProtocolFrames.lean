@@ -3,7 +3,11 @@ runtime identity. This module deliberately imports no controller or profile:
 wire epochs can be committed without a codec → profile → codec import cycle.
 Existing namespaces are retained so every encoder/decoder uses these same
 constants; retired frame fixtures remain next to their refusal proofs. -/
-import Init
+module
+
+public import Init
+
+@[expose] public section
 
 namespace Minidregg.Compiler.NativeHostCodec
 

@@ -1,3 +1,7 @@
+module
+
+@[expose] public section
+
 /- SHA-256 (FIPS 180-4) over bytes, for byte FINGERPRINTS: the captured source
 fingerprints of the Objective front end and the front-end identity. Not an
 identity hash of the protocol (those are cSHAKE256, `Sp800185Cshake256`). The

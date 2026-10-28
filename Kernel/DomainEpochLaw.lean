@@ -17,8 +17,27 @@ the same names it had when both were one file (CH-EPOCH):
 The split keeps Mathlib out of the runtime library (`channel-lib/build.sh` links the import closure of
 `Kernel.DomainEpochExport`, which no longer reaches this module). Pins: `Kernel.DomainEpochAudit`.
 -/
-import Kernel.DomainEpoch
-import Compiler.StreamCell
+module
+
+public import Kernel.DomainEpoch
+public import Compiler.StreamCell
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.DomainEpoch
 

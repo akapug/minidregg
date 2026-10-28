@@ -16,12 +16,31 @@ installs at a service resource is the pinned route law over some base, so
 (`ProviderRoute.installed_route_law`) every mutation that law admits satisfies
 the pinned schedule's `transition`. `other_schedule_refused` is the refusal pole.
 -/
-import Kernel.ProviderRoute
-import Kernel.PolicyInstallController
-import Compiler.PolicyRecordCodec
-import Compiler.GrainResourceBirthHostCodec
-import Compiler.CanonicalCellRegistry
-import Compiler.NativeObservationCodec
+module
+
+public import Kernel.ProviderRoute
+public import Kernel.PolicyInstallController
+public import Compiler.PolicyRecordCodec
+public import Compiler.GrainResourceBirthHostCodec
+public import Compiler.CanonicalCellRegistry
+public import Compiler.NativeObservationCodec
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ProviderRouteConsent
 

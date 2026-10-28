@@ -4,7 +4,11 @@ current-image admission. The lower birth/app checks cannot supply the original
 event22 ticket by themselves. Receipt-only lookup selects only the exact
 event27 admitted by the same verified walk, including its initialized cell root.
 -/
-import Kernel.NativeHost
+module
+
+public import Kernel.NativeHost
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationAgentLifetimeGrantReceiver
 

@@ -5,9 +5,13 @@ event25 from the same current Verified history. The caller must compare the
 echoed bytes to its retained op66 plan and fresh op26 callback; this function
 does not mint a launch permit or attest systemd itself.
 -/
-import Host.ApplicationLifecycleLaunchBeginInspection
-import Host.ApplicationLifecycleClaimV3Inspection
-import Kernel.ApplicationLifecycleV3Lookup
+module
+
+public import Host.ApplicationLifecycleLaunchBeginInspection
+public import Host.ApplicationLifecycleClaimV3Inspection
+public import Kernel.ApplicationLifecycleV3Lookup
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationLifecycleStopClaimInspection
 

@@ -110,7 +110,26 @@ which then takes no pipelined send (`notPipelinable`) and is retired by its deli
 **The turn** (`invoke`) commits every written object's state cell, its mail and
 the fee and escrow postings, as ONE intent, guarded on every object record,
 package cell and state cell it read, so a concurrent change refuses it. -/
-import Kernel.ObjectiveActivity
+module
+
+public import Kernel.ObjectiveActivity
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ObjectiveCall
 open Minidregg.Theory Minidregg.Compiler

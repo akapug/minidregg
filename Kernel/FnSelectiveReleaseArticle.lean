@@ -6,8 +6,12 @@ as owner authority. Its body carries only the selected packet, never a Mini
 genesis or accepted-history prefix. Native release admission separately
 checks the owner signature, current recipient law, capability and nonce.
 -/
-import Kernel.FnSelectiveReleaseSignature
-import Kernel.FnPortableSource
+module
+
+public import Kernel.FnSelectiveReleaseSignature
+public import Kernel.FnPortableSource
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnSelectiveReleaseArticle
 

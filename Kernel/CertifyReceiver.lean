@@ -25,9 +25,30 @@ tail.
 The patch is one guarded write of the system value from the exact loaded value;
 the record writes only the system cell (`intent_writes_system_cell`).
 -/
-import Compiler.DurableReceiverIO
-import Kernel.CapabilityRevocationController
-import Kernel.SystemCellDomain
+module
+
+public import Compiler.DurableReceiverIO
+public import Kernel.CapabilityRevocationController
+public import Kernel.SystemCellDomain
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.CertifyReceiver
 

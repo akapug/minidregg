@@ -5,8 +5,12 @@ The sample itself is `Kernel.NockProgramCell.Sample`. The reads (`checkProgram`,
 `sampleFor`) are what host ops 131 and 133 serve. The WRITE is the ordinary resource
 birth (`storage: "nock"`).
 -/
-import Kernel.NockProgramCell.Sample
-import Compiler.CanonicalCellRegistry
+module
+
+public import Kernel.NockProgramCell.Sample
+public import Compiler.CanonicalCellRegistry
+
+@[expose] public section
 
 namespace Minidregg.Kernel.NockProgramCell
 

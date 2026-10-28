@@ -33,8 +33,27 @@ The claimed step count is the runner's fuel AND the fee it signs for: the kernel
 never charges a count the runner did not sign, and the count is the evaluator's
 (`steps_equal_oracle`), independent of the claim's fuel.
 -/
-import Compiler.Evaluator
-import Kernel.NockProgramCell
+module
+
+public import Compiler.Evaluator
+public import Kernel.NockProgramCell
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.Run
 open Minidregg.Theory

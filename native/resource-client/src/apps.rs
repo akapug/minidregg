@@ -287,6 +287,17 @@ pub(crate) const FEATURED: &[(&str, &str)] = &[
     ("7qvcjh7gk0rzdx1s3c8gufd288sesf6vvdt297756xcv4q8xxvhh", "the deck is slides.md: PUT /slides.md, GET it back; published at <grain>-www"),
     ("m86q05rdvj14yvn78ghaxynqz7u2svw6rnttptxx49g1785cdv1h", "REST /api (boards, lists, cards) and DDP"),
     ("61gh7gnns305cknp20v2ekvdex48g4d3rv6wghuzk6huzx5qmp7h", "hg over HTTP: POST /?cmd=unbundle pushes a changegroup; GET /raw-file/<rev>/<path> and /rev/<node> read it back"),
+    ("1gda5n8p8zsc0r9pcana2yjgtvsq169068k4ve8mk68z4x9fvzuh", "drawings over socket.io: draw:progress and draw:end add a stroke to a room; a subscriber's project:load reads it back"),
+    ("w544a46cjwtje73rfearjvszwa3nhjtxjanu5s83qkdutx6k0nz0", "sticky notes over socket.io: joinRoom then createCard; initializeMe answers initCards from the board's redis"),
+    ("1d3umpx9ug1jv5stepvqfrucx3yr8n2a4gd7y5cud2vsq6mmj8uh", "the spec is one file: PUT /editor/spec, GET it back"),
+    ("nn7axgy3y8kvd0m1mtk3cwca34t916p5d7m4j1j2e874nuz3t8y0", "files over HTTP: PUT /file/<name> uploads, GET /file/ lists, GET /file/<name> reads"),
+    ("5uh349d0kky2zp5whrh2znahn27gwha876xze3864n0fu9e5220h", "POST /upload a ZIM (multipart file + contentRange), then GET /kiwix/A/<article> reads it"),
+    ("wfg1r0qra2ewyvns05r0rddqttt57qxurz3nz5z95rjnm63et7e0", "a websocket gives the session token; POST /upload an audio file with it as the token cookie; the track appears in the library subscription and GET /library/<file>"),
+    ("70xjeuj6t85v3s9a3up583q97wu044mnt8aekf3pqs41e3ct2v70", "POST /upload a video (multipart video_file, video_title); GET / redirects to /v/<id>, which shows it"),
+    ("u0yh8xndrzewsfx7z0jemv9scvyxtkwr2qzepgg93hm6r77m6580", "POST /api.php saves the best score and the board; GET /api.php?action=getbestscore|getgamestate reads them back"),
+    ("r8y55acmnwm0r8a2k3jp8m74pdf2xg7v2v5pxc07mcsqpq0ag3zh", "JSON: POST /api/new-game makes a puzzle, PUT /api/game/<id> saves the board, GET /api/game/<id> reads it"),
+    ("zxent02jw0z9ckkagz1uscdxesaf1f1wgzdunx2wrcj0jt9uf9rh", "POST /api.php saves the high score; GET /api.php?action=getbestscore and /highscores.php read it"),
+    ("yp9xt15y8s0rsuntnhgnr510qpcvm2tatd9mn1gzwr2au8h2n4p0", "direct capnp, no bridge: POST /chats appends a line, PUT /topic sets the topic; GET /chats and /topic read them"),
 ];
 
 pub(crate) fn featured(app_id: &str) -> Option<(usize, &'static str)> {
@@ -1534,7 +1545,7 @@ mod tests {
         assert_eq!(all.len(), entries.len());
         let names: Vec<&str> = all.iter().take(FEATURED.len()).map(|e| e.name.as_str()).collect();
         assert_eq!(names[0], "Etherpad");
-        assert_eq!(names.len(), 14, "every featured appId is in the recorded index: {names:?}");
+        assert_eq!(names.len(), 25, "every featured appId is in the recorded index: {names:?}");
         assert!(all[FEATURED.len()..].iter().all(|e| featured(&e.app_id).is_none()));
         let pad = entry_json(all[0], &Verdict { state: "unverified".into(), reason: None, raw_bytes: None, signed_app_id: None, running: 0 });
         assert_eq!(pad["featured"]["rank"], 1);

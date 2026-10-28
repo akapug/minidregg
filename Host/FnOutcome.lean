@@ -29,9 +29,31 @@ acknowledgement is durable-accepted exactly when the exit is 0 AND the frame is 
 consumer reply (`ackStatus_durableAccepted_iff`), not when a text line spells it. Mini reads no
 fn answer text line; the former `consumer STATUS[ DETAIL]` splitter (`answerLine`) is deleted.
 -/
-import Theory.AxiomPin
-import Theory.AssertCompiled
-import Compiler.FnWireConsumer
+module
+
+public import Theory.AxiomPin
+public import Theory.AssertCompiled
+public import Compiler.FnWireConsumer
+meta import Theory.AxiomPin
+meta import Theory.AssertCompiled
+meta import Compiler.FnWireConsumer
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Host.FnOutcome
 

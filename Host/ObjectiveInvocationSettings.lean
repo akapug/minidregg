@@ -3,10 +3,30 @@ that opens a Store under it: the native Host (`Host.Main`) and the local
 consent provider (`Host.ClientConsentCore`). The pin enters the runtime
 semantics (`NativeHost.Config.invocationBindings`), so a provider that parsed a
 different policy, or none, would verify against other semantics. -/
-import Kernel.ObjectiveBendNativeAdmission
-import Kernel.NativeHost
-import Host.SourceAgreementJson
-import Lean.Data.Json
+module
+
+public import Kernel.ObjectiveBendNativeAdmission
+public import Kernel.NativeHost
+public import Host.SourceAgreementJson
+public import Lean.Data.Json
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Host
 open Lean
 

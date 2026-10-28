@@ -6,8 +6,27 @@ authenticate a provider invoice. The native receiver still decides whether an
 authored settlement is admitted, under the provider purse's route law
 (`Kernel.ProviderRoute`), which charges by the route recorded at reserve.
 -/
-import Kernel.AgentGrain
-import Theory.AssertAxioms
+module
+
+public import Kernel.AgentGrain
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ProviderMetering
 

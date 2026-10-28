@@ -10,7 +10,27 @@ address map `F`, with heap headroom `gap`.
 * `ForcesBy.reenter`: a chain relates heaps: any valid control and stack of the lazy heap,
   renamed, are related alike (what extraction needs: it re-enters cells with an empty stack).
 * `agree_inverse`: a covering exact agreement between equal-size heaps inverts. -/
-import Theory.ObjectiveBendDemandForcingSwitch
+module
+
+public import Theory.ObjectiveBendDemandForcingSwitch
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Theory.ObjectiveBendDemandForcing
 open Minidregg.Theory.ObjectiveBendOpenRecursion
 open Minidregg.Theory.ObjectiveBendDemandMachine

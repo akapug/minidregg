@@ -29,48 +29,147 @@ import os, re, subprocess, sys, collections
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from lean_imports import header_layout, file_imports
 
-EVAL = re.compile(r"native_decide|^\s*#eval\b|^\s*#guard\s(?!_msgs)|^\s*#guard_expr\b|decide\s*\+\s*native|^\s*#reduce\b", re.M)
+# A file runs code at elaboration when it evaluates (`native_decide`, `#eval`, `#guard` term) or defines an
+# elaborator/macro whose body calls imported definitions: each import then needs a `meta import`.
+EVAL = re.compile(r"native_decide|^\s*#eval\b|^\s*#guard\s(?!_msgs)|^\s*#guard_expr\b|decide\s*\+\s*native|^\s*#reduce\b"
+                  r"|^\s*(?:@\[[^\]]*\]\s*)?(?:elab|elab_rules|macro|macro_rules)\b", re.M)
 
 
-# Core definitions that kernel reduction (`decide`, `decide +kernel`) in this tree unfolds and that
-# Lean's own modules do not expose; a module reaching them sees an opaque constant and `decide` gets
-# stuck (measured: `toString`/`s!` of Nat and List, `Array.map`, `Array.zip`). `import all` of the core
-# module restores the bodies for that one file. The toolchain never changes under a build, so the
-# private-olean dependency costs no rebuild. Grow this list when a converted file's `decide` sticks.
+# Header lines a converted file needs beyond its own imports (all statement-preserving; the home
+# modules never change under a build, so `import all` of them costs no rebuild):
+#  * `import all`: bodies the home module does not expose to a module importer. Kernel reduction
+#    (`decide`) through core: `toString`/`s!` of Nat and List (Nat.toDigits), Array.map, Array.zip, the
+#    UTF-8 encoder. Mathlib's derive handlers, whose generated instances `cases` on the handler's own
+#    private types (`deriving Encodable`: Mathlib.Deriving.Encodable.S).
+#  * `meta import`: a module whose `initialize` registers an attribute or extension; under the module
+#    system its initializers run in an importer's elaboration only through a meta import.
+#  * `public import`: a module a non-module file reached through a PRIVATE import of core or Mathlib
+#    (non-public imports do not propagate under the module system).
+# RULES fire on a pattern in the file's body; PER_FILE names what no pattern can see, as printed by
+# scripts/module-hidden-bodies.sh FILE on a box (never by guessing). An `import all` of one of OUR modules
+# (derived Repr/DecidableEq bodies are not exposed) re-links that one file to the module's private olean.
 CORE_REDUCE = ["Init.Data.Repr", "Init.Data.ToString.Basic", "Init.Data.ToString.Extra", "Init.Data.Array.Basic",
-               "Init.Data.ByteArray.Basic", "Init.Data.String.Decode", "Init.Data.String.Defs"]
-DECIDE = re.compile(r"\bdecide\b")
-CORE_NOTE = "-- `decide` reduces these core definitions, which core does not expose (module system).\n"
+               "Init.Data.ByteArray.Basic", "Init.Data.String.Decode", "Init.Data.String.Defs",
+               "Init.Control.Except", "Init.Data.List.Basic", "Init.Data.Nat.Bitwise.Basic",
+               "Init.Data.String.Bootstrap", "Init.Data.Format.Basic", "Init.Data.List.Scan.Basic"]
+RULES = [
+    (re.compile(r"\bdecide\b|\brfl\b"), ["import all " + m for m in CORE_REDUCE]),
+    # Mathlib's Encodable handler cases on its private `S`; Theory.DeriveEncodable is that handler with
+    # `S` public (same encoding), registered after Mathlib's so it is the one that runs
+    (re.compile(r"deriving\b[^\n]*\bEncodable\b"), ["public import Theory.DeriveEncodable"]),
+    (re.compile(r"deriving\b[^\n]*\bCountable\b"), ["import all Mathlib.Tactic.DeriveCountable"]),
+    (re.compile(r"deriving\b[^\n]*\bFintype\b"), ["import all Mathlib.Tactic.DeriveFintype"]),
+    (re.compile(r"persisted_codec_tag|make_persisted_codec_manifest"), ["meta import Compiler.PersistedCodecTagRegistry"]),
+    # `rfl` through IO/EIO binds unfolds EST.bind/EST.pure
+    (re.compile(r"\A(?=[\s\S]*\brfl\b)(?=[\s\S]*\b(?:IO|EIO|BaseIO)\b)"), ["import all Init.System.ST", "import all Init.System.IO"]),
+]
+# lines an earlier rule set wrote and the current one replaces
+RETIRED = {"import all Mathlib.Tactic.DeriveEncodable"}
+# Files that stay non-modules, with the reason. A non-module sees every imported body; a module may not
+# import one, so every importer of a kept file is kept too (the list is closed under importers).
+#  * the persisted-codec census fingerprints codec STRUCTURE by walking definition bodies across the tree;
+#    the fingerprints are hashed into the StoreEpoch, so it must see exactly the bodies it saw before
+#    (from a module, unexposed bodies are hidden and every fingerprint moves): it and its importers stay.
+KEEP = {
+    "Compiler/PersistedCodecTagCensus.lean", "Kernel/ConsentAnchor.lean", "Kernel/NativeClientConsent.lean",
+    "Kernel/NativeSpecializedConsent.lean", "Host/ClientConsentCore.lean", "Host/ClientConsentSession.lean",
+    "Host/MemberPlanConsent.lean", "Host/ObjectiveConsent.lean",
+}
+PER_FILE = {
+    "Compiler/Mersenne127.lean": ["import all Mathlib.NumberTheory.LucasLehmer"],
+    "Kernel/GenericSimplex.lean": ["import all Init.Util"],
+    "Host/CapacityJson.lean": ["import all Lean.Data.Json.Basic", "import all Init.Data.Nat.Bitwise.Basic",
+                               "import all Init.Data.String.Search", "import all Init.Prelude",
+                               "import Std.Data.TreeMap.Raw.Lemmas", "import Std.Data.String.ToNat"],
+    "Kernel/WorldRoot.lean": ["import all Init.Data.Format.Basic", "import all Init.Data.Nat.Bitwise.Basic",
+                              "import all Init.Data.String.Bootstrap", "import all Mathlib.Data.List.Sort"],
+    "Kernel/Seat.lean": ["import all Init.Data.Format.Basic", "import all Init.Data.Nat.Bitwise.Basic",
+                         "import all Init.Data.String.Bootstrap", "import all Mathlib.Data.List.Sort",
+                         "import all Kernel.Invitation", "import all Theory.TypedAuthorization"],
+    "Compiler/ObjectiveBendPublication.lean": ["import all Init.Data.String.Defs"],
+    "Kernel/LawView.lean": ["import Std.Data.String.ToNat"],
+    # `String.startsWith` reduces through the whole string-slice pattern family
+    "Host/FnArchivePublisher.lean": ["import all Init.Data.String.*", "import all Init.Prelude"],
+    "Host/Json.lean": ["import all Init.Data.Int.Repr", "import all Init.Data.List.Sort.Basic",
+                       "import all Init.Data.Range.Basic", "import all Init.Data.String.Legacy",
+                       "import all Init.Data.String.Pattern.String", "import all Init.Data.String.Search",
+                       "import all Init.Data.String.Slice", "import all Init.Data.String.TakeDrop",
+                       "import all Init.Prelude", "import all Lean.Data.Json.Basic",
+                       "import all Lean.Data.Json.FromToJson.Basic", "import all Lean.Data.Json.Parser",
+                       "import all Lean.Data.Json.Printer", "import all Std.Data.DHashMap.Basic"],
+    "Kernel/ObjectiveActivityReceiver.lean": ["import all Init.System.ST", "import all Init.System.IO"],
+    "Compiler/ObjectiveBendTermWire.lean": ["import all Lean.Data.Json.Basic", "import all Lean.Data.Json.FromToJson.Basic",
+                                            "public import Std.Data.TreeMap.Raw.Lemmas"],
+}
+CORE_NOTE = "-- Bodies this file reduces or derives through, not exposed by their modules (module system).\n"
 SECTION = "@[expose] public section\n"
-CORE_BLOCK = re.compile(r"\n-- `decide` reduces these core definitions[^\n]*\n(?:import all [^\n]*\n)+")
+CORE_BLOCK = re.compile(r"\n-- (?:`decide` reduces these core definitions|Bodies this file reduces)[^\n]*\n(?:(?:import all|meta import|public import|import) [^\n]*\n)+")
 
 
-def convert(text):
+_CORE_FAMILY = {}
+
+
+def expand(line):
+    """`import all Init.Data.String.*`: every toolchain module under that prefix (from `lean --print-prefix`)."""
+    if not line.endswith(".*"):
+        return [line]
+    head, prefix = line[:-2].rsplit(" ", 1)
+    if prefix not in _CORE_FAMILY:
+        root = subprocess.check_output(["lean", "--print-prefix"], text=True).strip()
+        src = os.path.join(root, "src", "lean", *prefix.split("."))
+        mods = []
+        for d, _, fs in os.walk(src):
+            for f in fs:
+                if f.endswith(".lean"):
+                    rel = os.path.relpath(os.path.join(d, f), os.path.join(root, "src", "lean"))
+                    mods.append(rel[:-5].replace(os.sep, "."))
+        _CORE_FAMILY[prefix] = sorted(mods)
+    return [f"{head} {m}" for m in _CORE_FAMILY[prefix]]
+
+
+def wanted(body, path):
+    lines = [l for rx, ls in RULES if rx.search(body) for l in ls] + PER_FILE.get(path, [])
+    return list(dict.fromkeys(x for l in lines for x in expand(l)))
+
+
+def convert(text, path=""):
     """The module form of text, or None when text is already in it."""
     first, imports, end, keywords = header_layout(text)
     if "prelude" in keywords:
         raise SystemExit("prelude files are not converted")
-    have_all = {m for (s, e, mods, m) in imports if text[s:e].split()[-2:-1] == ["all"]}
-    want_all = [m for m in CORE_REDUCE if m not in have_all] if DECIDE.search(text[end:]) else []
+    body = text[end:]
+    m = CORE_BLOCK.search(text)
+    have = [l for l in m.group(0).strip().split("\n")[1:]] if m else []
+    have = [l for l in have if l not in RETIRED]
+    me = path.removesuffix(".lean").replace("/", ".")
+    lines = [l for l in dict.fromkeys(have + wanted(body, path)) if l.split()[-1] != me]
+    block = (CORE_NOTE + "".join(l + "\n" for l in lines) + "\n") if lines else ""
     if "module" in keywords:
-        if not want_all:
-            return None
-        # one core block per file: drop the old one, write the union once
-        core = [m for m in CORE_REDUCE if m in have_all or m in want_all]
-        text = CORE_BLOCK.sub("\n", text)
-        i = text.find("\n" + SECTION)
+        if EVAL.search(body):
+            # every public import of a file that runs code at elaboration also needs its meta import
+            pub = [mo for (s, e, _, mo) in imports if text[s:e].split()[0] == "public" and text[s:e].split()[1] != "meta"]
+            have_meta = {mo for (s, e, _, mo) in imports if "meta" in text[s:e].split()[:2]}
+            add = [mo for mo in pub if mo not in have_meta]
+            if add:
+                last = max(e for (s, e, _, mo) in imports if text[s:e].split()[0] == "public")
+                text = text[:last] + "".join(f"\nmeta import {mo}" for mo in add) + text[last:]
+        stripped = CORE_BLOCK.sub("\n", text)
+        stripped = re.sub(r"\n\n+(?=" + re.escape(SECTION) + ")", "\n\n", stripped)
+        i = stripped.find("\n" + SECTION)
         if i < 0:
-            raise SystemExit("a module without `@[expose] public section` after its header: convert it by hand")
-        return text[:i + 1] + CORE_NOTE + "".join(f"import all {m}\n" for m in core) + text[i + 1:]
-    mods = [m for (_, _, _, m) in imports]
-    evals = bool(EVAL.search(text[end:]))
+            raise SystemExit(f"{path}: a module without `@[expose] public section` after its header: convert it by hand")
+        new = stripped[:i + 1] + block + stripped[i + 1:]
+        return None if new == text else new
+    mods = [mo for (_, _, _, mo) in imports]
+    evals = bool(EVAL.search(body))
     head = "module\n\n"
-    head += "".join(f"public import {m}\n" for m in mods)
+    head += "".join(f"public import {mo}\n" for mo in mods)
     if evals:
-        head += "".join(f"meta import {m}\n" for m in mods)
-    if want_all:
-        head += "\n" + CORE_NOTE + "".join(f"import all {m}\n" for m in want_all)
-    head += "\n" + SECTION
+        head += "".join(f"meta import {mo}\n" for mo in mods)
+    head += ("\n" + block if block else "\n") + SECTION
+    # with no imports, the file may open with a `/-!` module doc, which is a command: `module` goes first
+    if not mods:
+        return head + "\n" + text.lstrip("\n")
     return text[:first] + head + "\n" + text[end:].lstrip("\n")
 
 
@@ -111,11 +210,17 @@ def main(argv):
     files = argv[1:] if check else argv
     bad = 0
     for f in files:
+        if f in KEEP:
+            continue
         text = open(f, encoding="utf-8").read()
-        new = convert(text)
+        new = convert(text, f)
+        while new is not None and (again := convert(new, f)) is not None:
+            new = again
         if new is None:
             continue
         if check:
+            if "module" in header_layout(text)[3]:
+                continue
             print(f"not a module: {f}")
             bad = 1
         else:

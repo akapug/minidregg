@@ -10,8 +10,12 @@ that forces it, and every later load in this process reuses it. Holding changes 
 (`ObjectiveActivity.LoadMemo.replay_eq`): a pin whose cell holds other bytes than the held ones
 is not answered from the memo but replayed.
 -/
-import Kernel.NativeHost
-import Std.Data.HashSet
+module
+
+public import Kernel.NativeHost
+public import Std.Data.HashSet
+
+@[expose] public section
 
 namespace Minidregg.Kernel.NativeHostHeld
 

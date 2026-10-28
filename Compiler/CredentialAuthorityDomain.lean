@@ -32,9 +32,28 @@ Retired: `LOOM/AUTH/DOMAIN` catalogue cells, `LOOM/AUTH/POLICYPAGE` shards and
 (`CredentialAuthorityCell.retired_page_frame_refused`,
 `retired_state_frame_refused`, and `retired_catalogue_frame_refused` below).
 -/
-import Compiler.CredentialAuthorityCell
-import Theory.CredentialAuthorityEffects
-import Theory.PolicyInstall
+module
+
+public import Compiler.CredentialAuthorityCell
+public import Theory.CredentialAuthorityEffects
+public import Theory.PolicyInstall
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.CredentialAuthorityDomain
 

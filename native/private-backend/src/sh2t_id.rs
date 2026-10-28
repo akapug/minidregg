@@ -23,9 +23,7 @@ fn child(g: &Generation, context: [u8; 32], i: usize) -> Generation {
     let mut b = b"DREGG.SH2T.ID.CHILD.V1".to_vec();
     b.extend(context);
     b.extend((i as u64).to_le_bytes());
-    let mut h = g.clone();
-    h.invocation = Nat::from_be(&hash(&b));
-    h
+    g.derived(&hash(&b))
 }
 fn point_hash(
     context: [u8; 32],
@@ -1441,5 +1439,27 @@ mod pin_helpers {
         assert_eq!(Entropy::derive(RANDOM, seed, ctx, 0, 0), [0xaf, 0x7d, 0x41, 0xad, 0x74, 0x96, 0x13, 0x33, 0x4e, 0x4f, 0x57, 0x81, 0x47, 0x96, 0x28, 0xfc, 0xbe, 0x06, 0x8a, 0x6f, 0x04, 0xe9, 0x1d, 0xd5, 0xf7, 0x96, 0xe9, 0x4d, 0x2a, 0x5a, 0xe3, 0x8f]);
         assert_eq!(Entropy::derive(RANDOM, seed, ctx, 1, 0), [0x7c, 0xb1, 0xbf, 0xbb, 0xf2, 0x22, 0x47, 0x4d, 0x7e, 0x23, 0x86, 0x19, 0x80, 0xaa, 0xaa, 0xd3, 0x09, 0x68, 0xe0, 0x2c, 0xad, 0x8f, 0x3f, 0x39, 0x1a, 0x03, 0x57, 0xaa, 0xf2, 0x63, 0x6f, 0x4a]);
         assert_eq!(Entropy::derive(RANDOM, seed, ctx, 3, 7), [0x17, 0x93, 0xd2, 0xc3, 0x5b, 0x01, 0xbd, 0xa6, 0x09, 0xa7, 0x8d, 0x0c, 0x6a, 0x71, 0xc0, 0x04, 0x60, 0x5d, 0x3c, 0xf3, 0xc7, 0xbb, 0xce, 0x5b, 0x45, 0x6c, 0xdd, 0xcb, 0x69, 0x33, 0x1e, 0x7c]);
+    }
+}
+
+#[cfg(test)]
+mod pin_child {
+    use super::*;
+    #[test]
+    fn pin_sh2t_child_generation() {
+        let g = Generation {
+            invocation: Nat::new(19),
+            command: vec![3, 4],
+            attempt: Nat::new(2),
+            generation: Nat::new(1),
+            configuration: Nat::new(5),
+        };
+        let ctx: [u8; 32] = std::array::from_fn(|i| 100 + i as u8);
+        let c = child(&g, ctx, 0);
+        assert_eq!(c.invocation.digits(), &[97, 22, 63, 60, 51, 147, 14, 52, 151, 34, 159, 214, 158, 125, 79, 63, 186, 64, 129, 6, 124, 234, 117, 81, 147, 33, 178, 200, 30, 76, 154, 194][..]);
+        assert_eq!((&c.command, &c.attempt, &c.generation, &c.configuration), (&g.command, &g.attempt, &g.generation, &g.configuration));
+        let c = child(&g, ctx, 9);
+        assert_eq!(c.invocation.digits(), &[142, 85, 97, 191, 224, 202, 137, 31, 0, 156, 220, 0, 163, 25, 97, 35, 77, 89, 92, 205, 104, 244, 79, 162, 235, 235, 144, 246, 153, 101, 242, 196][..]);
+        assert_eq!((&c.command, &c.attempt, &c.generation, &c.configuration), (&g.command, &g.attempt, &g.generation, &g.configuration));
     }
 }

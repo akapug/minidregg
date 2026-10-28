@@ -1,7 +1,26 @@
-import Kernel.World
-import Kernel.DeployedBridge
-import Compiler.StoreCodec
-import Compiler.FiniteDependentMapCachedOrdering
+module
+
+public import Kernel.World
+public import Kernel.DeployedBridge
+public import Compiler.StoreCodec
+public import Compiler.FiniteDependentMapCachedOrdering
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 /-!
 # A World's maps, re-represented without changing a value

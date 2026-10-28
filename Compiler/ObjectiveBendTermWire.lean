@@ -10,9 +10,32 @@ packet carries is the decoding of its `term` field. Together they let
 
 The JSON object lookups go through `Std.TreeMap.Raw.getElem?_ofList_of_mem`: every
 rendered object has literally distinct keys. -/
-import Compiler.ObjectiveBendElaborate
-import Theory.ObjectiveBendTyping
-import Theory.AxiomPin
+module
+
+public import Compiler.ObjectiveBendElaborate
+public import Theory.ObjectiveBendTyping
+public import Theory.AxiomPin
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Lean.Data.Json.Basic
+import all Lean.Data.Json.FromToJson.Basic
+public import Std.Data.TreeMap.Raw.Lemmas
+
+@[expose] public section
+
 namespace Minidregg.Compiler.ObjectiveBendTermWire
 open Lean
 open Minidregg.Compiler.ObjectiveBendElaborate

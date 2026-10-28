@@ -1,6 +1,10 @@
 /- Read-only canonical presentation of event28 custody bytes. This is not admission. -/
-import Host.ApplicationGrainSessionEnrollmentAuthoring
-import Lean.Data.Json
+module
+
+public import Host.ApplicationGrainSessionEnrollmentAuthoring
+public import Lean.Data.Json
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationGrainSessionEnrollmentInspection
 

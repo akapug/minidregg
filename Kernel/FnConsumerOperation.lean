@@ -9,10 +9,31 @@ resource. The original synthetic route uses a trusted test adapter. The
 portable fn route records a verified source identity with explicit absent-
 Store sentinels until fn's native historical verdict connector is available.
 -/
-import Kernel.FnEvidence
-import Kernel.FnGatewayPolicy
-import Kernel.NativeHost
-import Kernel.ContentResource
+module
+
+public import Kernel.FnEvidence
+public import Kernel.FnGatewayPolicy
+public import Kernel.NativeHost
+public import Kernel.ContentResource
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnConsumerOperation
 

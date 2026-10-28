@@ -1,3 +1,4 @@
+# DiagramsNet: unsupported: declares permissions without a signed bridge schema (its static server declares `write` and editor/viewer roles at runtime; the package signs none). Refused by name by 0870373ae; re-qualify if upstream ships a signed schema. Not in FEATURED.
 j DiagramsNet e7f8ac92c7823a4127601e95685ca4d2 M / web
 k EtherDraw 71ebb1517a10002e8f5a631009743235 S / web
 l Scrumblr cf6ae092f937e7000b875cbb97d17907 S / web

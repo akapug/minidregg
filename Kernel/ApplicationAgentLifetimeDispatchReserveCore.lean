@@ -3,8 +3,12 @@ The original accepted purse reserve for one exact event26 grant/request. This
 component binds a Replay-minted raw ordinary invocation to the distinct v3
 context; it does not itself prove membership in the admitted chronology.
 -/
-import Kernel.ApplicationAgentLifetimeDispatchReserveContext
-import Kernel.ApplicationDispatchAgentReserveCore
+module
+
+public import Kernel.ApplicationAgentLifetimeDispatchReserveContext
+public import Kernel.ApplicationDispatchAgentReserveCore
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationAgentLifetimeDispatchReserveCore
 

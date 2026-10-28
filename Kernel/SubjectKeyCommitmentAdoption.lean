@@ -1,8 +1,29 @@
 /- Explicit current-key authorization to establish its first next-key commitment.
 The current and next key sign different frames over the complete command.
 Neither a sponsor nor a carry operator can invent this authority. -/
-import Kernel.Receivers.SubjectKeyRotation
-import Theory.KeyCommitmentAdoption
+module
+
+public import Kernel.Receivers.SubjectKeyRotation
+public import Theory.KeyCommitmentAdoption
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.SubjectKeyCommitmentAdoption
 open Minidregg.Compiler

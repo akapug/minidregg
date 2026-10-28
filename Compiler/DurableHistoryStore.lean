@@ -1,5 +1,9 @@
-import Compiler.DurableHistoryStoreCore
-import Compiler.DurableReceiverIO
+module
+
+public import Compiler.DurableHistoryStoreCore
+public import Compiler.DurableReceiverIO
+
+@[expose] public section
 
 namespace Minidregg.Compiler.DurableHistoryStore
 

@@ -3,8 +3,27 @@ The shared executable prime field. These declarations are moved unchanged
 from EmitSerialize so a native receiver need not import descriptor-emission
 examples and their unrelated compiler closure just to select its field.
 -/
-import Mathlib.Algebra.Field.ZMod
-import Mathlib.Tactic.NormNum.Prime
+module
+
+public import Mathlib.Algebra.Field.ZMod
+public import Mathlib.Tactic.NormNum.Prime
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler
 

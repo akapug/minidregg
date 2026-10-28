@@ -16,8 +16,29 @@ refusals at one instant close the charged lane (`charges_close_lane`).
 This is Host-process state, a bound on refusal work, not money: it is not part
 of the durable image and starts full when the Host starts.
 -/
-import Std.Data.HashMap
-import Theory.AssertAxioms
+module
+
+public import Std.Data.HashMap
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.RefusalLane
 

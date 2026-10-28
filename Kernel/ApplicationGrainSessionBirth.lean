@@ -3,11 +3,30 @@ Native factory admission still checks all current grants, sources, charge,
 uniqueness and durable receiving. Initial descriptor content is empty; explicit
 authorized enrollment creates a canonical stable atom, then each governed
 renewal edits that atom with the new generation-bound payload. -/
-import Kernel.ApplicationGrainSession
-import Kernel.ApplicationGrainSessionEnrollment
-import Kernel.NativeHostGenesis
-import Kernel.ResourceBirthController
-import Kernel.ContentResource
+module
+
+public import Kernel.ApplicationGrainSession
+public import Kernel.ApplicationGrainSessionEnrollment
+public import Kernel.NativeHostGenesis
+public import Kernel.ResourceBirthController
+public import Kernel.ContentResource
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationGrainSessionBirth
 open Minidregg.Compiler

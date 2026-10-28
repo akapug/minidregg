@@ -4,11 +4,30 @@ admit a request: the complete birth credential bundle and the signed grain
 target, observation, and authority envelopes must still be checked against
 one current loaded image and one joint candidate before any durable intent.
 -/
-import Compiler.GrainResourceBirthController
-import Compiler.GrainResourceBirthHostCodec
-import Kernel.ResourceBirthPolicyController
-import Kernel.DeclaredResourceController
-import Kernel.Bounds
+module
+
+public import Compiler.GrainResourceBirthController
+public import Compiler.GrainResourceBirthHostCodec
+public import Kernel.ResourceBirthPolicyController
+public import Kernel.DeclaredResourceController
+public import Kernel.Bounds
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.GrainResourceBirthPolicyController
 

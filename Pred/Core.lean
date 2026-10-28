@@ -55,7 +55,26 @@ Core Lean (Init) plus `Pred.HashEqDigest`, whose one import is the leaf cSHAKE25
 `Theory.Sp800185Cshake256Core` (Init only, no candidate code): the `hashEq` atom evaluates a
 hash, and this is the kernel's one executable cSHAKE256. Pred imports no `Compiler` module.
 -/
-import Pred.HashEqDigest
+module
+
+public import Pred.HashEqDigest
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Pred
 

@@ -14,8 +14,13 @@ Run with `lean --run Host/ObjectiveBendFrontEndMain.lean ...` against built olea
 `minidregg-host /dev/null objective-front ...` (the same code, compiled). A refusal is a
 `dregg.bend.compiler-diagnostic.v1` on stderr (and in NEW_DIR/diagnostic.json) with exit 2;
 `elaborate` exits 1, as its predecessor did. -/
-import Compiler.ObjectiveBendFrontEndIdentity
-import Host.ObjectiveBendPreview
+module
+
+public import Compiler.ObjectiveBendFrontEndIdentity
+public import Host.ObjectiveBendPreview
+
+@[expose] public section
+
 namespace Minidregg.Host.ObjectiveBendFrontEnd
 open Lean
 open Minidregg.Compiler

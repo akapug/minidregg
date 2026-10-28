@@ -6,7 +6,11 @@ uses the current owner signature, capability and policy admission and one
 durable CAS. This receiver makes no claim that the private source operation
 was historically admitted, nor that plaintext fn transport is confidential.
 -/
-import Kernel.FnSelectiveReleaseAdmission
+module
+
+public import Kernel.FnSelectiveReleaseAdmission
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnSelectiveReleaseReceiver
 

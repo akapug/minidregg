@@ -14,8 +14,28 @@ at the extended address types (`typed_yieldedPlanWith`). With `typed_settle` and
 What this module does NOT prove: that resuming the extraction's state ends as resuming
 the yielded state (sharing transparency). That is `Kernel.ObjectiveResumeContract.
 forcingTransparent_of_yieldedPlan`, over `Theory.ObjectiveBendDemandForcing*`. -/
-import Theory.ObjectiveBendDemandSettleProofs
-import Theory.ObjectiveBendDemandPreservation
+module
+
+public import Theory.ObjectiveBendDemandSettleProofs
+public import Theory.ObjectiveBendDemandPreservation
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Theory.ObjectiveBendDemandCollect
 open Minidregg.Theory.ObjectiveBendOpenRecursion
 open Minidregg.Theory.ObjectiveBendDemandMachine

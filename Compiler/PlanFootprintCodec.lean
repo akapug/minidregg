@@ -6,8 +6,27 @@ A signed header carries it as bytes; this is the one codec, for any layout with
 a `StoreCodec.Wire`: each read is the wire's canonical address followed by an
 optional value in the wire's value codec for that address's namespace.
 -/
-import Compiler.StoreCodec
-import Theory.PlanBinding
+module
+
+public import Compiler.StoreCodec
+public import Theory.PlanBinding
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.PlanFootprintCodec
 

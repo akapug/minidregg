@@ -25,9 +25,28 @@ As in `DurableCommitProtocol`, this is a model boundary.  The last section
 states the proof-relevant simulation a database, filesystem, or replicated
 service must discharge; it does not manufacture physical durability.
 -/
-import Kernel.DurableCommitProtocol
-import Theory.AxiomPin
-import Kernel.Bounds
+module
+
+public import Kernel.DurableCommitProtocol
+public import Theory.AxiomPin
+public import Kernel.Bounds
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.DurableDataIntent
 

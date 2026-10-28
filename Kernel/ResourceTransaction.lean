@@ -2,25 +2,44 @@
 operations share one command, exact old directory and authority snapshot, one
 nullifier, one candidate tuple and one durable publication. No wire variant
 contains a proposed post, raw patch, policy decision, or authority snapshot. -/
-import Compiler.NativeProtocolFrames
-import Compiler.NativeInvocationStatement
-import Compiler.ObjectiveInvocationClaim
-import Kernel.DeclaredResourceScalar
-import Kernel.WorldKindProjection
-import Kernel.WorldKindMethods
-import Kernel.WorldPrototypeConstruction
-import Compiler.ObjectAudienceRoster
-import Kernel.ObjectAudience
-import Kernel.ContentResource
-import Compiler.StreamCell
-import Compiler.ResourceAuthorityProjection
-import Kernel.Run
-import Kernel.NockDoor
-import Kernel.ClockCellDomain
-import Kernel.RunComputeBudgetDomain
-import Kernel.ResourceMoneyReceiver
-import Kernel.ResourceObservationAdmission
-import Kernel.ObjectiveWorkAccount
+module
+
+public import Compiler.NativeProtocolFrames
+public import Compiler.NativeInvocationStatement
+public import Compiler.ObjectiveInvocationClaim
+public import Kernel.DeclaredResourceScalar
+public import Kernel.WorldKindProjection
+public import Kernel.WorldKindMethods
+public import Kernel.WorldPrototypeConstruction
+public import Compiler.ObjectAudienceRoster
+public import Kernel.ObjectAudience
+public import Kernel.ContentResource
+public import Compiler.StreamCell
+public import Compiler.ResourceAuthorityProjection
+public import Kernel.Run
+public import Kernel.NockDoor
+public import Kernel.ClockCellDomain
+public import Kernel.RunComputeBudgetDomain
+public import Kernel.ResourceMoneyReceiver
+public import Kernel.ResourceObservationAdmission
+public import Kernel.ObjectiveWorkAccount
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.DeclaredResourceController
 open Minidregg.Compiler
