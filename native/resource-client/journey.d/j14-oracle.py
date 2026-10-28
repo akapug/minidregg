@@ -130,6 +130,7 @@ class Journey:
         self.world_pid=int((w/'public/server.pid').read_text())
         params=read(w/'genesis-params.json');self.sponsor=str(params['sponsor']['subject'])
         (self.homes/'sponsor/keys').mkdir(parents=True)
+        self.run('app-tasks',[self.mini,'apps','bootstrap','--dir',self.c['sponsorWorkspace'],'--budget','20000'])
         permit=self.root/'permit-all.json';write(permit,{'type':'all','predicates':[]})
         for who,funding in [('alice',5000),('bob',100),('hermes',10000),('hhost',0),('hprov',0),('hdisp',0)]:
             (self.homes/who).mkdir()
@@ -158,7 +159,6 @@ class Journey:
         self.shell('sponsor','import oracle-room '+reference)
         room=read(Path(self.c['sponsorWorkspace'])/'refs/oracle-room.json')
         self.c['room']={'target':room['target'],'capability':room['observeCapability']}
-        self.run('app-tasks',[self.mini,'apps','bootstrap','--dir',self.c['sponsorWorkspace'],'--budget','20000'])
         allocation=self.root/'allocation.json';write(allocation,inputs.allocation(self.c));self.c['allocation']=str(allocation)
         fresh=self.root/'operator-with-oracle.json'
         self.run('lifetime-target',['python3',REPO/'scripts/application-attachment.py','render-host-config',self.c['hostConfig'],allocation,fresh])
@@ -205,6 +205,33 @@ class Journey:
         if getattr(self,'world_pid',None):
             try:os.kill(self.world_pid,signal.SIGTERM)
             except ProcessLookupError:pass
+
+    def await_worker_release(self):
+        selected=os.environ.get('J14_ORACLE_WORKER_RELEASE')
+        if not selected:return
+        path=Path(selected)
+        if not path.is_absolute():raise ValueError('worker release path must be absolute')
+        previous=sha(self.runtime);deadline=time.monotonic()+1800
+        write(self.root/'worker-wait.json',{'releasePath':str(path),'previousRuntimeSha256':previous,'maximumWaitSeconds':1800})
+        while not path.exists():
+            if time.monotonic()>=deadline:raise TimeoutError('worker release not supplied; native Store and application attempts retained')
+            time.sleep(1)
+        metadata=path.lstat()
+        if path.is_symlink() or not path.is_file() or metadata.st_uid!=os.getuid() or metadata.st_mode&0o077:
+            raise ValueError('worker release must be an operator-private regular file')
+        release=read(path)
+        if set(release)!={'runtime','sha256','sourceCommit'} or re.fullmatch('[0-9a-f]{64}',release['sha256']) is None or re.fullmatch('[0-9a-f]{40}',release['sourceCommit']) is None:
+            raise ValueError('worker release pin contract differs')
+        source=Path(release['runtime'])
+        if not source.is_absolute() or source.is_symlink() or not source.is_file() or not os.access(source,os.X_OK) or sha(source)!=release['sha256']:
+            raise ValueError('released runtime differs from selected pin')
+        if sha(self.runtime)!=previous:raise ValueError('initial runtime changed while preparation was running')
+        temporary=self.bins/('grain-runtime-release-'+secrets.token_hex(6))
+        shutil.copyfile(source,temporary);temporary.chmod(0o755)
+        if sha(temporary)!=release['sha256']:raise ValueError('runtime changed during release copy')
+        write(self.root/'worker-runtime-successor.json',{'protocol':'mini-j14-runtime-successor-v1',
+            'previousRuntimeSha256':previous,'initialCandidateManifest':self.c['manifest'],'release':release})
+        os.replace(temporary,self.runtime)
 
     def worker(self):
         home=Path(self.layout['controllerHome']);base=home.parent;grain=home/'grain'
@@ -351,6 +378,7 @@ class Journey:
         phase('prepare-route','--input',path)
         self.profile=read(self.c['profileResult'])['profilePath']
         start=self.run('app-start',[self.bins/'spk-host','grain','start',self.profile,'9890001'],timeout=2400)
+        self.application_unit=read(start)['unit']
         activated=result(phase('activate','--input',start))
         self.fixed('controller-config',activated['bundle']);self.controller_config()
         self.fixed('controller-start')
@@ -448,6 +476,7 @@ def main():
     j=Journey()
     try:
         for phase in ['world','application','worker','room','attach','probe']:
+            if phase=='worker':j.await_worker_release()
             getattr(j,phase)()
             write(j.root/('context-after-'+phase+'.json'),j.c)
     except Exception as error:

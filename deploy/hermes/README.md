@@ -490,9 +490,39 @@ the resident tools `mini_pending_awaits` / `mini_answer_await`. A member announc
   (docs/oracle-agent-tools.md).
 - Every call goes through Mini's application dispatch and purse settlement. In a room without the
   bit, the call is refused `oracle-not-granted` before any dispatch.
-- The answer comes back as Hermes's paid reply. Row: J14_ORACLE=1, with J14_ORACLE_TOOLTASK naming
-  the route fragment issued for this world's Hermes task. Issuing that fragment inside J14's world
-  (codex's `issue-grant` / `prepare-route` against the J14 controller) is the open seam.
+- The answer comes back as Hermes's paid reply. `J14_ORACLE=1` selects the dedicated
+  `native/resource-client/journey.d/j14-oracle.sh` journey. It creates one fresh Store, enrolls
+  Hermes, installs the Oracle in that same Store, and issues the session and lifetime grant for
+  the actual controller. There is no preissued `J14_ORACLE_TOOLTASK` fragment.
+
+The Oracle row needs the usual journey inputs (`MINI`, `HOST`, `STORE`, `VERIFIER`,
+`GRAIN_RUNTIME`, `TEST_PROVIDER`, `JOURNEY_STEP_DIR`) plus these operator assets:
+
+```sh
+export J14_ORACLE=1
+export J14_ORACLE_BIN="$OVERLAY_BIN"  # candidate binaries and explicitly selected runtime/provider overlays
+export J14_ORACLE_CANDIDATE_MANIFEST="$CANDIDATE/manifest.json"
+export J14_ORACLE_ORCHESTRATION_COMMIT="$(git rev-parse HEAD)"
+export J14_HERMES_ROOT="$HERMES_RUNTIME_ROOT"
+export J14_ORACLE_SPK="$ORACLE_RUNTIME_SPK"
+export J14_ORACLE_DATA_SOURCE="$ORACLE_DATA_DIRECTORY"
+export J14_ORACLE_INVENTORY="$ORACLE_DATA_INVENTORY_JSON"
+native/resource-client/journey.d/j14.sh
+```
+
+Run from a committed source snapshot on the Linux lane host with passwordless access to the
+fixed SPK installer. The binary directory includes the selected candidate's native helpers,
+`spk-data-publish`, and the source snapshot's `deploy/spk-host/spk-ingest`. Core candidate hashes
+are checked before native writes; runtime/provider overlays and orchestration file hashes are
+recorded separately. Use a fresh evidence directory. The socket directory is separately allocated
+under `/build/lanes` (override `J14_ORACLE_SOCKET_PARENT` for another protected, short parent),
+and task IDs are allocated per run so preserved worlds do not share system unit names.
+
+The receiving checks cover the room's named refusal, the founder's grant, the actual Oracle
+answer joined to native dispatch settlement, a fresh paid room reply, and controller restart.
+The resident-page check inspects HTTP/HTML grant state; rendered-browser use and application
+restart/recovery belong to the separate Oracle shared-data journey. Command outputs and native
+attempts remain under `JOURNEY_STEP_DIR/oracle`, including a named failure when a phase stops.
 
 **Running J14 on dregg-build.** `/build/lanes/hermes-tier-run/tools-run.sh RUN_DIR` builds the
 lane binaries into `/build/lanes/hermes-tier-target` (CARGO_BUILD_JOBS=4), rebuilds the runtime
