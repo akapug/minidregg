@@ -2468,6 +2468,7 @@ mod tests {
             agent
         }).collect());
         fs::write(&path, serde_json::to_vec(&config).unwrap()).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
         assert!(ResidentConfig::load(&path).is_err());
         config["agentRouteProfile"] = json!("shared-64-v1");
         let bytes = serde_json::to_vec(&config).unwrap();
