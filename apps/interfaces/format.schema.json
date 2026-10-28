@@ -399,6 +399,9 @@
               },
               "where": {
                 "type": "object"
+              },
+              "values": {
+                "type": "boolean"
               }
             },
             "required": [
