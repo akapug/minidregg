@@ -778,8 +778,9 @@ private theorem mapM_forall₂ {α β : Type} (f : α → Except String β) :
 theorem validateChecks_pins {config : NativeHost.Config} {seed : DurableReceiver.Seed}
     {logStart : Digest} {directory? : Option (CellRegistry.Directory Nat CanonicalCellRegistry.registry)}
     {logical? : Option (Store.Store CredentialAuthorityState.layout)} {lawful? : Option Bool}
-    {built : FactoryPins}
-    (validated : NativeHost.validateChecks config seed logStart directory? logical? lawful? = .ok built) :
+    {platform? : Option PlatformCellLayout.Platform} {built : FactoryPins}
+    (validated : NativeHost.validateChecks config seed logStart directory? logical? lawful? platform? =
+      .ok built) :
     built.federation = config.federation ∧ built.policyId = ⟨config.deployment.factoryId⟩ := by
   unfold NativeHost.validateChecks at validated
   repeat' (first | split at validated | (simp only [bind, Except.bind] at validated))
@@ -797,14 +798,15 @@ theorem validateCore_pins {D A : Type} {config : NativeHost.Config} {seed : Dura
     {logStart : Digest} {directory? : Option D} {authority? : Option A}
     {directoryOf : D → CellRegistry.Directory Nat CanonicalCellRegistry.registry}
     {logicalOf : A → Store.Store CredentialAuthorityState.layout} {lawfulCheck : D → Bool}
+    {platform? : Option PlatformCellLayout.Platform}
     {parts : {parts : D × A × FactoryPins // lawfulCheck parts.1 = true}}
     (validated : NativeHost.validateCore config seed logStart directory? authority? directoryOf
-      logicalOf lawfulCheck = .ok parts) :
+      logicalOf lawfulCheck platform? = .ok parts) :
     parts.1.2.2.federation = config.federation ∧
       parts.1.2.2.policyId = ⟨config.deployment.factoryId⟩ := by
   unfold NativeHost.validateCore at validated
   cases checked : NativeHost.validateChecks config seed logStart (directory?.map directoryOf)
-      (authority?.map logicalOf) (directory?.map lawfulCheck) with
+      (authority?.map logicalOf) (directory?.map lawfulCheck) platform? with
   | error detail => simp [checked, bind, Except.bind] at validated
   | ok built =>
     simp only [checked, bind, Except.bind] at validated
