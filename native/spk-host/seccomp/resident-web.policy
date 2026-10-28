@@ -17,6 +17,10 @@
 #   allow-arg NAME ARG in VALUE... else ERRNO        allowed iff low 32 bits of ARG equal a VALUE
 #   allow-arg NAME ARG notin VALUE... else ERRNO     allowed iff low 32 bits of ARG equal no VALUE
 #   allow-arg NAME ARG clear MASK else ERRNO         allowed iff (low 32 bits of ARG) & MASK == 0
+#   allow-when NAME TERM [and TERM]... [or TERM [and TERM]...]... else ERRNO
+#                                                     allowed iff some or-clause has every and-term true;
+#                                                     TERM = ARG [masked MASK] in VALUE... (low 32 bits,
+#                                                     ANDed with MASK first when given)
 # ERRNO is one of EPERM, ENOSYS, EAFNOSUPPORT. ARG is 0..5. VALUE/MASK are decimal or 0x hex.
 # allow-arg compares only the LOW 32 bits: use it only where the kernel reads that argument as
 # a 32-bit int (socket family, ioctl request, personality) or where every tested bit lies in
@@ -89,8 +93,14 @@ allow getrandom
 allow-arg ioctl 1 notin 0x5412 0x541c else EPERM
 
 # --- sockets: loopback inside the sandbox's own network namespace only ---
-# AF_UNIX = 1, AF_INET = 2, AF_INET6 = 10. Netlink, packet, vsock and the rest are refused.
-allow-arg socket 0 in 1 2 10 else EAFNOSUPPORT
+# AF_UNIX = 1, AF_INET = 2, AF_INET6 = 10. Packet, vsock and the rest are refused.
+# AF_NETLINK = 16 is allowed for exactly one shape: NETLINK_ROUTE (protocol 0), type SOCK_DGRAM (2)
+# or SOCK_RAW (3) (the type argument is masked with SOCK_TYPE_MASK 0xf, so SOCK_CLOEXEC and
+# SOCK_NONBLOCK pass). That is what glibc's getifaddrs and libzmq's interface resolution open.
+# The app holds no capabilities (bwrap --cap-drop ALL) in its own unshared network namespace,
+# so the socket enumerates that namespace (its loopback) and cannot change an address or a
+# route; every other netlink protocol (GENERIC, NETFILTER, KOBJECT_UEVENT, ...) stays refused.
+allow-when socket 0 in 1 2 10 or 0 in 16 and 1 masked 0xf in 2 3 and 2 in 0 else EAFNOSUPPORT
 allow socketpair bind listen accept accept4 connect getsockname getpeername
 allow sendto recvfrom sendmsg recvmsg sendmmsg recvmmsg shutdown setsockopt getsockopt
 
