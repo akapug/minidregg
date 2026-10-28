@@ -363,13 +363,16 @@ def SwappedPlanRefusedStatement : Prop :=
 /-- **Satisfiable: the honest Host passes.** For a canonical ordinary birth draft that is the
 member's authoring at its own coordinates, the plan the deployed planner builds on any opened
 image (`NativeHost.prepareLoaded`, the served path's birth arm) is accepted, and the headers to
-sign are exactly the plan's. No premise on the opened image: its pins are the config's
-(`OpenedPinsPublicStatement`). -/
+sign are exactly the plan's. The opened image is the Host's own open (`validateLoaded`; the
+session's incremental `validateLoadedFrom` is the same, `validateLoadedFrom_eq`), whose pins are
+the config's (`OpenedPinsPublicStatement`). -/
 def HonestPlanAcceptedStatement : Prop :=
-  ∀ (config : NativeHost.Config) (opened : NativeHost.Opened config)
+  ∀ (config : NativeHost.Config) (durable : ResourceBirthController.Concrete.Durable)
+    (opened : NativeHost.Opened config)
     (author : BirthCoordinates → Option NativeObservationCodec.Intent) (wanted : NativeObservationCodec.Intent)
     (draftBytes : List UInt8) (capabilities : List CapabilityId) (draft : Descriptor Registry)
     (plan : NativeHostCodec.SigningPlan),
+    NativeHost.validateLoaded config durable = .ok opened →
     wanted.purpose = .prepare (.birth draftBytes capabilities) →
     GrainResourceBirthHostCodec.sourceCodec.decode draftBytes = none →
     CanonicalCellRegistry.sourceEncoding.codec.decode draftBytes = some draft →
@@ -380,12 +383,213 @@ def HonestPlanAcceptedStatement : Prop :=
         (NativeHostCodec.signingPlanCodec.encode plan) =
       .ok (plan.slots.map NativeHostCodec.SigningSlot.header, shown)
 
-/-- **Every opened image's public pins are the config's** (`validateLoaded` and
-`validateLoadedFrom` build `Opened` from `validateChecks`' pins; `restorage` copies them). The
-lemma that discharges what was the satisfiable pole's pins premise. -/
+/-- **The Host's opened image carries the config's public pins**: `validateLoaded` builds `Opened`
+from `validateChecks`' pins. -/
 def OpenedPinsPublicStatement : Prop :=
-  ∀ (config : NativeHost.Config) (opened : NativeHost.Opened config),
+  ∀ (config : NativeHost.Config) (durable : ResourceBirthController.Concrete.Durable)
+    (opened : NativeHost.Opened config),
+    NativeHost.validateLoaded config durable = .ok opened →
     opened.pins.federation = config.federation ∧
       opened.pins.policyId = ⟨config.deployment.factoryId⟩
+
+/-! ## Proofs -/
+
+section Proofs
+
+variable {F : Type} [Field F] {profile : CanonicalRuntimeProfile.Profile F}
+  {deployment : CanonicalCellRegistry.Deployment} {pins : FactoryPins}
+  {durable : ResourceBirthController.Concrete.Durable} {d : Descriptor Registry}
+
+/-- Every branch request of a birth carries the source effects digest of the whole descriptor. -/
+theorem branchRequest_effects
+    (prepared : ResourceBirthController.Concrete.PreparedBirth profile.compilerProfile deployment
+      pins durable d) (height : Height) (branch : Branch d) :
+    (branchRequest prepared height branch).2.effectsDigest =
+      CanonicalCellRegistry.sourceEncoding.effectsDigest d := by
+  cases branch <;> rfl
+
+theorem birthValues_effects (deployed : PublicPins) (descriptor : Descriptor Registry)
+    (branch : Branch descriptor) :
+    (birthValues deployed descriptor branch).2.effectsDigest =
+      CanonicalCellRegistry.sourceEncoding.effectsDigest descriptor := by
+  cases branch <;> rfl
+
+theorem birthSlotPlan_effects {deployed : PublicPins} {descriptor : Descriptor Registry}
+    {entry : Nat × Nat × AuthorizationDeclaration.SomeRequest}
+    (member : entry ∈ birthSlotPlan deployed descriptor) :
+    entry.2.2.2.effectsDigest = CanonicalCellRegistry.sourceEncoding.effectsDigest descriptor := by
+  obtain ⟨branch, _, rfl⟩ := List.mem_map.mp member
+  exact birthValues_effects deployed descriptor branch
+
+/-- Every slot `checkSlots` accepted has its header checked against some expected entry. -/
+theorem checkSlots_header (marker : Nat) (slots : List NativeHostCodec.SigningSlot) :
+    ∀ (position : Nat) (expected : List (Nat × Nat × AuthorizationDeclaration.SomeRequest)),
+      checkSlots marker position slots expected = .ok () →
+      ∀ slot ∈ slots, ∃ entry ∈ expected, ∃ n,
+        checkHeader n marker entry.2.2.2 slot.header = .ok () := by
+  induction slots with
+  | nil => intro _ _ _ slot member; cases member
+  | cons head tail ih =>
+    intro position expected accepted slot member
+    match expected, accepted with
+    | [], accepted => simp [checkSlots] at accepted
+    | (role, index, values) :: rest, accepted =>
+      simp only [checkSlots] at accepted
+      split at accepted
+      · split at accepted
+        · cases accepted
+        · rename_i ok
+          rcases List.mem_cons.mp member with same | inTail
+          · subst same
+            exact ⟨(role, index, values), List.mem_cons_self, position, ok⟩
+          · obtain ⟨entry, entryMember, n, checked⟩ := ih (position + 1) rest accepted slot inTail
+            exact ⟨entry, List.mem_cons_of_mem _ entryMember, n, checked⟩
+      · cases accepted
+
+/-- A header the receiver admitted for `request` that thin consent accepted against `values`
+signs a request with the effects digest of `values`. -/
+theorem consented_effects {marker n : Nat} {kind : ResourceKind} {values : Request kind}
+    {bytes : List UInt8} {header : CredentialSignedEnvelopeController.SignedHeader}
+    {request : AuthorizationDeclaration.SomeRequest}
+    (accepted : checkHeader n marker values bytes = .ok ())
+    (decoded : CredentialSignedEnvelopeController.headerCodec.decode bytes = some header)
+    (signs : header.message = CredentialSignatureAdmission.requestBytes request) :
+    request.2.effectsDigest = values.effectsDigest := by
+  obtain ⟨found, decodedRequest, decodedFound, _, message, _⟩ :=
+    NativeThinConsent.checkHeader_binds accepted
+  rw [decoded] at decodedFound
+  obtain rfl := Option.some.inj decodedFound
+  rw [signs] at message
+  have same := (TypedAuthorizationRequestCodec.signedRequestBytes_eq_iff _ _).mp message
+  exact congrArg (fun wanted : AuthorizationDeclaration.SomeRequest => wanted.2.effectsDigest) same
+
+/-- An admitted signature's header signs exactly the receiver's request. -/
+theorem admitted_message {snapshot : CredentialAuthorityDomain.Snapshot} {nullifier : Nat}
+    {request : AuthorizationDeclaration.SomeRequest}
+    (admitted : CredentialSignatureAdmission.Prepared snapshot nullifier request) :
+    admitted.controller.envelope.header.message = CredentialSignatureAdmission.requestBytes request := by
+  rw [admitted.headerExact]
+  rfl
+
+/-- What an accepted thin birth consists of. -/
+theorem checkBirthThin_ok {deployed : PublicPins}
+    {author : BirthCoordinates → Option NativeObservationCodec.Intent}
+    {wanted : NativeObservationCodec.Intent} {planBytes : List UInt8}
+    {headers : List (List UInt8)} {shown : BirthDisplay}
+    (checked : checkBirthThin deployed author wanted planBytes = .ok (headers, shown)) :
+    ∃ (draft : Descriptor Registry) (plan : NativeHostCodec.SigningPlan)
+      (finalized : Descriptor Registry),
+      wanted.purpose = .prepare (.birth shown.draft shown.capabilities) ∧
+      shown.coordinates = coordinatesOf draft ∧
+      author (coordinatesOf draft) = some wanted ∧
+      NativeHostCodec.signingPlanCodec.decode planBytes = some plan ∧
+      plan.finalizedDraft = .birth shown.finalized shown.capabilities ∧
+      CanonicalCellRegistry.sourceEncoding.codec.decode shown.finalized = some finalized ∧
+      CanonicalCellRegistry.sourceEncoding.codec.encode (userPart finalized) = shown.draft ∧
+      checkSlots finalized.authorityNullifier 0 plan.slots (birthSlotPlan deployed finalized) =
+        .ok () ∧
+      headers = plan.slots.map NativeHostCodec.SigningSlot.header := by
+  unfold checkBirthThin at checked
+  split at checked
+  · rename_i draftBytes capabilities purpose
+    split at checked
+    · cases checked
+    split at checked
+    · cases checked
+    rename_i draft decodedDraft
+    split at checked
+    · split at checked
+      · rename_i authored
+        split at checked
+        · cases checked
+        rename_i plan decodedPlan
+        split at checked
+        · rename_i finalBytes finalCapabilities finalizedDraft
+          split at checked
+          · rename_i coordinates
+            obtain ⟨_, _, sameCapabilities⟩ := coordinates
+            subst sameCapabilities
+            split at checked
+            · cases checked
+            rename_i finalized decodedFinal
+            split at checked
+            · rename_i canonical
+              split at checked
+              · rename_i userExact
+                split at checked
+                · cases checked
+                · rename_i slotsOk
+                  simp only [Except.ok.injEq, Prod.mk.injEq] at checked
+                  obtain ⟨rfl, rfl⟩ := checked
+                  exact ⟨draft, plan, finalized, purpose, rfl, authored, decodedPlan,
+                    finalizedDraft, decodedFinal, userExact, slotsOk, rfl⟩
+              · cases checked
+            · cases checked
+          · cases checked
+        · cases checked
+      · cases checked
+    · cases checked
+  · cases checked
+
+theorem display_is_commit : DisplayIsCommitStatement := by
+  intro F _ profile deployment pins durable d prepared height deployed author wanted planBytes
+    headers shown signed branch snapshot nullifier admitted bytes checked member decodedHeader
+    decodedSigned
+  obtain ⟨draft, plan, finalized, purpose, coordinatesExact, authored, _, _, decodedFinal,
+    userExact, slotsOk, headersExact⟩ := checkBirthThin_ok checked
+  rw [decodedFinal] at decodedSigned
+  obtain rfl := Option.some.inj decodedSigned
+  rw [headersExact] at member
+  obtain ⟨slot, slotMember, rfl⟩ := List.mem_map.mp member
+  obtain ⟨entry, entryMember, n, accepted⟩ :=
+    checkSlots_header _ _ _ _ slotsOk slot slotMember
+  have effects := consented_effects accepted decodedHeader (admitted_message admitted)
+  rw [branchRequest_effects, birthSlotPlan_effects entryMember] at effects
+  by_cases same : finalized = d
+  · subst same
+    refine Or.inr ⟨coordinatesExact ▸ authored, purpose, userExact, prepared.auxiliaryExact, rfl,
+      ?_, prepared.grants.post_logical, prepared.resources.post_logicalBook⟩
+    unfold ResourceBirthController.allocationWrites Descriptor.createRequests userPart
+    rw [prepared.auxiliaryExact]
+    simp
+  · exact Or.inl ⟨same, effects.symm⟩
+
+theorem swap_after_consent_refused : SwapAfterConsentRefusedStatement := by
+  intro F _ profile deployment pins durable d' prepared height deployed author wanted planBytes
+    headers shown signed checked decodedSigned differs
+  by_cases collision : EffectsCollision signed d'
+  · exact Or.inl collision
+  · refine Or.inr ?_
+    intro branch snapshot nullifier admitted bytes member decodedHeader
+    obtain ⟨_, plan, finalized, _, _, _, _, _, decodedFinal, _, slotsOk, headersExact⟩ :=
+      checkBirthThin_ok checked
+    rw [decodedFinal] at decodedSigned
+    obtain rfl := Option.some.inj decodedSigned
+    rw [headersExact] at member
+    obtain ⟨slot, slotMember, rfl⟩ := List.mem_map.mp member
+    obtain ⟨entry, entryMember, n, accepted⟩ :=
+      checkSlots_header _ _ _ _ slotsOk slot slotMember
+    have effects := consented_effects accepted decodedHeader (admitted_message admitted)
+    rw [branchRequest_effects, birthSlotPlan_effects entryMember] at effects
+    exact collision ⟨differs, effects.symm⟩
+
+theorem swapped_plan_refused : SwappedPlanRefusedStatement := by
+  refine ⟨?_, ?_⟩
+  · intro deployed author wanted planBytes draftBytes finalBytes capabilities draft finalized plan
+      purpose grain decodedDraft noAuxiliary authored decodedPlan finalizedDraft domain semantics
+      decodedFinal canonical changed
+    unfold checkBirthThin
+    simp [purpose, grain, decodedDraft, noAuxiliary, authored, decodedPlan, finalizedDraft, domain,
+      semantics, decodedFinal, canonical, changed]
+  · intro deployed author wanted planBytes draftBytes capabilities draft purpose grain decodedDraft
+      noAuxiliary notAuthored
+    unfold checkBirthThin
+    simp [purpose, grain, decodedDraft, noAuxiliary, notAuthored]
+
+end Proofs
+
+#assert_axioms branchRequest_effects birthValues_effects checkSlots_header consented_effects
+  admitted_message checkBirthThin_ok display_is_commit swap_after_consent_refused
+  swapped_plan_refused
 
 end Minidregg.Kernel.NativeThinBirth
