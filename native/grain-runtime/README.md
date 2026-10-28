@@ -31,6 +31,27 @@ grain-runtime admin /var/lib/mini/grains/task-7001/admin.sock 'reconcile provide
 grain-runtime admin /var/lib/mini/grains/task-7001/admin.sock 'reconcile effects'
 ```
 
+Before submitting the first tool after a cold start, an operator can run:
+
+```sh
+grain-runtime admin /absolute/state/admin.sock 'prepare idle'
+```
+
+This performs ordinary native recovery and soft attachment if needed, then
+requires a fresh signed idle-task observation. Its `mini-grain-idle-readiness-v1`
+reply has `ready: true` only when no worker, foreground call, held allowance, or
+unresolved effect blocks admission. A listening socket alone is not readiness.
+Retained foreground/API attempts require their exact recovery command first.
+
+The optional controller setting `startupTimeoutSeconds` gives cold startup,
+recovery, and idle attachment one shared wall-clock budget: 1200 seconds by
+default, configurable from 60 to 1500. Nested maintenance cannot restart that
+clock. The upper bound leaves room inside the private admin transport and
+installer deadlines. Ordinary native helper calls retain their 300-second
+limit, and this setting cannot extend an active worker or foreground API
+budget. Expiry still stops/reaps the helper and leaves its outcome undecided;
+it does not authorize another submission.
+
 Hard EOF or explicit disconnect signals the owned process group immediately;
 the persistent controller then stops its remaining members and sends Mini a
 signed `interrupt` generation fence. A soft transport close leaves its current

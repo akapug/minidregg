@@ -2,6 +2,8 @@
 //! exclusively a signed call to the native Lean host through `mini`.
 mod journal_io;
 mod deadline;
+#[cfg(test)]
+mod startup_budget_tests;
 mod controller_digest;
 mod public_status;
 mod application_api_tools;
@@ -92,6 +94,9 @@ struct Config {
     host_config: PathBuf,
     #[serde(default)]
     host_socket: Option<PathBuf>,
+    /// Operator budget for cold startup/recovery and idle attachment only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    startup_timeout_seconds: Option<u64>,
     control_socket: PathBuf,
     custody_key: PathBuf,
     state_dir: PathBuf,
@@ -2915,6 +2920,7 @@ fn validate(c: &Config) -> Result<()> {
     validate_with_workspace(c, None)
 }
 fn validate_with_workspace(c: &Config, prospective_workspace: Option<&[u8]>) -> Result<()> {
+    deadline::startup_limit(c.startup_timeout_seconds)?;
     if let Some(sandbox) = &c.sandbox {
         sandbox.validate()?;
         if c.tool_task.as_ref().and_then(|t| t.room.as_ref()).is_none() {
@@ -3557,6 +3563,8 @@ struct Runtime {
     prompt_decision: Option<(u64, Option<prompt_outcome::Outcome>)>,
     foreground_operation: Option<u64>,
     foreground_api_budget: Option<ForegroundApiBudget>,
+    /// Process-local total budget; never persisted as authority or reused by work.
+    startup_deadline: Option<Instant>,
     output: Option<control::OutputHandle>,
     /// First controller operation ID allocated by this process. Earlier
     /// attempts were started by a previous process.
@@ -6695,6 +6703,7 @@ impl Runtime {
             prompt_decision: None,
             foreground_operation: None,
             foreground_api_budget: None,
+            startup_deadline: None,
             output: None,
             process_first_operation_id,
             startup_recovery_active: false,
@@ -7380,11 +7389,49 @@ impl Runtime {
         self.save()?;
         Ok(id)
     }
+    fn with_startup_budget<T>(
+        &mut self,
+        outer: Option<Instant>,
+        work: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        if self.child.is_some()
+            || self.prompt_active
+            || self.foreground_operation.is_some()
+            || self.foreground_api_budget.is_some()
+        {
+            return Err("cold-start budget cannot be entered by active work".into());
+        }
+        let previous = self.startup_deadline;
+        let mut end = previous.unwrap_or(
+            Instant::now() + deadline::startup_limit(self.config.startup_timeout_seconds)?,
+        );
+        if let Some(outer) = outer {
+            end = end.min(outer);
+        }
+        self.startup_deadline = Some(end);
+        let result = self.native_work_limit().and_then(|_| work(self));
+        self.startup_deadline = previous;
+        result
+    }
     fn native_work_limit(&self) -> Result<Duration> {
-        let remaining = self.foreground_api_budget.as_ref().map(|budget|
-            budget.deadline.saturating_duration_since(Instant::now())).unwrap_or(deadline::NATIVE_CALL);
-        if remaining.is_zero() { return Err("foreground API budget expired before native helper spawn".into()); }
-        Ok(remaining.min(deadline::NATIVE_CALL))
+        if let Some(budget) = &self.foreground_api_budget {
+            let remaining = budget.deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err("foreground API budget expired before native helper spawn".into());
+            }
+            return Ok(remaining.min(deadline::NATIVE_CALL));
+        }
+        // A stale maintenance marker must never extend a live worker's helper.
+        if self.child.is_none() && !self.prompt_active && self.foreground_operation.is_none() {
+            if let Some(end) = self.startup_deadline {
+                let remaining = end.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    return Err("cold-start budget expired before native helper spawn".into());
+                }
+                return Ok(remaining);
+            }
+        }
+        Ok(deadline::NATIVE_CALL)
     }
     fn command_output(&self, program: &Path, args: &[&str]) -> Result<()> {
         self.custody_exit_reaped.store(false, Ordering::SeqCst);
@@ -12998,6 +13045,62 @@ impl Runtime {
         Ok(())
     }
 
+    /// The same idle-state gate is used for readiness and tool admission.
+    fn idle_task_ready(&self) -> bool {
+        !(self.child.is_some()
+            || self.prompt_active
+            || self.foreground_operation.is_some()
+            || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
+            || self.cancelled.load(Ordering::SeqCst)
+            || self.journal.child.is_some()
+            || self.journal.foreground_attempt.is_some()
+            || self.journal.pending.is_some()
+            || self.journal.parent_hold.is_some()
+            || self.journal.tool_pending.is_some()
+            || self.journal.tool_hold.is_some()
+            || (self.journal.workspace_attempt.is_some() || self.journal.room_attempt.is_some())
+            || self.journal.workspace_birth.is_some()
+            || self.journal.birth_operation.is_some()
+            || self.journal.birth_pending.is_some()
+            || self.journal.provider_pending.is_some()
+            || self.journal.provider_hold.is_some()
+            || self.journal.provider_attempt.is_some()
+            || self.journal.dispatch_pending.is_some()
+            || self.journal.dispatch_hold.is_some()
+            || self.journal.dispatch_attempt.is_some()
+            || self.journal.application_api_attempt.is_some()
+            || self.journal.settlement_due.is_some()
+            || !self.journal.unresolved_external.is_empty())
+    }
+
+    /// Explicit operator readiness, before any tool request is submitted.
+    /// This may perform ordinary native recovery/soft attachment; success
+    /// requires both a clean controller and a fresh signed idle task view.
+    fn prepare_idle(&mut self, outer: Instant) -> Result<Value> {
+        if self.child.is_some()
+            || self.journal.child.is_some()
+            || self.prompt_active
+            || self.foreground_operation.is_some()
+            || self.journal.foreground_attempt.is_some()
+            || self.journal.application_api_attempt.is_some()
+        {
+            return Err("idle preparation cannot recover an active or retained worker/tool; use exact recovery".into());
+        }
+        self.with_startup_budget(Some(outer), |rt| {
+            if !rt.idle_task_ready() { rt.attach(true)?; }
+            if !rt.idle_task_ready() { return Err("controller is not reconciled and idle".into()); }
+            let signed = rt.query()?;
+            if signed.pointer("/grain/status").and_then(Value::as_str) != Some("1")
+                || signed.pointer("/grain/reserved").and_then(Value::as_str) != Some("0") {
+                return Err("controller readiness lacks a signed idle task".into());
+            }
+            Ok(json!({"type":"mini-grain-idle-readiness-v1", "ready":true,
+                "task":rt.config.task, "connection":rt.journal.connection,
+                "startupTimeoutSeconds":deadline::startup_limit(rt.config.startup_timeout_seconds)?.as_secs(),
+                "signedTask":signed}))
+        })
+    }
+
     /// Run one model-free tool call under the same signed parent/tool custody.
     /// The foreground operation ID is durable before reserve or any native
     /// submit; a lost result can only be inspected, never replayed as work.
@@ -13078,27 +13181,8 @@ impl Runtime {
             .output
             .as_ref()
             .is_some_and(|output| output.is_active_framed_attachment(attachment_id))
-            || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
-            || self.cancelled.load(Ordering::SeqCst)
-            || self.journal.child.is_some()
-            || self.journal.foreground_attempt.is_some()
-            || self.journal.pending.is_some()
-            || self.journal.parent_hold.is_some()
-            || self.journal.tool_pending.is_some()
-            || self.journal.tool_hold.is_some()
-            || (self.journal.workspace_attempt.is_some() || self.journal.room_attempt.is_some())
-            || self.journal.workspace_birth.is_some()
-            || self.journal.birth_operation.is_some()
-            || self.journal.birth_pending.is_some()
-            || self.journal.provider_pending.is_some()
-            || self.journal.provider_hold.is_some()
-            || self.journal.provider_attempt.is_some()
-            || self.journal.dispatch_pending.is_some()
-            || self.journal.dispatch_hold.is_some()
-            || self.journal.dispatch_attempt.is_some()
-            || self.journal.application_api_attempt.is_some()
-            || self.journal.settlement_due.is_some()
-            || !self.journal.unresolved_external.is_empty()
+
+            || !self.idle_task_ready()
         {
             return Err("foreground tool requires an attached, reconciled idle task".into());
         }
@@ -13699,6 +13783,9 @@ impl Runtime {
         Ok(())
     }
     fn attach(&mut self, soft: bool) -> Result<()> {
+        self.with_startup_budget(None, |rt| rt.attach_inner(soft))
+    }
+    fn attach_inner(&mut self, soft: bool) -> Result<()> {
         // A tripped breaker or lost reply leaves the task fenced. The owner's
         // reattach first runs the same provable recovery the controller runs
         // at startup; whatever it cannot prove keeps the task fenced.
@@ -17205,7 +17292,7 @@ impl Runtime {
             return;
         }
         self.startup_recovery_active = true;
-        let result = self.recover().and_then(|()| self.automatic_reconcile());
+        let result = self.with_startup_budget(None, |rt| rt.recover().and_then(|()| rt.automatic_reconcile()));
         self.startup_recovery_active = false;
         let decision = self.journal.next_operation_id;
         self.journal.reconciliation_log.push(json!({
@@ -18075,6 +18162,14 @@ fn serve(mut rt: Runtime) -> Result<()> {
                         .send("admin action expired before dispatch".into());
                     continue;
                 }
+                if request.command == "prepare idle" {
+                    let result = rt.prepare_idle(request.deadline);
+                    request.phase.store(2, Ordering::SeqCst);
+                    let _ = request.reply.send(match result {
+                        Ok(value) => value.to_string(), Err(error) => format!("error: {error}"),
+                    });
+                    continue;
+                }
                 if let Some(sha)=request.command.strip_prefix("resident prepare ") {
                     let result=rt.prepare_resident_prompt(sha);
                     let _=request.reply.send(match result {Ok(value)=>value.to_string(),Err(error)=>format!("error: {error}")});
@@ -18577,6 +18672,12 @@ fn main() -> ExitCode {
             }
         };
         return match control::admin_call(&PathBuf::from(&args[2]), command) {
+            Ok(response) if command == "prepare idle" => {
+                let ready = serde_json::from_str::<Value>(&response).ok().is_some_and(|value|
+                    value["type"] == "mini-grain-idle-readiness-v1" && value["ready"] == true);
+                if ready { println!("{response}"); ExitCode::SUCCESS }
+                else { eprintln!("grain-runtime admin: {response}"); ExitCode::from(1) }
+            }
             Ok(response) if command == "hermes verify-session" => {
                 let ready = serde_json::from_str::<Value>(&response).ok().is_some_and(|value|
                     value["type"] == "mini-hermes-session-readiness-v1" && value["ready"] == true);
@@ -19508,6 +19609,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
             host: root.join("host"),
             host_config: root.join("host-config.json"),
             host_socket: None,
+            startup_timeout_seconds: None,
             control_socket: state.join("control.sock"),
             custody_key: root.join("parent.key"),
             state_dir: state.clone(),
