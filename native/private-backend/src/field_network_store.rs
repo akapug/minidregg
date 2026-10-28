@@ -303,7 +303,7 @@ mod pin_wire {
         let mut want = vec![2, 255];
         for s in &ps {
             want.extend(s.to.to_le_bytes());
-            let m = crate::field_network::encode_message(&s.message);
+            let m = <crate::field_network_layers::LayerEngine as FieldRuntime>::encode_message(&s.message);
             crate::codec::Nat::new(m.len() as u64).put(&mut want);
             want.extend(m);
         }
