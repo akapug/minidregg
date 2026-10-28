@@ -45,7 +45,8 @@ def prepareLoaded (config : Config) (opened : Opened config)
     Except String (List UInt8 × List SigningSlot) := do
   let source ← need "noncanonical grain-backed birth source"
     (sourceCodec.decode sourceBytes)
-  let tariff ← config.grainBirthTariffValue
+  let tariff ← need "grain-backed birth tariff: the image's platform record pins none"
+    (GrainResourceBirthAdmission.grainTariffAt config.deployment opened.durable)
   let profile := config.profile
   let marker := GrainResourceBirthAdmission.useMarker profile config.deployment tariff source
   let height := logicalHeight config opened.durable

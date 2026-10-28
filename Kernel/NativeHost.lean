@@ -3211,7 +3211,7 @@ def submitLoadedVia (transport : DurableReceiverIO.Transport) (config : Config)
         config.signature light.opening (light.basisVia transport) bytes confirm
   | .birth bytes =>
       if (GrainResourceBirthPolicyController.decodeIngress bytes).isSome then
-        let tariff := config.grainBirthTariffValue.toOption
+        let tariff := GrainResourceBirthAdmission.grainTariffAt config.deployment opened.durable
         let ambient : DeclaredResourceController.Ambient := ⟨config.federation, height⟩
         match ← GrainResourceBirthReceiver.receiveLoaded config.profile config.deployment
             opened.pins tariff ambient config.signature transport

@@ -1165,7 +1165,8 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
         config.profile.semantics ⟨config.federation, logicalHeight config opened.durable⟩
         (source.grainCommand tariff)}
       {ingress : GrainResourceBirthPolicyController.DecodedIngress}
-      (pinned : config.grainBirthTariffValue = .ok tariff)
+      (pinned : GrainResourceBirthAdmission.grainTariffAt config.deployment opened.durable =
+        some tariff)
       (accepted : GrainResourceBirthAdmission.Accepted config.profile config.deployment
         opened.pins opened.durable ⟨config.federation, logicalHeight config opened.durable⟩
         tariff source birth grain ingress) :
@@ -2709,9 +2710,9 @@ private def derive (config : Config) (opened : Opened config)
     | .ok accepted => return .ok ⟨accepted.intent, .applicationLifecycleBegin accepted,
         none, some ⟨ingress, ⟨accepted, rfl⟩⟩, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := GrainResourceBirthPolicyController.decodeIngress bytes then
-    match pinned : config.grainBirthTariffValue with
-    | .error detail => return .error s!"historical grain-backed birth tariff: {detail}"
-    | .ok tariff =>
+    match pinned : GrainResourceBirthAdmission.grainTariffAt config.deployment opened.durable with
+    | none => return .error "historical grain-backed birth tariff: the image's platform record pins none"
+    | some tariff =>
         let source := ingress.source
         match GrainResourceBirthController.prepareSourceBirth config.profile.compilerProfile
             config.profile.disabledEvaluators config.deployment opened.pins opened.durable config.profile.semantics tariff source height with
