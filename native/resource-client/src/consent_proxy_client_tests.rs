@@ -113,3 +113,48 @@ fn rejects_handshake_with_a_different_provider_digest() {
         .contains("service binding mismatch"));
     server.join().unwrap();
 }
+
+/// The warm public body keeps one delegated connection for hours. The worker closes a connection that
+/// has been idle for REPLAY and ends itself when idle, so the next request met a dead transport and
+/// every later one answered "consent transport is poisoned". Now a dead connection is noticed before
+/// the next request is sent, the session is dropped, and the next request opens a fresh connection.
+#[test]
+fn a_body_whose_worker_closed_its_connection_serves_the_next_request_on_a_fresh_one() {
+    let fixture = Fixture::new();
+    let listener = fixture.listener.try_clone().unwrap();
+    let expected = fixture.selection.hello();
+    let server = thread::spawn(move || {
+        // first connection: one exchange, then the worker goes away (idle exit or deadline)
+        let (mut first, _) = listener.accept().unwrap();
+        assert_eq!(transport::read_frame(&mut first).unwrap().unwrap(), expected);
+        transport::write_frame(&mut first, &expected).unwrap();
+        assert_eq!(transport::read_frame(&mut first).unwrap().unwrap(), [220, 1]);
+        transport::write_frame(&mut first, &[220, 2]).unwrap();
+        drop(first);
+        // second connection, from the socket-activated unit's next worker
+        let (mut second, _) = listener.accept().unwrap();
+        assert_eq!(transport::read_frame(&mut second).unwrap().unwrap(), expected);
+        transport::write_frame(&mut second, &expected).unwrap();
+        assert_eq!(transport::read_frame(&mut second).unwrap().unwrap(), [220, 3]);
+        transport::write_frame(&mut second, &[220, 4]).unwrap();
+    });
+    let session = |(input, output, live): (Box<dyn Write + Send>, Box<dyn Read + Send>, Lifeline)| {
+        (Some(mini_sdk::consent::Consent(mini_sdk::local::Session::over(input, output, PathBuf::from("/x"), Vec::new()))), Some(live))
+    };
+    let (mut slot, mut live) = session(connect_with_lifeline(&fixture.selection, &fixture.config).unwrap());
+    assert!(live.as_ref().unwrap().alive(), "a fresh connection is alive");
+    assert!(!crate::client_consent::drop_dead_delegated_session(&mut slot, &mut live), "and is kept");
+    let reply = slot.as_mut().unwrap().0.exchange(220, &[1]).unwrap();
+    assert_eq!(reply, (220, vec![2]));
+    // the worker is gone: the idle connection is dead before anything is sent into it
+    for _ in 0..200 {
+        if !live.as_ref().unwrap().alive() { break; }
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(crate::client_consent::drop_dead_delegated_session(&mut slot, &mut live), "a closed connection is dropped");
+    assert!(slot.is_none() && live.is_none());
+    // the next request: a fresh connection, one exchange, never a replay of the old one
+    let (mut slot, _live) = session(connect_with_lifeline(&fixture.selection, &fixture.config).unwrap());
+    assert_eq!(slot.as_mut().unwrap().0.exchange(220, &[3]).unwrap(), (220, vec![4]));
+    server.join().unwrap();
+}
