@@ -111,11 +111,11 @@ def Report.validFor (report : Report)
           report.pid == 0 && report.stopAudit.isEmpty
     | .start, .running =>
         !report.invocationId.isEmpty && decide (report.invocationId.length ≤ 256) &&
-        !report.controlGroup.isEmpty && decide (report.controlGroup.length ≤ 256) &&
+        !report.controlGroup.isEmpty && decide (report.controlGroup.length ≤ ApplicationLifecycleCompletionReport.controlGroupBound) &&
         decide (report.pid > 0) && report.stopAudit.isEmpty
     | .stop, .stopped =>
         !report.invocationId.isEmpty && decide (report.invocationId.length ≤ 256) &&
-        !report.controlGroup.isEmpty && decide (report.controlGroup.length ≤ 256) &&
+        !report.controlGroup.isEmpty && decide (report.controlGroup.length ≤ ApplicationLifecycleCompletionReport.controlGroupBound) &&
         !report.stopAudit.isEmpty && decide (report.stopAudit.length ≤ 4096) &&
         report.pid == 0 &&
         ApplicationLifecycleCompletionReport.stopAuditValid report.unit

@@ -86,6 +86,12 @@ def stopAuditFrame : List UInt8 :=
 def stopAuditCodec : LawfulCodec StopAudit :=
   NativeHostCodec.framed stopAuditFrame stopAuditStream
 
+/-- A control group is an absolute cgroup path, so its bound is the kernel's path bound, not the
+256 bytes of a unit name. The nested class slice tree
+`s{store}-mini-grains-{class}-a{app}.slice` repeats the 16-hex store tag five times and reaches 260
+bytes for a four-digit app (dregg-build, 2026-10-28). -/
+def controlGroupBound : Nat := 4096
+
 def stopAuditValid (unit invocationId controlGroup : List UInt8)
     (bytes : List UInt8) : Bool :=
   match stopAuditCodec.decode bytes with
@@ -174,11 +180,11 @@ def Report.validFor (report : Report)
         report.pid == 0 && report.stopAudit.isEmpty
   | .start, .running =>
       !report.invocationId.isEmpty && decide (report.invocationId.length ≤ 256) &&
-        !report.controlGroup.isEmpty && decide (report.controlGroup.length ≤ 256) &&
+        !report.controlGroup.isEmpty && decide (report.controlGroup.length ≤ controlGroupBound) &&
         decide (report.pid > 0) && report.stopAudit.isEmpty
   | .stop, .stopped =>
       !report.invocationId.isEmpty && decide (report.invocationId.length ≤ 256) &&
-        !report.controlGroup.isEmpty && decide (report.controlGroup.length ≤ 256) &&
+        !report.controlGroup.isEmpty && decide (report.controlGroup.length ≤ controlGroupBound) &&
         !report.stopAudit.isEmpty && decide (report.stopAudit.length ≤ 4096) &&
         report.pid == 0 &&
         stopAuditValid report.unit report.invocationId report.controlGroup report.stopAudit
