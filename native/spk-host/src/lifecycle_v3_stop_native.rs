@@ -2,6 +2,7 @@
 //! A sealed fresh op26 claim may fence the running incarnation. Recovery can
 //! only resume its exact retained attempt from an already-Fenced journal row.
 
+use crate::io_context::IoContext;
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
 use crate::hostd::{Journal, Phase, Record, StopIdentity, UnitStopAudit};
 use crate::lifecycle_v3_native::{decimal, framed_payload, hex, lowercase_hex, unhex};
@@ -280,7 +281,7 @@ impl StopTarget {
         let mut file = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-            .open(path)?;
+            .open(&path).ctx("open", &path)?;
         let before = file.metadata()?;
         if !before.is_file()
             || before.uid() != unsafe { libc::geteuid() }
