@@ -85,13 +85,8 @@ write_EtherCalc() {
 # body over HTTP: GET /new makes the note (303 to /<id>) and the text goes in as a socket.io
 # `operation`, the one recipe shared with the rt table (write_HedgeDocRT in market-writes/rt.sh).
 write_HedgeDoc() { write_HedgeDocRT; }
-write_Davros() {
-  local put; put=$(req PUT /remote.php/webdav/featured.txt -H 'Content-Type: text/plain' --data-binary 'filed by a resident')
-  local putbody; putbody=$(snip)
-  local got; got=$(req GET /remote.php/webdav/featured.txt)
-  [[ $put =~ ^20 && $got == 200 ]] && grep -q 'filed by a resident' "$body" && { echo "1 PUT webdav/featured.txt $put; GET $got"; return; }
-  echo "0 PUT webdav/featured.txt $put [$putbody]; GET $got [$(snip)]"
-}
+write_Davros() { typed_app_row davros; }
+
 write_sntfy() {
   local post; post=$(req POST /featured --data-binary 'job done, from a resident')
   local postbody; postbody=$(snip)

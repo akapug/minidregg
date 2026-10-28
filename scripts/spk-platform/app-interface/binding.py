@@ -1,0 +1,312 @@
+"""Executable conformance model for mini-app-interface-v1, NOT a policy/runtime service.
+
+The declarations are the source of tool schemas, encodings and qualification rows.
+This Python driver stays in the qualification harness. Production custody/admission
+remain in Lean/Rust; see docs/APP-INTERFACE-2026-10-28.md for the native receiving seam.
+"""
+import base64
+import hashlib
+import json
+import re
+import urllib.parse
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+from jsonschema import Draft202012Validator
+
+ROOT = Path(__file__).resolve().parents[3] / 'apps' / 'interfaces'
+
+
+class Refusal(Exception):
+    def __init__(self, name, detail=''):
+        self.name, self.detail = name, detail
+        super().__init__(name + (': ' + detail if detail else ''))
+
+
+class Uncertain(Refusal):
+    """A dispatched mutation may have happened; never retry it automatically."""
+
+
+def load(name):
+    if name not in ('gogs', 'wekan', 'davros'):
+        raise Refusal('interface-unknown')
+    d = json.loads((ROOT / (name + '.json')).read_text())
+    check_declaration(d)
+    return d
+
+
+def check_declaration(d):
+    if d['format'] != 'mini-app-interface-v1':
+        raise Refusal('interface-version-unsupported')
+    contract = json.loads((ROOT / 'format.schema.json').read_text())
+    if not Draft202012Validator(contract).is_valid(d):
+        raise Refusal('declaration-invalid')
+    for op in d['operations'].values():
+        for key in ('input', 'output'):
+            Draft202012Validator.check_schema({**op[key], '$defs': d['$defs']})
+        b = op['binding']
+        if b['protocol'] == 'http' and sum(k in b for k in ('json', 'text', 'base64')) > 1:
+            raise Refusal('declaration-invalid', 'ambiguous HTTP body')
+    # Relations may only read. Reject cycles before a row can dispatch anything.
+    def visit(name, ancestors):
+        if name not in d['operations'] or name in ancestors:
+            raise Refusal('declaration-invalid', 'unknown or cyclic operation dependency')
+        for req in d['operations'][name].get('requires', []):
+            if d['operations'].get(req['op'], {}).get('write', True):
+                raise Refusal('declaration-invalid', 'relation dependency must read')
+            visit(req['op'], ancestors | {name})
+    for name in d['operations']:
+        visit(name, set())
+    seen = set()
+    for step in d['qualification']:
+        if step['id'] in seen or step['op'] not in d['operations']:
+            raise Refusal('declaration-invalid', 'invalid qualification step')
+        seen.add(step['id'])
+
+
+def digest(d):
+    return hashlib.sha256(json.dumps(d, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+
+def relative_path(s):
+    # Reject aliases before any percent encoding; one path has one interpretation.
+    if not isinstance(s, str) or not s or any(c in s for c in ('\\', '%', '?', '#')):
+        raise Refusal('path-invalid')
+    if any(ord(c) < 32 or ord(c) == 127 for c in s) or any(p in ('', '.', '..') for p in s.split('/')):
+        raise Refusal('path-invalid')
+    return '/'.join(urllib.parse.quote(p, safe='-._~') for p in s.split('/'))
+
+
+def validate(d, schema, value, phase='input'):
+    errors = list(Draft202012Validator({**schema, '$defs': d['$defs']}).iter_errors(value))
+    if errors:
+        # Do not echo values: arguments and app responses may contain private data.
+        raise Refusal(phase + '-schema', '/'.join(map(str, errors[0].absolute_path)))
+    def formats(s, v):
+        if '$ref' in s:
+            return formats(d['$defs'][s['$ref'].split('/')[-1]], v)
+        if s.get('format') == 'relative-path':
+            relative_path(v)
+        if s.get('contentEncoding') == 'base64':
+            try:
+                b = base64.b64decode(v, validate=True)
+            except (ValueError, TypeError):
+                raise Refusal('binary-encoding') from None
+            if base64.b64encode(b).decode() != v:
+                raise Refusal('binary-encoding')
+            limit = 'bodyBytes' if phase == 'input' else 'replyBytes'
+            if len(b) > d['limits'][limit]:
+                raise Refusal('body-over-bound' if phase == 'input' else 'reply-over-bound')
+        if isinstance(v, dict):
+            for k, sub in s.get('properties', {}).items():
+                if k in v:
+                    formats(sub, v[k])
+        if isinstance(v, list) and 'items' in s:
+            for x in v:
+                formats(s['items'], x)
+    formats(schema, value)
+
+
+def resolve(x, args, context, results=None):
+    if isinstance(x, list):
+        return [resolve(v, args, context, results) for v in x]
+    if not isinstance(x, dict):
+        return x
+    if set(x) == {'arg'}:
+        return args[x['arg']]
+    if set(x) == {'context'}:
+        return context[x['context']]
+    if set(x) == {'result'}:
+        v = results
+        for p in x['result']:
+            v = v[p]
+        return v
+    if set(x) == {'concat'}:
+        return ''.join(str(resolve(v, args, context, results)) for v in x['concat'])
+    if set(x) == {'path'} and isinstance(x['path'], list):
+        return encode_path(x['path'], args)
+    return {k: resolve(v, args, context, results) for k, v in x.items()}
+
+
+def encode_path(parts, args):
+    encoded = []
+    for part in parts:
+        if isinstance(part, str):
+            encoded.append(part)
+            continue
+        value = str(args[part['arg']])
+        if part['encoding'] == 'path':
+            encoded.append(relative_path(value))
+        elif part['encoding'] == 'segment':
+            if value in ('.', '..') or '/' in value or '\\' in value:
+                raise Refusal('path-invalid')
+            encoded.append(urllib.parse.quote(value, safe='-._~'))
+        else:
+            raise Refusal('binding-encoding-unsupported')
+    return ''.join(encoded)
+
+
+def encode_http(d, op, args, context):
+    b = op['binding']
+    headers = resolve(b.get('headers', {}), args, context)
+    if 'json' in b:
+        body = json.dumps(resolve(b['json'], args, context), separators=(',', ':'), ensure_ascii=False).encode()
+        headers['content-type'] = 'application/json'
+    elif 'base64' in b:
+        body = base64.b64decode(resolve(b['base64'], args, context), validate=True)
+    else:
+        body = b.get('text', '').encode()
+    if len(body) > d['limits']['bodyBytes']:
+        raise Refusal('body-over-bound')
+    for k, v in headers.items():
+        if any(c in k + v for c in '\r\n\x00'):
+            raise Refusal('header-invalid')
+    query = urllib.parse.urlencode(resolve(b.get('query', {}), args, context), quote_via=urllib.parse.quote)
+    return {'method': b['method'], 'path': encode_path(b['path'], args), 'query': query,
+            'headers': headers, 'body': body}
+
+
+def dav_decode(body):
+    if b'<!DOCTYPE' in body.upper() or b'<!ENTITY' in body.upper():
+        raise Refusal('dav-xml-unsafe')
+    try:
+        root = ET.fromstring(body)
+        if root.tag != '{DAV:}multistatus':
+            raise ValueError()
+        result = []
+        for response in root.findall('{DAV:}response'):
+            href = response.findtext('{DAV:}href')
+            if not href:
+                raise ValueError()
+            props = {}
+            for ps in response.findall('{DAV:}propstat'):
+                status = ps.findtext('{DAV:}status', '')
+                if re.fullmatch(r'HTTP/\S+ 2\d\d(?: .*)?', status):
+                    props.update({p.tag: p for p in ps.find('{DAV:}prop')})
+                elif ' 404 ' not in status:
+                    raise Refusal('dav-property-refused')
+            if '{DAV:}resourcetype' not in props:
+                raise Refusal('dav-property-missing')
+            size = props.get('{DAV:}getcontentlength')
+            etag = props.get('{DAV:}getetag')
+            result.append({'href': href, 'collection': props['{DAV:}resourcetype'].find('{DAV:}collection') is not None,
+                           'bytes': int(size.text) if size is not None and size.text else None,
+                           'etag': etag.text if etag is not None else None})
+        return result
+    except (ET.ParseError, ValueError, TypeError):
+        raise Refusal('dav-response-invalid') from None
+
+
+def decode_http(d, op, response):
+    status, headers, body = response
+    if len(body) > d['limits']['replyBytes']:
+        raise Refusal('reply-over-bound')
+    if status not in op['binding']['status']:
+        if op['write'] and status >= 500:
+            raise Uncertain('app-server-error-after-dispatch', str(status))
+        raise Refusal({401: 'app-auth-required', 403: 'app-permission-denied', 404: 'app-not-found',
+                       409: 'app-conflict', 412: 'app-precondition-failed'}.get(status, 'app-http-status'), str(status))
+    mode = op['binding']['decode']
+    try:
+        if mode == 'json':
+            if 'json' not in headers.get('content-type', '').lower():
+                raise Refusal('app-content-type')
+            return json.loads(body)
+        if mode == 'base64':
+            return {'contentBase64': base64.b64encode(body).decode()}
+        if mode == 'status':
+            return {'status': status}
+        if mode == 'dav-multistatus':
+            return dav_decode(body)
+        raise Refusal('binding-decoder-unsupported')
+    except (ValueError, UnicodeError):
+        raise Refusal('app-json-invalid') from None
+
+
+def tools(d):
+    """MCP shapes for an already member/session/package-bound catalog. No ambient route argument."""
+    return [{'name': 'mini_' + d['name'] + '_' + name.replace('.', '_'),
+             'description': op['description'],
+             'inputSchema': {**op['input'], '$defs': d['$defs']},
+             'outputSchema': {'type': 'object', 'properties': {'value': op['output']},
+                              'required': ['value'], 'additionalProperties': False, '$defs': d['$defs']},
+             'annotations': {'readOnlyHint': not op['write'], 'idempotentHint': False},
+             '_meta': {'interfaceDigest': digest(d), 'packageId': d['packageId'], 'operation': name}}
+            for name, op in d['operations'].items()]
+
+
+class Engine:
+    def __init__(self, declaration, transport, context):
+        self.d, self.transport, self.context = declaration, transport, context
+
+    def call(self, name, args):
+        op = self.d['operations'].get(name)
+        if op is None:
+            raise Refusal('operation-unknown')
+        validate(self.d, op['input'], args)
+        for req in op.get('requires', []):
+            snapshot = self.call(req['op'], resolve(req['args'], args, self.context))
+            for r in req.get('exists', []):
+                where = resolve(r['where'], args, self.context)
+                matches = [v for v in snapshot[r['collection']] if all(v.get(k) == x for k, x in where.items())]
+                if len(matches) != 1:
+                    raise Refusal('relation-not-visible-or-mismatched', r['collection'])
+            for check in req.get('assert', []):
+                got = snapshot
+                for p in check['path']:
+                    got = got[p]
+                if got != resolve(check['equals'], args, self.context):
+                    raise Refusal('precondition-failed', req['op'])
+        try:
+            b = op['binding']
+            if b['protocol'] == 'http':
+                value = decode_http(self.d, op, self.transport.http(encode_http(self.d, op, args, self.context)))
+            elif b['protocol'] == 'ddp':
+                value = self.transport.ddp(b, args, self.context, op['write'])
+            else:
+                raise Refusal('binding-protocol-unsupported')
+            if 'projection' in op:
+                p = op['projection']; where = resolve(p['where'], args, self.context)
+                value = [v for v in value[p['collection']] if all(v.get(k) == x for k, x in where.items())]
+            validate(self.d, op['output'], value, 'output')
+            return value
+        except Uncertain:
+            raise
+        except (OSError, EOFError) as e:
+            cls = Uncertain if op['write'] else Refusal
+            raise cls('dispatch-uncertain' if op['write'] else 'transport-closed') from e
+        except Refusal as e:
+            # A malformed success reply is not evidence that a mutation did not occur.
+            if op['write'] and e.name in ('output-schema', 'app-json-invalid', 'app-content-type', 'reply-over-bound'):
+                raise Uncertain('reply-uninterpretable', e.name) from e
+            raise
+
+    def tool_call(self, name, args):
+        """MCP result projection for the prototype; the row uses this same entry point."""
+        spec = next((t for t in tools(self.d) if t['name'] == name), None)
+        if spec is None:
+            raise Refusal('operation-unknown')
+        value = {'value': self.call(spec['_meta']['operation'], args)}
+        return {'structuredContent': value, 'content': [{'type': 'text', 'text': json.dumps(value)}],
+                'isError': False}
+
+
+def run_scenario(engine):
+    results = {}
+    for step in engine.d['qualification']:
+        args = resolve(step['args'], {}, engine.context, results)
+        tool_name = 'mini_' + engine.d['name'] + '_' + step['op'].replace('.', '_')
+        value = engine.tool_call(tool_name, args)['structuredContent']['value']
+        results[step['id']] = value
+        for check in step.get('assert', []):
+            if 'contains' in check:
+                expected = resolve(check['contains'], {}, engine.context, results)
+                ok = isinstance(value, list) and any(all(v.get(k) == x for k, x in expected.items()) for v in value)
+            else:
+                got = value
+                for p in check['path']:
+                    got = got[p]
+                ok = got == resolve(check['equals'], {}, engine.context, results)
+            if not ok:
+                raise Refusal('readback-mismatch', step['id'])
+    return results

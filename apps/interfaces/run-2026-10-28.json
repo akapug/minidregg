@@ -1,0 +1,55 @@
+{
+  "runDate": "2026-10-28",
+  "host": "hbox",
+  "candidate": "e89fe7b8ba8c477d1538ed6ee1f0e7aeac70c97f",
+  "worldStore": "7ad196bf297244ab",
+  "importProfile": "market-large-v1",
+  "scope": "Serial member-browser-route prototype run; not native agent admission or a Hermes row.",
+  "lifecycle": {
+    "gogs": {
+      "status": "PASS",
+      "seconds": 207
+    },
+    "wekan": {
+      "status": "PASS",
+      "seconds": 783
+    },
+    "davros": {
+      "status": "PASS",
+      "seconds": 371
+    }
+  },
+  "results": [
+    {
+      "app": "davros",
+      "packageId": "15bf92664a1b14a784bf737e502e13b7",
+      "interfaceDigest": "baea0878fbb659ab58476c081f4621265d75fc910cc3df8ea4d2885fce0d8f3d",
+      "runId": "ai-6c9f115ce58b4b08a5e4",
+      "transport": "member-browser-route",
+      "hermes": "NOT_RUN",
+      "status": "PASS",
+      "row": "typed-write-readback"
+    },
+    {
+      "app": "gogs",
+      "packageId": "aede44cf19129337aae68b6993324574",
+      "interfaceDigest": "7e275d6673a1d6a1e5c6b1c42624d918a2f220f3da75a5f216d5949f854167e1",
+      "runId": "ai-73a419884f634d19b745",
+      "transport": "member-browser-route",
+      "hermes": "NOT_RUN",
+      "status": "PASS",
+      "row": "typed-write-readback"
+    },
+    {
+      "app": "wekan",
+      "packageId": "2a2c05041cb4285da884d114e4820298",
+      "interfaceDigest": "2bb850a47e299658f7c3b2980c967abf6751fe53d5724f4461bb61e837ce6d8b",
+      "runId": "ai-d46ec753c98a402e89c0",
+      "transport": "member-browser-route",
+      "hermes": "NOT_RUN",
+      "status": "FAIL",
+      "reason": "auth-rendezvous-refused",
+      "detail": "500"
+    }
+  ]
+}
