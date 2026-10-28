@@ -456,6 +456,16 @@ def birthJson (display : NativeThinBirth.BirthDisplay) : Json :=
       ("lineage", toJson (display.coordinates.lineage.map fun (placement, ancestors) =>
         Json.mkObj [("placement", toJson (toString placement)),
           ("ancestors", toJson (ancestors.map toString))]))]),
+    -- The money terms the member consents to (audit pass 22/24 follow-up): the owner budget
+    -- and lifetime its grants carry and the fee, rendered, not only inside the draft hex.
+    ("terms", Json.mkObj [
+      ("ownerBudget", toJson (toString display.coordinates.ownerBudget)),
+      ("lifetime", toJson (toString display.coordinates.lifetime)),
+      ("fee", Json.mkObj [
+        ("payer", toJson (toString display.coordinates.fee.payer)),
+        ("collector", toJson (toString display.coordinates.fee.collector)),
+        ("asset", toJson (toString display.coordinates.fee.asset)),
+        ("amount", toJson (toString display.coordinates.fee.amount))])]),
     ("finalized", toJson (SourceAgreementJson.encodeHex display.finalized))])]
 
 /-- The member's own birth source, as the thin birth frames carry it. -/

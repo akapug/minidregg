@@ -96,7 +96,7 @@ private def fixedHeaders (pin : Pin) (plan : SigningPlan) : Except String Unit :
       throw "completion signing key differs from operator pin"
 
 /-- Op70 obtains a source-derived plan from the exact admitted current image.
-The physical report is verified under Config's distinct custodian key before
+The physical report is verified under the platform record's custodian key before
 any management header escapes. Current grants and law remain decisive in op38. -/
 def prepareVerified (config : Config) {target : Durable}
     (verified : NativeHostReplay.Verified config target) (pin : Pin)
@@ -116,8 +116,10 @@ def prepareVerified (config : Config) {target : Durable}
     return .error "completion subject or resource differs from operator pin"
   if !ApplicationLifecycleResidentProfile.beginMatchesV3 config.storeIdentity begin then
     return .error "completion BEGIN is outside resident host profile"
-  let some key := config.completionCustodianKey
-    | return .error "pinned physical custodian key unavailable"
+  let some record := PlatformCellDomain.recordOn config.deployment opened.durable.snapshot
+    | return .error "platform cell unavailable (completion custodian key)"
+  let some key := record.completionCustodianKey
+    | return .error "physical custodian key unavailable in the platform record"
   match ← ApplicationFailedStartRecoveryReport.check config.signature
       config.deployment.domain config.profile.semantics key begin physical with
   | .error detail => return .error detail

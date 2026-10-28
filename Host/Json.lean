@@ -2220,15 +2220,25 @@ private def birthRootCapability {kind : ResourceKind}
   { NativeHostGenesis.rootCapability profile source kind identifier owner target verbs with
     notBefore := height, notAfter := height + profile.template.lifetime }
 
-/-- Existing offline authoring retains the genesis epochs. Loaded birth
-authoring substitutes the two epochs from the same verified authority image
-used by the receiver; all other grant fields keep their source derivation. -/
+/-- Existing offline authoring retains the genesis epochs and the genesis template. Loaded
+birth authoring substitutes the two epochs from the same verified authority image used by
+the receiver, and the owner budget and lifetime from that image's platform record
+(`current`), the template the receiver binds the birth by
+(`ResourceBirthPolicyController.Concrete.birthTemplate`); all other grant fields keep their
+source derivation. -/
 private def birthRootCapabilityAt {kind : ResourceKind}
     (profile : CanonicalRuntimeProfile.Profile NativeHostProfile.Field)
     (source : NativeHostGenesis.Config) (height : Nat)
-    (authority : Option AuthState) (identifier : CapabilityId)
+    (authority : Option AuthState) (current : Option PlatformCellLayout.Platform)
+    (identifier : CapabilityId)
     (owner : SubjectId) (target : Nat) (verbs : Finset (Verb kind)) : Capability kind :=
-  let grant := birthRootCapability profile source height identifier owner target verbs
+  let authored := birthRootCapability profile source height identifier owner target verbs
+  let grant := match current with
+    | none => authored
+    | some record =>
+        { authored with
+          notAfter := height + record.lifetime
+          scope := { authored.scope with maxCost := record.ownerBudget } }
   match authority with
   | none => grant
   | some current =>
@@ -2275,7 +2285,8 @@ private def birthParts (path : String)
     (source : NativeHostGenesis.Config) (height : Nat) (json : Lean.Json)
     (authority : Option AuthState := none)
     (providerRoutes : List (Nat × ProviderMetering.Schedule) := [])
-    (lineage : Option (CapabilityId → Option (Finset CapabilityId)) := none) : Result BirthParts := do
+    (lineage : Option (CapabilityId → Option (Finset CapabilityId)) := none)
+    (current : Option PlatformCellLayout.Platform := none) : Result BirthParts := do
   let raw ← object path json
   let storage ← string (path ++ ".storage") (← field path "storage" raw)
   let worker ← if storage = "grain" then grainWorker path raw else pure none
@@ -2396,13 +2407,13 @@ private def birthParts (path : String)
   let asRoom {kind : ResourceKind} (cap : Capability kind) : Capability kind :=
     { cap with scope := { cap.scope with targets := .under target } }
   let ownerGrant : ResourceBirth.AuthorityGrant := match kind with
-    | .object => ⟨.object, ⟨asRoom (birthRootCapabilityAt profile source height authority
+    | .object => ⟨.object, ⟨asRoom (birthRootCapabilityAt profile source height authority current
         ownerId owner target (ResourceBirthPolicyController.Concrete.ownerVerbs .object)), []⟩⟩
-    | .account => ⟨.account, ⟨asRoom (birthRootCapabilityAt profile source height authority
+    | .account => ⟨.account, ⟨asRoom (birthRootCapabilityAt profile source height authority current
         ownerId owner target (ResourceBirthPolicyController.Concrete.ownerVerbs .account)), []⟩⟩
-    | .program => ⟨.program, ⟨asRoom (birthRootCapabilityAt profile source height authority
+    | .program => ⟨.program, ⟨asRoom (birthRootCapabilityAt profile source height authority current
         ownerId owner target (ResourceBirthPolicyController.Concrete.ownerVerbs .program)), []⟩⟩
-  let control : Capability .program := birthRootCapabilityAt profile source height authority
+  let control : Capability .program := birthRootCapabilityAt profile source height authority current
     controlId owner target {.installPolicy, .revokeCapability}
   -- A room birth's grants carry the creator's placing capability and its
   -- ancestors (`ResourceBirthPolicyController.Concrete.BornLineage`): a kick
@@ -2429,7 +2440,8 @@ private def birth (path : String) (json : Lean.Json)
     (currentHeight : Option Nat := none)
     (authority : Option AuthState := none)
     (providerRoutes : List (Nat × ProviderMetering.Schedule) := [])
-    (lineage : Option (CapabilityId → Option (Finset CapabilityId)) := none) : Result Draft := do
+    (lineage : Option (CapabilityId → Option (Finset CapabilityId)) := none)
+    (current : Option PlatformCellLayout.Platform := none) : Result Draft := do
   let raw ← object path json
   let obj ← exactObject path (["genesis", "template", "creator", "nonce", "resources",
     "sourceCapabilities", "funding", "feePayer"] ++
@@ -2472,10 +2484,15 @@ private def birth (path : String) (json : Lean.Json)
   let nonce ← nat (path ++ ".nonce") (← field path "nonce" obj)
   let parts ← list (path ++ ".resources")
     (fun itemPath value => birthParts itemPath profile source height value authority
-      providerRoutes lineage)
+      providerRoutes lineage (current := current))
     (← field path "resources" obj)
   let movements ← list (path ++ ".funding") funding (← field path "funding" obj)
   let payer ← nat (path ++ ".feePayer") (← field path "feePayer" obj)
+  -- The quote: the loaded image's platform record's creation tariff, the one the opened
+  -- pins carry (`NativeHost.pinnedTariff`); offline authoring quotes the genesis tariff.
+  let tariff := match current with
+    | some record => record.creation
+    | none => source.tariff
   let identity := ResourceBirthController.Concrete.sourceIdentity profile.compilerProfile
     source.deployment creator nonce
   let descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry := {
@@ -2483,8 +2500,8 @@ private def birth (path : String) (json : Lean.Json)
     transactionId := identity, nonce := nonce, births := parts.map (·.item), auxiliaryCreates := [],
     grants := parts.flatMap fun part => [part.ownerGrant, part.controlGrant],
     initialPolicies := parts.map (·.policy), authorityNullifier := identity.value,
-    funding := movements, fee := ⟨payer, source.tariff.collector, source.tariff.asset, 0⟩ }
-  let priced := { descriptor with fee := { descriptor.fee with amount := descriptor.quotedFee source.tariff } }
+    funding := movements, fee := ⟨payer, tariff.collector, tariff.asset, 0⟩ }
+  let priced := { descriptor with fee := { descriptor.fee with amount := descriptor.quotedFee tariff } }
   let capabilities ← list (path ++ ".sourceCapabilities")
     (fun p value => CapabilityId.mk <$> nat p value) (← field path "sourceCapabilities" obj)
   pure (.birth ((ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode priced) capabilities)
@@ -2496,7 +2513,8 @@ immutable deployment coordinates. Current grant epochs come only from the
 loaded authority, never from that genesis description. -/
 def birthCurrent (path : String) (json : Lean.Json)
     (deployed : NativeHost.Config) (height : Nat) (authority : AuthState)
-    (lineage : CapabilityId → Option (Finset CapabilityId)) :
+    (lineage : CapabilityId → Option (Finset CapabilityId))
+    (current : PlatformCellLayout.Platform) :
     Result Draft := do
   let raw ← object path json
   let source ← genesis (path ++ ".genesis") (← field path "genesis" raw)
@@ -2505,6 +2523,7 @@ def birthCurrent (path : String) (json : Lean.Json)
   unless NativeHost.seedIdentity built.seed == deployed.expectedSeed do
     throw s!"{path}.genesis: differs from the pinned seed"
   birth path json none (some deployed) (some height) (some authority) [] (some lineage)
+    (some current)
 
 structure ApplicationBirthContext where
   source : NativeHostGenesis.Config
@@ -2646,8 +2665,9 @@ private def applicationBirth (path : String) (json : Lean.Json)
   let (context, specJson) ← applicationBirthContext path "application" json grainBirthTariff none deployed
   let spec ← applicationSpec (path ++ ".application") specJson
   let ready ← ApplicationGrainBirth.prepare spec
-  let descriptor := ready.descriptor context.profile context.source context.height
-    context.creator context.nonce context.feePayer context.funding
+  let descriptor := ready.descriptor context.profile context.source
+    (NativeHostGenesis.genesisRecord context.source) context.height context.creator context.nonce
+    context.feePayer context.funding
   pure (.birth ((ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode descriptor)
     context.sourceCapabilities)
 
@@ -2657,8 +2677,9 @@ private def applicationSessionBirth (path : String) (json : Lean.Json)
   let (context, specJson) ← applicationBirthContext path "session" json grainBirthTariff none deployed
   let spec ← applicationSessionSpec (path ++ ".session") specJson
   let ready ← ApplicationGrainSessionBirth.prepare spec
-  let descriptor := ready.descriptor context.profile context.source context.height
-    context.creator context.nonce context.feePayer context.funding
+  let descriptor := ready.descriptor context.profile context.source
+    (NativeHostGenesis.genesisRecord context.source) context.height context.creator context.nonce
+    context.feePayer context.funding
   pure (.birth ((ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode descriptor)
     context.sourceCapabilities)
 
@@ -4394,15 +4415,19 @@ def payEnrolQuoteLoadedJson (config : NativeHost.Config) (opened : NativeHost.Op
   if mode = "renew" ∧ !enrolled then throw "pay quote: key not enrolled"
   let height := NativeHost.logicalHeight config opened.durable
   let identities := PayEnrolReceiver.ids config.deployment.domain miniKey
+  -- The receiver's own ambient: the platform record's creation tariff and template.
+  let ambient := NativeHost.payEnrolAmbient config opened
+  unless PayEnrolReceiver.ambientCurrent config.deployment config.profile opened.durable ambient do
+    throw "pay quote: platform cell unavailable"
   let birthFee := if mode = "renew" then 0 else
-    PayEnrolReceiver.birthFee config.deployment config.profile.semantics config.profile.template
-      config.tariff opened.authority.snapshot.cell height identities 0
+    PayEnrolReceiver.birthFee config.deployment config.profile.semantics ambient.template
+      ambient.tariff opened.authority.snapshot.cell height identities 0
   -- One room+founder stream, document, application and application session,
   -- plus one hundred ordinary transaction base charges for an initial work
   -- session: 105 transactions, eight births, sixteen grants. Provider tokens
   -- and compute have separate tariffs and are not promised by this allowance.
   -- Byte-priced deployments choose a budget explicitly; counts cannot quote bytes.
-  let suggestion := PayStarterAllowance.recommendation config.tariff (mode == "renew")
+  let suggestion := PayStarterAllowance.recommendation ambient.tariff (mode == "renew")
   let starterInput ← field "$" "starterCredit" obj
   let starter ← if starterInput == .null then
       match suggestion with

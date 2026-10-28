@@ -81,7 +81,7 @@ theorem activity_storage {config : NativeHost.Config} {opened : NativeHost.Opene
     {ingress : ObjectiveActivityReceiver.DecodedIngress}
     (verdict : ObjectiveActivityReceiver.Verdict config.deployment config.profile
       ⟨config.federation, NativeHost.logicalHeight config opened.durable,
-        config.tariff.asset, config.tariff.collector, {}⟩ opened.durable ingress) :
+        opened.pins.tariff.asset, opened.pins.tariff.collector, {}⟩ opened.durable ingress) :
     verdict.intent.exactCharge .storageBytes =
       DeployedCharge.storageCharge opened.durable.snapshot verdict.intent.writes verdict.intent.event := by
   cases verdict with
@@ -101,7 +101,7 @@ theorem seat_storage {config : NativeHost.Config} {opened : NativeHost.Opened co
     {ingress : SeatReceiver.DecodedIngress}
     (verdict : SeatReceiver.Accepted config.deployment config.profile
       ⟨config.federation, NativeHost.logicalHeight config opened.durable,
-        config.tariff.asset, config.tariff.collector, {}⟩ opened.durable ingress) :
+        opened.pins.tariff.asset, opened.pins.tariff.collector, {}⟩ opened.durable ingress) :
     (SeatReceiver.intent verdict).exactCharge .storageBytes =
       DeployedCharge.storageCharge opened.durable.snapshot (SeatReceiver.intent verdict).writes
         (SeatReceiver.intent verdict).event := rfl
@@ -124,7 +124,7 @@ theorem objective_refines_step {config : NativeHost.Config} {opened : NativeHost
     {ingress : ObjectiveActivityReceiver.DecodedIngress}
     (verdict : ObjectiveActivityReceiver.Verdict config.deployment config.profile
       ⟨config.federation, NativeHost.logicalHeight config opened.durable,
-        config.tariff.asset, config.tariff.collector, {}⟩ opened.durable ingress)
+        opened.pins.tariff.asset, opened.pins.tariff.collector, {}⟩ opened.durable ingress)
     {t : DTurn deployedR Digest}
     (derived : Turn.ofLoaded bridge DeployedHistory.history opened.durable verdict.intent = .ok t)
     (schedule : Schedule) :
@@ -143,7 +143,7 @@ theorem seat_refines_step {config : NativeHost.Config} {opened : NativeHost.Open
     {ingress : SeatReceiver.DecodedIngress}
     (verdict : SeatReceiver.Accepted config.deployment config.profile
       ⟨config.federation, NativeHost.logicalHeight config opened.durable,
-        config.tariff.asset, config.tariff.collector, {}⟩ opened.durable ingress)
+        opened.pins.tariff.asset, opened.pins.tariff.collector, {}⟩ opened.durable ingress)
     {t : DTurn deployedR Digest}
     (derived : Turn.ofLoaded bridge DeployedHistory.history opened.durable (SeatReceiver.intent verdict) = .ok t)
     (schedule : Schedule) :
@@ -163,7 +163,7 @@ abbrev ActivityVerdict (config : NativeHost.Config) (opened : NativeHost.Opened 
     (ingress : ObjectiveActivityReceiver.DecodedIngress) :=
   ObjectiveActivityReceiver.Verdict config.deployment config.profile
     ⟨config.federation, NativeHost.logicalHeight config opened.durable,
-      config.tariff.asset, config.tariff.collector, {}⟩ opened.durable ingress
+      opened.pins.tariff.asset, opened.pins.tariff.collector, {}⟩ opened.durable ingress
 
 /-- The OB configuration the receiver actually used. -/
 def activityConfig {config : NativeHost.Config} {opened : NativeHost.Opened config}
@@ -197,7 +197,7 @@ theorem seat_receiver_step {config : NativeHost.Config} {opened : NativeHost.Ope
     {ingress : SeatReceiver.DecodedIngress}
     (verdict : SeatReceiver.Accepted config.deployment config.profile
       ⟨config.federation, NativeHost.logicalHeight config opened.durable,
-        config.tariff.asset, config.tariff.collector, {}⟩ opened.durable ingress)
+        opened.pins.tariff.asset, opened.pins.tariff.collector, {}⟩ opened.durable ingress)
     (ob : ObjectiveActivity.Config) (schedule : Schedule) :
     ObjectiveCheckpointInvariant.Step ob opened.durable.snapshot
       ((execute schedule opened.durable.snapshot (SeatReceiver.intent verdict)).storeAfter
@@ -216,7 +216,7 @@ inductive ReceiverIntent (config : NativeHost.Config) (opened : NativeHost.Opene
   | seat {ingress : SeatReceiver.DecodedIngress}
       (verdict : SeatReceiver.Accepted config.deployment config.profile
         ⟨config.federation, NativeHost.logicalHeight config opened.durable,
-          config.tariff.asset, config.tariff.collector, {}⟩ opened.durable ingress)
+          opened.pins.tariff.asset, opened.pins.tariff.collector, {}⟩ opened.durable ingress)
       (ob : ObjectiveActivity.Config) :
       ReceiverIntent config opened ob (SeatReceiver.intent verdict)
 

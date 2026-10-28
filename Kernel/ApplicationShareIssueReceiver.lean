@@ -123,7 +123,8 @@ theorem charge_fee_exact (accepted : Accepted profile config pins durable height
     charge accepted .feeDebit = accepted.birth.descriptor.fee.amount := rfl
 
 theorem charge_fee_source_quoted (accepted : Accepted profile config pins durable height ingress) :
-    charge accepted .feeDebit = accepted.birth.descriptor.quotedFee config.tariff := by
+    charge accepted .feeDebit =
+      accepted.birth.descriptor.quotedFee accepted.birth.pending.record.creation := by
   rw [charge_fee_exact]
   exact accepted.special_fee_bound
 
