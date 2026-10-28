@@ -17,3 +17,12 @@ lean_nat_def() {  # FILE NAME: the value of `def NAME : Nat := N` in FILE
 }
 
 content_command_version() { lean_nat_def "$1/Kernel/ContentResource.lean" commandVersion; }
+
+# response_marker REPO SYMBOL prints a Host reply marker's byte from the registry
+# (protocol/host-operations.json `response_markers`), e.g. NO_RECORD: the reply to a request the
+# Host refused before any append.
+response_marker() {
+  jq -er --arg s "$2" '[.response_markers[] | select(.symbol == $s) | .code] |
+    if length == 1 then .[0] else error("no single response marker \($s)") end' \
+    "$1/protocol/host-operations.json"
+}

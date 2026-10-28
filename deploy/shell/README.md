@@ -94,6 +94,20 @@ When the client is given a Host path and `MINI_CONSENT_HOST` is unset, it takes
 candidate ships both in `bin/`; `client_consent.rs:50-52`), and the provider then
 reads the deployment config and its Store with the session's own permissions.
 
+Under split tenancy a hosted member's account (`mini-s-NAME`) cannot read the Store, which the
+Store operator owns. That is the isolation boundary, so the member's full consent runs box-side,
+delegated (`native/resource-client/src/consent_proxy.rs`). Per member, a socket-activated `mini
+serve-controller-consent` runs as the Store operator, holds the verifier that replays the Store,
+and answers only that member's consent frames (220-227). Its listener is owned by the member and
+sits in the member's own 0700 directory. The member's session selects it with
+`MINI_CONSENT_SOCKET`, `MINI_CONSENT_PEER_UID` (0: systemd creates the listener),
+`MINI_CONSENT_SHA256` (the provider) and `MINI_CONSENT_CONFIG_SHA256` (the pinned config),
+alongside the three variables above. The client refuses a peer, provider or config that differs
+from these pins before it sends a frame. The member gains no read access: what comes back is the
+consent answer for its own request. The service ends after `--idle-seconds` (600) with no
+connection and restarts from its retained frontier on the next connection. The unit pair is the
+one `deploy/spk-host/controller-world.py` renders for controllers.
+
 The sponsor's side, in their (hosted) shell (grammar: `native/resource-client/src/shell_grammar.rs:429-438`):
 
 ```

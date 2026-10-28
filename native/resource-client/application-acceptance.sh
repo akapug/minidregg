@@ -14,6 +14,8 @@ HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 REPO=$(CDPATH='' cd -- "$HERE/../.." && pwd)
 . "$REPO/native/resource-client/journey.d/lib/genesis-params.sh"
 resolve_params_sh "$REPO" || exit 2
+. "$REPO/native/resource-client/journey.d/lib/wire.sh"
+NO_RECORD=$(response_marker "$REPO" NO_RECORD)
 MINI=${MINI:-"$HERE/target/debug/mini"}
 STORE_BINARY=${STORE_BINARY:-"$REPO/native/hyperdocument-link-sqlite-store/target/debug/minidregg-link-sqlite-store"}
 SIGNATURE_BINARY=${SIGNATURE_BINARY:-"$REPO/native/credential-signature-verifier/target/debug/minidregg-credential-signature-verifier"}
@@ -65,11 +67,15 @@ deny_query() (
     echo "unauthorized read succeeded: $label" >&2
     exit 1
   fi
-  reason_hex=$(printf '%s' 'observation refused' | od -An -tx1 -v | tr -d ' \n')
+  # Refused by name at the observation, before any record: the key holds no grant on that
+  # target (`no-grant`, phase observation), a NO_RECORD (253) frame the client keeps.
   if ! { [ -s "$EVIDENCE/$label/signed-observation.bin" ] &&
       [ ! -e "$EVIDENCE/$label/view.json" ] &&
-      grep -Fq 'host refused query' "$EVIDENCE/$label.stderr" &&
-      grep -Fq "$reason_hex" "$EVIDENCE/$label.stderr"; }; then
+      jq -e '.type == "minidregg-query-refusal-v1" and .stage == "query"' \
+        "$EVIDENCE/$label/query-refusal.json" >/dev/null &&
+      [ "$(head -c 1 "$EVIDENCE/$label/query-refusal.frame" | od -An -tu1 | tr -d ' ')" = "$NO_RECORD" ] &&
+      grep -Fq 'host refused query: refused: no-grant: ' "$EVIDENCE/$label.stderr" &&
+      grep -Fq '(phase observation)' "$EVIDENCE/$label.stderr"; }; then
     echo "missing exact native observation refusal: $label" >&2
     exit 1
   fi
