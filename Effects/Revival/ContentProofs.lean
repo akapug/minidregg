@@ -10,9 +10,28 @@ action against `ContentResource.step`'s write sites; the replay half is
 `ContentResource.run_executes` plus the rotation's guard, which holds because no content
 write touches the blinding.
 -/
-import Effects.Revival.Statements
-import Effects.Revival.EngineProofs
-import Theory.AssertAxioms
+module
+
+public import Effects.Revival.Statements
+public import Effects.Revival.EngineProofs
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Effects.Revival
 

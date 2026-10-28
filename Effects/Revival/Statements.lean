@@ -41,8 +41,12 @@ arm (a real refinement, not an `rfl` through a reader this lane wrote), and in
 `contentSpec.Complete`, the declared frame of the fifteen content actions (a claim that can
 be false, with its own teeth).
 -/
-import Effects.Revival.Engine
-import Kernel.DeclaredResourceController
+module
+
+public import Effects.Revival.Engine
+public import Kernel.DeclaredResourceController
+
+@[expose] public section
 
 namespace Minidregg.Effects.Revival
 

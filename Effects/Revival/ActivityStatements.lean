@@ -20,8 +20,12 @@ satisfiable pole, and the collapsed judgment is refuted.
 
 This file proves nothing; the proofs follow the auditor's verdict.
 -/
-import Effects.Revival.Engine
-import Kernel.ObjectiveActivity
+module
+
+public import Effects.Revival.Engine
+public import Kernel.ObjectiveActivity
+
+@[expose] public section
 
 namespace Minidregg.Effects.Revival
 

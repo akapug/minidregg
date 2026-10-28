@@ -206,8 +206,12 @@ The commits that follow the opening.  The Host arm belongs to the platform lane 
 2. **Transfer (activity `Effect.transfer`).**  The substrate is the Book: `Prim =
    CanonicalResourceKernel.Operation`, `step` the floor-guarded posting, `writes = {(source,
    asset), (destination, asset)}`, `field = balance asset`.  `sem` is `transferVerdict`
-   over `(config, funds, reserve, written)` as `Ctx`, returning
-   `Except EffectRefusal (List Operation)` with `unfunded`, `reserved`, `closed` by name.
+   over `(config, funds, reserve, written)` as `Ctx`.  A refused verdict (`unfunded`,
+   `reserved`, `closed`) is NOT the declaration's refusal.  It is an accepted yield whose
+   await records `.performed (.refused reason)` and that commits nothing, so `sem` returns
+   `.ok []` with the verdict in the emitted await, never `.error`.  The gate is `TwoLevels`
+   (`ActivityStatements.lean`, proved of today's `commitYield`) for the derived executor
+   projected to a `YieldCommit`.
    `commitYield`'s `performed` branch dispatches through an activity registry (the same
    `Handler` type, over the activity's turn cell).  Deleted in the same commit:
    `Effect.transfer`, `effectOps`, `withEffect`, the transfer branch of `commitYield`, and

@@ -7,9 +7,13 @@ imports only `Theory.Store`, `Theory.TypedAuthorization` and the stream codecs, 
 proofs build on a small closure.  The live keystones over the deployed controller are in
 `Effects.Revival.Statements`, which imports this file.
 -/
-import Theory.Store
-import Theory.TypedAuthorization
-import Compiler.Tower256ConcreteBackend
+module
+
+public import Theory.Store
+public import Theory.TypedAuthorization
+public import Compiler.Tower256ConcreteBackend
+
+@[expose] public section
 
 namespace Minidregg.Effects.Revival
 

@@ -6,9 +6,28 @@ lane/audit-platform; nothing here changes a statement): the engine keystone, the
 completeness keystone, and every satisfiable / teeth / premise witness of the two-entry pole,
 plus the materialize lemma the live content handler's soundness needs.
 -/
-import Effects.Revival.Engine
-import Theory.CellState
-import Theory.AssertAxioms
+module
+
+public import Effects.Revival.Engine
+public import Theory.CellState
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Effects.Revival
 
