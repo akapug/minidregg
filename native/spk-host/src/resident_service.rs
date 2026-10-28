@@ -3,6 +3,7 @@
 //! owner, and opens HTTP only after fresh native physical completion. INSTALL
 //! materialization and stopped wake remain separate lifecycle operations.
 
+use crate::io_context::IoContext;
 use crate::agent_api_custody::AgentCustody;
 use crate::agent_api_lifetime_custody_v3::LifetimeCustodyV3;
 use crate::agent_api_lifetime_reverse_v3::LifetimeReverseClient;
@@ -535,9 +536,9 @@ fn retire_start_markers(
         }
     }
     for path in present {
-        fs::remove_file(path)?;
+        fs::remove_file(&path).ctx("remove", &path)?;
     }
-    File::open(&config.journal_dir)?.sync_all()
+    File::open(&config.journal_dir).ctx("open", &config.journal_dir)?.sync_all()
 }
 
 /// Per-generation artifacts of a governed repeat CREATE (event69/70/72).
@@ -599,9 +600,9 @@ fn retire_retry_v4_markers(config: &ResidentConfig) -> io::Result<()> {
         }
     }
     for path in present {
-        fs::remove_file(path)?;
+        fs::remove_file(&path).ctx("remove", &path)?;
     }
-    File::open(journal)?.sync_all()
+    File::open(&journal).ctx("open", &journal)?.sync_all()
 }
 
 /// Which lawful BEGIN this START consumes. Continue and a first create stay
@@ -986,7 +987,7 @@ fn reconcile_uncertain_submit(
         },
     };
     let mut random = [0u8; 16];
-    File::open("/dev/urandom")?.read_exact(&mut random)?;
+    File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut random)?;
     write_new(
         &config.journal_dir,
         &format!(
@@ -1113,7 +1114,7 @@ fn reconcile_prior_start(
         PriorUnitState::Uncertain => "uncertain-unit-incarnation",
     };
     let mut random = [0u8; 16];
-    File::open("/dev/urandom")?.read_exact(&mut random)?;
+    File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut random)?;
     write_new(
         &config.journal_dir,
         &format!(

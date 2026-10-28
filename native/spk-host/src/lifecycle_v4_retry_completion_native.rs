@@ -5,6 +5,7 @@
 //! `lifecycle_v3_completion_native` (op70 plan / op71 assemble / op38 submit /
 //! op39 receipt-only lookup). Uncertain op38 is never resubmitted.
 
+use crate::io_context::IoContext;
 use crate::dispatch_author::{private_signing_key, SignerPin};
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
 use crate::hostd::Journal;
@@ -83,7 +84,7 @@ pub(crate) struct RetryReportInput<'a> {
 
 fn nonce() -> io::Result<String> {
     let mut bytes = [0u8; 16];
-    File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut bytes)?;
     let value = u128::from_le_bytes(bytes);
     if value == 0 {
         return Err(invalid("v4 retry physical nonce zero"));
@@ -615,8 +616,8 @@ fn checked_assembled(
         .parent()
         .ok_or_else(|| invalid("v4 retry completion parent absent"))?;
     private_dir(parent)?;
-    if fs::read(parent.join(ACTIVE_MARKER))? != assembled.active_marker
-        || fs::read(attempt.join(COMPLETION_INGRESS_FILE))? != assembled.ingress
+    if fs::read(parent.join(ACTIVE_MARKER)).ctx("read", &(parent.join(ACTIVE_MARKER)))? != assembled.active_marker
+        || fs::read(attempt.join(COMPLETION_INGRESS_FILE)).ctx("read", &(attempt.join(COMPLETION_INGRESS_FILE)))? != assembled.ingress
         || assembled.begin_sha256 != hex(&Sha256::digest(&begin.ingress))
         || assembled.claim_sha256 != hex(&Sha256::digest(&claim.claim_ingress))
         || assembled.report_sha256 != hex(&Sha256::digest(signed_report))
@@ -700,7 +701,7 @@ pub(crate) fn recover_receipt_only(
         "mini-spk-launch-retry-completion-submit-requested-v4",
         COMPLETION_INGRESS_FILE,
     )?;
-    let marker: Value = serde_json::from_slice(&fs::read(attempt_dir.join("op38-requested.json"))?)?;
+    let marker: Value = serde_json::from_slice(&fs::read(attempt_dir.join("op38-requested.json")).ctx("read", &(attempt_dir.join("op38-requested.json")))?)?;
     if !ingress.starts_with(INGRESS_TAG)
         || text(&marker, "claimSha256")? != hex(&Sha256::digest(&claim.committed))
     {

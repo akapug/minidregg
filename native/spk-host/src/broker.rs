@@ -2,6 +2,7 @@
 //! provide grain isolation. Only the registered one-shot helper holds volume
 //! mount/freeze privilege; the broker never runs with host uid zero.
 
+use crate::io_context::IoContext;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -18,6 +19,8 @@ use crate::canonical::hex64;
 
 #[path = "broker_endpoint.rs"]
 mod endpoint;
+#[cfg(test)]
+pub(crate) fn connect_for_test(path: &Path) -> io::Result<std::os::unix::net::UnixStream> { endpoint::connect_for_test(path) }
 
 #[path = "broker_runtime_adoption.rs"]
 mod runtime_adoption;
@@ -230,17 +233,17 @@ fn spk_namespace_paths(root: Option<&Path>) -> io::Result<(PathBuf, PathBuf)> {
 fn validate_spk_namespace(root: Option<&Path>) -> io::Result<()> {
     let root=root.ok_or_else(||invalid("SPK namespace requires an explicit store-scoped root"))?;
     let (packages,inbox)=spk_namespace_paths(Some(root))?;
-    if fs::canonicalize(root)? != root {
+    if fs::canonicalize(&root).ctx("resolve", &root)? != root {
         return Err(invalid("SPK root traverses a symlink"));
     }
     for entry in root.ancestors() {
-        let metadata=fs::symlink_metadata(entry)?;
+        let metadata=fs::symlink_metadata(&entry).ctx("inspect", &entry)?;
         if !metadata.is_dir() || !(crate::os::root_owner(metadata.uid()) || metadata.uid()==unsafe{libc::geteuid()}) || metadata.mode()&0o022!=0 {
             return Err(invalid(format!("SPK root custody differs: {}",entry.display())));
         }
     }
     for (path,mode) in [(root,0o755),(packages.as_path(),0o755),(inbox.as_path(),0o700)] {
-        let metadata=fs::symlink_metadata(path)?;
+        let metadata=fs::symlink_metadata(&path).ctx("inspect", &path)?;
         if !metadata.is_dir() || !(crate::os::root_owner(metadata.uid()) || metadata.uid()==unsafe{libc::geteuid()}) || metadata.mode()&0o777!=mode {
             return Err(invalid(format!("SPK namespace directory custody differs: {}",path.display())));
         }
@@ -399,7 +402,7 @@ fn read_private_operator(path: &Path, max: u64) -> io::Result<Vec<u8>> {
     let file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(path)?;
+        .open(&path).ctx("open", &path)?;
     let meta = file.metadata()?;
     if !meta.is_file() || meta.uid()!=unsafe{libc::geteuid()} || meta.mode() & 0o077 != 0 || meta.len() > max {
         return Err(invalid(format!("{} must be operator 0600", path.display())));
@@ -437,10 +440,10 @@ fn pinned_digest(path: &Path, meta: &fs::Metadata) -> io::Result<String> {
     if let Some(known) = PINNED_DIGESTS.lock().ok().and_then(|cache| cache.as_ref().and_then(|c| c.get(&key).cloned())) {
         return Ok(known);
     }
-    let digest = file_sha256(&mut File::open(path)?)?;
+    let digest = file_sha256(&mut File::open(&path).ctx("open", &path)?)?;
     PINNED_HASHES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     // The identity must still be the one hashed: a file replaced mid-read is not remembered.
-    let after = fs::symlink_metadata(path)?;
+    let after = fs::symlink_metadata(&path).ctx("inspect", &path)?;
     if (after.dev(), after.ino(), after.size(), after.mtime(), after.mtime_nsec(), after.ctime(), after.ctime_nsec()) == key {
         if let Ok(mut cache) = PINNED_DIGESTS.lock() {
             cache.get_or_insert_with(Default::default).insert(key, digest.clone());
@@ -450,7 +453,7 @@ fn pinned_digest(path: &Path, meta: &fs::Metadata) -> io::Result<String> {
 }
 
 fn pinned_root_executable(path: &Path, sha: Option<&str>) -> io::Result<()> {
-    let meta = fs::symlink_metadata(path)?;
+    let meta = fs::symlink_metadata(&path).ctx("inspect", &path)?;
     if !path.is_absolute() || !meta.is_file() || !(crate::os::root_owner(meta.uid()) || meta.uid()==unsafe{libc::geteuid()}) || meta.mode() & 0o022 != 0 {
         return Err(invalid(format!(
             "{} must be a root-owned executable",
@@ -473,13 +476,13 @@ fn pinned_root_executable(path: &Path, sha: Option<&str>) -> io::Result<()> {
 fn operator_dir(path: &Path, mode: u32) -> io::Result<()> {
     match fs::symlink_metadata(path) {
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            fs::create_dir(path)?;
-            fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
+            fs::create_dir(&path).ctx("create directory", &path)?;
+            fs::set_permissions(path, fs::Permissions::from_mode(mode)).ctx("set permissions", &path)?;
         }
         Err(error) => return Err(error),
         Ok(_) => {}
     }
-    let meta = fs::symlink_metadata(path)?;
+    let meta = fs::symlink_metadata(&path).ctx("inspect", &path)?;
     if !meta.is_dir()
         || meta.uid()!=unsafe{libc::geteuid()}
         || meta.gid()!=unsafe{libc::getegid()}
@@ -588,7 +591,7 @@ fn helper(program: &Path, args: &[&str]) -> io::Result<String> {
 fn write_operator_text(path: &Path, text: &str, mode: u32, replace: bool) -> io::Result<bool> {
     if let Ok(current) = fs::read(path) {
         if current == text.as_bytes() {
-            fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
+            fs::set_permissions(path, fs::Permissions::from_mode(mode)).ctx("set permissions", &path)?;
             return Ok(false);
         }
         if !replace {
@@ -605,18 +608,18 @@ fn write_operator_text(path: &Path, text: &str, mode: u32, replace: bool) -> io:
             .and_then(|n| n.to_str())
             .unwrap_or("broker")
     ));
-    let _ = fs::remove_file(&temp);
+    let _ = fs::remove_file(&temp).ctx("remove", &temp);
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(mode)
-        .open(&temp)?;
+        .open(&temp).ctx("open", &temp)?;
     // The broker's umask is 077; unit files are meant to be world-readable.
     file.set_permissions(fs::Permissions::from_mode(mode))?;
     file.write_all(text.as_bytes())?;
     file.sync_all()?;
-    fs::rename(&temp, path)?;
-    File::open(parent)?.sync_all()?;
+    fs::rename(&temp, path).ctx("rename", &temp)?;
+    File::open(&parent).ctx("open", &parent)?.sync_all()?;
     Ok(true)
 }
 
@@ -698,7 +701,7 @@ impl Broker {
             if prefix == config.grains_root {
                 break;
             }
-            let meta = fs::symlink_metadata(&prefix)?;
+            let meta = fs::symlink_metadata(&prefix).ctx("inspect", &prefix)?;
             if !meta.is_dir() || !(crate::os::root_owner(meta.uid()) || meta.uid()==unsafe{libc::geteuid()}) || meta.mode() & 0o022 != 0 {
                 return Err(invalid(format!(
                     "grains root ancestor {} is not root-owned",
@@ -706,7 +709,7 @@ impl Broker {
                 )));
             }
         }
-        let root=fs::symlink_metadata(&config.grains_root)?;
+        let root=fs::symlink_metadata(&config.grains_root).ctx("inspect", &config.grains_root)?;
         if !root.is_dir() || root.uid()!=0 || root.mode()&0o7777!=0o755 { return Err(invalid("protected world root custody refused")); }
         let broker = config.grains_root.join("broker");
         operator_dir(&broker, 0o700)?;
@@ -719,7 +722,7 @@ impl Broker {
             .append(true)
             .create(true)
             .mode(0o600)
-            .open(broker.join("broker.log"))?;
+            .open(broker.join("broker.log")).ctx("open", &(broker.join("broker.log")))?;
         Ok(Self {
             config,
             operator_uid,
@@ -815,7 +818,7 @@ impl Broker {
     /// Resident units installed for this app (any state).
     fn app_units_installed(&self, store: &str, app: &str) -> io::Result<Vec<String>> {
         let mut installed = Vec::new();
-        for entry in fs::read_dir(self.broker_dir().join("units"))? {
+        for entry in fs::read_dir(self.broker_dir().join("units")).ctx("list", &(self.broker_dir().join("units")))? {
             let name = entry?.file_name().to_string_lossy().into_owned();
             let Ok((unit_store, unit_app, _)) = Self::check_resident_unit_name(&name) else {
                 continue;
@@ -832,7 +835,7 @@ impl Broker {
 
     fn app_units_active(&self, store: &str, app: &str) -> io::Result<Vec<String>> {
         let mut active = Vec::new();
-        for entry in fs::read_dir(self.broker_dir().join("units"))? {
+        for entry in fs::read_dir(self.broker_dir().join("units")).ctx("list", &(self.broker_dir().join("units")))? {
             let name = entry?.file_name().to_string_lossy().into_owned();
             let Ok((unit_store, unit_app, _)) = Self::check_resident_unit_name(&name) else {
                 continue;
@@ -875,18 +878,18 @@ impl Broker {
                 let dir = self.root().join(&store);
                 match fs::symlink_metadata(&dir) {
                     Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                        fs::create_dir(&dir)?;
+                        fs::create_dir(&dir).ctx("create directory", &dir)?;
                         std::os::unix::fs::chown(
                             &dir,
                             Some(self.operator_uid),
                             Some(self.operator_gid),
                         )?;
-                        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))?;
+                        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).ctx("set permissions", &dir)?;
                     }
                     Err(error) => return Err(error),
                     Ok(_) => {}
                 }
-                let meta = fs::symlink_metadata(&dir)?;
+                let meta = fs::symlink_metadata(&dir).ctx("inspect", &dir)?;
                 if !meta.is_dir()
                     || meta.uid() != self.operator_uid
                     || meta.mode() & 0o7777 != 0o700
@@ -910,7 +913,7 @@ impl Broker {
                     );
                 }
                 let mut bound = Vec::new();
-                for entry in fs::read_dir(self.broker_dir().join("placements"))? {
+                for entry in fs::read_dir(self.broker_dir().join("placements")).ctx("list", &(self.broker_dir().join("placements")))? {
                     let path = entry?.path();
                     if path.extension().and_then(|e| e.to_str()) != Some("json") {
                         continue;
@@ -1001,23 +1004,23 @@ impl Broker {
                     }
                     let inbox = private_inbox.join(format!("grain-{sha256}.spk"));
                     let temp = private_inbox.join(format!(".grain-{sha256}.broker"));
-                    let _ = fs::remove_file(&temp);
+                    let _ = fs::remove_file(&temp).ctx("remove", &temp);
                     let mut out = OpenOptions::new()
                         .write(true)
                         .create_new(true)
                         .mode(0o600)
-                        .open(&temp)?;
+                        .open(&temp).ctx("open", &temp)?;
                     let copied = io::copy(&mut source.take(bound + 1), &mut out)?;
                     if copied > bound || copied != source_length {
-                        let _ = fs::remove_file(&temp);
+                        let _ = fs::remove_file(&temp).ctx("remove", &temp);
                         return Err(invalid("staged package changed or exceeds import profile bound"));
                     }
                     out.sync_all()?;
-                    if file_sha256(&mut File::open(&temp)?)? != sha256 {
-                        let _ = fs::remove_file(&temp);
+                    if file_sha256(&mut File::open(&temp).ctx("open", &temp)?)? != sha256 {
+                        let _ = fs::remove_file(&temp).ctx("remove", &temp);
                         return Err(invalid("staged package differs from its SHA-256"));
                     }
-                    fs::rename(&temp, &inbox)?;
+                    fs::rename(&temp, &inbox).ctx("rename", &temp)?;
                     let arguments=ingest_arguments(self.config.spk_root.as_deref(),&runtime.spk_host,
                         &runtime.spk_host_sha256,&inbox,placement.app_uid,profile)?;
                     let borrowed=arguments.iter().map(String::as_str).collect::<Vec<_>>();
@@ -1137,8 +1140,8 @@ impl Broker {
                 // dead incarnation by. `start` and `stop` reset it.
                 if !visibility.is_empty() {
                     let drop_dir=crate::os::runtime_units().join(format!("{unit}.d"));
-                    fs::create_dir_all(&drop_dir)?;
-                    fs::set_permissions(&drop_dir,fs::Permissions::from_mode(0o755))?;
+                    fs::create_dir_all(&drop_dir).ctx("create directory", &drop_dir)?;
+                    fs::set_permissions(&drop_dir,fs::Permissions::from_mode(0o755)).ctx("set permissions", &drop_dir)?;
                     write_operator_text(&drop_dir.join("10-native-visibility.conf"),&visibility,0o644,false)?;
                 }
                 systemctl(&["daemon-reload"])?;

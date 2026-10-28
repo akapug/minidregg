@@ -20,129 +20,116 @@ Notation used in the commands:
 - "template" = the fixture's per-candidate world restored (`NEWPARTICIPANT_TEMPLATE_DIR`, on by default);
   "genesis" = the row writes its own genesis.
 
-## 0. Candidate 0ce31391 (validator run, 2026-10-28 02:00-03:40Z)
+## 0. Candidates 2d8b7ed54, 76758dba6, e89fe7b8b (validator run, 2026-10-28 06:00-08:30Z)
 
-Run against `/build/candidates/0ce31391790a7e2ed9f83eb1b8bb85d6556a0de3`'s binaries on hbox
-(journey rows, app worlds, FOUC, authority) and dregg-ref (effects, acceptance, oracle checks). Drivers
-from the candidate's tree, with the row-harness fixes below and, where the coordinator asked, main's
-scripts (effects: main bd37686c0's `world/` and drivers; jserve: lane/custody-b beb108d5f; grain-birth:
-L1c 746b182d2). The gate (tour, composed) and enrol-resume are the integrator's: build green,
-enrol-resume PASS.
+Three candidates landed during one run. Each row is quoted on the newest candidate it ran on.
+- 2d8b7ed54 (cut 14+, `2d8b7ed544100acfaeb9ff2f9b597c31b8cb81e6`): the grain-install fix (25cfb86bd),
+  prepare-refusal clients (f73893fce), split-tenancy consent (52c0eae22), frame v8.
+- 76758dba6 (`76758dba687cde9447bc45d77931bb7d57527e56`): adds the resident-start fixes (un-ns-owner
+  125927331 + 29d3152d3, and 507d6ce78's controlGroup bound) and the JDISCLOSE row fix cd79cdaa3.
+- e89fe7b8b (`e89fe7b8ba8c477d1538ed6ee1f0e7aeac70c97f`): adds the story-GM fix (a8376ce8f) and
+  thin-birth (a5343b507). Same genesis.
 
-Row-harness fixes this run produced (lane/rows-ledger, all merged or routed to the integrator):
-7dfe4a3c4 (m4 provision folder 0700), b627478ec (native-share-member.sh worker-bare refused at prepare),
-0a05ab6ba (journey classifiers match OUTCOME/v8), 709cd12d0 (acceptance.sh consent provider beside the
-wrapper Host), 6ee5acb4c (check-fouc site pages), 96fc2701d (demo/kernel rows pass GRAIN_RUNTIME), the jnames.sh missing-reference pattern.
+Rows ran against each candidate's binaries:
+- hbox: journey rows, demo `--only`, app worlds, m6grain.
+- dregg-ref: the genesis writers and effects.
+Drivers come from the candidate's own source.tar, except for the overlays named in the result rows.
+On 76758dba6 and e89fe7b8b, main's `scripts/spk-platform/{grain-journey.sh,composed-inputs.sh}` were
+overlaid (50ec8de76's importProfile, 789b9b478's repeat suffix). Every harness fix from the previous
+run is on these trees. The gate and enrol-resume are the integrator's.
 
-| group | row | result on 0ce31391 | owner of the red |
+Row-harness fix this run: lane/rows-ledger 49c70a937. JP2's thin birth now declares field 2, the field
+its later rows write. Since K-FIELD-CLOSURE, a declared cell born without a field list holds none.
+
+| group | row | result | owner of the red |
 |---|---|---|---|
-| journey rows | journey (J0-J8, rotation) | PASS 15/15 | |
-| journey rows | activity seats bounty call send domain upgrade objectrecord welcomecontinuity m3 m8 fleetsign chargedfailure jbend jprivate rate hermes sshe2e m4 | PASS | |
-| journey rows | jserve | PASS with custody-b beb108d5f (253 refusals named); red on the candidate's own driver (envelope v1) | custody-b |
-| journey rows | jpay | JPAY1-4 PASS; JPAY6 FAIL `query parent-witness-tool-pre: request refused ... (phase observation)` | L1 / pay |
-| journey rows | rooms | J5 red was the v7 classifier; J5 8/8 and JPRIV1 229 PASS on the fixed tree | |
-| journey rows | m6grain | FAIL: with b627478ec the store phase passes; then `install-a` hits the grain-install red | L1c (25cfb86bd) |
-| journey rows | objective, hostupgrade, m7, exchange | UNCONFIGURED: no lean env; no previous candidate set; no M7 reference; fn is out | |
-| journey rows | births, perf | UNCONFIGURED (box not quiet; timing rows belong on dregg-build) | |
-| demo steps | J0-J8, J12X, KC, KT, K10, KIX, K10C, K12C/T/M/R/I/H, JPRIV1, JFEEDBACK, J12W, THIN, JDV (143), M5, JNAMES, JPAYE1 (14/14), JPAYE2 (38/38), JPAYE3 (27/27), JRLANE, JGATE, JESC, JFLEETIN, JSLK, JAUDIT (11/11) | PASS (the 5000 s demo budget starves the tail; tail steps run with `--only`) | |
-| demo steps | JP2 | thin birth arm (lane/thin-birth, Kernel.NativeThinBirth): row 19 asserts a successful remote create under thin consent, the lifecycle rows are restored, and a swapped birth plan is refused birthSourceChanged; not yet run against a candidate | L2 shell / thin consent |
-| demo steps | JPD | FAIL row 3 `doc protect pd-paper`: `inspect object-audience ... is a session frame, not a codec frame (phase op 8)` | L2 shell |
-| demo steps | JDISCLOSE | FAIL: invocation refused `DeclaredResourceController.Reject.scalar (undeclaredField 2)` | declared-resource owner (same family as acceptance.sh `unsupportedVersion`) |
-| demo steps | JCHAT | 3/69 differ: the Discord mirror rows need `mini-discord-mirror` and `fake-discord` in one dir (the set has no fake-discord) | input |
-| demo steps | M6, JR17 | UNCONFIGURED: M6 runs as the operator uid; JR17's key rows need /etc/mini/keys-client.json | |
-| demo steps | J17 | FAIL: after a decided `bookRefused` pay, the next `pay lab week` says "a previous pay of this request was recorded but never submitted" | L1c prepare-refusal clients / pay |
-| demo steps | WEB | FAIL 4/38: extra `unavailable` in transclusion placeholders (3 rows); `board-fields` 403 | L12 web |
-| demo steps | JLI | FAIL: `law export show jli-room/notes` refused as a malformed reference name | L2 shell |
-| demo steps | KTPL | FAIL 12/163: `room new lab --template workroom` runs no template lines; index links missing | L2 shell |
-| demo steps | J12 | FAIL 1/139: row 87, index links to paper | L2 shell |
-| demo steps | J14 | L4b's (J14_TOOLS/AWAIT on this candidate) | L4b |
-| app tables | every world (b1, b2, b4, b6, rt, featured; standard and market-large) | BLOCKED: every install refused (`v3 BEGIN native reply ...`; in fact op69 claim assemble: "claim plan differs from original BEGIN", storeIdentity vs expectedSeed) | L1c, fix lane/prepare-refusal-clients 25cfb86bd |
-| app tables | b8 IPython | refused `Too many or too few segments 583` | L13 |
-| effects | effect dues bounty play ballot story commons | PASS 7/7 (19, 17, 21, 27, 27, 25, 20 rows) with main's world/ and drivers | |
-| acceptance | acceptance.sh, selected-release-acceptance.sh | FAIL `invocation preparation: DeclaredResourceController.Reject.unsupportedVersion` | custody-b |
-| acceptance | application-acceptance.sh | FAIL `sqlite-store error: published byte record is missing` | custody-b |
-| acceptance | grain-runtime acceptance (plain, PROVIDER_BOOTSTRAP) | FAIL `authorityBatch` at prepare (custody-b reports PROVIDER_BOOTSTRAP fixed in dabf7afdd) | custody-b |
-| acceptance | authority-acceptance.sh | FAIL :223, the denied write is refused at prepare (no call.bin); on the direct-binary route mini said "request status uncertain" (fixed in f73893fce) | L1c / custody-b |
-| acceptance | fn-e1e2 setup-mini | UNCONFIGURED: no fn fixture tree (fn is out) | |
-| oracle | focused harness checks | PASS 2/2 (test renamed `..._configuration_before_bootstrap`) | |
-| oracle | joracle, Oracle v7 fresh world | BLOCKED on the grain-install red | codex |
-| FOUC | check-fouc app, site | PASS 12/12, 12/12 | |
-| demo seed | deploy/demo-seed/seed.sh | not run here: needs the demo-vm frame; infra runs it on a dregg-ref scratch root | infra |
-
-Not this validator's (central or timing): templates on/off, births/perf, hot-path BEFORE/AFTER,
-generic-simplex load 200 (needs the integrator's built Verify exe), lifetime-grant Lean fixtures,
-cohort gate (needs a built Lean tree and bun).
+| journey rows (2d8b7ed54) | journey, rooms, activity, seats, call, send, bounty, domain, upgrade, objectrecord, welcomecontinuity, m3, m4, sshe2e, hermes, m8, fleetsign, chargedfailure, jbend, jserve (the candidate's own driver), jprivate, rate | PASS | |
+| journey rows (2d8b7ed54) | jpay | PASS: JPAY1 15/15, JPAY2 18/18, JPAY3 24/24, JPAY4 26/26, JPAY6 41/41 (red on 0ce31391) | |
+| journey rows | m6grain | PASS on 76758dba6 with 789b9b478's grain-journey.sh, 1062 s. evidence-a has 25/25 phases, including stop, start-a2, enroll-a2 and poll-a2; world b and the cross-world refusal also pass. On 2d8b7ed54 it was the resident-start red. On bare 76758dba6 enroll-a2 failed: a trailing `2` had come to mean "second session" (closed by 789b9b478, now on main) | |
+| journey rows | objective, hostupgrade, m7, exchange, births, perf | UNCONFIGURED, as before | |
+| journey rows | jbend (deputy) | 33/0 on 76758dba6 (un-bend-seed 14adcc13a) | |
+| demo row (2d8b7ed54) | the row itself | 22/45 in its 5,000 s budget (KTPL 1756 s, J17 1265 s on a loaded hbox). Every later step was run with `--only` | |
+| demo steps | J0-J8, J12X, KC, KT, K10, KIX, K10C, K12C/I/T/M/R/H, WEB 38/38 | PASS (2d8b7ed54 demo row) | |
+| demo steps | THIN, JLI, KTPL 196/196, JPRIV1 229, J17 204, J12W 81, JFEEDBACK 19, JSLK 23/23 | PASS on e89fe7b8b (JLI, KTPL and J17 were red or starved on 2d8b7ed54) | |
+| demo steps | J12 139/139 (row 87 fixed), JNAMES, JDV 143, JPD 82, M3, M4, M5, M8, JPAYE1 14/14, JPAYE2 38/38, JPAYE3 27/27, JROT 34/34, JROTL 10/10, JRLANE 14/14, JGATE 12/12, JESC 13/13, JFLEETIN 12/12, JAUDIT 11/11 | PASS (2d8b7ed54 `--only`) | |
+| demo steps | JP2 | On e89fe7b8b the remote thin birth (row 19) and its display pass. With 49c70a937, row 22 `submit first-write` is refused before signing: `thin consent refused: NativeThinConsent.Refusal.servedRootMismatch`. 11 of 66 rows, including the swapped-plan refusal, are not reached | thin-birth owner (a5343b507), via the coordinator |
+| demo steps | JDISCLOSE | FAIL 7/20 on 76758dba6, with cd79cdaa3 in it; the run dies at `submit da1`. narrow-observe-only, narrow-mutate and narrow-owner refused `DeclaredResourceScalar.Reject.guardRejected 0` where law-denied is expected. unenrolled-1..3 give one frame but not "refused at challenge, bad-signature". d8-descent-hint has no hint line. `chat invite` now needs the full v3 recipient declaration, and `doc append` needs protected-document audience enrollment | JDISCLOSE owner a8a584cfddb80cad4 (lane red-jdisclose-scalar) |
+| demo steps | JCHAT | 3/69 differ: the set has no `fake-discord` beside `mini-discord-mirror` | input |
+| demo steps | M6, M7, JR17 | UNCONFIGURED: M6 needs the operator uid, M7 a reference build, JR17 /etc/mini/keys-client.json | |
+| demo steps | J14 | L4b's | L4b |
+| genesis writers (dregg-ref) | acceptance, application, selected-release, grain plain, grain PROVIDER_BOOTSTRAP, JPAY2 18/18 | PASS on 2d8b7ed54 and on 76758dba6 | |
+| genesis writers | authority-acceptance | The prepare refusal now passes: exit 3, NO_RECORD 253, decoded law-denied naming subject 8's write clause. Then FAIL at :247-253 on both candidates: the post-denial view of resource 600 has `.cell.entries` [] where one entry, field 1 = "0", is expected. The world root, height and cell root match | a GLM, via the coordinator (not L1e) |
+| effects (dregg-ref, 2d8b7ed54) | effect 19, dues 17, bounty 21, play 27, ballot 27, story 25, commons 20 | PASS 7/7 (failed [] each), the candidate's own `world/` | |
+| apps | every app start on 2d8b7ed54 | the resident-start red (ns-owner pin, then op 7 controlGroup). Install itself passes: b1 SandMD birth/install/share exit 0 (25cfb86bd clears the install red) | un-ns-owner (fixed in 76758dba6) |
+| apps | concurrent world-ups | 5 of 6 worlds started together died in the store phase with `consent refused: native durable read failed: sqlite-store error: opaque SQLite failure 15: locking protocol`. The failed worlds left orphaned codec/consent residents with no PID file | un-ns-owner (f02507d22: close-on-exec fds, residents get PID files) |
+| apps | shared hbox world-up lock | Plain `flock /tank/lanes/world-up.lock CMD` hands its fd to world-up's long-lived servers, so a world holds the lock until it is torn down, and past world-down while residents survive. Every user switched to `flock -o` | |
+| apps | featured (76758dba6) | 9 PASS of 13. PASS: EtherCalc lifecycle and write, DokuWiki lifecycle and write, Datasette lifecycle and recorded read, and the HedgeDoc, Davros and HledgerWeb lifecycles. FAIL: HedgeDoc write (socket.io `close frame`), Davros write and HledgerWeb write (no detail line), sntfy lifecycle (`get-m exit=22` on page /). Evidence: hbox:/tank/rows-76758dba-apps/q-featured/ | deputy |
+| apps | b1, b2, b6, b4, rt, fixups (76758dba6) | queued behind the shared world-up lock. Their plain-flock waiters await ember's ruling; the table runs once they reach the lock | deputy |
+| apps (deputy) | japps --box | 28/29 on 76758dba6: co-edit and lifecycle PASS. Hacker Slides `PUT /slides.md 403` is the restart-renew gap | un-stale-enrollment (a4e312352a7091f59) |
+| apps (deputy) | B8 | 0/4 on 2d8b7ed54 (resident start, plus IPython's importProfile harness bug, 50ec8de76). On 76758dba6: Mercurial lifecycle PASS and write PASS; IPython lifecycle PASS, write FAIL (kernel websocket `close frame`); MediaWiki and Firefly III rerunning | deputy |
+| apps (deputy) | DiagramsNet | unsupported: declares permissions without a signed bridge schema (refused by name, 0870373ae); out of FEATURED | |
+| apps (deputy) | B3, B5, B7 | queued behind the lock on 76758dba6 | deputy |
+| oracle | joracle, Oracle v7 fresh world | not run: needs an app world after the lock queue drains | codex |
 
 ## 0a. Validator continuation (for the next validator)
 
-**Boxes and paths.** Journey rows, app worlds, FOUC and the authority acceptance run on hbox (user
-`hbox`, full sudo, Ubuntu 24.10, umask 002, operator account `mini-operator` uid 1001 with linger).
-Effects, the other acceptance scripts and the oracle checks run on dregg-ref (`lanes@2.31.71.194`,
-`~/.ssh/id_portable`, no `shasum`, no bun, no grain-world sudo rules). Neither box is the integrator's.
+**Boxes.**
+- hbox (user `hbox`, full sudo, umask 002, operator account `mini-operator` uid 1001 with linger): journey
+  rows, demo `--only`, app worlds, m6grain.
+- dregg-ref (`lanes@2.31.71.194`, `~/.ssh/id_portable`, no `shasum`, no bun): the genesis writers and effects.
+Neither box is the integrator's.
+
+**Getting a candidate onto a box.** Stream it directly from dregg-build; the Mac's uplink is too slow.
+- hbox reaches dregg-build as `ssh -i ~/.ssh/id_portable -o UserKnownHostsFile=<dir>/kh lanes@178.105.4.114`.
+  Pull with `ssh ... "tar -C /build/candidates -cf - SHA" | tar -C <dir>/artifacts -xf -`, then
+  `sha256sum -c SHA256SUMS` (about 5 min).
+- Then push hbox → dregg-ref the same way: about 80 s.
+- On hbox, also `cp -a` the set to `/build/candidates/SHA`. That is the manifest's absolute path and it is
+  SHARED with the deputy's faeries: copy it in full only if it is missing, and never remove it. A faerie
+  once deleted a partial copy mid-run.
+
+**Per-candidate layout** (SHORT is the sha's first 8 characters):
 
 | path | what it holds |
 |---|---|
-| hbox:/tank/dregg-build/rows-0ce31391/ | `box.env` (roots, `PIPELINE_JOURNEY_JOBS=3`, `PIPELINE_ROW_MEM_MAX=20G`, m6grain inputs: `MINI_OPERATOR_UID=1001`, `MINI_TEST_SPK`); `rerun-row.sh ROW` (one journey row from the covered tree, own results root `rerun-ROW/`); `app-job.sh NAME TABLE PROFILE` (world-up, featured-qualify, world-down) and `app-keep.sh` (the same without world-down); `demo-only*.sh` (journey.sh `--only` runs); `logs/`; every PID file; `pw/` (Playwright 1.62.1 and its Chromium under `pw/browsers`) |
-| hbox:/tank/dregg-build/claude-lanes/rows-0ce31391/src | the candidate's source.tar, extracted where /etc/sudoers.d/mini-operator covers two-world-journey.sh and install-user-world; `deploy/spk-host/{controller-world.py,install-user-world}` are chowned root (install-user-world refuses a companion owned by neither root nor SUDO_UID) |
-| hbox:/tank/rows-0ce31391-apps | worlds and qualify output, owned by mini-operator 0755 directly under root-owned /tank (world-up's scratch custody refuses any writable ancestor) |
-| hbox:/tank/rows-0ce31391-hbox | an hbox-owned 0700 root for the acceptance scripts' evidence; run them under `umask 077` (hbox's umask 002 makes the Store's head-anchor directory group-writable and the store refuses it) |
-| hbox:/build/candidates/SHA | a root-created, hbox-owned copy of the candidate at the manifest's absolute path (manifest.json and lib.sh name /build/candidates/SHA; a symlink fails "manifest .host does not name its candidate output"); box.env sets `ARTIFACT_ROOT=/build/candidates` |
-| dregg-ref:/build/lanes/rows-0ce31391/ | `cand/SHA` (the set), `src` (its source.tar), `src-main` (src with main's tree overlaid), `effects-job.sh`, `effects-main-job.sh`, `accept-job.sh`, `logs/`, PID files |
+| hbox:/tank/dregg-build/rows-SHORT/ | `artifacts/SHA`; `box.env`; `rerun-row.sh ROW` (journey-runner --row from the covered tree); `run-journeys.sh` (all rows, results under `journeys-all/`); `demo-only.sh TAG STEP...` (one keep-going `journey.sh --only` run, steps copied to `demo-TAG-steps/`); `app-job2.sh NAME TABLE PROFILE` and `apps-all2.sh` (world-up under `flock -o`, then qualify, then world-down); `wait-pid.sh PIDFILE MARKER` (a cross-uid waiter: `kill -0` on a mini-operator PID fails EPERM as hbox and reads as dead); `mo/` (mini-operator-owned logs and PID files); `logs/`; `*.pid` |
+| hbox:/tank/dregg-build/claude-lanes/rows-SHORT/src | the candidate's source.tar plus main's `scripts/spk-platform` overlay. This location is covered by /etc/sudoers.d/mini-operator. `deploy/spk-host/{controller-world.py,install-user-world}` are chowned root |
+| hbox:/tank/rows-SHORT-apps | worlds and qualify output, mini-operator 0755 directly under root-owned /tank (`sudo install -d -o mini-operator`) |
+| dregg-ref:/build/lanes/rows-SHORT/ | `cand/SHA`, `src` (its source.tar), `accept-job.sh` (the six writers, grain rows serial, then JPAY2 with `/build/lanes/custody-b/venv/bin` first in PATH), `effects-job.sh` (the seven effects with `--method` for dues and commons), `accept/`, `logs/` |
 
-Copy a candidate to a box by streaming it through the Mac:
-`ssh dregg-build "tar -C /build/candidates -cf - SHA" | ssh BOX "tar -C DEST -xf -"`, then
-`sha256sum -c SHA256SUMS`. On hbox also `sudo cp -a` it to /build/candidates/SHA.
+Live roots: rows-2d8b7ed5, rows-76758dba, rows-e89fe7b8. The 0ce31391 roots are kept for evidence.
 
-**Main's scripts over a candidate.** When the coordinator says a harness fix is on main and the
-candidate predates it, run the candidate's binaries with main's drivers. On dregg-ref:
-`git archive <main> world scripts native/resource-client/... | tar -x` over a copy of the candidate's
-tree (`src-main`), with `SRC=` set to that tree and the job cd'd into it. On hbox: copy the changed
-files over the covered tree. Name every file taken from main in the report; anything in main's
-scripts that disagrees with the candidate's binaries is reported, not mixed silently.
+**App worlds: the rules this run paid for.**
+- Start worlds one at a time.
+  - Concurrent world-ups hit `sqlite-store error: opaque SQLite failure 15: locking protocol` in the store
+    phase.
+  - Every hbox world-up, the deputy's included, takes `flock -o /tank/lanes/world-up.lock`. Plain `flock`
+    without `-o` passes the lock fd to world-up's long-lived servers, so a world holds the lock until it
+    is torn down.
+  - Until e44a4a75c / 3a8109059 is in a candidate, the codec and consent residents also survive
+    world-down, so the lock stays held. The coordinator stops those survivors by exact PID. Check with
+    `sudo lsof /tank/lanes/world-up.lock`.
+- The fixups (OrgTodo, HackerCMS, HakyllCMS) live in b2/b4. A separate `fixups.tsv`, relettered j/k/l,
+  runs them on their own world.
+- `QUALIFY_STOP=1` does not stop the table at the first red; featured ran all 13 rows in about 68 min.
+- Class L tables (b4, rt, b8, fixups) need 50ec8de76's importProfile. It is in e89fe7b8b; overlay it on
+  older candidates.
 
-**Journey rows.** `rerun-row.sh ROW` runs
-`journey-runner --tip SHA --row ROW --source-tree <covered tree> --results-root rerun-ROW` under
-swarm-build. A full run is `run-journeys.sh` (about 6 min, 3 jobs). Each row runs in its own systemd
-user scope, so its servers stop with it.
+**Demo row.** Its 5,000 s budget reaches about 22 of 45 steps on a loaded hbox, so run every later step with
+`--only`, two or three keep-going runs in parallel.
 
-**The demo row's tail: run it with `--only`.** The demo row gives journey.sh a 5,000 s budget
-(`PIPELINE_ROW_TIMEOUT_S` 5400 minus 400). On hbox JPRIV1 (1,146 s), KTPL (1,020 s) and J12W
-(861 s) spend it, and every later step reports "journey wall budget spent". Take the demo row's
-verdicts for the steps it reached, then run the rest in one fresh journey:
-`JOURNEY_KEEP_GOING=1 GRAIN_RUNTIME=$C/bin/grain-runtime TEST_PROVIDER=$C/fixtures/mini-hermes-test-provider LAUNCH_GATE=$C/bin/launch-gate PAY_WATCHER_BIN=$C/bin/pay-watcher CANDIDATE=$C/provenance.json journey.sh --only STEP ... $C/manifest.json NEW_RUN`.
-The flags come before the two positional arguments. journey.sh adds each step's dependencies itself.
+**Acceptance scripts.** Use the env in docs/ONE-WIRE-STATE.md. On dregg-ref, authority-acceptance uses
+evidence.sh's `sha256`, so it runs there too.
 
-**Effects.** `SRC=<tree> swarm-build bash scripts/world-native-admit.sh DOMAIN ... --candidate <set>`
-(SRC is required: source.tar has no .git). dues needs `--method world/dues/StandingDues.obend` and
-commons needs `--method world/commons/ResidentServiceCommons.obend`: each directory holds two .obend files.
-
-**App worlds.** As mini-operator from the covered tree:
-`MINI_IMPORT_PROFILE=P MINI_OPERATOR_UID=1001 MINI_OPERATOR_NAME=mini-operator world-up.sh BIN BIN RUN`,
-then `QUALIFY_STOP=1 [QUALIFY_TABLE=market-batches/bN.tsv] featured-qualify.sh RUN/WORLD.env OUT`.
-One world per table: featured (default table), b1, b2, b6 on standard-v1; b4, rt and b8 on
-market-large-v1 (WordPress, Wekan, IPython). Seven worlds at once were fine on hbox (load about 20).
-A world from a candidate whose install failed cannot retry the install (UNRESOLVED by design): use a
-fresh world.
-
-**Acceptance scripts.** env `CANDIDATE=$set/provenance.json MINI=$B/mini STORE_BINARY=$B/minidregg-link-sqlite-store SIGNATURE_BINARY=$B/minidregg-credential-signature-verifier GRAIN=$B/grain-runtime`.
-Never set `MINI_CONSENT_HOST` alone (mini then demands `MINI_LOCAL_HOST` and `MINI_CONSENT_CONFIG` too).
-authority-acceptance.sh needs `shasum`, so run it on hbox under `umask 077`.
-
-**Next candidate (the first carrying 25cfb86bd and f73893fce): the plan.**
-1. App tables on fresh worlds (all seven above) and `japps --box` including the co-edit row. Expected
-   to clear the install red. Then the DAV rows, then joracle on an operator-appliance-v1 world, then
-   the fresh Oracle v7 world (section 7).
-2. The six genesis writers (acceptance, application, selected-release, authority, grain plain,
-   grain `PROVIDER_BOOTSTRAP=1`) plus JPAY2. Use the commands and the PyNaCl venv note in
-   docs/ONE-WIRE-STATE.md's state section (custody-b). The profiled grain mode is deleted (97aab6054).
-3. Every red from section 0, by name:
-   - journey rows: m6grain, JPAY6;
-   - demo steps: J17, WEB, JLI, KTPL, J12 row 87, JP2, JPD, JDISCLOSE;
-   - acceptance: authority-acceptance;
-   - app worlds: b8's `Too many or too few segments`.
-   Also check that the harness fixes listed in section 0 are on the candidate's tree.
-4. The full journey-rows run and the demo `--only` tail, as above. JCHAT needs `fake-discord`
-   beside `mini-discord-mirror`. M6 needs the operator uid. JR17 needs /etc/mini/keys-client.json.
+**Open at hand-off.**
+- Six plain-flock waiters for the 76758dba6 app tables (b1, b2, b6, b4, rt, fixups). Their PIDs are in
+  `rows-76758dba/mo/app-*.pid` (app-job parents) plus their flock children. They wait on ember's ruling;
+  if she allows it, stop them and relaunch with `apps-all2.sh` on the newest candidate.
+- Rerun JDISCLOSE once its owner pushes.
+- Rerun JP2 once thin consent's servedRootMismatch is fixed.
+- Rerun authority once the zero-field view is fixed.
+- Run joracle and the Oracle v7 fresh world on an operator-appliance-v1 world once the lock queue drains.
+- Run japps restart/renew on the candidate carrying un-enroll-renew.
 
 ## 1. The gate (integrator's; listed so nothing is lost)
 

@@ -1,5 +1,6 @@
 //! Physical checkpoint fencing at the resident's serialized receiving boundary.
 //! This attenuates transport only; resume never mints participant authority.
+use crate::io_context::IoContext;
 use crate::hostd::Journal;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -71,7 +72,7 @@ pub(crate) fn checkpoint_lock(app_dir: &Path) -> io::Result<File> {
         .truncate(false)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(app_dir.join(".checkpoint.lock"))?;
+        .open(app_dir.join(".checkpoint.lock")).ctx("open", &(app_dir.join(".checkpoint.lock")))?;
     let meta = lock.metadata()?;
     if !meta.is_file()
         || meta.nlink() != 1
@@ -120,8 +121,8 @@ impl CheckpointControl {
             .ok_or_else(|| invalid("checkpoint app directory absent"))?
             .join("checkpoint-pause.json");
         let socket = binding.journal_dir.join("checkpoint-control.sock");
-        let listener = UnixListener::bind(&socket)?;
-        fs::set_permissions(&socket, fs::Permissions::from_mode(0o600))?;
+        let listener = UnixListener::bind(&socket).ctx("bind", &socket)?;
+        fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)).ctx("set permissions", &socket)?;
         Ok(Self {
             listener,
             socket,
@@ -226,7 +227,7 @@ impl CheckpointControl {
             // Exact acknowledgement is durable before releasing admission. A
             // crash in this gap keeps the app fenced until this exact retry.
             publish(&path, &bytes)?;
-            fs::remove_file(&self.pause_path)?;
+            fs::remove_file(&self.pause_path).ctx("remove", &self.pause_path)?;
             File::open(
                 self.pause_path
                     .parent()
@@ -282,7 +283,7 @@ impl CheckpointControl {
 }
 impl Drop for CheckpointControl {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.socket);
+        let _ = fs::remove_file(&self.socket).ctx("remove", &self.socket);
     }
 }
 #[cfg(test)]

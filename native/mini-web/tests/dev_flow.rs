@@ -11,16 +11,27 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 #[allow(unused_imports)]
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::process::CommandExt;
 use std::time::{Duration, Instant};
 
-struct Procs(Vec<Child>, PathBuf);
+/// The servers a test started and the directories it made. Each server leads its own process group
+/// (`process_group(0)` at spawn), and the helper's dev layout spawns bodies without a new session, so
+/// a body is in its helper's group: dropping kills each group by its leader's pid, then reaps the
+/// leader, then removes the directories. A failed assertion therefore leaves no body or scratch behind.
+struct Procs(Vec<Child>, Vec<PathBuf>);
 impl Drop for Procs {
     fn drop(&mut self) {
         for child in &mut self.0 {
+            let pgid = child.id() as libc::pid_t;
+            unsafe {
+                libc::kill(-pgid, libc::SIGKILL);
+            }
             let _ = child.kill();
             let _ = child.wait();
         }
-        let _ = std::fs::remove_dir_all(&self.1);
+        for dir in &self.1 {
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 }
 
@@ -172,6 +183,7 @@ fn a_login_code_opens_one_session_whose_terminal_runs_as_the_member_until_logout
     let helper_child = Command::new(&helper)
         .arg("--dev").arg(&config).arg("--socket").arg(&sock).arg("--state").arg(scratch.join("state")).arg("--run").arg(&run)
         .stdout(Stdio::null()).stderr(std::fs::File::create(scratch.join("helper.log")).unwrap())
+        .process_group(0)
         .spawn()
         .unwrap();
     let port = free_port();
@@ -179,10 +191,11 @@ fn a_login_code_opens_one_session_whose_terminal_runs_as_the_member_until_logout
     let gateway_child = Command::new(&gateway)
         .args(["--listen", &format!("127.0.0.1:{port}"), "--helper"]).arg(&sock).args(["--origin", &origin, "--shutdown", "the end of this test"])
         .stdout(Stdio::null()).stderr(std::fs::File::create(scratch.join("gateway.log")).unwrap())
+        .process_group(0)
         .spawn()
         .unwrap();
     let logs = || format!("helper: {}\ngateway: {}", std::fs::read_to_string(scratch.join("helper.log")).unwrap_or_default(), std::fs::read_to_string(scratch.join("gateway.log")).unwrap_or_default());
-    let _procs = Procs(vec![helper_child, gateway_child], run.clone());
+    let _procs = Procs(vec![helper_child, gateway_child], vec![run.clone(), scratch.clone()]);
     let deadline = Instant::now() + Duration::from_secs(20);
     while Instant::now() < deadline && !(sock.exists() && TcpStream::connect(("127.0.0.1", port)).is_ok()) {
         std::thread::sleep(Duration::from_millis(50));
@@ -366,6 +379,7 @@ while True:
     let helper_child = Command::new(&helper)
         .arg("--dev").arg(&config).arg("--socket").arg(&sock).arg("--state").arg(scratch.join("state")).arg("--run").arg(&run)
         .stdout(Stdio::null()).stderr(std::fs::File::create(scratch.join("helper.log")).unwrap())
+        .process_group(0)
         .spawn()
         .unwrap();
     let port = free_port();
@@ -374,10 +388,11 @@ while True:
         .args(["--listen", &format!("127.0.0.1:{port}"), "--helper"]).arg(&sock)
         .args(["--origin", &origin, "--frame-src", "https://*.demo.dregg.online"])
         .stdout(Stdio::null()).stderr(std::fs::File::create(scratch.join("gateway.log")).unwrap())
+        .process_group(0)
         .spawn()
         .unwrap();
     let logs = || format!("helper: {}\ngateway: {}", std::fs::read_to_string(scratch.join("helper.log")).unwrap_or_default(), std::fs::read_to_string(scratch.join("gateway.log")).unwrap_or_default());
-    let _procs = Procs(vec![helper_child, gateway_child], run.clone());
+    let _procs = Procs(vec![helper_child, gateway_child], vec![run.clone(), scratch.clone()]);
     let deadline = Instant::now() + Duration::from_secs(20);
     while Instant::now() < deadline && !(sock.exists() && TcpStream::connect(("127.0.0.1", port)).is_ok()) {
         std::thread::sleep(Duration::from_millis(50));

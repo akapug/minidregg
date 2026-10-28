@@ -1,6 +1,7 @@
 //! Operator configuration of the existing source-admitted lifetime API.
 //! Registration does not issue a grant or authorize a request. Immutable
 //! records select the next resident generation; current resident pins stay put.
+use crate::io_context::IoContext;
 use super::*;
 use crate::agent_api_lifetime_custody_v3::LifetimeCustodyV3;
 use std::collections::{BTreeMap, BTreeSet};
@@ -127,7 +128,7 @@ pub(super) fn lock(app_dir: &Path) -> io::Result<File> {
         .create(true)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(app_dir.join(".agent-routes.lock"))?;
+        .open(app_dir.join(".agent-routes.lock")).ctx("open", &(app_dir.join(".agent-routes.lock")))?;
     let m = f.metadata()?;
     if !m.is_file()
         || m.nlink() != 1
@@ -148,7 +149,7 @@ fn retained(app_dir: &Path, app: &str, app_uid: u32) -> io::Result<BTreeMap<Stri
     }
     private_dir(&root)?;
     let mut records = BTreeMap::new();
-    for (index, entry) in fs::read_dir(&root)?.enumerate() {
+    for (index, entry) in fs::read_dir(&root).ctx("list", &root)?.enumerate() {
         if index >= MAX_REVISIONS {
             return Err(invalid("agent route revision bound exceeded"));
         }

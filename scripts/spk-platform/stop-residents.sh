@@ -6,7 +6,9 @@
 set -uo pipefail
 [[ $# == 1 && -d $1 ]] || { echo "usage: $0 RUN_ROOT" >&2; exit 2; }
 dir=$1/a
+[[ -d $dir ]] || dir=$1/w/a   # a world-up root: its anchors are under RUN/w
 rc=0
+descendants() { local c; for c in $(pgrep -P "$1" || true); do echo "$c"; descendants "$c"; done; }
 [[ -d $dir ]] || exit 0
 pids=()
 for file in "$dir"/*.pid; do
@@ -15,7 +17,7 @@ for file in "$dir"/*.pid; do
   [[ $pid =~ ^[0-9]+$ ]] || { echo "stop-residents: $file does not hold a pid" >&2; rc=1; continue; }
   if [[ -r /proc/$pid/cmdline ]] && tr '\0' ' ' </proc/$pid/cmdline | grep -q -- '-resident '; then
     # the resident's descendants (its Host, store and verifier children), named before it ends
-    kids=$(pgrep -P "$pid" || true)
+    kids=$(descendants "$pid")
     kill "$pid" 2>/dev/null && pids+=("$pid" $kids)
   fi
 done

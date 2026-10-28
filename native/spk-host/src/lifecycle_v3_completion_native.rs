@@ -2,6 +2,7 @@
 //! A source-authored, custodian-signed v2 physical report is required; this
 //! module never encodes that report or infers process/volume evidence.
 
+use crate::io_context::IoContext;
 use crate::dispatch_author::SignerPin;
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
 use crate::hostd::Journal;
@@ -288,8 +289,8 @@ fn checked_assembled(
         .parent()
         .ok_or_else(|| invalid("v3 completion parent absent"))?;
     private_dir(parent)?;
-    if fs::read(parent.join("lifecycle-completion-v2-active.json"))? != assembled.active_marker
-        || fs::read(attempt.join("completion-v2.bin"))? != assembled.ingress
+    if fs::read(parent.join("lifecycle-completion-v2-active.json")).ctx("read", &(parent.join("lifecycle-completion-v2-active.json")))? != assembled.active_marker
+        || fs::read(attempt.join("completion-v2.bin")).ctx("read", &(attempt.join("completion-v2.bin")))? != assembled.ingress
         || assembled.begin_sha256 != hex(&Sha256::digest(&begin.ingress))
         || assembled.claim_sha256 != hex(&Sha256::digest(&claim.claim_ingress))
         || assembled.report_sha256 != hex(&Sha256::digest(signed_report))
@@ -418,7 +419,7 @@ pub(crate) fn recover_receipt_only(
 ) -> io::Result<RecoveredLaunchCompletion> {
     checked_assembled(assembled, begin, claim, signed_report)?;
     let attempt = &assembled.attempt_dir;
-    let marker: Value = serde_json::from_slice(&fs::read(attempt.join("op38-requested.json"))?)?;
+    let marker: Value = serde_json::from_slice(&fs::read(attempt.join("op38-requested.json")).ctx("read", &(attempt.join("op38-requested.json")))?)?;
     if text(&marker, "protocol")? != "mini-spk-launch-completion-submit-requested-v1"
         || text(&marker, "ingressSha256")? != hex(&Sha256::digest(&assembled.ingress))
         || text(&marker, "claimSha256")? != hex(&Sha256::digest(&claim.committed))
@@ -428,7 +429,7 @@ pub(crate) fn recover_receipt_only(
     // A lookup may be repeated after another lost reply. Each read-only probe
     // owns fresh output paths; the original op38 marker and ingress stay fixed.
     let mut nonce = [0u8; 16];
-    std::fs::File::open("/dev/urandom")?.read_exact(&mut nonce)?;
+    std::fs::File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut nonce)?;
     let lookup_dir = attempt.join(format!("op39-lookup-{}", hex(&nonce)));
     DirBuilder::new().mode(0o700).create(&lookup_dir)?;
     let reply = operator.invoke(crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_LOOKUP, &assembled.ingress)?;

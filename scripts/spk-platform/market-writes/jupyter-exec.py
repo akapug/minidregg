@@ -24,8 +24,15 @@ def main():
         "content": {"code": code, "silent": False, "store_history": True,
                     "user_expressions": {}, "allow_stdin": False, "stop_on_error": True}}))
     out, err, deadline = "", None, time.time() + 150
+    seen = []
     while time.time() < deadline:
-        m = json.loads(ws.recv())
+        try:
+            m = json.loads(ws.recv())
+        except EOFError as e:
+            # The kernel channel closed before idle: say which messages arrived first (a restart or
+            # a dead status explains a kernel that is gone from /api/kernels).
+            print(json.dumps({"ok": False, "error": "%s; seen: %s" % (e, ",".join(seen[-12:]) or "nothing")})); sys.exit(1)
+        seen.append("%s:%s" % (m.get("msg_type") or m.get("header", {}).get("msg_type"), (m.get("content") or {}).get("execution_state", "")))
         if m.get("parent_header", {}).get("msg_id") != msg_id:
             continue
         t, c = m.get("msg_type") or m["header"]["msg_type"], m.get("content", {})

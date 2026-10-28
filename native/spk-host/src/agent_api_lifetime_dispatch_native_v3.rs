@@ -1,6 +1,7 @@
 //! Fresh event26 lifetime permit. A retained op77 receipt cannot construct
 //! this type and can never authorize fd3 delivery.
 
+use crate::io_context::IoContext;
 use crate::agent_api_lifetime_paid_native_v3::AssembledLifetimePaidV3;
 use crate::agent_api_lifetime_reverse_v3::RetainedReserveV3;
 use crate::agent_api_lifetime_v3::{
@@ -62,14 +63,14 @@ impl FreshLifetimePermitV3 {
     /// Clear only after a retained definite reply and confirmed controller
     /// settlement. The one-shot per-operation submit marker is never erased.
     pub(crate) fn clear_active_after_settlement(&self) -> io::Result<()> {
-        let metadata = fs::symlink_metadata(&self.active_marker)?;
+        let metadata = fs::symlink_metadata(&self.active_marker).ctx("inspect", &self.active_marker)?;
         if !metadata.is_file()
             || (metadata.dev(), metadata.ino()) != self.active_identity
-            || fs::read(&self.active_marker)? != self.active_bytes
+            || fs::read(&self.active_marker).ctx("read", &self.active_marker)? != self.active_bytes
         {
             return Err(refused("lifetime active marker changed before settlement"));
         }
-        fs::remove_file(&self.active_marker)?;
+        fs::remove_file(&self.active_marker).ctx("remove", &self.active_marker)?;
         File::open(
             self.active_marker
                 .parent()
@@ -113,11 +114,11 @@ pub(crate) fn clear_retained_active_after_settlement(attempt_dir: &Path) -> io::
     }
     let mut actual = Vec::new();
     file.read_to_end(&mut actual)?;
-    if actual != expected || fs::symlink_metadata(&path)?.ino() != metadata.ino() {
+    if actual != expected || fs::symlink_metadata(&path).ctx("inspect", &path)?.ino() != metadata.ino() {
         return Err(refused("retained lifetime active marker bytes drift"));
     }
-    fs::remove_file(path)?;
-    File::open(parent)?.sync_all()
+    fs::remove_file(&path).ctx("remove", &path)?;
+    File::open(&parent).ctx("open", &parent)?.sync_all()
 }
 
 pub(crate) fn submit_fresh_once(
@@ -150,12 +151,12 @@ pub(crate) fn submit_fresh_once(
         .write(true)
         .create_new(true)
         .mode(0o600)
-        .open(&active_marker)?;
+        .open(&active_marker).ctx("open", &active_marker)?;
     active.write_all(&marker_bytes)?;
     active.sync_all()?;
     let metadata = active.metadata()?;
     let active_identity = (metadata.dev(), metadata.ino());
-    File::open(parent)?.sync_all()?;
+    File::open(&parent).ctx("open", &parent)?.sync_all()?;
     if cancelled.load(Ordering::Acquire) {
         // No op76 call has begun. Keep the attempt as terminal for this ID.
         return Err(refused("lifetime caller cancelled before op76"));

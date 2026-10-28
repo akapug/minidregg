@@ -42,6 +42,9 @@ node=$(dirname "$(dirname "$config")")
 [[ -f $config && -S $socket && -x $host ]] || refuse "sponsor workspace does not pin a config, a live public socket and a Host"
 private_socket=$(jq -r '.operator // empty' "$node/ingress.json" 2>/dev/null || true)
 [[ -n $private_socket ]] || private_socket=$(dirname "$(dirname "$socket")")/operator/mini.sock
+# A grain install talks to the Host over the private operator socket (mini serve-operator), never the public
+# one; a world served by a single public `mini serve` cannot install, so say so here, not as spk-host's bare ENOENT.
+[[ -S $private_socket ]] || refuse "no live private operator socket at $private_socket: the world serves only its public socket; bring it up with serve-operator + serve-public-proxy (edge store-entry.sh, public-ingress.sh)"
 genesis=$node/genesis.json
 [[ -f $genesis ]] || refuse "no genesis.json beside the node's config ($node)"
 # ── the operator policy a grain host needs, pinned at genesis ────────────────

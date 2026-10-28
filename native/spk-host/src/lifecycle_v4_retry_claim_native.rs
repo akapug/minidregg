@@ -4,6 +4,7 @@
 //! claim consumes the one-use retry token; it never clears the v3
 //! first-attempt marker. Only a fresh op26 committed projection can arm the
 //! physical launch, exactly as in v3.
+use crate::io_context::IoContext;
 use crate::dispatch_author::SignerPin;
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
 use crate::hostd::VerifiedBegin;
@@ -488,8 +489,8 @@ fn checked_assembled(
         .parent()
         .ok_or_else(|| invalid("v4 retry claim attempt parent absent"))?;
     private_dir(parent)?;
-    if fs::read(parent.join(ACTIVE_MARKER))? != assembled.active_marker
-        || fs::read(attempt_dir.join(CLAIM_INGRESS_FILE))? != assembled.ingress
+    if fs::read(parent.join(ACTIVE_MARKER)).ctx("read", &(parent.join(ACTIVE_MARKER)))? != assembled.active_marker
+        || fs::read(attempt_dir.join(CLAIM_INGRESS_FILE)).ctx("read", &(attempt_dir.join(CLAIM_INGRESS_FILE)))? != assembled.ingress
         || assembled.begin_sha256 != hex(&Sha256::digest(&begin.ingress))
         || assembled.descriptor_sha256 != hex(&Sha256::digest(&launch.descriptor().canonical))
     {

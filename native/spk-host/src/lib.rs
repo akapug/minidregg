@@ -65,6 +65,8 @@ mod lifecycle_selector;
 #[cfg(target_os = "linux")]
 pub mod grain;
 #[cfg(target_os = "linux")]
+mod io_context;
+#[cfg(target_os = "linux")]
 mod grain_export;
 #[cfg(target_os = "linux")]
 mod grain_route;

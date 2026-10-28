@@ -35,6 +35,7 @@
 //! The physical fd3 slot (`dispatch-active.json`, hostd) is a separate fence
 //! and is not touched here.
 
+use crate::io_context::IoContext;
 use crate::dispatch_native::{write_new, PrivateOperator};
 use crate::lifecycle_receipt_lookup::{retained, OUTCOME_TAG};
 use crate::host_operations::{RESPONSE_HOST_OUTCOME, RESPONSE_NO_RECORD};
@@ -206,7 +207,7 @@ fn present(path: &Path) -> io::Result<bool> {
 /// hostd's `dispatch-op-<key>.json` tombstones are files and are skipped.
 fn attempts(parent: &Path) -> io::Result<Vec<(u64, PathBuf)>> {
     let mut found = Vec::new();
-    for entry in fs::read_dir(parent)? {
+    for entry in fs::read_dir(&parent).ctx("list", &parent)? {
         let entry = entry?;
         let Some(number) = entry.file_name().to_str().and_then(attempt_number) else {
             continue;
@@ -247,10 +248,10 @@ pub(crate) fn settle(active: &Path, expected: &[u8], resolution: &Value) -> io::
     let attempt_dir = active
         .parent()
         .ok_or_else(|| invalid("dispatch submit marker parent absent"))?;
-    let _ = fs::remove_file(attempt_dir.join(RESOLUTION));
+    let _ = fs::remove_file(attempt_dir.join(RESOLUTION)).ctx("remove", &(attempt_dir.join(RESOLUTION)));
     write_new(attempt_dir, RESOLUTION, &serde_json::to_vec(resolution)?)?;
-    fs::remove_file(active)?;
-    File::open(attempt_dir)?.sync_all()?;
+    fs::remove_file(&active).ctx("remove", &active)?;
+    File::open(&attempt_dir).ctx("open", &attempt_dir)?.sync_all()?;
     strip(attempt_dir)
 }
 
@@ -267,16 +268,16 @@ fn strip(attempt_dir: &Path) -> io::Result<()> {
     if present(&attempt_dir.join(SUBMIT_ACTIVE))? {
         return Err(invalid("undecided dispatch attempt is never stripped"));
     }
-    for entry in fs::read_dir(attempt_dir)? {
+    for entry in fs::read_dir(&attempt_dir).ctx("list", &attempt_dir)? {
         let entry = entry?;
         let name = entry.file_name();
         if name == SUBMIT_REQUESTED || name == RESOLUTION || refusal_evidence(&name) {
             continue;
         }
         if entry.file_type()?.is_dir() {
-            fs::remove_dir_all(entry.path())?;
+            fs::remove_dir_all(entry.path()).ctx("remove", &(entry.path()))?;
         } else {
-            fs::remove_file(entry.path())?;
+            fs::remove_file(entry.path()).ctx("remove", &(entry.path()))?;
         }
     }
     Ok(())
@@ -299,9 +300,9 @@ pub(crate) fn collect(parent: &Path) -> io::Result<()> {
     }
     let excess = settled.len().saturating_sub(MAX_SETTLED);
     for path in settled.into_iter().take(excess) {
-        fs::remove_dir_all(path)?;
+        fs::remove_dir_all(&path).ctx("remove", &path)?;
     }
-    File::open(parent)?.sync_all()
+    File::open(&parent).ctx("open", &parent)?.sync_all()
 }
 
 /// A plan (op36) or assembly (op37) refusal: no submit was armed, so the
@@ -390,7 +391,7 @@ fn receipt_fields(view: &Value) -> Value {
 fn lookup(operator: &PrivateOperator, attempt_dir: &Path, ingress: &[u8]) -> io::Result<Option<Value>> {
     let deadline = Instant::now() + LOOKUP_DEADLINE;
     let mut nonce = [0u8; 16];
-    File::open("/dev/urandom")?.read_exact(&mut nonce)?;
+    File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut nonce)?;
     let directory = attempt_dir.join(format!("op35-lookup-{}", hex(&nonce)));
     fs::DirBuilder::new().mode(0o700).create(&directory)?;
     let reply = match operator.invoke_until(crate::host_operations::APPLICATION_DISPATCH_LOOKUP, ingress, deadline) {
@@ -421,7 +422,7 @@ fn note(directory: &Path, text: &str) -> io::Result<()> {
         .create_new(true)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(directory.join("note.txt"))?;
+        .open(directory.join("note.txt")).ctx("open", &(directory.join("note.txt")))?;
     file.write_all(text.as_bytes())?;
     file.sync_all()
 }

@@ -1,6 +1,7 @@
 //! Root-observed persistent /var identity for the resident START profile.
 //! These bytes are physical evidence, never Mini launch authority by themselves.
 
+use crate::io_context::IoContext;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read};
 use std::os::fd::RawFd;
@@ -174,7 +175,7 @@ impl VolumeWitness {
     }
 
     pub(crate) fn compare_open_mount(&self, persistent_var_fd: RawFd) -> io::Result<()> {
-        let path_meta = fs::symlink_metadata(&self.mount)?;
+        let path_meta = fs::symlink_metadata(&self.mount).ctx("inspect", &self.mount)?;
         if !path_meta.is_dir()
             || !crate::os::app_owner(path_meta.uid(), self.app_uid)
             || path_meta.permissions().mode() & 0o777 != 0o700
@@ -213,7 +214,7 @@ fn root_chain(path: &Path) -> io::Result<()> {
             return Err(invalid("attestation path contains dot component"));
         };
         prefix.push(name);
-        let meta = fs::symlink_metadata(&prefix)?;
+        let meta = fs::symlink_metadata(&prefix).ctx("inspect", &prefix)?;
         if !meta.is_dir() || !crate::namespace_identity::root_owned(&prefix, &meta) || meta.permissions().mode() & 0o022 != 0 {
             return Err(invalid("attestation directory custody refused"));
         }
@@ -234,7 +235,7 @@ fn read_root_witness(
     let mut file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(&path)?;
+        .open(&path).ctx("open", &path)?;
     let meta = file.metadata()?;
     if !meta.is_file()
         || !crate::namespace_identity::root_owned(&path, &meta)
