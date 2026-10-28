@@ -997,6 +997,36 @@ fn managed_worker_policy_source(owner: &str, workers: &[String], generation: &st
     }
 }
 
+#[derive(Clone, Copy)]
+enum ToolSurface {
+    Resident,
+    OperatorForeground,
+}
+
+fn operator_foreground_tool(name: &str) -> bool {
+    matches!(name,
+            "mini_grain_status"
+                | "mini_workspace_list"
+                | "mini_workspace_describe"
+                | "mini_workspace_read"
+                | "mini_workspace_propose"
+                | "mini_workspace_submit"
+                | "mini_workspace_create"
+                | "mini_workspace_recover"
+                | "mini_workspace_attempts"
+                | "mini_workspace_import_reference"
+                | "mini_workspace_export_reference"
+                | "mini_read_resource"
+                | "mini_create_resource"
+                | "mini_create_application"
+                | "mini_create_application_session"
+                | "mini_publish"
+                | "mini_application_api"
+                | "mini_oracle_discover"
+                | "mini_oracle_call"
+    )
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ConsentFullReadiness {
@@ -12403,12 +12433,63 @@ impl Runtime {
         )
     }
 
-    fn tool_call(&mut self, name: &str, arguments: &Value) -> Result<Value> {
-        if self.room_tools_restricted()
-            && !resource_tools::is_room_tool(name)
-            && name != "mini_room_attempts"
+    fn require_tool_surface(&self, surface: ToolSurface, name: &str) -> Result<()> {
+        match surface {
+            ToolSurface::Resident => {
+                if self.room_tools_restricted()
+                    && !resource_tools::is_room_tool(name)
+                    && name != "mini_room_attempts"
+                {
+                    return Err("this resident accepts only room tools".into());
+                }
+            }
+            ToolSurface::OperatorForeground => {
+                if self.config.foreground_tool.is_none() {
+                    return Err("foregroundTool is not configured".into());
+                }
+                if !operator_foreground_tool(name) {
+                    return Err("foreground tool is not delegated".into());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn require_foreground_execution(&self, name: &str, arguments: &Value) -> Result<()> {
+        let attempt = self.journal.foreground_attempt.as_ref()
+            .ok_or("operator tool lacks a durable foreground request")?;
+        if self.foreground_operation != Some(attempt.operation_id)
+            || attempt.phase != ForegroundPhase::Executing
+            || attempt.reported || attempt.name != name
+            || attempt.result_path.is_some() || attempt.result_sha256.is_some()
+            || self.child.is_some() || self.journal.child.is_some() || self.prompt_active
         {
-            return Err("this resident accepts only room tools".into());
+            return Err("operator tool is not the exclusive executing foreground request".into());
+        }
+        self.journal.validate_foreground(&self.config.state_dir)?;
+        let request: ForegroundRequest = serde_json::from_slice(
+            &bounded_regular_file(&attempt.request_path, 262_144)?)
+            .map_err(|e| format!("operator retained request: {e}"))?;
+        if request.request_id != attempt.request_id || request.name != name
+            || request.arguments != *arguments
+        {
+            return Err("operator execution differs from its retained foreground request".into());
+        }
+        Ok(())
+    }
+
+    fn tool_call(&mut self, name: &str, arguments: &Value) -> Result<Value> {
+        self.tool_call_from(ToolSurface::Resident, name, arguments)
+    }
+
+    fn tool_call_from(&mut self, surface: ToolSurface, name: &str, arguments: &Value) -> Result<Value> {
+        self.require_tool_surface(surface, name)?;
+        match surface {
+            ToolSurface::OperatorForeground => self.require_foreground_execution(name, arguments)?,
+            ToolSurface::Resident if self.foreground_operation.is_some() => {
+                return Err("resident request cannot borrow an operator foreground invocation".into());
+            }
+            ToolSurface::Resident => {}
         }
         if self.cancelled.load(Ordering::SeqCst)
             || self.journal.connection == Connection::Fenced
@@ -12705,6 +12786,7 @@ impl Runtime {
     /// This is only a syntax/operator-profile preflight; the normal tool path
     /// still verifies every native grant and current source state.
     fn preflight_foreground_arguments(&self, request: &ForegroundRequest) -> Result<()> {
+        self.require_tool_surface(ToolSurface::OperatorForeground, &request.name)?;
         let arguments = &request.arguments;
         let tool = self
             .config
@@ -13214,30 +13296,7 @@ impl Runtime {
         {
             return Err("foreground tool name is invalid".into());
         }
-        if !matches!(
-            request.name.as_str(),
-            "mini_grain_status"
-                | "mini_workspace_list"
-                | "mini_workspace_describe"
-                | "mini_workspace_read"
-                | "mini_workspace_propose"
-                | "mini_workspace_submit"
-                | "mini_workspace_create"
-                | "mini_workspace_recover"
-                | "mini_workspace_attempts"
-                | "mini_workspace_import_reference"
-                | "mini_workspace_export_reference"
-                | "mini_read_resource"
-                | "mini_create_resource"
-                | "mini_create_application"
-                | "mini_create_application_session"
-                | "mini_publish"
-                | "mini_application_api"
-                | "mini_oracle_discover"
-                | "mini_oracle_call"
-        ) {
-            return Err("foreground tool is not delegated".into());
-        }
+        self.require_tool_surface(ToolSurface::OperatorForeground, &request.name)?;
         let profile = self
             .config
             .foreground_tool
@@ -13304,7 +13363,7 @@ impl Runtime {
                 let arguments = self.application_tool_arguments(&request.name, &request.arguments)?;
                 self.foreground_application_api(&arguments, input)?
             } else {
-                self.tool_call(&request.name, &request.arguments)
+                self.tool_call_from(ToolSurface::OperatorForeground, &request.name, &request.arguments)
                     .map(|value| json!({"isError":false,"text":value.to_string()}))?
             };
             self.check_not_cancelled()?;
