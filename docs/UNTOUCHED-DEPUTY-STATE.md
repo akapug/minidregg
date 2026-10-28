@@ -45,4 +45,4 @@ Generic Simplex gate; bend verb + lost reply + seed (14adcc13a); world apps nati
 ## Next three
 1. Read the b26630168 results as they arrive (japps rows, B3, B7 rt, B8 IPython); fix reds through the faerie holding the context; greens into FEATURED; shas to the integrator.
 2. On the rehearsal candidate 349e59ef1: confirm with infra (a298031c78e86d651) that hosted `apps install`, the public reader and the story seed pass in demo-dry; then B5's OwnTracks and recipe fixes on the next candidate.
-3. Grain-route latency fix (a6603277e4ffe2d70); then TextEditor's write and the HedgeDoc/IPython websocket family.
+3. Grain-route latency: the profile from ac1e69b668c52c684, then the design paragraph to the coordinator + auditor; then TextEditor's write and the HedgeDoc/IPython websocket family.
