@@ -8,11 +8,14 @@
 #       expectedTargetRoot, authored from a fresh signed read)
 #   FB  a Host whose plan carries the slots of ANOTHER command: refused
 #       headerMismatch before anything is signed
-#   FA  a Host serving a view of another state: refused servedRootMismatch
-#       before anything is signed
+#   FA  a Host serving a view of another state: the root recomputed from its
+#       opening is not the signed root, refused servedRootMismatch before
+#       anything is signed
 #   T2  honest again after the faults: shown = committed
-#   N1  a member whose observe grant is narrowed to one field: the served view
-#       is not the cell, refused servedRootMismatch before anything is signed
+#   N1  a member whose observe grant is narrowed to one field: thin consent
+#       checks the served view by its salted opening, shows the post at the
+#       opened field with no post root (the opening seals the rest), and the
+#       turn commits
 #   N2  a member with no grant on the target: the Host refuses the signed read,
 #       serves no bytes, and nothing is signed
 #   S1  a signed call whose target moved, for a signer who observes the target:
@@ -177,16 +180,21 @@ row blind-setup 0 0 PASS
 printf '{"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":[{"name":"tc-blind","payload":{"type":"scalar","actions":[{"type":"create","key":{"type":"object","field":"401"},"value":"1"}]}}]}\n' >"$D/req/blind-write.json"
 "$MINI" workspace --action propose --dir "$NEWCOMER_WS" --request "$D/req/blind-write.json" --proposal-id n1 \
   >"$D/log/n1-propose.out" 2>"$D/log/n1-propose.err" || fail n1-propose 0 1 x "$(tail -3 "$D/log/n1-propose.err")"
-# N1: its observe grant is narrowed to field 401, so the view the Host serves is
-# not the cell: refused servedRootMismatch before anything is signed.
+# N1: its observe grant is narrowed to field 401, so the view the Host serves
+# opens field 401 and seals every other entry (the blinding included). Thin
+# consent checks it by the opening, shows the post at field 401 with no post
+# root, and the turn commits.
 : >"$D/proxy-n1.log"
 rc=0; env MINI_THIN_CONSENT=1 MINI_LOCAL_HOST="$HOST" MINI_CONSENT_HOST="$PROXY" MINI_CONSENT_CONFIG="$CONFIG" \
   THIN_PROXY_REAL="$REAL" THIN_PROXY_MODE=pass THIN_PROXY_LOG="$D/proxy-n1.log" \
   "$MINI" workspace --action submit --dir "$NEWCOMER_WS" --intent "$NEWCOMER_WS/proposals/n1/intent.json" \
   --attempt "$NEWCOMER_WS/attempts/n1" >"$D/log/n1-submit.out" 2>"$D/log/n1-submit.err" || rc=$?
-grep -q 'servedRootMismatch' "$D/log/n1-submit.err" || fail n1-narrowed servedRootMismatch "$rc" x "$(tail -3 "$D/log/n1-submit.err")"
-check n1-nothing-signed test ! -e "$NEWCOMER_WS/attempts/n1/transaction-signatures.json"
-row n1-narrowed servedRootMismatch "$rc" PASS
+[ "$rc" = 0 ] || fail n1-narrowed 0 "$rc" x "$(tail -3 "$D/log/n1-submit.err")"
+check n1-thin-frames grep -q 'frame 232' "$D/proxy-n1.log"
+check n1-shown-opened jq -e '.[0].postBytes != null and (.[0] | has("postRoot") | not)' \
+  "$NEWCOMER_WS/attempts/n1/thin-display.json"
+check n1-signed test -s "$NEWCOMER_WS/attempts/n1/transaction-signatures.json"
+row n1-narrowed 0 "$rc" PASS
 # N2: a target it holds no grant on at all (tc-one, under its tc-blind
 # capability): the Host refuses the signed read, serves no bytes, and nothing
 # is signed.
@@ -205,8 +213,12 @@ for read in $(reads_of "$D/log/n2-submit.err"); do
 done
 check n2-nothing-signed test ! -e "$NEWCOMER_WS/attempts/n2/transaction-signatures.json"
 row n2-refused "$(grep -m1 '^refused: ' "$D/log/n2-submit.err" | cut -c1-60)" "$rc" PASS
-# S2: the newcomer signs with full consent (it replays), the sponsor moves the cell, the call is refused uniformly.
-"$MINI" workspace --action submit --dir "$NEWCOMER_WS" --intent "$NEWCOMER_WS/proposals/n1/intent.json" \
+# S2: the newcomer signs its own write over N1's post with full consent (it
+# replays), the sponsor moves the cell, the call is refused uniformly.
+printf '{"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":[{"name":"tc-blind","payload":{"type":"scalar","actions":[{"type":"write","key":{"type":"object","field":"401"},"expected":"1","value":"2"}]}}]}\n' >"$D/req/s2-write.json"
+"$MINI" workspace --action propose --dir "$NEWCOMER_WS" --request "$D/req/s2-write.json" --proposal-id s2 \
+  >"$D/log/s2-propose.out" 2>"$D/log/s2-propose.err" || fail s2-propose 0 1 x "$(tail -3 "$D/log/s2-propose.err")"
+"$MINI" workspace --action submit --dir "$NEWCOMER_WS" --intent "$NEWCOMER_WS/proposals/s2/intent.json" \
   --attempt "$NEWCOMER_WS/attempts/s2-sealed" --prepare-only true >"$D/log/s2-prepare.out" 2>"$D/log/s2-prepare.err" \
   || fail s2-sealed 0 1 x "$(tail -3 "$D/log/s2-prepare.err")"
 printf '{"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":[{"name":"tc-blind","payload":{"type":"scalar","actions":[{"type":"create","key":{"type":"object","field":"402"},"value":"1"}]}}]}\n' >"$D/req/blind-move.json"

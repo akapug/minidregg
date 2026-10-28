@@ -229,19 +229,17 @@ when the arm lands.
   `checkOpened` refuses a pre-reading payload (world, kind definition: `patchReadsPre`) over an
   opening that seals anything (`unsupportedPayload`). The keystone needs it because those member
   patches read the pre-state. Tell the auditor.
-* **Owed, in order:**
-  1. Prove `OpenedViewRefusedStatement` (`simp [checkOpened, ...]` on the hypotheses).
-  2. Prove `HonestScalarViewAcceptedStatement`. Needs: `servedOpening` of the encoded
-     `resourceView` (codec `decode_encode` plus `openingView` at `.declaredObject`), `root_opens`,
-     `cellCodec.decode (PackedCell.bytes p) = some p`, `selectDeclared` returning the narrowed
-     payload, and `entries W (DFinsupp.filter v s) = (entries W s).filter (v ∘ fst)` (via
-     `entries_fromEntries_of_pairwise`) against `StoreHiding.openedEntries_eq_filterMap`.
-  3. Implementation: `displayTarget` calls `checkOpened deployment command target view`. Delete
-     `servedBytes`, `checkServed`, `RootBinds`, `honest_binds`, `mismatch_refused` and the old
-     `thin_display_is_commit` (no twin). `Display.post`'s root becomes `Option`, present only when
-     the opening seals nothing; `Host.ClientConsentCore.displayJson` prints it only then
-     (`jthin-consent.sh` reads `postRoot` for world instances, which seal nothing).
-  4. Rebuild `Host.ClientConsentCore Host.ClientConsentSession` on dregg-ref
-     (`/build/lanes/thin-birth-scratch/build.sh` as `lanes`). Rerun JP2 on a candidate (hbox
-     `/tank/dregg-build/rows-e89fe7b8/demo-only-jp2.sh` pattern, with lane/rows-ledger 49c70a937's
-     harness fix).
+* **Done (successor lane, 2026-10-28):** the auditor ACCEPTED the `patchReadsPre` tightening
+  (world/kindDefinition payloads require an opening that seals nothing, a full-scope view) and
+  asked for its named teeth: `PreReadingSealedRefusedStatement`, proved. Proved per file on
+  dregg-ref (lean-ask, `#assert_axioms` clean): `opened_view_refused`,
+  `pre_reading_sealed_refused`, `honest_scalar_view_accepted` (with `entries_filter`,
+  `openedBytes_items`). `displayTarget` calls `checkOpened`; `checkServed`, `servedBytes`,
+  `RootBinds`, `honest_binds`, `mismatch_refused`, `thin_display_is_commit` and the
+  `servedMalformed` refusal are deleted. `Display.post` is `Option (bytes × Option root)`: the
+  root only when the opening seals nothing (`sealsNothing`); `displayJson` prints `postRoot` only
+  then. jthin-consent N1 (narrowed grant on a declared cell) now commits with an opened display
+  and no `postRoot`; S2 seals its own write over N1's post.
+* **Owed:** the closure build of the consent modules on dregg-ref and JP2 on a candidate (row 22
+  and the swapped-plan rows); then the acceptance poles or journey rows for account-metadata,
+  world instance, world kind, content and stream targets.
