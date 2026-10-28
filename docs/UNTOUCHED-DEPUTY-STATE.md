@@ -1,4 +1,4 @@
-# Untouched-areas deputy: state (2026-10-28 ~10:30: resumed on Opus from distillation; japps and B8 wait for the f1b7add21 candidate)
+# Untouched-areas deputy: state (2026-10-28 late morning: public-reader red is PRIORITY; market runs park for the module-conversion candidate)
 
 Inputs: docs/review/2026-10-27-untouched-areas/{LEAN,NATIVE}.md, docs/review/2026-10-27-blind-spots/BLIND-SPOTS.md Sweep 1.
 Each lane: /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>.
@@ -20,6 +20,12 @@ Each lane: /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>.
 - japps w6 FINISHED, INCONCLUSIVE for the Hacker Slides write (its box tree was on the old overlay 55510fca2, without the repeat-suffix and anchor fixes): 25/27, co-edit PASS, the two FAILs cascade from the stale enroll-a2. w1-w6 and bin2 removed; logs in /build/lanes/un-stream-continuity-evidence. Nothing of it runs on dregg-build. Next run: hbox, on the first candidate of main 7280f9db8 (carries 391311929 + bf5ead3fa), a clean checkout verified by ancestry; continuation file docs/review/2026-10-27-untouched-areas/JAPPS-STATE.md landed on lane/un-stream-continuity 4cd145c7f (rows owed: Hacker Slides write after restart -> renew; fresh-world bootstrap -> install with the parent's `reserve 1` checked; the hbox recipe; a dregg-build-only sudoers need is reported, not worked around).
 - (history) japps w6 (a4e312352a7091f59, /build/lanes/un-stream-continuity/job7.pid, started 08:31) survived the OOM and finishes there; nothing new starts there. Its next run (391311929 + bf5ead3fa candidate) goes to hbox /tank/lanes/un-stream-continuity. Open risk it will name if hit: `japps --box` may need install-user-world's lanes sudoers rules, which exist only on dregg-build (hbox's passwordless rule covers only /tank/dregg-build/claude-lanes/*/src).
 - japps faerie context ~493k: continuation file by ~580k.
+
+
+## PRIORITY: public reader (rehearsal blocker; faerie abe65d70bd4f62538)
+- Red 1: the public reader gets 403 on every published document, so GET / stays the index and the seed's anonymous /welcome check fails. Find the cause among the public subject's grant on published docs, the publish step, the reader identity (/etc/mini/public-subject) and the gateway's anonymous path; fix it at the cause. Row: an anonymous GET of a published doc returns 200 and an unpublished one is refused, both red-proofed. Evidence comes from infra (a298031c78e86d651, demo-dry on dregg-ref; hand-off at the top of ~/dev/dregg-infra-demo-vm/edge/demo/CHECKLIST.md, "Rehearsal #3").
+- Red 2 (infra): a warm public body whose consent worker idles out stays dead: 502 "consent transport is poisoned", with no reconnect through the still-listening mini-consent@public.socket (body broken pipe at 08:15, consent frame deadline at 08:30, worker idled at 08:40). Same faerie, after red 1: reconnect on the next request, with a row that idles or stops the worker and then GETs, red-proofed. Infra stops the warm scope on the faerie's word.
+- Box use: hbox or dregg-ref, never dregg-build.
 
 ## Landed (all on main as of e05a19fe)
 un-verify (Generic Simplex gate), un-bend (bend verb + lost reply), un-world (Tally/call/send native; DOMAINS.md), un-assurance (census, Door 11, StoryHistory, Kernel/StoryLaw), un-native-rows, un-moves, un-fixtures, un-seats, un-pb-codec (R8), un-pb-exec (R7/P9), un-pb-seal (R3 whole), un-pb-wal (R2 + five two-step dealers), un-pb-twins 134535c2 (§5.3 deletions, Pool/Cut, AnchorFixture -> real serve, P6 verifier), un-pb-helpers 353a6d11d (Lagrange, Horner, PRG/urandom, Nat cursors, outbox/phase codecs), un-web-front 0da04999, un-effects 2acd8acf (effect Plan kernel, keystone 5e116ec9, pass-11 additions, world apps on the kernel protocol), un-pred-census 44479e30 (Vouchers sweep: every receiver a Kernel.Receiving.Family at receiverVerifier, Ran private with one mint, gate rows receiver-verifier and ran-mint), un-stream-continuity 6544ea37 (hot-route op154 fixed at the cause; statement accepted e0916a53).
@@ -94,6 +100,13 @@ Its hbox worlds: /tank/rows-2d8b7ed5-apps/w-{featured,b1,b2,b4,b6,rt,fixups}. Mi
 - 886c43dfd (un-market-install) on main (aae3e2e37). Gate on 76758dba6 FAILED in the integrator's own composed harness (`..` in the socket path), fixed by it at 171e5af5b.
 14adcc13a (un-bend-seed: absent object refused by name; seed makes lobby-tally first; jbend 33/0 on 76758dba6; the seed line awaits infra's demo-dry rerun), 789b9b478 (journey repeat suffix), a8376ce8f (story GM install), 50ec8de76 (importProfile), 353a6d11d (pb helpers), 20f28ac31 (commons split + world READMEs). Infra told a8376ce8f fixes its demo-dry story red; the door README already says author = the seed's SEED_HOST (bc6c837ba).
 
+## B5 DONE (a0ef59eabda7075b4, parked)
+- On 76758dba6 all four apps pass lifecycle and write: FileDrop (owner role 1), Kiwix (hand-built 650-byte ZIM), Groove Basin (websocket token; owner role 2; 8136 bytes identical), Tube (303 followed). featured-qualify.sh takes an optional 7th column, the owner role id.
+- lane/app-market-b5-featured 0aff6334e (on 0b0cbbf2f; cherry-picks 7ba911ef0): FEATURED 17 -> 21, filtered test green on hbox; sent to the integrator.
+- OwnTracks: Lean safeApiTail now admits a prefix with no trailing slash, matching Rust checked_prefix (84938f78c on lane/app-market-b5, elaborated on dregg-ref); held by the integrator until after the module conversion; re-qualify on the first candidate carrying it.
+- Staging on hbox and dregg-ref removed.
+- ON MAIN (integrator): FEATURED 21 at f573a47c4; OwnTracks 84938f78c at 3a943f85e (converted header intact). Neither is in the b26630168 conversion candidate (fresh genesis, building); the next main build carries both and is the first elaboration of safeApiTail; OwnTracks re-qualifies on it.
+
 ## Featured on 76758dba6 (validator a373556d56d56744d): 9 PASS of 13
 - PASS: EtherCalc lifecycle + write, DokuWiki lifecycle + write, Datasette lifecycle + recorded read, HedgeDoc/Davros/HledgerWeb lifecycles.
 - HedgeDoc write "close frame" (socket.io): same family as IPython's kernel websocket; given to B8 (a13f0bc9626b1320a), fix at the cause for both.
@@ -102,6 +115,7 @@ Its hbox worlds: /tank/rows-2d8b7ed5-apps/w-{featured,b1,b2,b4,b6,rt,fixups}. Mi
 - spk-host io errors name operation + path: DONE (coordinator). lane/un-spk-ioctx 5cb33bbdf, IoContext::ctx at ~365 sites in 49 files, red-proofed on the final tip, 231/0 filtered; merged by the integrator into main 7280f9db8 (building). Nothing remains for a6603277e4ffe2d70 on it.
 
 ## Next three
+0. PRIORITY: the public-reader 403 and the poisoned consent transport (abe65d70bd4f62538): review each sha against the code, send it to the integrator and infra.
 1. Read B3/B5/B7/B8 on 76758dba6 (each serial under the world-up flock); fix reds (recipes or spk-host); every app green on lifecycle + write into FEATURED in apps.rs (B3 does its own commit; DiagramsNet stays out); target 2-3 dozen.
 2. When the integrator names the candidate of main f1b7add21 (host stage since 09:19; carries 7280f9db8, 391311929, bf5ead3fa, de74f4f5e, 3a8109059, 0870373ae; the allAccess owner fix and 7162b1d30 are on main's scripts; japps and B8 told): hand it to a4e312352a7091f59 (one japps run on hbox per JAPPS-STATE.md; context ~500k, it hands off by its file if it nears 580k); verdict -> validator for ROWS-OWED §0. That run confirms restart -> renew -> write and a fresh-world bootstrap -> install (the parent's `reserve 1` checked).
 3. Owed after the demo: revive Effects/ so transfer/commit come from the derivation engine (EFFECTS.md); private-backend P6 lost reply; the child() twin check.
