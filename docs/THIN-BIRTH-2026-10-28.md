@@ -99,11 +99,12 @@ The Host proves nothing new. The binding is in what the member signed and what a
 * every branch's `effectsDigest` is the effects digest of the executed descriptor.
 
 So a signed header admitted for a birth of descriptor `d` gives
-`effectsDigest(d) = effectsDigest(F)`. Under one carrier, `EffectsBinds`, scoped to the two
-descriptor byte strings (it fails exactly at a collision of the deployment's cSHAKE source
-digest, and the honest Host inhabits it with `d = F`), this gives `d = F`. A Host that swaps the
-plan after consent, any field including the auxiliary creates, has no member signature for any
-branch of the swapped birth.
+`effectsDigest(d) = effectsDigest(F)`, so either `d = F` or the two are an `EffectsCollision`
+(different descriptors, equal digest: a collision of the deployment's cSHAKE source digest at
+exactly those two canonical encodings). The theorems conclude the claim or that named collision;
+no hash premise is taken (the PinCollision pattern the auditor accepted for the platform cell). A
+Host that swaps the plan after consent, in any field including the auxiliary creates, has no
+member signature for any branch of the swapped birth, unless it exhibits that collision.
 
 ## 6. How a refusal is named, and the consent wire
 
@@ -129,11 +130,11 @@ before. Full and delegated full consent (220 to 222 and the delegated socket) ar
 
 | pole | statement | what it says |
 |---|---|---|
-| **keystone** | `DisplayIsCommitStatement` | For the executor's own `PreparedBirth` of descriptor `d`, if thin consent accepted `(headers, shown)` and admission matched one accepted header to one of the executor's branch requests, then under `EffectsBinds`: the authoring at the shown coordinates gives the intent, whose draft is the shown draft and capabilities; `userPart d` is the shown draft; the auxiliary creates are the grant batch's (kernel-owned); the prepared writes are exactly the allocations, the factory's (unchanged), the Book's and the authority's; the newborn writes are the shown creates followed by the kernel's; the authority post is the shown entries over the pre-state; the Book's logical post is the shown batch applied to the pre-Book |
-| **teeth** (after consent) | `SwapAfterConsentRefusedStatement` | For an executor birth of any `d'` whose bytes differ from the consented `finalized`, under `EffectsBinds`: no signature the receiver admits for any branch of `d'` carries a header the member consented to |
+| **keystone** | `DisplayIsCommitStatement` | For the executor's own `PreparedBirth` of descriptor `d`, if thin consent accepted `(headers, shown)` and admission matched one accepted header to one of the executor's branch requests, then either `EffectsCollision signed d` or: the authoring at the shown coordinates gives the intent, whose draft is the shown draft and capabilities; `userPart d` is the shown draft; the auxiliary creates are the grant batch's (kernel-owned); the prepared writes are exactly the allocations, the factory's (unchanged), the Book's and the authority's; the newborn writes are the shown creates followed by the kernel's; the authority post is the shown entries over the pre-state; the Book's logical post is the shown batch applied to the pre-Book |
+| **teeth** (after consent) | `SwapAfterConsentRefusedStatement` | For an executor birth of any `d'` whose bytes differ from the consented `finalized`: either `EffectsCollision` or no signature the receiver admits for any branch of `d'` carries a header the member consented to |
 | **teeth** (before consent) | `SwappedPlanRefusedStatement` | A plan whose finalized user part differs from the intent's draft is refused `birthSourceChanged`; an intent draft that is not the authoring of the member's source at its coordinates is refused `draftNotAuthored` |
 | **satisfiable** | `HonestPlanAcceptedStatement` | Completeness: for an ordinary canonical draft the member authored (`author (coordinatesOf draft) = some draftBytes`), the plan the honest planner builds (`NativeHost.prepareLoaded … (.birth draftBytes caps) = .ok plan`) is accepted |
-| **premise inhabitation** | `EffectsBindsInhabitedStatement` | `EffectsBinds hash finalized finalized`: the honest Host's carrier |
+| **premise inhabitation** | `OpenedPinsPublicStatement` | Every opened image's pins carry the config's federation and factory policy id (built from `validateChecks`), so the satisfiable pole has no pins premise. The keystone and teeth take no hash premise: a cSHAKE collision at the two descriptors is a named disjunct (`EffectsCollision`) |
 
 The authoring function is a parameter of the Kernel check (`author : BirthCoordinates → Option
 Intent`), since the Kernel cannot import `Host.Json`. The Host instantiates it exactly once, at
@@ -143,10 +144,9 @@ that instance. The Host-side completeness (an intent the Store-reading authoring
 re-authors to itself at its own coordinates) runs through the JSON parser. It is witnessed by the
 journey's successful thin birth (row 19), and I do not claim it as a theorem.
 
-Two carriers bound the claims. `EffectsBinds` at the honest pair is inhabited (the premise pole).
-At a swapped pair (`signed ≠ d'`), the teeth's `EffectsBinds signed d'` is a cSHAKE
-non-collision at those two encodings, the same kind of carrier as `RootBinds` in the
-invocation arm.
+The satisfiable pole's pins premises (opened pins equal to the config's) are discharged by
+`OpenedPinsPublicStatement`, which needs an invariant on `NativeHost.Opened` (built only by
+`validateLoaded`, `validateLoadedFrom` and `restorage`, all from `validateChecks`' pins).
 
 ## 8. Relation to DEMO-PREFIX:190 (the "O(1) provider" switch)
 
@@ -187,7 +187,9 @@ when the arm lands.
 
 * Worktree `/Users/ember/dev/minidregg-lanes/thin-birth` (lane/thin-birth, from origin/main
   7265c5fc6). Box tree: `dregg-ref:/build/lanes/thin-birth` (clone-warm of `/build/minidregg`).
-* State: design and statements pushed (7410dd6d9); sent to auditor af7a93e7b8ba729d4 with five
+* Audit (af7a93e7b8ba729d4, AUDIT.md §22 on lane/audit-platform d1b348a36): REVISE 1 (carrier to
+  named-collision disjunct) and 2 (pins premises to a proved lemma) applied; the rest ACCEPTED.
+* Earlier: design and statements pushed (7410dd6d9); sent to auditor af7a93e7b8ba729d4 with five
   questions (carrier form, conjuncts 3-7, Host authoring completeness as journey-witnessed, the
   Opened pins premises, shown-not-judged coordinates). Elaboration of `Kernel/NativeThinBirth.lean`
   is running on dregg-ref (`/build/lanes/thin-birth-check.{log,pid}`, lane-check; its imports

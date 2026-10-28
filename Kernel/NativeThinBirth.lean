@@ -21,9 +21,9 @@ Store. A birth passes through two Host steps, and this arm checks both:
 The binding: every branch's `effectsDigest` is the source effects digest of the whole executed
 descriptor, and admission matches a signature only to `requestBytes` of its own request
 (`CredentialSignatureAdmission.Prepared.headerExact`). So an admitted consented header fixes the
-executed descriptor, up to the carrier `EffectsBinds`, scoped to two descriptors (it fails exactly
-at a collision of the deployment's cSHAKE source digest on two different encodings; the honest Host
-inhabits it with equal descriptors).
+executed descriptor, up to a named collision scoped to two descriptors (it occurs exactly
+at a collision of the deployment's cSHAKE source digest on two different encodings). The keystone
+and the teeth conclude their claim or that collision (`EffectsCollision`), taking no hash premise.
 
 ## The poles (ATLAS fields), stated below; proofs follow the auditor's verdict
 
@@ -33,8 +33,11 @@ inhabits it with equal descriptors).
 * **Teeth, before consent** `SwappedPlanRefusedStatement`: a swapped plan is refused
   `birthSourceChanged`; a swapped draft is refused `draftNotAuthored`.
 * **Satisfiable** `HonestPlanAcceptedStatement`: the honest planner's plan is accepted.
-* **Premise inhabitation** `EffectsBindsInhabitedStatement`, and `HonestPlanAcceptedStatement`'s
-  premises are those of every successful birth preparation.
+* **Premise inhabitation**: the keystone and teeth take no carrier (they conclude
+  `EffectsCollision` as a disjunct); `HonestPlanAcceptedStatement`'s premises are those of every
+  successful birth preparation, its pins discharged by `OpenedPinsPublicStatement`. The Host-side
+  re-authoring fixed point (an intent the Store-reading authoring produced re-authors to itself at
+  its own coordinates) is a JOURNEY ROW (jpriv2 row 19), not a theorem.
 -/
 import Kernel.NativeThinConsent
 import Kernel.NativeHost
@@ -241,13 +244,15 @@ def checkBirthThin (pins : PublicPins) (author : BirthCoordinates → Option Nat
       else .error .birthMalformed
   | _ => .error (.birthRoute "not a birth intent")
 
-/-! ## The carrier -/
+/-! ## The named collision -/
 
-/-- Scoped to two descriptors: the deployment's source effects digest separates them. -/
-def EffectsBinds (signed executed : Descriptor Registry) : Prop :=
-  CanonicalCellRegistry.sourceEncoding.effectsDigest signed =
-      CanonicalCellRegistry.sourceEncoding.effectsDigest executed →
-    signed = executed
+/-- Two different descriptors with the same source effects digest: a collision of the
+deployment's cSHAKE source digest at exactly these two (canonical) encodings. The keystone and
+the teeth conclude their claim **or** this event, so neither takes a hash premise. -/
+def EffectsCollision (signed executed : Descriptor Registry) : Prop :=
+  signed ≠ executed ∧
+    CanonicalCellRegistry.sourceEncoding.effectsDigest signed =
+      CanonicalCellRegistry.sourceEncoding.effectsDigest executed
 
 /-! ## The poles -/
 
@@ -255,7 +260,7 @@ def EffectsBinds (signed executed : Descriptor Registry) : Prop :=
 of a birth of descriptor `d` (`PreparedBirth`, built from the loaded image at admission) and a
 signature the receiver admitted for one of its branches
 (`CredentialSignatureAdmission.Prepared`) whose header is one thin consent accepted. Under the
-carrier, at the descriptor the headers sign:
+collision at the two descriptors, at the descriptor the headers sign:
 
 * the deployed authoring of the member's source at the shown coordinates is the intent, whose
   draft is the shown draft and capabilities;
@@ -284,8 +289,8 @@ def DisplayIsCommitStatement : Prop :=
     CredentialSignedEnvelopeController.headerCodec.decode bytes =
       some admitted.controller.envelope.header →
     CanonicalCellRegistry.sourceEncoding.codec.decode shown.finalized = some signed →
-    EffectsBinds signed d →
-    author shown.coordinates = some wanted ∧
+    EffectsCollision signed d ∨
+    (author shown.coordinates = some wanted ∧
     wanted.purpose = .prepare (.birth shown.draft shown.capabilities) ∧
     CanonicalCellRegistry.sourceEncoding.codec.encode (userPart d) = shown.draft ∧
     d.auxiliaryCreates = prepared.grants.auxiliaryCreates ∧
@@ -299,7 +304,7 @@ def DisplayIsCommitStatement : Prop :=
         (ResourceBirthAuthority.entries (userPart d)) ∧
     CanonicalResourceKernel.logicalBook prepared.resources.post.logical =
       (userPart d).resourceBatch.apply
-        (CanonicalResourceKernel.logicalBook prepared.book.payload.logical)
+        (CanonicalResourceKernel.logicalBook prepared.book.payload.logical))
 
 /-- **Teeth, after consent.** A Host that executes a birth of any descriptor `d'` other than the
 one the consented headers sign gets no consented signature admitted on any branch of it: every
@@ -316,7 +321,7 @@ def SwapAfterConsentRefusedStatement : Prop :=
     checkBirthThin deployed author wanted planBytes = .ok (headers, shown) →
     CanonicalCellRegistry.sourceEncoding.codec.decode shown.finalized = some signed →
     signed ≠ d' →
-    EffectsBinds signed d' →
+    EffectsCollision signed d' ∨
     ∀ (branch : Branch d') (snapshot : CredentialAuthorityDomain.Snapshot) (nullifier : Nat)
       (admitted : CredentialSignatureAdmission.Prepared snapshot nullifier
         (branchRequest prepared height branch)),
@@ -358,15 +363,13 @@ def SwappedPlanRefusedStatement : Prop :=
 /-- **Satisfiable: the honest Host passes.** For a canonical ordinary birth draft that is the
 member's authoring at its own coordinates, the plan the deployed planner builds on any opened
 image (`NativeHost.prepareLoaded`, the served path's birth arm) is accepted, and the headers to
-sign are exactly the plan's. The pins premise is the shape every opened image's pins have
-(`NativeHostContext.validateChecks`). -/
+sign are exactly the plan's. No premise on the opened image: its pins are the config's
+(`OpenedPinsPublicStatement`). -/
 def HonestPlanAcceptedStatement : Prop :=
   ∀ (config : NativeHost.Config) (opened : NativeHost.Opened config)
     (author : BirthCoordinates → Option NativeObservationCodec.Intent) (wanted : NativeObservationCodec.Intent)
     (draftBytes : List UInt8) (capabilities : List CapabilityId) (draft : Descriptor Registry)
     (plan : NativeHostCodec.SigningPlan),
-    opened.pins.federation = config.federation →
-    opened.pins.policyId = ⟨config.deployment.factoryId⟩ →
     wanted.purpose = .prepare (.birth draftBytes capabilities) →
     GrainResourceBirthHostCodec.sourceCodec.decode draftBytes = none →
     CanonicalCellRegistry.sourceEncoding.codec.decode draftBytes = some draft →
@@ -377,9 +380,12 @@ def HonestPlanAcceptedStatement : Prop :=
         (NativeHostCodec.signingPlanCodec.encode plan) =
       .ok (plan.slots.map NativeHostCodec.SigningSlot.header, shown)
 
-/-- **Premise inhabitation.** The honest Host, which executes the descriptor the headers sign,
-meets the carrier. -/
-def EffectsBindsInhabitedStatement : Prop :=
-  ∀ descriptor : Descriptor Registry, EffectsBinds descriptor descriptor
+/-- **Every opened image's public pins are the config's** (`validateLoaded` and
+`validateLoadedFrom` build `Opened` from `validateChecks`' pins; `restorage` copies them). The
+lemma that discharges what was the satisfiable pole's pins premise. -/
+def OpenedPinsPublicStatement : Prop :=
+  ∀ (config : NativeHost.Config) (opened : NativeHost.Opened config),
+    opened.pins.federation = config.federation ∧
+      opened.pins.policyId = ⟨config.deployment.factoryId⟩
 
 end Minidregg.Kernel.NativeThinBirth
