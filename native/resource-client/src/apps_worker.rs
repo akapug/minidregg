@@ -1445,14 +1445,14 @@ mod tests {
     fn a_refused_turn_gives_its_reservation_back_and_a_failed_release_is_named() {
         use std::cell::Cell;
         let (released, retired) = (Cell::new(0), Cell::new(0));
-        let refused: Result<(), String> = super::guarded_reserve(|| Ok(()), || Err("law-denied".into()), || { released.set(released.get() + 1); Ok(()) }, || retired.set(retired.get() + 1));
+        let refused: super::Result<()> = super::guarded_reserve(|| Ok(()), || Err("law-denied".into()), || { released.set(released.get() + 1); Ok(()) }, || retired.set(retired.get() + 1));
         assert!(refused.unwrap_err().contains("law-denied; the tool reservation was released"));
         assert_eq!((released.get(), retired.get()), (1, 1));
         let ok = super::guarded_reserve(|| Ok(()), || Ok(7), || panic!("no release on success"), || panic!("no retire on success"));
         assert_eq!(ok, Ok(7));
-        let stuck: Result<(), String> = super::guarded_reserve(|| Ok(()), || Err("refused".into()), || Err("undecided".into()), || panic!("nothing retired when the release failed"));
+        let stuck: super::Result<()> = super::guarded_reserve(|| Ok(()), || Err("refused".into()), || Err("undecided".into()), || panic!("nothing retired when the release failed"));
         assert!(stuck.unwrap_err().contains("toolReservationReleaseUndecided: undecided"));
-        let not_reserved: Result<(), String> = super::guarded_reserve(|| Err("reserve refused".into()), || panic!("no turn"), || panic!("no release"), || {});
+        let not_reserved: super::Result<()> = super::guarded_reserve(|| Err("reserve refused".into()), || panic!("no turn"), || panic!("no release"), || {});
         assert_eq!(not_reserved.unwrap_err(), "reserve refused");
     }
 
