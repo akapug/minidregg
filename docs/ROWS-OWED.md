@@ -270,24 +270,22 @@ Run on a worktree at the candidate's commit, one `swarm-build`, PID file. Eviden
 | focused harness checks | generated operator/genesis JSON; allocation guard | `python3 -B scripts/test-oracle-agent-lifetime-journey.py HarnessTests.test_complete_grain_store_configuration_before_bootstrap HarnessTests.test_actual_factory_allocation_guard` | none | codex | 5 focused checks PASS on dregg-ref at ce27ff402 (5.422 s); native qualification remains below |
 | lifetime-grant fixtures | the three-capability grant; ordinary template refuses it | `lake env lean tests/lean/LifetimeGrantObserverAdversary.lean`, `...LifetimeGrantSourceAdversary.lean`, `Host/NativeLifecycleConsent.lean`, then `scripts/codec-shapes-regen.py` (integrator's, central build) | none | codex / integrator | per-file exit0 on c77ef2f9 epoch; source adversary not rerun |
 | joracle | the oracle lands as a grain via the market; one bounded question answered on its origin; stopped | `MINI_IMPORT_PROFILE=operator-appliance-v1` WORLD, then `joracle.sh --box WORLD.env OUT RUNTIME.spk DATA_SOURCE_DIR INVENTORY.json` (dataset 14.01 GiB, inventory `32bb3cf1...`) | WORLD | oracle-grain lane | result in the lane report only; not on record here |
-| Oracle v7 fresh world | a fresh Store qualified through agent calls (grant issue, dispatch, answer), authority refusals, browser use, restart and exact retry; old stopped Stores preserved | `scripts/oracle-shared-data-journey.sh BASE_BIN OWN_BIN NEW_RUN_ROOT SIGNED_RUNTIME_SPK DATA_SOURCE INVENTORY_JSON` with the inputs below; candidate includes oracle-grant-factory + oracle-lifetime-grant (genesis v8, outcome v7) | genesis | codex | 28 Oct: Store `a64d135a102a1951` reached recovered STOP g14, payer-route migration and START g16 (acceptedCount 136). At 18:35 UTC, unrelated world cleanup destroyed its app volumes and removed its controller before activation resumed. Its logical Store and evidence remain; the removed physical identity cannot be resumed. A fresh replacement qualification is being prepared. Agent/browser/restart checks remain open. |
-| Hermes Oracle composition | the room's own Hermes task discovers and invokes Oracle, obeys its grant, and answers after restart | `J14_ORACLE=1` with the inputs in `deploy/hermes/README.md` | J14's own Store and tasks | codex | 28 Oct: Store `89725141b12626ca` passed native prompt audit and drain, STOP g2, payer-route migration, START g4, controller enrollment and signed readiness. The retained fresh ask is executing. Full answer/restart qualification remains open. |
+| Oracle v7 fresh world | a fresh Store qualified through agent calls (grant issue, dispatch, answer), authority refusals, browser use, restart and exact retry; old stopped Stores preserved | `scripts/oracle-shared-data-journey.sh BASE_BIN OWN_BIN NEW_RUN_ROOT SIGNED_RUNTIME_SPK DATA_SOURCE INVENTORY_JSON` with the inputs below; candidate includes oracle-grant-factory + oracle-lifetime-grant (genesis v8, outcome v7) | genesis | codex | 28 Oct: Store `a64d135a102a1951` reached recovered STOP g14, payer-route migration and START g16 (acceptedCount 136). At 18:35 UTC, unrelated world cleanup destroyed its app volumes and removed its controller before activation resumed. Its logical Store and evidence remain; the removed physical identity cannot be resumed. Replacement Store `26aaa9ecdb7c66e9` reached genesis before the operator-approved deletion of dregg-build. Physical installer outcome and remote artifact survival are unverified. Agent/browser/restart checks remain open. |
+| Hermes Oracle composition | the room's own Hermes task discovers and invokes Oracle, obeys its grant, and answers after restart | `J14_ORACLE=1` with the inputs in `deploy/hermes/README.md` | J14's own Store and tasks | codex | 28 Oct: Store `89725141b12626ca` passed native prompt audit and drain, STOP g2, payer-route migration, START g4, controller enrollment and signed readiness. Prompt 107 ran, but native completion receiving remains pending; no Oracle answer is claimed. dregg-build was subsequently deleted with operator approval. Full answer/restart qualification remains open. |
 
 ### Oracle appliance
 
 Owner: `lane/oracle-grant-factory` (provisioning), with the integrated
 `lane/oracle-lifetime-grant` repair. Native session birth and lifetime grant now pass;
-the complete hosted qualification remains open. Preserve
-`/build/lanes/oracle-v7-q3-20261028/oracle-run` and its logical Store: its physical
-world was removed by unrelated cleanup during recovery, so it is evidence of an
-interrupted qualification, not a resumable installed world. Its coherent candidate
-was `aae3e2e372b045dd43493183144db08212d51659` with recorded runtime overlays.
-The live Hermes world `89725141b12626ca` and its run
-`/build/lanes/j14-o7-q2-IYLEXpPj/run2/oracle` remain owned by this qualification.
-A stopped service or an idle interval between recovery phases does not mean a
-world is disposable. Oracle qualification worlds, including stopped predecessors
-`be0d1db693ca88bd` and `c2babca8414652c2`, must be retained until their owner
-explicitly retires them.
+the complete hosted qualification remains open. The operator approved deleting
+`dregg-build` on 28 October; there are no live qualification jobs there.
+The last runs were q3 (`a64d135a102a1951`, removed earlier during cleanup),
+Hermes (`89725141b12626ca`, completion 107 pending) and q4
+(`26aaa9ecdb7c66e9`, genesis completed). The 400 GB build volume remains detached;
+its contents and the recoverability of these runs have not been verified.
+See [the direct qualification checkpoint](oracle-direct-qualification.md).
+Old `/build/lanes/...` paths in receipts identify last observed locations.
+Do not treat a source rescue archive as a backup of controller homes or Stores.
 The exact-Host STOP prerequisite passed all 11 lifecycle phases and all four
 negative controls; its copied-Store benchmark is
 `/build/lanes/oracle-v7-q-20261028/stop-copy3/probe/benchmark.json`.

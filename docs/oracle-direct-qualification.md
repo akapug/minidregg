@@ -38,3 +38,9 @@ Q4 preflight pins the prior same-Host native J14 STOP. Its own cold/served
 inspection comparison runs immediately after its first STOP, before a successor
 START can make that plan historical. A trial against J14's older generation
 correctly refused; that refusal is retained and is not counted as a pass.
+
+The cloud volume inventory still lists detached `dregg-build-volume`
+(`107281049`, 400 GB) after server deletion. No attachment, mount or contents
+verification has been performed. The Mac rescue directory contains source
+bundles/diffs; it is not a complete controller-world backup. Existing local
+checkpoints and captured diagnostics remain available.

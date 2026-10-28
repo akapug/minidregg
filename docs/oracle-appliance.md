@@ -115,12 +115,16 @@ grant, migrated the payer route and completed native STOP and successor START.
 Its physical world was subsequently removed by unrelated cleanup while recovery
 was paused. The logical Store and admission evidence are preserved; that run is
 not a complete receiving result and its removed physical identity cannot resume.
-A replacement qualification is being prepared. The live Hermes composition has
-passed controller enrollment and signed readiness; agent answers, browser use
-and the complete restart journey remain open.
+A replacement qualification reached genesis. The Hermes composition passed
+controller enrollment and signed readiness, but its completed model turn still
+needed native receiving. The build server was then deleted with operator
+approval. Agent answers, browser use and the complete restart journey remain
+open; no qualification process remains on that deleted server.
 
-Earlier stopped v5 and v7 Stores remain preserved. Their
-[recovery record](evidence/oracle-hosted-recovery-2026-10-27.json) names the exact
+The detached build volume still exists, but its contents have not been mounted
+or verified after the deletion. Old remote evidence paths are historical
+locations, not a guarantee of recoverable installed worlds. Earlier stopped
+v5 and v7 runs have a [recovery record](evidence/oracle-hosted-recovery-2026-10-27.json) names the exact
 outstanding custody and results. The lifetime-grant repair now admits the
 source's owner, controller and read-only observer through a dedicated frame;
 ordinary births retain their own restriction. The
