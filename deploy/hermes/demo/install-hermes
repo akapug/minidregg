@@ -86,10 +86,15 @@ here=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(CDPATH='' cd -- "$here/../../.." && pwd)
 
 die() { echo "install-hermes: $*" >&2; exit 1; }
-as_op() { runuser -u "$OPERATOR" -- "$@"; }
+# Consent anchors: runuser's HOME for both accounts is a root-owned directory,
+# so each account names its own persistent anchor directory (the operator's is
+# the Store's, as the run sheet's `apps bootstrap` uses; the resident's is
+# ANCHORS, which its controller and resident units name too).
+ANCHORS=$V/anchors
+as_op() { runuser -u "$OPERATOR" -- env MINI_CONSENT_ANCHOR_DIR="$NODE/consent-anchors" "$@"; }
 # The resident pins its route's listener creator (systemd, uid 0); every
 # child `mini` of its commands inherits the pin.
-as_res() { runuser -u "$RESIDENT" -- env MINI_OPERATOR_PEER_UID=0 "$@"; }
+as_res() { runuser -u "$RESIDENT" -- env MINI_OPERATOR_PEER_UID=0 MINI_CONSENT_ANCHOR_DIR="$ANCHORS" "$@"; }
 resident_subject() { case $1 in hermes|hhost|hprov) return 0 ;; *) return 1 ;; esac; }
 as_owner() { local who=$1; shift; if resident_subject "$who"; then as_res "$@"; else as_op "$@"; fi; }
 home_of() { if resident_subject "$1"; then echo "$H/$1"; else echo "$HO/$1"; fi; }
@@ -151,7 +156,8 @@ step_preflight() {
   # operator's part is the operator's; everything else is the resident's.
   install -d -o root -g root -m 0755 "$V"
   install -d -o "$OPERATOR" -g "$OPERATOR" -m 0700 "$OPV" "$HO" "$WO" "$RECORD"
-  install -d -o "$RESIDENT" -g "$RESIDENT" -m 0700 "$H" "$WS" "$RUN"
+  install -d -o "$RESIDENT" -g "$RESIDENT" -m 0700 "$H" "$WS" "$RUN" "$ANCHORS"
+  [ -d "$NODE/consent-anchors" ] || install -d -o "$OPERATOR" -g "$OPERATOR" -m 0700 "$NODE/consent-anchors"
   printf '%s\n' "$POOL_ROW" | as_op tee "$RECORD/pool-row" >/dev/null
   mark preflight
 }
