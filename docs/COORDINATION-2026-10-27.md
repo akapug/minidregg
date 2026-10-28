@@ -131,8 +131,9 @@ regeneration, no decisions ledger, no census of the research tree, no accepted-r
 - **Veterans are resumed, never respawned.** The agent that diagnosed a failure fixes it; a
   successor is spawned only when context is the problem, and then from the predecessor's own
   continuation file.
-- **Distill at 400k, not at death.** The token curve bends there (58 % of tokens were spent above
-  it; four lanes died of context). `cv distill --keep-last 10` for code lanes, `--keep-last 14` for
+- **Distill at about 470k, not at death; write the continuation by about 450k.** (ember, 2026-10-28:
+  raised about 17% from 400k, since tonight's veterans kept handing off mid-task. Earlier measure: 58 % of
+  tokens were spent above 400k and four lanes died of context, so the continuation file comes first.) `cv distill --keep-last 10` for code lanes, `--keep-last 14` for
   box and infra lanes (their last calls carry live PIDs and candidate paths). Hub lanes rotate per
   task cluster whatever their size.
 - **Before any swarm, the permission allowlist is in place**: write-side heredocs and `git`/`ssh`
