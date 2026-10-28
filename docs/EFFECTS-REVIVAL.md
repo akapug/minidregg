@@ -344,8 +344,9 @@ Engine/Statements split).
    today (`HostLegacyCensusRefutedToday`: `Payload.content` is tag 1) and provable exactly
    when the migration deletes that constructor.  `OneSource`/`composeDispatch` stay only as
    the extensional shadow (any dispatcher agreeing on registered codes satisfies it).
-   Proofs owed: the toy census pair and `HostLegacyCensusRefutedToday` now; the census
-   itself at the migration commit.
+   Proved (pass 27 accepted): `legacyCensusSatisfiable`, `legacyCensusTeeth`,
+   `oneSourceSatisfiable`, `oneSourceTeeth`, `hostLegacyCensusRefutedToday`.  Owed: the
+   census itself, at the migration commit.
 3. **The bridge to the deployed receiver** (gap 2).  `HostKeystone` is about a wrapper this
    lane wrote.  Stated (Statements §8; pass 27): `PrepareFactors E`: the deployed
    `ResourceTransaction.prepareTarget` (post packed, refusals named) equals the content
@@ -358,7 +359,8 @@ Engine/Statements split).
    (every byte string under an old code dispatches exactly as before: decode, header,
    selection, interpretation, execution, refusals), `SafeExtension` (the explicit policy for
    newly accepted codes: a retired code is never rebound), with satisfiable and teeth;
-   `LawfulRegistry` gains `octet` (every code < 256, the payload tag byte).  Proofs owed.
+   `LawfulRegistry` gains `octet` (every code < 256, the payload tag byte).  Proved:
+   `extensionPreserves`, `extensionSatisfiable`, `extensionTeeth`.
    Still to state: prefix consumption (the outer target decoder reads the tag octet, then the
    handler's `opStream.decodePrefix`; an extension preserves `decodePrefix` on every old
    code), and a whole-epoch compatibility design: the persisted corpus feeds

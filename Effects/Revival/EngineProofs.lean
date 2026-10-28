@@ -273,7 +273,73 @@ theorem completenessPremise : CompletenessPremise :=
       · simp [List.lookup] at found; subst found; exact entryA_lawful
       · simp [List.lookup] at found⟩, rfl⟩
 
+/-! ## Step 4: the legacy census, one source, and registry extension. -/
+
+/-- The ghost pole reads code 0 differently from the pole (`5` lands as `6`). -/
+theorem toyGhostDispatch5 :
+    dispatch toyGhostPole 0 (StreamCodec.nat.encode 5) () toyEmpty ≠
+      .ok (Store.set toyEmpty ⟨false, ()⟩ (some (5 : Nat))) := by
+  intro agree
+  simp [dispatch, toyGhostPole, decode_encode_op, Handler.fire, toyEntry,
+    EffectSpec.exec, entryASpec, ghostASpec, toyWrite, toyEmpty, EffectSpec.InFrame,
+    Substrate.footprint, Substrate.run, storeSubstrate, Op.Enabled, Op.apply, Store.Fresh,
+    toyField, Op.writeAddress?, Op.address, Except.map] at agree
+  have at0 := congrArg (fun c : ToyStore => c ⟨false, ()⟩) agree
+  simp at at0
+
+theorem legacyCensusSatisfiable : LegacyCensusSatisfiable := by
+  intro p
+  cases p
+  simp [toyLegacyTag, toyPole]
+
+theorem legacyCensusTeeth : LegacyCensusTeeth := fun census => census () (by simp [toyPole])
+
+theorem oneSourceSatisfiable : OneSourceSatisfiable := by
+  refine ⟨fun code _ _ _ => .error (.unregistered code), ?_⟩
+  funext code bytes ctx cell
+  unfold composeDispatch
+  cases found : toyPole.lookup code with
+  | none => simp [dispatch, found]
+  | some e => rfl
+
+theorem oneSourceTeeth : OneSourceTeeth := by
+  rintro ⟨legacy, same⟩
+  have at0 := congrFun (congrFun (congrFun (congrFun same 0) (StreamCodec.nat.encode 5)) ()) toyEmpty
+  simp only [composeDispatch, show toyPole.lookup 0 = some (toyEntry entryASpec) from rfl,
+    toyDispatchA5] at at0
+  exact toyGhostDispatch5 at0
+
+theorem extensionPreserves (Ctx Cell : Type) : ExtensionPreserves Ctx Cell := by
+  intro R R' ext code present bytes ctx cell
+  cases found : R.lookup code with
+  | none => exact absurd found present
+  | some e => simp only [dispatch, ext code e found, found]
+
+theorem extensionSatisfiable : ExtensionSatisfiable := by
+  refine ⟨?_, by simp⟩
+  intro code e found
+  rcases code with _ | code
+  · simp [List.lookup] at found; subst found; rfl
+  · simp [List.lookup] at found
+
+theorem extensionTeeth : ExtensionTeeth := by
+  refine ⟨fun ext => ?_, fun safe => ?_⟩
+  · have same := extensionPreserves Unit ToyStore toyPole toyGhostPole ext 0
+      (by simp [toyPole]) (StreamCodec.nat.encode 5) () toyEmpty
+    rw [toyDispatchA5] at same
+    exact toyGhostDispatch5 same
+  · have retired := safe.2 1 (by simp)
+    simp [toyPole, List.lookup] at retired
+
 /-! ## Axiom pins. -/
+
+#assert_axioms legacyCensusSatisfiable
+#assert_axioms legacyCensusTeeth
+#assert_axioms oneSourceSatisfiable
+#assert_axioms oneSourceTeeth
+#assert_axioms extensionPreserves
+#assert_axioms extensionSatisfiable
+#assert_axioms extensionTeeth
 
 #assert_axioms engineKeystone
 #assert_axioms completenessKeystone

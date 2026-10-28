@@ -520,7 +520,16 @@ theorem contentNarrowed_incomplete : ¬ contentNarrowed.Complete := by
   simp [contentNarrowed, contentSpec, contentFrame, contentActionFrame, sampleLinkCommand,
     ResourceObservationAdmission.contentFieldAt, ResourceObservationAdmission.contentField] at written
 
+/-! ## The live legacy census is false today. -/
+
+/-- `Payload.content` still carries code 1: the census is refuted until the migration
+deletes that constructor. -/
+theorem hostLegacyCensusRefutedToday : HostLegacyCensusRefutedToday := fun census =>
+  census (.content ⟨[]⟩) (by simp [payloadTag, DeclaredResourceController.payloadStream])
+
 /-! ## Axiom pins. -/
+
+#assert_axioms hostLegacyCensusRefutedToday
 
 #assert_axioms contentComplete
 #assert_axioms contentNarrowed_incomplete
