@@ -589,8 +589,9 @@ enroll() (
       --dir "$EV/$label-close-g$gen-attempt" >"$EV/$label-close-g$gen.stdout"
     confirmed "$EV/$label-close-g$gen-attempt/outcome.json"
   fi
-  # The ticket was issued by the share under the base label (a), not by this repeat (a2).
-  anchor=$EV/${label%[0-9]}-ticket-$ticket/issue/receipt-anchor.json
+  # The share issued the ticket under the label this enrollment carries (a repeat enrolls under
+  # the base label a; the second session shares and enrolls as b2).
+  anchor=$EV/$label-ticket-$ticket/issue/receipt-anchor.json
   [ -s "$anchor" ] || fail "enroll $label: the ticket's issue receipt anchor is missing: $anchor"
   count=$(jq -er .receipt.acceptedCount "$anchor") || fail "enroll $label: $anchor has no acceptedCount"
   jq -n --argjson basis "$ROLE_BASIS" --arg index "$((count - 1))" --arg ticket "$ticket" --arg pkg "$((app + 1))" \
