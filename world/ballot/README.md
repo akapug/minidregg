@@ -1,7 +1,8 @@
 # world/ballot — sealed-ballot (commit/reveal) vote for rooms
 
 `SealedBallot.obend` + `preview-cohort.json` (37 rows). Evidence class: **executed in the
-effect-free preview**; not native, and **not hiding** (see below).
+effect-free preview**; not hiding (see below).
+Native: admitted on the activity route on candidate 0ce31391, scenario `ballot` of `native/resource-client/world-activity-admit.py`, 27/27 rows (every refusal row confirms its refusal); run `scripts/world-native-admit.sh ballot --route activity --scenario ballot --entry ballot`. Evidence: `docs/evidence/2026-10-27-world-native/ballot/` (`verdicts.txt`, `results.json`).
 
 ## What it does
 Three phases by height. COMMIT (`now < commitEnd`): each elector commits a digest of

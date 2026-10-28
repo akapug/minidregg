@@ -1,0 +1,454 @@
+{
+ "rows": [
+  {
+   "step": "extract-quote-is-the-policy-ceiling",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "published": {
+     "extractTicks": "3200000"
+    },
+    "policy": 3200000
+   },
+   "group": null
+  },
+  {
+   "step": "publish",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "publish"
+  },
+  {
+   "step": "create",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "create"
+  },
+  {
+   "step": "birth",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "birth"
+  },
+  {
+   "step": "born-awaiting-the-keeper-ledger-0",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "source": {
+     "decider": "40",
+     "kind": "reply",
+     "slot": "51889406466536787604330792951063104726831921449508139899029992023942395637048",
+     "slotCell": "121273874244426222471371749468921533546947964766848167435020686388521265752646"
+    },
+    "state": {
+     "fields": [
+      {
+       "name": "moves",
+       "value": {
+        "tag": "natural",
+        "value": "0"
+       }
+      }
+     ],
+     "tag": "record"
+    }
+   },
+   "group": "play"
+  },
+  {
+   "step": "resolve-commit-a",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "play"
+  },
+  {
+   "step": "deliver-commit-a",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "play"
+  },
+  {
+   "step": "resolve-commit-b",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "play"
+  },
+  {
+   "step": "deliver-commit-b",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "play"
+  },
+  {
+   "step": "resolve-reveal-a",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "play"
+  },
+  {
+   "step": "deliver-reveal-a",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "play"
+  },
+  {
+   "step": "resolve-reveal-b",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "play"
+  },
+  {
+   "step": "deliver-reveal-b",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "play"
+  },
+  {
+   "step": "winner-paid-exactly-the-pot-from-the-purse",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "source": {
+     "kind": "performed",
+     "reason": null,
+     "verdict": "settled"
+    },
+    "winner": [
+     100000000000,
+     100200000000
+    ],
+    "state": {
+     "fields": [
+      {
+       "name": "moves",
+       "value": {
+        "tag": "natural",
+        "value": "1"
+       }
+      }
+     ],
+     "tag": "record"
+    },
+    "purse": [
+     300000000,
+     86670728
+    ]
+   },
+   "group": "play"
+  },
+  {
+   "step": "deliver-settled",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "play"
+  },
+  {
+   "step": "pot-paid-once-and-finished",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "phase": null,
+    "state": {
+     "fields": [
+      {
+       "name": "moves",
+       "value": {
+        "tag": "natural",
+        "value": "1"
+       }
+      }
+     ],
+     "tag": "record"
+    }
+   },
+   "group": "play"
+  },
+  {
+   "step": "create-poor",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "play-teeth-unfunded"
+  },
+  {
+   "step": "birth-underfunded",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "play-teeth-unfunded"
+  },
+  {
+   "step": "resolve-commit-a-underfunded",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "play-teeth-unfunded"
+  },
+  {
+   "step": "deliver-commit-a-underfunded",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "play-teeth-unfunded"
+  },
+  {
+   "step": "resolve-commit-b-underfunded",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "play-teeth-unfunded"
+  },
+  {
+   "step": "deliver-commit-b-underfunded",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "play-teeth-unfunded"
+  },
+  {
+   "step": "resolve-timeout-underfunded",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "play-teeth-unfunded"
+  },
+  {
+   "step": "deliver-timeout-underfunded",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "play-teeth-unfunded"
+  },
+  {
+   "step": "payout-refused-unfunded-moves-nothing",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "source": {
+     "kind": "performed",
+     "reason": "unfunded",
+     "verdict": "refused"
+    },
+    "version": [
+     "1",
+     "1"
+    ],
+    "state": {
+     "fields": [
+      {
+       "name": "moves",
+       "value": {
+        "tag": "natural",
+        "value": "0"
+       }
+      }
+     ],
+     "tag": "record"
+    }
+   },
+   "group": "play-teeth-unfunded"
+  },
+  {
+   "step": "deliver-refused-underfunded",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "play-teeth-unfunded"
+  },
+  {
+   "step": "refused-payout-waits-for-the-next-event",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "source": {
+     "decider": "40",
+     "kind": "reply",
+     "slot": "79830817474101911876200017674776489468913412530519790236982774319191067278225",
+     "slotCell": "189352895273172312160594612566066613300689493366346844839773021211383817987573"
+    }
+   },
+   "group": "play-teeth-unfunded"
+  }
+ ],
+ "totals": [
+  {
+   "after": "born",
+   "height": "15",
+   "total": "0"
+  },
+  {
+   "after": "resolved-commit-a",
+   "height": "16",
+   "total": "0"
+  },
+  {
+   "after": "after-commit-a",
+   "height": "17",
+   "total": "0"
+  },
+  {
+   "after": "resolved-commit-b",
+   "height": "18",
+   "total": "0"
+  },
+  {
+   "after": "after-commit-b",
+   "height": "19",
+   "total": "0"
+  },
+  {
+   "after": "resolved-reveal-a",
+   "height": "20",
+   "total": "0"
+  },
+  {
+   "after": "after-reveal-a",
+   "height": "21",
+   "total": "0"
+  },
+  {
+   "after": "resolved-reveal-b",
+   "height": "22",
+   "total": "0"
+  },
+  {
+   "after": "after-reveal-b",
+   "height": "23",
+   "total": "0"
+  },
+  {
+   "after": "after-settled",
+   "height": "24",
+   "total": "0"
+  },
+  {
+   "after": "birth-underfunded-view",
+   "height": "26",
+   "total": "0"
+  },
+  {
+   "after": "resolved-commit-a-underfunded",
+   "height": "27",
+   "total": "0"
+  },
+  {
+   "after": "after-commit-a-underfunded",
+   "height": "28",
+   "total": "0"
+  },
+  {
+   "after": "resolved-commit-b-underfunded",
+   "height": "29",
+   "total": "0"
+  },
+  {
+   "after": "after-commit-b-underfunded",
+   "height": "30",
+   "total": "0"
+  },
+  {
+   "after": "resolved-timeout-underfunded",
+   "height": "31",
+   "total": "0"
+  },
+  {
+   "after": "after-timeout-underfunded",
+   "height": "32",
+   "total": "0"
+  },
+  {
+   "after": "after-refused-underfunded",
+   "height": "33",
+   "total": "0"
+  }
+ ],
+ "objects": {
+  "obj": {
+   "object": "10206318963115059792",
+   "capability": "11215847271725424384"
+  },
+  "poor": {
+   "object": "16960649745211602150",
+   "capability": "12028357091307192323"
+  }
+ },
+ "allPass": true,
+ "pin": "110146591734896236465389977268943156946672301001174673297892215999599426604874",
+ "height": "33"
+}
