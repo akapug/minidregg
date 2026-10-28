@@ -50,10 +50,66 @@ The auditor is af7a93e7b8ba729d4; passes 16–23 are on lane/audit-platform.
   23.7 GB) and cold on hbox. The targets were the twenty modules in
   /build/lanes/lean-audit-c-build.sh, plus the lifetime-grant and share-issue Host files and
   tests/lean/LifetimeGrantSourceAdversary.lean (lane-check). The integrator has it, held.
-- **lane/lean-audit-c-m2 1a29e71af, on top of 82c17c448's tree,** is green on hbox (build-m2d):
-  the same targets plus Kernel.MeterRefillReceiver, Kernel.NativeHostReplay and
-  Assurance.DeployedCredentialLifecycle. 3fa536765 adds the World refill pole, built per
-  module. The hbox tree matches the M2 tip byte for byte.
+- **lane/lean-audit-c-m2, tip 3fa536765**, is green on hbox at 1a29e71af, on top of 82c17c448's
+  tree (build-m2d). Targets: the same plus Kernel.MeterRefillReceiver, Kernel.NativeHostReplay
+  and Assurance.DeployedCredentialLifecycle. 3fa536765 adds the World refill pole, built per
+  module.
+
+### In progress: item 7's plan poles (audit pass 24)
+
+- File: Fixtures/BirthPlanPoles.lean, on this branch, uncommitted when this section was
+  written. It is not in Verify/, because `Fixtures` is imported by no umbrella, keystone or
+  axiom census, and the umbrella target list builds it.
+- Contents:
+  - a source-built genesis opened purely (`openState`/`openLoaded`/`validateLoaded`);
+  - the one neutral content birth;
+  - the real `prepareDraft` and `preparePending`;
+  - `plan_passes_inhabited` (verdict `some true`, law `birth/7001 = exact root`);
+  - `plan_refuses_inhabited` (verdict `some false`, root + 1).
+- Decided by `native_decide` (law 9, confessed). The pin names the two auxiliary axioms Lean
+  4.30 emits (`…._native.native_decide.ax_1_1`). The file elaborated green alone in about 6 s.
+- The build of `Fixtures CensusChecks` was started on hbox in /othersys/lanes/lean-audit-c/src
+  as a foreground ssh swarm-build. **It has no PID file.** Rerun it detached with a PID file if
+  its result is lost.
+- Still owed for item 7, by the pass-24 ruling: the signed poles over a recorded transcript
+  (`CheckedSignature` with Oracle `.recorded`, CredentialSignatureAdmission.lean:287-296;
+  `check-native-transcripts.sh` re-checks the verdict). That covers:
+  - `BranchAccepted … .factory` inhabited, and admission `.error .policyRejected` on the
+    refusing law;
+  - the `ReceiverReadsCurrent` satisfiable `AcceptedBirth`;
+  - the completion `Candidate` passing `platformReadOnly`;
+  - the Host-level refill at an exhausted meter.
+- Gate cost (pass 24): if a kernel version's total passes a few minutes, the native module
+  gates merges and the kernel one runs nightly. Measured cost of kernel cSHAKE: about 0.13 s per
+  hashed byte (100 B about 33 s, 1,000 B about 144 s).
+- Found while doing this: scripts/kn2/neutral-birth.lean is stale. Its genesis Config lacks
+  `payControlCapabilityId`, `clockControlCapabilityId` and the four `platform*` fields, so the
+  accepted interim executed witness does not elaborate. Fix it alongside the poles.
+
+### Audit record (lane/audit-platform AUDIT.md)
+
+- Pass 20 accepted the completion custodian key from the platform cell.
+- Pass 21 accepted the M2 design; the overflow finding was withdrawn, since the meter is an
+  unbounded Nat. Its addendum accepted the deployed K1/K2/K3 and retired the spec twin.
+- Pass 23, option A: the World carries credit, with three conditions (the regression pole,
+  `step_meter` with the 0→5 pole, the K3 docstring). Addenda accepted the exact text plus the
+  tooth `encodeTurn_credit_ne`, the strengthened `SnapRepresents.meter`, and
+  `charge_le_allowance` with `+ credit`. `Reserved.uncredited` was accepted in a reply, with no
+  section.
+- Pass 24: item 7 witnesses. Signed poles go over a recorded transcript; a native_decide
+  module is the fallback, thresholded on the module's total gate time.
+
+### Queued after landing
+
+- **Birth-authoring twin, ordered by the coordinator under law 1.** The box authors births with
+  Host.Json, and the thin-consent provider re-authors with `Host.SourceAgreementJson.birthAt`.
+  They are identical copies (lane/thin-birth 1e0f741d3, docs/THIN-BIRTH-2026-10-28.md); if they
+  ever diverge, honest thin births are refused `draftNotAuthored`. Collapse them into one
+  function both call, keep the better copy, and prove agreement with rfl or a filtered test. Do
+  this after lean-audit-c and thin-birth are both on main.
+- thin-birth lands in the same window as the conversion. Expect overlap with this lane in
+  Host/SourceAgreementJson.lean (`birthCurrent`) and Host/HostOperations.lean when merging the
+  converted main.
 
 ### Order with the module conversion (agreed with iter-speed a0fd127abfb9aac75; the integrator confirms)
 
