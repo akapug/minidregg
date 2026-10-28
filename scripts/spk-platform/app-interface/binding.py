@@ -28,7 +28,7 @@ class Uncertain(Refusal):
 
 
 def load(name):
-    if name not in ('gogs', 'wekan', 'davros'):
+    if not re.fullmatch(r'[a-z][a-z0-9-]*', name) or not (ROOT / (name + '.json')).is_file():
         raise Refusal('interface-unknown')
     d = json.loads((ROOT / (name + '.json')).read_text())
     check_declaration(d)
@@ -42,16 +42,19 @@ def check_declaration(d):
     if not Draft202012Validator(contract).is_valid(d):
         raise Refusal('declaration-invalid')
     for op in d['operations'].values():
+        ids = [step['id'] for step in op.get('prepare', [])]
+        if len(ids) != len(set(ids)):
+            raise Refusal('declaration-invalid', 'duplicate preparation id')
         for key in ('input', 'output'):
             Draft202012Validator.check_schema({**op[key], '$defs': d['$defs']})
         b = op['binding']
-        if b['protocol'] == 'http' and sum(k in b for k in ('json', 'text', 'base64')) > 1:
+        if b['protocol'] == 'http' and sum(k in b for k in ('json', 'text', 'base64', 'form', 'multipart')) > 1:
             raise Refusal('declaration-invalid', 'ambiguous HTTP body')
     # Relations may only read. Reject cycles before a row can dispatch anything.
     def visit(name, ancestors):
         if name not in d['operations'] or name in ancestors:
             raise Refusal('declaration-invalid', 'unknown or cyclic operation dependency')
-        for req in d['operations'][name].get('requires', []):
+        for req in d['operations'][name].get('requires', []) + d['operations'][name].get('prepare', []):
             if d['operations'].get(req['op'], {}).get('write', True):
                 raise Refusal('declaration-invalid', 'relation dependency must read')
             visit(req['op'], ancestors | {name})
@@ -114,6 +117,11 @@ def resolve(x, args, context, results=None):
         return x
     if set(x) == {'arg'}:
         return args[x['arg']]
+    if set(x) == {'cookie'}:
+        value = context.get('cookies', {}).get(x['cookie'])
+        if value is None:
+            raise Refusal('app-cookie-required', x['cookie'])
+        return value
     if set(x) == {'context'}:
         return context[x['context']]
     if set(x) == {'result'}:
@@ -146,24 +154,70 @@ def encode_path(parts, args):
     return ''.join(encoded)
 
 
-def encode_http(d, op, args, context):
+def multipart(parts, args, context, results):
+    encoded = []
+    for part in parts:
+        name, filename, content_type = part['name'], part.get('filename'), part.get('contentType')
+        for field in (name, filename, content_type):
+            if field is not None and (not isinstance(field, str) or any(c in field for c in '\r\n\x00"\\')):
+                raise Refusal('multipart-metadata-invalid')
+        disposition = 'Content-Disposition: form-data; name="' + name + '"'
+        if filename is not None:
+            disposition += '; filename="' + filename + '"'
+        headers = disposition + '\r\n' + ('Content-Type: ' + content_type + '\r\n' if content_type else '')
+        if 'base64' in part:
+            try:
+                data = base64.b64decode(resolve(part['base64'], args, context, results), validate=True)
+            except (ValueError, TypeError):
+                raise Refusal('binary-encoding') from None
+        else:
+            value = resolve(part['text'], args, context, results)
+            if not isinstance(value, str):
+                raise Refusal('text-encoding')
+            data = value.encode()
+        encoded.append(headers.encode() + b'\r\n' + data)
+    seed = hashlib.sha256(b'\x00'.join(encoded)).hexdigest()
+    boundary = 'mini-' + seed
+    while any(boundary.encode() in part for part in encoded):
+        boundary += '-x'
+    marker = boundary.encode()
+    body = b''.join(b'--' + marker + b'\r\n' + part + b'\r\n' for part in encoded) + b'--' + marker + b'--\r\n'
+    return body, 'multipart/form-data; boundary=' + boundary
+
+
+def encode_http(d, op, args, context, results=None):
     b = op['binding']
-    headers = resolve(b.get('headers', {}), args, context)
+    value = lambda x: resolve(x, args, context, results)
+    headers = value(b.get('headers', {}))
     if 'json' in b:
-        body = json.dumps(resolve(b['json'], args, context), separators=(',', ':'), ensure_ascii=False).encode()
+        body = json.dumps(value(b['json']), separators=(',', ':'), ensure_ascii=False).encode()
         headers['content-type'] = 'application/json'
     elif 'base64' in b:
-        body = base64.b64decode(resolve(b['base64'], args, context), validate=True)
+        body = base64.b64decode(value(b['base64']), validate=True)
+    elif 'form' in b:
+        fields = value(b['form'])
+        if any(not isinstance(v, (str, int, float, bool)) for v in fields.values()):
+            raise Refusal('form-value-invalid')
+        body = urllib.parse.urlencode(fields).encode()
+        headers['content-type'] = 'application/x-www-form-urlencoded'
+    elif 'multipart' in b:
+        body, headers['content-type'] = multipart(b['multipart'], args, context, results)
     else:
-        body = b.get('text', '').encode()
+        text = value(b.get('text', ''))
+        if not isinstance(text, str):
+            raise Refusal('text-encoding')
+        body = text.encode()
     if len(body) > d['limits']['bodyBytes']:
         raise Refusal('body-over-bound')
     for k, v in headers.items():
-        if any(c in k + v for c in '\r\n\x00'):
+        if not isinstance(v, str) or any(c in k + v for c in '\r\n\x00'):
             raise Refusal('header-invalid')
-    query = urllib.parse.urlencode(resolve(b.get('query', {}), args, context), quote_via=urllib.parse.quote)
-    return {'method': b['method'], 'path': encode_path(b['path'], args), 'query': query,
-            'headers': headers, 'body': body}
+    query = urllib.parse.urlencode(value(b.get('query', {})), quote_via=urllib.parse.quote)
+    request = {'method': b['method'], 'path': encode_path(b['path'], args), 'query': query,
+               'headers': headers, 'body': body}
+    if op.get('internal') or op.get('prepare'):
+        request['redact'] = True
+    return request
 
 
 def dav_decode(body):
@@ -212,6 +266,10 @@ def decode_http(d, op, response):
             if 'json' not in headers.get('content-type', '').lower():
                 raise Refusal('app-content-type')
             return json.loads(body)
+        if mode == 'text':
+            return body.decode('utf-8')
+        if mode == 'json-lines':
+            return [json.loads(line) for line in body.decode('utf-8').splitlines() if line.strip()]
         if mode == 'base64':
             return {'contentBase64': base64.b64encode(body).decode()}
         if mode == 'status':
@@ -232,7 +290,7 @@ def tools(d):
                               'required': ['value'], 'additionalProperties': False, '$defs': d['$defs']},
              'annotations': {'readOnlyHint': not op['write'], 'idempotentHint': False},
              '_meta': {'interfaceDigest': digest(d), 'packageId': d['packageId'], 'operation': name}}
-            for name, op in d['operations'].items()]
+            for name, op in d['operations'].items() if not op.get('internal', False)]
 
 
 class Engine:
@@ -244,6 +302,9 @@ class Engine:
         if op is None:
             raise Refusal('operation-unknown')
         validate(self.d, op['input'], args)
+        results = {}
+        for step in op.get('prepare', []):
+            results[step['id']] = self.call(step['op'], resolve(step['args'], args, self.context, results))
         for req in op.get('requires', []):
             snapshot = self.call(req['op'], resolve(req['args'], args, self.context))
             for r in req.get('exists', []):
@@ -260,7 +321,8 @@ class Engine:
         try:
             b = op['binding']
             if b['protocol'] == 'http':
-                value = decode_http(self.d, op, self.transport.http(encode_http(self.d, op, args, self.context)))
+                context = {**self.context, 'cookies': self.transport.cookie_values() if hasattr(self.transport, 'cookie_values') else {}}
+                value = decode_http(self.d, op, self.transport.http(encode_http(self.d, op, args, context, results)))
             elif b['protocol'] == 'ddp':
                 value = self.transport.ddp(b, args, self.context, op['write'])
             else:
