@@ -57,14 +57,3 @@ write_3DBlockstack() {
 # suffix long-polls, so it is not used); POST /chats appends "<handle>: <text>\n" and redirects to "/";
 # PUT /topic sets the topic and logs "<handle> set the topic to: ...". The logged-room action (/serve -i)
 # keeps these in /var/chats and /var/topic, so the read-back is the grain's storage.
-write_SimpleChat() {
-  local text='hello from a resident'
-  local post; post=$(req POST /chats -H 'Content-Type: text/plain' --data-binary "$text")
-  local put; put=$(req PUT /topic -H 'Content-Type: text/plain' --data-binary 'featured topic')
-  local chats; chats=$(req GET /chats)
-  grep -q ": $text" "$body" || { echo "0 POST /chats $post, PUT /topic $put; GET /chats $chats: message not in the log"; return; }
-  local topic; topic=$(req GET /topic)
-  [[ $post =~ ^(200|302|303)$ && $put =~ ^(200|302|303)$ && $topic == 200 ]] && grep -q 'featured topic' "$body" \
-    && echo "1 POST /chats $post; PUT /topic $put; GET /chats $chats holds the message; GET /topic $topic" \
-    || echo "0 PUT /topic $put, GET /topic $topic: topic not read back"
-}

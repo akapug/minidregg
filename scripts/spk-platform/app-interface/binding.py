@@ -8,6 +8,7 @@ import base64
 import hashlib
 import json
 import re
+import time
 import urllib.parse
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -66,6 +67,8 @@ def check_declaration(d):
     for step in d['qualification']:
         if step['id'] in seen or step['op'] not in d['operations']:
             raise Refusal('declaration-invalid', 'invalid qualification step')
+        if 'await' in step and d['operations'][step['op']]['write']:
+            raise Refusal('declaration-invalid', 'readiness wait must read')
         seen.add(step['id'])
 
 
@@ -374,26 +377,50 @@ class Engine:
                 'isError': False}
 
 
+def scenario_assertions(step, value, context, results):
+    for check in step.get('assert', []):
+        if 'contains' in check:
+            expected = resolve(check['contains'], {}, context, results)
+            ok = isinstance(value, list) and any(
+                isinstance(v, dict) and all(v.get(k) == x for k, x in expected.items()) for v in value)
+        else:
+            got = value
+            try:
+                for p in check['path']:
+                    got = got[p]
+            except (KeyError, IndexError, TypeError):
+                raise Refusal('readback-mismatch', step['id']) from None
+            if 'containsText' in check:
+                expected = resolve(check['containsText'], {}, context, results)
+                ok = isinstance(got, str) and isinstance(expected, str) and expected in got
+            else:
+                ok = got == resolve(check['equals'], {}, context, results)
+        if not ok:
+            raise Refusal('readback-mismatch', step['id'])
+
+
 def run_scenario(engine):
     results = {}
     for step in engine.d['qualification']:
         args = resolve(step['args'], {}, engine.context, results)
         tool_name = 'mini_' + engine.d['name'] + '_' + step['op'].replace('.', '_')
-        value = engine.tool_call(tool_name, args)['structuredContent']['value']
-        results[step['id']] = value
-        for check in step.get('assert', []):
-            if 'contains' in check:
-                expected = resolve(check['contains'], {}, engine.context, results)
-                ok = isinstance(value, list) and any(all(v.get(k) == x for k, x in expected.items()) for v in value)
-            else:
-                got = value
-                for p in check['path']:
-                    got = got[p]
-                if 'containsText' in check:
-                    expected = resolve(check['containsText'], {}, engine.context, results)
-                    ok = isinstance(got, str) and isinstance(expected, str) and expected in got
-                else:
-                    ok = got == resolve(check['equals'], {}, engine.context, results)
-            if not ok:
-                raise Refusal('readback-mismatch', step['id'])
+        wait = step.get('await')
+        if wait and engine.d['operations'][step['op']]['write']:
+            raise Refusal('declaration-invalid', 'readiness wait must read')
+        for attempt in range(wait['attempts'] if wait else 1):
+            try:
+                value = engine.tool_call(tool_name, args)['structuredContent']['value']
+                candidate = {**results, step['id']: value}
+                scenario_assertions(step, value, engine.context, candidate)
+                results = candidate
+                break
+            except Refusal as e:
+                # No transport reconnect, mutation replay, auth retry, or generic
+                # error suppression. Only this declared finite readiness condition.
+                retryable = e.name == 'readback-mismatch' or (
+                    e.name == 'app-http-status' and e.detail in {
+                        str(status) for status in (wait or {}).get('retryStatuses', [])})
+                if not wait or isinstance(e, Uncertain) or not retryable or attempt + 1 == wait['attempts']:
+                    raise
+                time.sleep(wait['intervalSeconds'])
     return results

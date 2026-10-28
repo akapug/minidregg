@@ -466,6 +466,39 @@
             "items": {
               "type": "object"
             }
+          },
+          "await": {
+            "type": "object",
+            "properties": {
+              "attempts": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 20
+              },
+              "intervalSeconds": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 3
+              },
+              "retryStatuses": {
+                "type": "array",
+                "uniqueItems": true,
+                "maxItems": 3,
+                "items": {
+                  "enum": [
+                    502,
+                    503,
+                    504
+                  ]
+                }
+              }
+            },
+            "required": [
+              "attempts",
+              "intervalSeconds",
+              "retryStatuses"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [

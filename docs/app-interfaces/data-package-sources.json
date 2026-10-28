@@ -1,0 +1,67 @@
+[
+  {
+    "path": "datasette-package/opt/app/metadata.yml",
+    "sha256": "a668129187e603d4d33385a407bdad57dc4850af96796f69752b03f1680160d8",
+    "bytes": 64
+  },
+  {
+    "path": "datasette-package/usr/local/lib/python3.9/dist-packages/datasette_insert/__init__.py",
+    "sha256": "17d61c0526d7f343abb0589b548cae14a9ee0d414d4055d3c2128c7be93b476a",
+    "bytes": 4160
+  },
+  {
+    "path": "datasette-package/usr/local/lib/python3.9/dist-packages/datasette_sandstorm_support/__init__.py",
+    "sha256": "8ac25b33612a5fd8312202476bd4e86ac16d5fd3f2fe5f1348e9d7fd9bf690c5",
+    "bytes": 1442
+  },
+  {
+    "path": "datasette-package/usr/local/lib/python3.9/dist-packages/datasette_upload_dbs/__init__.py",
+    "sha256": "de177338471e0881cb83986f3ce1c805d940fad62dbd75d744c3281933784901",
+    "bytes": 3880
+  },
+  {
+    "path": "datasette-package/usr/local/lib/python3.9/dist-packages/datasette_write/__init__.py",
+    "sha256": "112cd8a6d3a8118c3aa5cba9e786d2be30b0f5589c9941992ba808051fb35b70",
+    "bytes": 5229
+  },
+  {
+    "path": "5198a2ec87bcc4b29e787b77079ba590/programs/server/app/app.js",
+    "sha256": "e0c19e7eedeadf5ce4a6022d28e65672b8dc7330ae26bbe4bb204bab3513c4da",
+    "bytes": 1130010
+  },
+  {
+    "path": "5198a2ec87bcc4b29e787b77079ba590/programs/server/packages/kenton_accounts-sandstorm.js",
+    "sha256": "fe6c7b1df4aa3629ce0b5ba14c7d61eb8f3433cc99b541326d5886b309059fe4",
+    "bytes": 8914
+  },
+  {
+    "path": "5198a2ec87bcc4b29e787b77079ba590/programs/server/packages/rocketchat_lib.js",
+    "sha256": "75b9e11e7c014c5b54a219dcebb3b3d058bc442fd4503ddc149a3f39ca590b5f",
+    "bytes": 1717460
+  },
+  {
+    "path": "5198a2ec87bcc4b29e787b77079ba590/programs/server/packages/rocketchat_sandstorm.js",
+    "sha256": "169d95a6b5eb4d6b4c1ddf59596ee70918ddecb6bfe6c4fa0d0fdd05b117dfe1",
+    "bytes": 20386
+  },
+  {
+    "path": "5198a2ec87bcc4b29e787b77079ba590/programs/server/packages/webapp.js",
+    "sha256": "bce75219846514091cc70559d4dd15edb51b752b118520589d357cd48aae3734",
+    "bytes": 101828
+  },
+  {
+    "path": "57dedad4b0275606c24bdb13d995b218/usr/local/lib/python2.7/dist-packages/notebook/services/contents/handlers.py",
+    "sha256": "cf5a3a56f5240637747f25d9302fbad95566e9da1e7dc7fafe9fb845a2afe4e8",
+    "bytes": 11263
+  },
+  {
+    "path": "57dedad4b0275606c24bdb13d995b218/usr/local/lib/python2.7/dist-packages/notebook/services/kernels/handlers.py",
+    "sha256": "a561150b9629a0e436d77648de72291ebb9412369e21ac8ab0e9f1e703e38ff7",
+    "bytes": 17535
+  },
+  {
+    "path": "eace6915b227131cf0ed2b1a0db2e86b/zim_uploader/uploader/app.py",
+    "sha256": "cd920ecd7c84399db273cff34392a165a6c046af3bb70b1d4aed9f08ea9ad639",
+    "bytes": 11323
+  }
+]
