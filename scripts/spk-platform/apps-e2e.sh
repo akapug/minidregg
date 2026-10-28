@@ -69,7 +69,11 @@ init_ws() { # NAME SUBJECT KEY CONTEXT  (the workroom's records commit to no nex
     --birth-context "$4" --namespace-root "$out/ns-$1" --no-prerotation >"$out/init-$1.out" 2>"$out/init-$1.err"
   [[ -f $ws/workspace.json ]]
 }
-init_ws manager 8 "$WR/tool.key" "$(context 8 55 42)"; row "manager workspace (subject 8) over the workroom's tool key" "$([ -f "$out/ws-manager/workspace.json" ] && echo 1 || echo 0)" "$(tail -1 "$out/init-manager.err" 2>/dev/null | cut -c1-120)"
+# The manager's genesis-authored capabilities (55, 42) are birth-stale by the time a bootstrap births
+# anything (birthStale: notBefore + birthSlack < height), so with APPS_E2E_BOOTSTRAP the manager is
+# initialised after the sponsor provisions it a fresh funded account, as for the member below.
+manager_row() { row "manager workspace (subject 8) over the workroom's tool key" "$([ -f "$out/ws-manager/workspace.json" ] && echo 1 || echo 0)" "$(tail -1 "$out/init-manager.err" 2>/dev/null | cut -c1-120)"; }
+if [ "${APPS_E2E_BOOTSTRAP:-0}" != 1 ]; then init_ws manager 8 "$WR/tool.key" "$(context 8 55 42)"; manager_row; fi
 init_ws controller 7 "$WR/controller.key" "$(context 7 54 41)"; row "controller workspace (subject 7, the parent task's owner) over the workroom's controller key" "$([ -f "$out/ws-controller/workspace.json" ] && echo 1 || echo 0)" "$(tail -1 "$out/init-controller.err" 2>/dev/null | cut -c1-120)"
 # The member is funded the way the door funds one (dregg-infra mini-reenroll): the sponsor (the
 # factory's controller, 7) provisions a funded account for the holder through the factory and
@@ -83,6 +87,11 @@ mini workspace --action provision --dir "$out/ws-controller" --name member9 --ho
   --account-predicate "$out/permit-all.json" --factory-ref factory >"$out/provision.out" 2>"$out/provision.err"
 MEMBER_CONTEXT=$out/ws-controller/provisions/member9/birth-context.json
 row "the sponsor provisions the member a funded account ($MEMBER_FUNDING), as the door does" "$([ -s "$MEMBER_CONTEXT" ] && echo 1 || echo 0)" "$(jq -r '.account.target // empty' "$out/provision.out" 2>/dev/null) $(tail -1 "$out/provision.err" | cut -c1-140)"
+if [ "${APPS_E2E_BOOTSTRAP:-0}" = 1 ]; then
+  mini workspace --action provision --dir "$out/ws-controller" --name manager8 --holder 8 --funding "${MANAGER_FUNDING:-100000}" \
+    --account-predicate "$out/permit-all.json" --factory-ref factory >"$out/provision-manager.out" 2>"$out/provision-manager.err"
+  init_ws manager 8 "$WR/tool.key" "$out/ws-controller/provisions/manager8/birth-context.json"; manager_row
+fi
 init_ws member 9 "$WR/member.key" "$MEMBER_CONTEXT"; row "member workspace (subject 9) over the workroom's member key, from the provisioned birth context" "$([ -f "$out/ws-member/workspace.json" ] && echo 1 || echo 0)" "$(tail -1 "$out/init-member.err" 2>/dev/null | cut -c1-120)"
 WSM=$out/ws-manager WSC=$out/ws-controller WS9=$out/ws-member HOME9=$out/home-member
 
