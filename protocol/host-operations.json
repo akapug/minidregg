@@ -2739,5 +2739,49 @@
     "destination",
     "overwrite",
     "lock-token"
+  ],
+  "dav_header_rules": [
+    {
+      "name": "depth",
+      "methods": [
+        "PROPFIND",
+        "COPY",
+        "LOCK",
+        "REPORT"
+      ],
+      "values": [
+        "0",
+        "1",
+        "infinity"
+      ]
+    },
+    {
+      "name": "destination",
+      "methods": [
+        "COPY",
+        "MOVE"
+      ],
+      "values": []
+    },
+    {
+      "name": "overwrite",
+      "methods": [
+        "COPY",
+        "MOVE"
+      ],
+      "values": [
+        "T",
+        "F",
+        "t",
+        "f"
+      ]
+    },
+    {
+      "name": "lock-token",
+      "methods": [
+        "UNLOCK"
+      ],
+      "values": []
+    }
   ]
 }

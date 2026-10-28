@@ -131,8 +131,7 @@ impl Request {
                 }
                 for header in headers {
                     if !(allowed_header(&header.name)
-                        || (crate::host_operations::dav_method(method)
-                            && crate::host_operations::dav_header_name(&header.name)))
+                        || crate::host_operations::dav_header_allowed(method, &header.name, &header.value))
                         || header.name.len() > 128
                         || header.value.len() > 8192
                         || !control_free(&header.value)

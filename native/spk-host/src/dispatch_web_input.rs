@@ -375,7 +375,7 @@ fn project_http(
                 }
             }
             dav_header if crate::host_operations::dav_header_name(dav_header) => {
-                if !dav_call {
+                if !dav_call || !matches!(call, Call::Exchange(m) if crate::host_operations::dav_header_allowed(dav_name(*m), dav_header, value)) {
                     return Err(invalid("DAV parameter header on a non-DAV call"));
                 }
                 if !dav_seen.insert(dav_header) {
@@ -530,22 +530,27 @@ fn dav_parameter(
         }
         "lock-token" => dav.lock_token = Some(value.to_owned()),
         "destination" => {
-            let path = if let Some(rest) = value.strip_prefix("https://") {
-                let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
-                if let Route::Browser = route {
-                    if format!("https://{authority}") != base_path {
-                        return Err(invalid("DAV destination is on another origin"));
+            // Browser Destination has HTTP origin semantics; API Destination is an
+            // exact relative path under the already verified signed package prefix.
+            let routed;
+            let path = match route {
+                Route::Api { signed_path } => {
+                    routed = minidregg_signed_api_path::route(signed_path, value)
+                        .map_err(invalid)?;
+                    routed.as_str()
+                }
+                Route::Browser => {
+                    if let Some(rest) = value.strip_prefix("https://") {
+                        let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
+                        if format!("https://{authority}") != base_path {
+                            return Err(invalid("DAV destination is on another origin"));
+                        }
+                        path
+                    } else {
+                        value.strip_prefix('/').ok_or_else(|| invalid("DAV browser destination is not absolute"))?
                     }
                 }
-                path
-            } else {
-                value.strip_prefix('/').ok_or_else(|| invalid("DAV destination is neither an https URL nor an absolute path"))?
             };
-            if let Route::Api { signed_path } = route {
-                if signed_path != "/" {
-                    return Err(invalid("DAV destination under an apiPath is unsupported"));
-                }
-            }
             if path.len() > 8192 || path.contains(['#', '\r', '\n', '\0']) {
                 return Err(invalid("DAV destination outside protocol bound"));
             }
@@ -707,6 +712,20 @@ mod tests {
             ..http
         };
         assert!(physical_web_input(&source, &http, "Friend", "friend", "https://friend.example.test").is_err());
+    }
+
+    #[test]
+    fn dav_api_destination_is_exactly_under_signed_prefix() {
+        let mut args = DavArgs::default();
+        dav_parameter(&mut args, "destination", "notes/new.txt",
+            Route::Api { signed_path: "/dav/" }, "").unwrap();
+        assert_eq!(args.destination.as_deref(), Some("dav/notes/new.txt"));
+        for destination in ["/elsewhere", "https://elsewhere/a", "../escape", "a/%2e%2e/b"] {
+            assert!(dav_parameter(&mut DavArgs::default(), "destination", destination,
+                Route::Api { signed_path: "/dav/" }, "").is_err());
+        }
+        assert!(!crate::host_operations::dav_header_allowed("MOVE", "depth", "1"));
+        assert!(!crate::host_operations::dav_header_allowed("PROPFIND", "overwrite", "T"));
     }
 
     #[test]

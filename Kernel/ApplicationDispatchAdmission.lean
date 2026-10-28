@@ -5,6 +5,7 @@ the DRC invocation, accepted historical share issuance, and one durable CAS.
 -/
 module
 
+public import Effects.Revival.HostedDav
 public import Kernel.ApplicationDispatchAdmissionIngress
 public import Kernel.ApplicationDispatchManifest
 public import Kernel.ApplicationDispatchWitness
@@ -223,7 +224,8 @@ def requestSafeFor (streamedOpen : Bool) (request : ApplicationDispatchCodec.Req
       !header.generated &&
       (ordinaryHeaderName header.name ||
         (streamed request && header.name == webSocketProtocolHeader) ||
-        (davMethod request.method && davHeaderName header.name)) &&
+        (davMethod request.method &&
+          Effects.Revival.HostedDav.headerAllowed request.method header.name header.value)) &&
       decide (header.name.length ≤ 128) &&
       decide (header.value.length ≤ 8192) &&
       cleanTransportText header.value)
