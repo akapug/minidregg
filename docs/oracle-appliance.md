@@ -92,6 +92,11 @@ these are measurements under shared host load, not latency guarantees.
 
 ## Checked state — 28 October 2026
 
+The [checkpoint and design review](oracle-appliance-review-2026-10-28.md)
+separates the passing runtime checks from unfinished hosted qualification,
+records the final Host-selection checks, and identifies the remaining latency
+and browser usability work.
+
 For new shared deployments, the operator can select `agentRouteProfile:
 "shared-64-v1"` in the private SPK host profile. It allows 64 active controller
 routes and 1,024 retained route revisions per app, with at most 64 MiB of route
