@@ -1041,6 +1041,14 @@ pub(crate) fn verify_lifetime_reserve_inspection(
         request,
         plan,
     } = inspection;
+    // This boundary is exclusively v3. The shared HTTP router also serves
+    // legacy callers, whose snake_case operation_id must not stand in for a
+    // retained lifetime request's operationId.
+    if retained_forward.get("type").and_then(Value::as_str) != Some("dispatch-v3")
+        || retained_forward.get("protocol").and_then(Value::as_str) != Some(LIFETIME_PROTOCOL)
+    {
+        return Err("lifetime reserve requires a retained v3 forward request".into());
+    }
     let expected_http = routed_reserve_http(retained_forward, &route.signed_api_path)?;
     if request.get("type").and_then(Value::as_str)
         != Some("application-agent-lifetime-author-request-v3")
@@ -1084,10 +1092,10 @@ pub(crate) fn verify_lifetime_reserve_inspection(
     same(
         context,
         "httpOperationId",
-        retained_forward
-            .get("operation_id")
+        expected_http
+            .get("operationId")
             .and_then(Value::as_str)
-            .ok_or("retained lifetime forward operation ID absent")?,
+            .ok_or("routed lifetime forward operation ID absent")?,
     )?;
     if context.get("requestDigest") != request.get("requestDigest") {
         return Err("lifetime reserve HTTP digest differs from source request".into());
@@ -2553,8 +2561,9 @@ mod tests {
     #[test]
     fn lifetime_reserve_inspection_binds_exact_http_and_historical_grant() {
         let route = lifetime_route();
-        let retained =
-            dispatch_request(37, &parse_input(&request(), &["workroom".into()]).unwrap());
+        let input = parse_input(&request(), &["workroom".into()]).unwrap();
+        // Use the actual native forward constructor, not a legacy test stand-in.
+        let retained = lifetime_dispatch_request(37, &"ab".repeat(32), &input).unwrap();
         let http = routed_reserve_http(&retained, &route.signed_api_path).unwrap();
         let selectors = json!({"sourceBuiltExactSelectors":"test"});
         let source = json!({
@@ -2592,10 +2601,10 @@ mod tests {
                 "pursePhysicalRoot":"803"
             }
         });
-        let verify = |request: &Value, plan: &Value| {
+        let verify = |retained: &Value, request: &Value, plan: &Value| {
             verify_lifetime_reserve_inspection(LifetimeReserveInspection {
                 route: &route,
-                retained_forward: &retained,
+                retained_forward: retained,
                 expected_selectors: &selectors,
                 reserve_operation_id: "88",
                 signed_parent_generation: "7",
@@ -2608,22 +2617,34 @@ mod tests {
                 plan,
             })
         };
-        verify(&source, &plan).unwrap();
+        verify(&retained, &source, &plan).unwrap();
+        let legacy = dispatch_request(37, &input);
+        assert!(verify(&legacy, &source, &plan).unwrap_err().contains("v3 forward"));
+        let mut wrong = retained.clone();
+        wrong["protocol"] = json!(PROTOCOL);
+        assert!(verify(&wrong, &source, &plan).is_err());
+        wrong = retained.clone();
+        wrong.as_object_mut().unwrap().remove("operationId");
+        wrong["operation_id"] = json!("37");
+        assert!(verify(&wrong, &source, &plan).is_err());
+        let mut changed = plan.clone();
+        changed["context"]["httpOperationId"] = json!("38");
+        assert!(verify(&retained, &source, &changed).is_err());
         let mut changed = source.clone();
         changed["http"]["headers"][0]["generated"] = json!(true);
-        assert!(verify(&changed, &plan).is_err());
+        assert!(verify(&retained, &changed, &plan).is_err());
         let mut changed = plan.clone();
         changed["bindings"]["grantIssueReceipt"]["worldRoot"] = json!("1");
-        assert!(verify(&source, &changed).is_err());
+        assert!(verify(&retained, &source, &changed).is_err());
         let mut changed = plan.clone();
         changed["context"]["parentGeneration"] = json!("8");
-        assert!(verify(&source, &changed).is_err());
+        assert!(verify(&retained, &source, &changed).is_err());
         let mut changed = plan.clone();
         changed["bindings"]["grantPhysicalRoot"] = json!("9");
-        assert!(verify(&source, &changed).is_err());
+        assert!(verify(&retained, &source, &changed).is_err());
         let mut changed = plan.clone();
         changed["bindings"]["sessionPhysicalRoot"] = json!("9");
-        assert!(verify(&source, &changed).is_err());
+        assert!(verify(&retained, &source, &changed).is_err());
     }
 
     #[test]
