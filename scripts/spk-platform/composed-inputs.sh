@@ -139,15 +139,18 @@ jq -n --arg config "$config" --arg genesis "$genesis" --arg manifest "$out/manif
      owner:{subject:$ms,keyId:$mk,keyEpoch:"2",seed:$mseed,publicKey:$mpub},
      management:{subject:$ms,keyId:$mk,keyEpoch:"2",seed:$mseed,publicKey:$mpub}},
    authority:$authority}' >"$out/platform-inputs.json"
+# The rooms phase creates "<op>-room" (composed-scenario.py generate; the gate passes op "jd3"); every member
+# holds it under that name, so the app and the resident adopt that room.
+op=${COMPOSED_OP:-jd3}
 # ── the selection: owner, members, package, unused ids ───────────────────────────
 spk=${MINI_TEST_SPK:-$("$here/fetch-test-spk.sh")}
 names=$(jq -r '.members | keys[]' "$world")
 owner=$(sed -n 2p <<<"$names"); member=$(sed -n 3p <<<"$names"); reader=$(sed -n 4p <<<"$names"); reviewer=$(sed -n 1p <<<"$names")
 jq -n --arg evidence "$out/evidence" --arg grains "$grains" --arg broker "$broker" --arg spk "$spk" --arg sha "$(sha256sum "$spk" | cut -d ' ' -f1)" \
-  --arg owner "$owner" --arg member "$member" '
+  --arg owner "$owner" --arg member "$member" --arg op "$op" '
   {protocol:"mini-spk-same-store-selection-v1",evidence:$evidence,grainsRoot:$grains,brokerSocket:$broker,
    package:{path:$spk,sha256:$sha},sizeClass:"S",
-   app:{owner:$owner,room:"jd3-r0",members:{owner:{subject:$owner,expectedHost:"grain-owner.test"},member:{subject:$member,expectedHost:"grain-member.test"}},
+   app:{owner:$owner,room:($op+"-room"),members:{owner:{subject:$owner,expectedHost:"grain-owner.test"},member:{subject:$member,expectedHost:"grain-member.test"}},
         resources:"930001",capabilities:"960001"}}' >"$out/app-selection.json"
 # ── the documents binding: four distinct members, their own workspaces ───────────
 jq -n --arg manifest "$out/manifest.json" --arg msha "$(sha256sum "$out/manifest.json" | cut -d ' ' -f1)" --arg config "$config" --arg socket "$socket" \
@@ -157,11 +160,11 @@ jq -n --arg manifest "$out/manifest.json" --arg msha "$(sha256sum "$out/manifest
    reader:{workspace:$m[$reader].workspace,home:$m[$reader].home},reviewer:{workspace:$m[$reviewer].workspace,home:$m[$reviewer].home}}' >"$out/documents-binding.json"
 # ── the resident binding: the typed resident's fixtures and the room the rooms phase makes ───
 jq -n --arg inputs "$out/platform-inputs.json" --arg base "$(dirname "$node")" --arg a0 "$owner" --arg a1 "$member" --arg witness "$reader" \
-  --arg reference "$(jq -r --arg o "$owner" '.members[$o].workspace' "$world")/refs/jd3-r0.notes.json" --arg registration "$out/resident-registration-receipt.json" \
-  --arg acp "$repo/testing/journeys/shared-resident-fixture-acp" --arg acpsha "$(sha256sum "$repo/testing/journeys/shared-resident-fixture-acp" | cut -d ' ' -f1)" \
+  --arg reference "$(jq -r --arg o "$owner" '.members[$o].workspace' "$world")/refs/${op}-room.notes.json" --arg registration "$out/resident-registration-receipt.json" \
+  --arg op "$op" --arg acp "$repo/testing/journeys/shared-resident-fixture-acp" --arg acpsha "$(sha256sum "$repo/testing/journeys/shared-resident-fixture-acp" | cut -d ' ' -f1)" \
   --arg prov "$repo/testing/journeys/shared-resident-fixture-provider.py" --arg provsha "$(sha256sum "$repo/testing/journeys/shared-resident-fixture-provider.py" | cut -d ' ' -f1)" '
   {protocol:"mini-same-world-resident-binding-v1",platformInputs:$inputs,base:$base,authors:[$a0,$a1],providerWitness:$witness,
-   room:{alias:"jd3-r0",mode:"adopt"},sharedDocumentReference:$reference,registration:$registration,task:8802,
+   room:{alias:($op+"-room"),mode:"adopt"},sharedDocumentReference:$reference,registration:$registration,task:8802,
    fixtureAcp:{path:$acp,sha256:$acpsha},fixtureProvider:{path:$prov,sha256:$provsha},requestCounts:[1,1],preserveOnSuccess:true}' >"$out/resident-binding.json"
 printf -- '--app-world-inputs %s %s --documents-binding %s --residents-binding %s\n' "$out/platform-inputs.json" "$out/app-selection.json" "$out/documents-binding.json" "$out/resident-binding.json" >"$out/composed-args.txt"
 printf 'COMPOSED INPUTS store=%s grains=%s broker=%s\n' "$store" "$grains" "$broker" | tee -a "$out/result.log"
