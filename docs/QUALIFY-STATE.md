@@ -56,8 +56,12 @@ Present state, rewritten whole. This lane qualifies rehearsal #3. Its board is
   workspace, and the ticket's `appDelegateCapability` naming the child. Then run
   `qrun.sh` on an overlay of Host 9bd52317c and Rust b65465c72.
 - **Lean, on dregg-ref:**
-  - lane/qualify-lean-refusals ad03184c5: operator-log reasons for ops 34/26/22/84/105/242/246/189
-    and the fn arms. Unelaborated; the retry's verdict lands in `/srv/lanes/qlr-state/retry.log`.
+  - lane/qualify-lean-refusals 59fadc9cf (code 664f8e09b): operator-log reasons for ops
+    34/26/22/84/105/242/246/189 and the fn arms. Unelaborated: the earlier runs never compiled
+    (runuser without the lanes user's bus env, so swarm-build's `systemd-run --user` failed; not OOM).
+    Relaunched with the bus env: PID file /srv/lanes/qlr-state/retry.pid, verdict in
+    /srv/lanes/qlr-state/retry.log. Trap for briefs: `runuser -u lanes` needs XDG_RUNTIME_DIR and
+    DBUS_SESSION_BUS_ADDRESS for swarm-build.
   - lane/qualify-certify-prefix: statement c71fa04ec (green, audited); implementation at 9d00fba59:
     TailBound and DurableLogTags lane-check green (one proof fixed); next file to check is
     Compiler/DurableReceiverCore; continuation note docs/CERTIFY-PREFIX-STATE.md. Nothing running.
