@@ -38,18 +38,24 @@ store/node/deployment/pinned-config.json` shows the three pinned values, and `ke
 | user `mini-apps-edge` (nologin, primary group `mini-edge`) | the grain front; connects to route sockets, nothing else |
 | group `mini-apps` | readers of the quarantine: `mini-market` writes it, `mini-core` (the worker) reads it |
 | group `mini-edge` | the edge: `mini-apps-edge` is a member; the worker's unit carries `SupplementaryGroups=mini-edge` (membership inside that process only, never the account), so the worker can create `edge.sock` with that group |
-| `mini-core` | unchanged; the worker runs in its user manager beside `mini-spk-broker@` |
+| `mini-core` | unchanged, plus membership of group `mini-apps` (below); the worker runs as a SYSTEM unit with `User=mini-core` and drives `mini-spk-broker@` in mini-core's user manager through `/run/user/UID` |
+
+`mini-core` must be in `mini-apps` to read the quarantine (0750/0640, group `mini-apps`); add it where the accounts are made:
+
+```
+usermod -aG mini-apps mini-core     # new processes only: restart the worker after this
+```
 
 ## 2. Directories
 
 ```
-/var/lib/mini-market                 mini-market:mini-apps 0750
+/var/lib/mini-market                 mini-market:mini-apps 0751   (others need only x: members read index.json beneath it; the 0750 children stay closed)
   index.json                         0644   the catalogue (mini apps search/show read it; L12's pane too)
   local.json                         0644   the operator's pinned entries (root writes it; index-check merges them; docs/ORACLE-GRAIN-2026-10-27.md §2)
   quarantine/                        0750   ID.spk 0640 (sha256 prefix == ID, <= 256 MiB)
   meta/ refused/                     0755   ID.json 0644
   wanted/                            0730   flags dropped by the worker (mini-core, via group mini-apps)
-/var/lib/mini-apps                   root:root 0711       (NOT under /var/lib/mini: the front must traverse it)
+/var/lib/mini-apps                   mini-core:mini-core 0711   (NOT under /var/lib/mini: the front must traverse it; mini-core-owned because the worker, running as mini-core, binds edge.sock here and creates origins/ verdicts/ requests/ grains/ work/ exports/ itself)
   origins/                           mini-core 0755             a<app>.json 0644, read by the front
   edge.sock                          mini-core:mini-edge 0660   the edge connector: the front asks `connect {grain, route}` and receives the custodian socket (SCM_RIGHTS); created by the worker
   verdicts/                          mini-core 0755             ID.json 0644, the ingest's verdict the catalogue shows
@@ -79,13 +85,34 @@ deny. The index host resolves to a CDN; the caveat is the same as for `openroute
 ```
 install -m 0755 deploy/market/mini-market-fetch /usr/local/lib/mini/market/mini-market-fetch
 install -m 0644 deploy/market/mini-market.{service,timer,path} deploy/market/mini-apps-front.service /etc/systemd/system/
-install -m 0644 deploy/market/mini-apps-worker@.service /etc/systemd/user/     # the operator's user manager, exactly where mini-spk-broker@.service goes (mini-core's home is root's /var/lib/mini)
+install -m 0644 deploy/market/mini-apps-worker@.service /etc/systemd/system/     # a SYSTEM unit (User=mini-core): a user manager cannot setgroups for SupplementaryGroups (216/GROUP)
 echo 'd /run/mini-apps 0750 mini-core mini-sessions -' >/etc/tmpfiles.d/mini-apps.conf && systemd-tmpfiles --create
-install -d -m 0711 -o root /var/lib/mini-apps
+install -d -m 0711 -o mini-core -g mini-core /var/lib/mini-apps
 systemctl enable --now mini-market.timer mini-market.path mini-apps-front.service
 systemctl start mini-market.service          # the first index refresh, so the catalogue is there before a member asks
-sudo -u mini-core XDG_RUNTIME_DIR=/run/user/$(id -u mini-core) systemctl --user enable --now mini-apps-worker@STORE.service
+# the uid is the box's: a system unit cannot learn it (%U is 0 there), so a drop-in carries it
+uid=$(id -u mini-core)
+install -d /etc/systemd/system/mini-apps-worker@.service.d
+cat >/etc/systemd/system/mini-apps-worker@.service.d/10-mini-core-uid.conf <<DROPIN
+[Unit]
+Requires=user@$uid.service
+After=user@$uid.service
+[Service]
+Environment=XDG_RUNTIME_DIR=/run/user/$uid
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus
+DROPIN
+systemctl daemon-reload
+systemctl enable --now mini-apps-worker@STORE.service
 ```
+
+What the worker needs from mini-core's user manager, exactly: `spk-host grain start|stop|status` run
+`systemctl --user` (`os::systemctl`, `hostd.rs`), which finds the manager through `XDG_RUNTIME_DIR`
+(`/run/user/UID/systemd/private`; the bus address is the fallback), and the broker's runtime units
+live under `/run/user/UID/systemd/user` (`os::runtime_units`, by effective uid, which `User=mini-core`
+makes right). `mini-spk-broker@` is a user unit, so a system unit cannot order against it: the drop-in
+orders after `user@UID.service` (the manager exists; `loginctl enable-linger mini-core` keeps it up).
+The worker does not wait for the broker: a grain operation that finds it down answers `undecided`
+with a retry command (`mini apps status --grain …`) and the member retries.
 
 **Step 0, once per world, by the operator (ruling 2026-10-27): the metered tasks.** The demo's
 genesis has no metered parent/tool tasks (7901/7902 are the workroom fixture's), so the apps world
