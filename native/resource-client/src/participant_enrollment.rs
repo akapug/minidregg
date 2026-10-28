@@ -322,7 +322,14 @@ fn pin_plan_height(host: &Path, config: &Path, plan: &Path, height: &str, output
     let arguments = [
         OsStr::new("pin-enrollment-plan-height"), plan.as_os_str(), OsStr::new(height), output.as_os_str(),
     ];
-    match crate::local_process(host, config, &arguments) {
+    // The Host writes OUTPUT under the inherited umask; custody bytes are
+    // owner-private whatever the caller's shell umask (a root shell's 022 left
+    // it group-readable and `private_bytes` refused it).
+    // SAFETY: umask has no preconditions; it is restored right after the call.
+    let previous = unsafe { libc::umask(0o077) };
+    let pinned = crate::local_process(host, config, &arguments);
+    unsafe { libc::umask(previous) };
+    match pinned {
         Ok(_) => Ok(Some(private_bytes(output, LIMIT)?)),
         // A Host without the verb answers an unknown subcommand with its own verb listing
         // (`minidregg-host CONFIG.json profile|describe|...`) and exit 1; a Host that has the verb
