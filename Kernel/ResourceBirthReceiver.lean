@@ -234,7 +234,7 @@ theorem source_reads_covered {height : Height}
 /-- The directory slot at an identifier is the live cell the image holds there. -/
 private theorem slot_of_live {durable : ResourceBirthController.Concrete.Durable}
     (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable) (identifier : Nat)
-    (packed : PackedCell CanonicalCellRegistry.registry)
+    (packed : CellRegistry.PackedCell CanonicalCellRegistry.registry)
     (holds : durable.snapshot.canonicalBytes ⟨identifier⟩ =
       LifecycleImage.bytes CanonicalCellRegistry.registry (.live packed)) :
     directory.directory.slots identifier = .present packed := by
@@ -245,6 +245,7 @@ private theorem slot_of_live {durable : ResourceBirthController.Concrete.Durable
   rw [Option.some.inj decoded]
   try rfl
 
+omit [DecidableEq F] in
 /-- **No birth writes the platform cell.** Every write a birth commits is a fresh allocation
 (its identifier unused in the loaded directory), the factory cell, the resource book or the
 credential-authority cell; the platform cell is live in the same directory with kind
