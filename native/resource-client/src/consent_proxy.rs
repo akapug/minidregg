@@ -194,10 +194,41 @@ impl Write for Channel {
         Ok(())
     }
 }
+/// Whether a connection made by [`connect_with_lifeline`] can still carry the next request. The
+/// worker ends a connection that has been idle for `REPLAY`, and ends itself when idle with no
+/// connection; a body that keeps one connection for hours must notice before it sends, not after:
+/// a frame written into a dead connection is lost, and a half-sent frame is never replayed.
+pub(crate) struct Lifeline {
+    socket: UnixStream,
+    failed: Arc<AtomicBool>,
+}
+impl Lifeline {
+    pub(crate) fn alive(&self) -> bool {
+        if self.failed.load(Ordering::Acquire) {
+            return false;
+        }
+        let mut fd = libc::pollfd {
+            fd: self.socket.as_raw_fd(),
+            events: libc::POLLIN | libc::POLLRDHUP,
+            revents: 0,
+        };
+        // Between requests nothing is owed to us: readable or hung up means EOF (the worker or
+        // its deadline closed the connection) or stray bytes (desynchronized); either is unusable.
+        unsafe { libc::poll(&mut fd, 1, 0) == 0 }
+    }
+}
+
 pub(crate) fn connect(
     selection: &Selection,
     config: &[u8],
 ) -> Result<(Box<dyn Write + Send>, Box<dyn Read + Send>)> {
+    connect_with_lifeline(selection, config).map(|(input, output, _)| (input, output))
+}
+
+pub(crate) fn connect_with_lifeline(
+    selection: &Selection,
+    config: &[u8],
+) -> Result<(Box<dyn Write + Send>, Box<dyn Read + Send>, Lifeline)> {
     if <[u8; 32]>::from(Sha256::digest(config)) != selection.config {
         return Err("delegated consent exact config digest mismatch".into());
     }
@@ -211,6 +242,10 @@ pub(crate) fn connect(
     fsio::check_private_socket(&selection.socket)?;
     let deadline = Arc::new(Mutex::new(Instant::now() + REPLAY + IO));
     let failed = Arc::new(AtomicBool::new(false));
+    let lifeline = Lifeline {
+        socket: socket.try_clone().map_err(|e| e.to_string())?,
+        failed: failed.clone(),
+    };
     let mut input = Channel {
         socket: socket.try_clone().map_err(|e| e.to_string())?,
         deadline: deadline.clone(),
@@ -232,7 +267,7 @@ pub(crate) fn connect(
     if reply != selection.hello() {
         return Err("delegated consent service binding mismatch".into());
     }
-    Ok((Box::new(input), Box::new(output)))
+    Ok((Box::new(input), Box::new(output), lifeline))
 }
 
 fn allowed(frame: &[u8]) -> bool {
