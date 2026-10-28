@@ -113,7 +113,7 @@ class Route:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=['tools', 'qualify', 'call'])
-    parser.add_argument('app', choices=['gogs', 'wekan', 'davros'])
+    parser.add_argument('app', help='package-pinned declaration name under apps/interfaces')
     parser.add_argument('--route', type=Path, help='member route directory holding http.sock and browser.token')
     parser.add_argument('--package-id', help='installed package identity from verified lifecycle evidence')
     parser.add_argument('--out', type=Path, help='new private run directory (never reused)')
