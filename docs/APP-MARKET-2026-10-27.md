@@ -103,7 +103,7 @@ past start: both failed there on w11 because of the provenance bug, which is now
 
 **Not this lane's:** the co-edit red (`authority handoff requires an opening read from the
 Store`, `withOpenedFreshTip`) is with the deputy's faerie. When it is fixed, the validator
-reruns `register-X2` and `ddp-coedit.py`.
+reruns `register-Xs` and `ddp-coedit.py`.
 
 **Box notes (for the validator):**
 - After each checkout on dregg-build, run `chmod go-w deploy/spk-host/*`.
