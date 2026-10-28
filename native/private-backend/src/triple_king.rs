@@ -368,38 +368,19 @@ pub(crate) fn burn_preparation(
     anchor: &Path,
     local: &Path,
 ) -> Result<Vec<u8>> {
-    let _guard = custody::lock(&local.with_extension("preparation.lock"))?;
-    let before = Journal::decode(&custody::rpc(anchor, &[0])?)?;
-    before.reserve_batch(ids, g.clone(), Purpose::Triple)?;
     let mut req = vec![2];
     req.extend(crate::codec::batch_request(ids, g, Purpose::Triple));
-    let confirmed = Journal::decode(&custody::rpc(anchor, &req)?)?;
-    let indexed = confirmed
-        .allocations
-        .iter()
-        .map(|a| (&a.id, a))
-        .collect::<std::collections::BTreeMap<_, _>>();
-    if !confirmed.extends(&before)
-        || !confirmed.preserves_allocations(&before)
-        || ids.iter().any(|id| {
-            indexed
-                .get(id)
-                .is_none_or(|a| a.generation != *g || a.purpose != Purpose::Triple || a.consumed)
-        })
-    {
-        return Err(bad("preparation batch allocation binding/retention"));
-    }
-    // Persist exact original manifest with the whole completed reservation.
-    let mut receipt = burn_receipt_prefix(binding, g);
-    bytes(&confirmed.encode(), &mut receipt);
-    custody::snapshot(local, &receipt)?;
-    if std::fs::read(local)? != receipt {
-        return Err(bad("preparation burn readback"));
-    }
-    let latest = Journal::decode(&custody::rpc(anchor, &[0])?)?;
-    if !latest.extends(&confirmed) || !latest.preserves_allocations(&confirmed) {
-        return Err(bad("preparation anchor regression"));
-    }
+    let (_, receipt) = custody::reserve_with_receipt(
+        &local.with_extension("preparation.lock"),
+        &req,
+        ids,
+        g,
+        Purpose::Triple,
+        burn_receipt_prefix(binding, g),
+        anchor,
+        local,
+        "preparation burn",
+    )?;
     Ok(receipt)
 }
 fn burn_receipt_prefix(binding: &[u8], g: &Generation) -> Vec<u8> {
@@ -1733,5 +1714,30 @@ pub(crate) mod tests {
         let a = crate::custody::AnchorHandle::new(&r);
         let sock = a.socket().to_path_buf();
         (a, sock, r)
+    }
+    /// The burn half of the lost-reply law: the anchor committed the batch but
+    /// the caller never got (or never persisted) its receipt. The retry returns
+    /// the identical receipt, the receipt opens against the manifest, and the
+    /// anchor still holds each row once. Fault that must turn this red: make the
+    /// held batch fall through to `reserve_batch` in `custody::reserve_with_receipt`.
+    #[test]
+    fn burn_preparation_lost_reply_is_recovered_not_refused() {
+        let r = root("lost-burn");
+        let a = crate::custody::AnchorHandle::new(&r);
+        let g = generation(910);
+        let ids = (0..5)
+            .map(|row| Correlation { pool: Nat::new(61), row: Nat::new(row) })
+            .collect::<Vec<_>>();
+        let local = r.join("burn");
+        let first = burn_preparation(&ids, &g, b"binding", a.socket(), &local).unwrap();
+        std::fs::remove_file(&local).unwrap();
+        let again = burn_preparation(&ids, &g, b"binding", a.socket(), &local).unwrap();
+        assert_eq!(again, first);
+        open_burn_receipt(&ids, &g, b"binding", &again).unwrap();
+        let j = Journal::decode(&custody::rpc(a.socket(), &[0]).unwrap()).unwrap();
+        assert_eq!(j.spent.len(), 5, "no double burn");
+        // A different manifest over the same rows is not the retained request.
+        std::fs::remove_file(&local).unwrap();
+        assert!(burn_preparation(&ids, &g, b"other binding", a.socket(), &local).is_err());
     }
 }

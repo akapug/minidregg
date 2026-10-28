@@ -318,6 +318,24 @@ impl Journal {
         j.spent.shrink_to_fit();
         Ok(j)
     }
+    /// True when every id is already allocated to exactly this generation and
+    /// purpose: the batch an earlier request already reserved, whose reply may
+    /// have been lost. Consumption is not compared; a caller that needs an
+    /// unconsumed row checks that itself.
+    pub fn holds_batch(&self, ids: &[Correlation], generation: &Generation, purpose: Purpose) -> bool {
+        let indexed = self
+            .allocations
+            .iter()
+            .map(|a| (&a.id, a))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        !ids.is_empty()
+            && ids.iter().collect::<BTreeSet<_>>().len() == ids.len()
+            && ids.iter().all(|id| {
+                indexed
+                    .get(id)
+                    .is_some_and(|a| a.generation == *generation && a.purpose == purpose)
+            })
+    }
     pub fn extends(&self, old: &Self) -> bool {
         let spent = self.spent.iter().collect::<BTreeSet<_>>();
         old.spent.iter().all(|id| spent.contains(id))

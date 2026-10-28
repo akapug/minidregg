@@ -115,34 +115,21 @@ impl PrivateOutput {
             pool: Nat::from_be(&hash(&identity)),
             row: Nat::new(0),
         };
-        let _guard = custody::lock(&local.with_extension("output.lock"))?;
-        let before = Journal::decode(&custody::rpc(anchor, &[0])?)?;
-        before.reserve(id.clone(), generation.clone(), Purpose::HolderPad)?;
         let mut req = vec![1];
         req.extend(crate::codec::request(&id, &generation, Purpose::HolderPad));
-        let confirmed = Journal::decode(&custody::rpc(anchor, &req)?)?;
-        if !confirmed.extends(&before)
-            || !confirmed.preserves_allocations(&before)
-            || !confirmed.allocations.iter().any(|a| {
-                a.id == id
-                    && a.generation == generation
-                    && a.purpose == Purpose::HolderPad
-                    && !a.consumed
-            })
-        {
-            return Err(bad("private output actual anchor retention"));
-        }
-        let mut receipt = b"DREGG.PRIVATE.OUTPUT.BURN\x01".to_vec();
-        bytes(&binding, &mut receipt);
-        bytes(&confirmed.encode(), &mut receipt);
-        custody::snapshot(local, &receipt)?;
-        if std::fs::read(local)? != receipt {
-            return Err(bad("private output durable readback"));
-        }
-        let latest = Journal::decode(&custody::rpc(anchor, &[0])?)?;
-        if !latest.extends(&confirmed) || !latest.preserves_allocations(&confirmed) {
-            return Err(bad("private output anchor regression"));
-        }
+        let mut prefix = b"DREGG.PRIVATE.OUTPUT.BURN\x01".to_vec();
+        bytes(&binding, &mut prefix);
+        let (confirmed, _) = custody::reserve_with_receipt(
+            &local.with_extension("output.lock"),
+            &req,
+            &[id.clone()],
+            &generation,
+            Purpose::HolderPad,
+            prefix,
+            anchor,
+            local,
+            "private output",
+        )?;
         let output = parent.output().unwrap();
         if output.context() != parent.context()
             || output.holder() != me
