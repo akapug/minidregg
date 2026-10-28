@@ -159,6 +159,10 @@ def entryStream (keyStream : StreamCodec K)
         rw [(valueStream key).decodeAt_spec bytes _ (Nat.sub_le _ _)]
         simp only [cursorOfPrefix, keyStream.rest_at keyOk]
         cases valueOk : (valueStream key).decodePrefix afterKey <;> simp [valueOk]
+  encodeInto out entry := (valueStream entry.1).encodeInto (keyStream.encodeInto out entry.1) entry.2
+  encodeInto_spec := by
+    intro out entry
+    rw [(valueStream entry.1).encodeInto_spec, keyStream.encodeInto_spec, List.append_assoc]
   -- `cursorNative` stays false: whether every `valueStream key` is native is not computable
   -- for an arbitrary key type. A consumer that knows its keys sets the bit on the codec it
   -- decodes with (`StoreCodec.payloadStream`, by `StoreCodec.Wire.cursorReady`).

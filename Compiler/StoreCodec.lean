@@ -160,6 +160,8 @@ def unitStream : StreamCodec Unit where
     simp only [cursorOfPrefix, Option.map_some, Option.some.injEq, Prod.mk.injEq, true_and]
     rw [StreamCodec.size_sub_drop bytes inside]
   cursorNative := true
+  encodeInto out _ := out
+  encodeInto_spec out _ := (List.append_nil _).symm
 
 /-- The cursor of a decoder that reads one tag octet and nothing after it (a
 namespace tag): the list decoder runs on that one octet. -/
