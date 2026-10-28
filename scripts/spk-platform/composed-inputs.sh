@@ -66,6 +66,15 @@ completion_pub=$node/keys/completion.pub
 [[ -f $completion_seed && -f $completion_pub ]] || refuse "completionCustodyRequired: $completion_seed / $completion_pub (the key whose public half the config pins as completionCustodianKey)"
 [[ $(jq -r .completionCustodianKey "$config") == "$(od -An -tx1 -v "$completion_pub" | tr -d ' \n')" ]] || refuse "the completion seed beside the node is not the one the config pins"
 # ── the candidate's manifest, with the roles the same-store adapters read ───────
+# The world runs the copy of the candidate its install placed beside the Store (the sponsor's Host
+# names it); the adapters compare member workspaces against the manifest's paths, so the manifest is
+# that installed copy's, provided every role's bytes are the CANDIDATE_DIR manifest's.
+installed=$(dirname "$(dirname "$host")")/manifest.json
+if [[ -f $installed && $(readlink -f "$installed") != $(readlink -f "$manifest") ]]; then
+  jq -e --slurpfile c "$manifest" '.sha256 == $c[0].sha256' "$installed" >/dev/null \
+    || refuse "the world's installed candidate ($installed) is not CANDIDATE_DIR's (role digests differ)"
+  manifest=$installed
+fi
 for role in host mini store verifier spkHost; do
   jq -e --arg r "$role" 'has($r) and (.sha256 | has($r))' "$manifest" >/dev/null || refuse "candidate manifest lacks role $role"
 done
