@@ -402,19 +402,28 @@ root recomputed from the opening's items is the root the signed command names; t
 packed cell, selected under the executor's own role selection, is exactly the store of the
 opened entries; the member patch applies to it. Returns the displayed post. -/
 def checkOpened (deployment : Deployment) (command : Command) (target : Target)
-    (view : List UInt8) : Except Refusal (Store target.layout) := do
-  let (packedBytes, frame, items) ← servedOpening target view
-  unless frame = StoreCodec.frame (targetWire target) do .error (.viewMalformed target.target)
-  unless StoreHiding.rootOfItems (targetWire target) items = target.expectedTargetRoot do
-    .error (.servedRootMismatch target.target)
-  let some packed := CanonicalCellRegistry.cellCodec.decode packedBytes
-    | .error (.viewMalformed target.target)
-  let some cell := selectTarget deployment target packed | .error (.viewRole target.target)
-  unless (StoreCodec.entries (targetWire target) cell.logical).map (StoreCodec.entryBytes (targetWire target)) =
-      openedBytes items do .error (.openingMismatch target.target)
-  let patch ← memberPatch command target cell.logical
-  if Patch.ValidFrom cell.logical patch then .ok (Patch.run cell.logical patch)
-  else .error (.patchRefused target.target)
+    (view : List UInt8) : Except Refusal (Store target.layout) :=
+  match servedOpening target view with
+  | .error refusal => .error refusal
+  | .ok (packedBytes, frame, items) =>
+    if frame = StoreCodec.frame (targetWire target) then
+      if StoreHiding.rootOfItems (targetWire target) items = target.expectedTargetRoot then
+        match CanonicalCellRegistry.cellCodec.decode packedBytes with
+        | none => .error (.viewMalformed target.target)
+        | some packed =>
+          match selectTarget deployment target packed with
+          | none => .error (.viewRole target.target)
+          | some cell =>
+            if (StoreCodec.entries (targetWire target) cell.logical).map
+                (StoreCodec.entryBytes (targetWire target)) = openedBytes items then
+              match memberPatch command target cell.logical with
+              | .error refusal => .error refusal
+              | .ok patch =>
+                if Patch.ValidFrom cell.logical patch then .ok (Patch.run cell.logical patch)
+                else .error (.patchRefused target.target)
+            else .error (.openingMismatch target.target)
+      else .error (.servedRootMismatch target.target)
+    else .error (.viewMalformed target.target)
 
 /-- A collision of the store hash at the actual pre-state: the items' leaves are not the
 actual store's leaves yet root to the same digest, or an opened item is not the actual
@@ -594,11 +603,28 @@ theorem checkOpened_ok {deployment : Deployment} {command : Command} {target : T
       Patch.ValidFrom cell.logical patch ∧ shown = Patch.run cell.logical patch := by
   unfold checkOpened at checked
   rw [served] at checked
-  repeat' (first | split at checked | (simp only [bind, Except.bind] at checked))
-  all_goals first
-    | (cases checked; done)
-    | skip
-  all_goals sorry
+  simp only at checked
+  split at checked
+  · split at checked
+    · rename_i rooted
+      split at checked
+      · cases checked
+      split at checked
+      · cases checked
+      rename_i cell _
+      split at checked
+      · rename_i opened
+        split at checked
+        · cases checked
+        rename_i patch member
+        split at checked
+        · rename_i valid
+          cases checked
+          exact ⟨cell, patch, rooted, opened, member, valid, rfl⟩
+        · cases checked
+      · cases checked
+    · cases checked
+  · cases checked
 
 /-! ## Headers: every member-derived field is recomputed locally
 
