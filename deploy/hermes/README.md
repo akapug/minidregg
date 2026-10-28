@@ -632,6 +632,19 @@ tools-run.sh with `C=` that candidate, J14_TOOLS=1 J14_AWAIT=1, root `hroot-q2`;
   names its consent anchor directory (cb638b87; the resident's is /var/lib/mini/INSTANCE/anchors,
   and infra adds the same `Environment=` to the resident's units). The resident is uid 981 in
   mini-sessions; broker provider peers [994, 981]. Fix forward whatever it sends next.
+  Third red fixed: umask 077 in install-hermes and around mini's pin-enrollment-plan-height
+  (0cfb0986). **Fourth red, open, a blocker, at `create`:** the operator's birth is refused
+  `ResourceBirthPolicyController.Reject.birthStale`. demo-dry is at height ~350, birthSlack is the
+  default 64, and grain create's birth intent (`grain_create.rs` `birth_intent`: `grants` =
+  `spec.sponsor.grants`, the sponsor's genesis factory-observe and account-spend capabilities)
+  carries grants whose notBefore is genesis. J14 creates right after genesis, so it never saw this.
+  `workspace create` births on aged worlds (journey.d/jbirthwin.sh: "a birth is authored at the
+  current height H0; its root grants name notBefore = H0") take `grants` from a birth context, so
+  compare that authoring path (workspace.rs ~4744 and the birth-context it reads) with
+  `mini submit --intent-kind birth-intent`, which grain create uses. The fix most likely has grain
+  create author its birth through the same window, with the sponsor's grants at the current
+  height. Evidence: demo-dry /root/hermes-e89f-3.log and /var/lib/mini/hermes/g/create/. No signed
+  call was retained, so infra may remove that birth attempt directory before a rerun.
 - The allowlist stays as seeded until the await rows run on their own ask. The used set on every run
   so far: 1-5, 17, 19, 96-98, 144.
 - Every J14 pass runs from main's scripts and a candidate's source (coordinator); a J5 red from an
