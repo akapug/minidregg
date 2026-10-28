@@ -22,9 +22,9 @@ use std::process::{Command, Stdio};
 /// The cost ceiling of a publication's `observe` grant. Every signed read is judged with a cost
 /// (the encoded intent's length, `Kernel/NativeObservationController.lean` `requestAt`) and a
 /// grant covers it only while `cost <= maxCost`; a grant with ceiling 0 therefore covers no read at
-/// all and the Host answers every visitor `no-grant`. 50000 is the ceiling the seed's member grants
-/// use (`deploy/demo-seed/seed.sh`); it bounds one read, it is not a budget.
-pub(super) const PUBLIC_READ_MAX_COST: u64 = 50000;
+/// all and the Host answers every visitor `no-grant`. The value lives in one file, which the seed
+/// (`deploy/demo-seed/seed.sh`) reads too; it bounds one read, it is not a budget.
+pub(super) const PUBLIC_READ_MAX_COST: &str = include_str!("../../../../deploy/demo-seed/public-read-max-cost");
 
 /// The shell's paths this body runs lines with.
 pub(super) struct Shell {
@@ -814,7 +814,7 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
         ["doc", name, "publish"] => {
             let Some(subject) = site.shell.as_ref().and_then(|s| s.public_subject.clone()) else { return simple(400, "Publish", "this box has no public reader") };
             let id = fresh_id();
-            act(site, &format!("Publish {name}"), vec![format!("delegate {id} {} {subject} observe {PUBLIC_READ_MAX_COST}", quote(name)), format!("submit {id}"), format!("publish {id}")], &id, &[("the document", &format!("/doc/{name}"))])
+            act(site, &format!("Publish {name}"), vec![format!("delegate {id} {} {subject} observe {}", quote(name), PUBLIC_READ_MAX_COST.trim()), format!("submit {id}"), format!("publish {id}")], &id, &[("the document", &format!("/doc/{name}"))])
         }
         ["doc", name, "unpublish"] => {
             let Some(subject) = site.shell.as_ref().and_then(|s| s.public_subject.clone()) else { return simple(400, "Unpublish", "this box has no public reader") };
