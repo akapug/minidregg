@@ -459,7 +459,8 @@
     }
   ],
   "auth": {
-    "kind": "member-session"
+    "kind": "member-session",
+    "appCookies": "retain"
   },
   "sources": [
     "package:547714ee1f01bae653fe9276d6d30ce9/usr/local/lib/python3.9/dist-packages/datasette_upload_dbs/__init__.py",

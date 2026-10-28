@@ -163,7 +163,15 @@
           "path": [],
           "containsText": "Mini native typed library"
         }
-      ]
+      ],
+      "await": {
+        "attempts": 20,
+        "intervalSeconds": 3,
+        "retryStatuses": [
+          502,
+          503
+        ]
+      }
     }
   ],
   "auth": {
