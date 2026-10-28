@@ -76,6 +76,17 @@ struct DoorConfig {
     link_ttl_s: u64,
     login_host: String,
     pay: Option<PayConfig>,
+    /// The built-in story every member joins at enrolment (`story`: `{"author": "box", "name":
+    /// "tale"}`): the author's account invites the member as a player and the member joins, so the
+    /// tour's story door has a cell to move on. Absent: no story step.
+    story: Option<StoryConfig>,
+}
+
+#[derive(Clone, Debug)]
+struct StoryConfig {
+    /// The hosted account that founded the story (`mini-s-AUTHOR`); only the author invites.
+    author: String,
+    name: String,
 }
 
 /// An atomic amount as a decimal token amount ("50000007", 6 -> "50.000007"; trailing zeros kept
@@ -108,7 +119,7 @@ impl DoorConfig {
     fn load(path: &Path) -> Result<Self, String> {
         let v: Value = serde_json::from_slice(&std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?)
             .map_err(|e| format!("door config: {e}"))?;
-        let known = ["version", "funding", "freeCap", "inviteReserve", "inviteCodes", "dailyCap", "perRun", "sponsorFloor", "linkTtlHours", "loginHost", "pay"];
+        let known = ["version", "funding", "freeCap", "inviteReserve", "inviteCodes", "dailyCap", "perRun", "sponsorFloor", "linkTtlHours", "loginHost", "pay", "story"];
         if let Some(k) = v.as_object().ok_or("door config is not an object")?.keys().find(|k| !known.contains(&k.as_str())) {
             return Err(format!("door config has an unknown key {k}"));
         }
@@ -156,6 +167,14 @@ impl DoorConfig {
         if invite_reserve > 0 && invite_codes.is_none() {
             return Err("inviteReserve above 0 needs inviteCodes (the codes file)".into());
         }
+        let word = |w: &str| !w.is_empty() && w.len() <= 32 && w.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+        let story = match &v["story"] {
+            Value::Null => None,
+            st => match (st["author"].as_str(), st["name"].as_str()) {
+                (Some(a), Some(n)) if word(a) && word(n) => Some(StoryConfig { author: a.to_owned(), name: n.to_owned() }),
+                _ => return Err("story is {\"author\": WORD, \"name\": WORD} (lowercase letters, digits, -)".into()),
+            },
+        };
         Ok(DoorConfig {
             funding: big("funding", 1000)?,
             free_cap,
@@ -167,6 +186,7 @@ impl DoorConfig {
             link_ttl_s: nat("linkTtlHours", 168)?.saturating_mul(3600),
             login_host,
             pay,
+            story,
         })
     }
 }
@@ -514,7 +534,7 @@ impl<O: BoxOps> Processor<O> {
     /// The stranger's view: root-owned, readable by the form's group, never the secrets.
     fn publish_status(&self, r: &Value) -> Result<(), String> {
         let mut v = json!({"type":door::STATUS_TYPE,"id":r["id"],"phase":r["phase"],"name":r["name"],"route":r["route"]});
-        for k in ["detail", "linkCode", "sign", "payment", "webLogin", "webOnly", "funding", "researchConsent"] {
+        for k in ["detail", "linkCode", "sign", "payment", "webLogin", "webOnly", "funding", "researchConsent", "story"] {
             if !r[k].is_null() {
                 v[k] = r[k].clone();
             }
@@ -1142,12 +1162,85 @@ impl<O: BoxOps> Processor<O> {
         self.publish("door-state.json", &v)
     }
 
+    /// Every enrolled member joins the built-in story once per world: the author's account runs
+    /// `story invite NAME SUBJECT`, the invitation is handed to the member's HOME/requests, and the
+    /// member runs `story join NAME @NAME-invite.json`. The world is named by the digest of the
+    /// node's pinned config, so a re-genesis (a new world, where nobody has joined yet) invites
+    /// every member again. The invitation is recorded before the join, so a failed join retries
+    /// only the join (a second invite would find the member's cell already born). A failure is
+    /// recorded on the request and its status and never touches enrolment; the next run retries.
+    fn welcome_story(&mut self) -> Result<(), String> {
+        let Some(story) = self.cfg.story.clone() else { return Ok(()) };
+        let world = match std::fs::read(self.p.config()) {
+            Ok(bytes) => sha256_hex(&bytes),
+            Err(e) => {
+                self.say(format!("story {}: no world to join ({}: {e})", story.name, self.p.config().display()));
+                return Ok(());
+            }
+        };
+        let mut done = 0;
+        for mut r in self.requests() {
+            if done >= self.cfg.per_run {
+                break;
+            }
+            if r["phase"] != "enrolled" || (r["story"]["world"] == world.as_str() && r["story"]["joined"] == true) {
+                continue;
+            }
+            done += 1;
+            let name = r["name"].as_str().unwrap_or("").to_owned();
+            if let Err(e) = self.join_story(&story, &world, &name, &mut r) {
+                self.say(format!("request {}: story {}: {e}", r["id"].as_str().unwrap_or(""), story.name));
+                r["story"]["error"] = json!(e);
+            }
+            self.save(&mut r)?;
+        }
+        Ok(())
+    }
+
+    fn join_story(&mut self, story: &StoryConfig, world: &str, name: &str, r: &mut Value) -> Result<(), String> {
+        let file = format!("{}-invite.json", story.name);
+        if r["story"]["invited"] != world {
+            let subject = match r["subject"].as_str() {
+                Some(s) => s.to_owned(),
+                None => {
+                    let ran = self.ops.tenant_line(name, "whoami");
+                    let v: Value = serde_json::from_str(ran.stdout.trim()).unwrap_or(Value::Null);
+                    match v["subject"].as_str() {
+                        Some(s) if ran.ok => s.to_owned(),
+                        _ => return Err(format!("whoami: {}", ran.why())),
+                    }
+                }
+            };
+            if subject.is_empty() || !subject.bytes().all(|b| b.is_ascii_digit()) {
+                return Err(format!("the member's subject {subject:?} is not a decimal"));
+            }
+            let ran = self.ops.tenant_line(&story.author, &format!("story invite {} {subject}", story.name));
+            let prefix = format!("story join {} ", story.name);
+            let invitation = ran.stdout.lines().filter_map(|l| l.strip_prefix(prefix.as_str())).last().map(str::to_owned);
+            let Some(invitation) = invitation.filter(|_| ran.ok) else {
+                return Err(format!("story invite: {}", ran.why()));
+            };
+            self.ops.give(name, &self.p.home(name).join("requests").join(&file), format!("{invitation}\n").as_bytes())?;
+            r["subject"] = json!(subject);
+            r["story"] = json!({"name": story.name, "invited": world});
+            self.save(r)?;
+        }
+        let ran = self.ops.tenant_line(name, &format!("story join {} @{file}", story.name));
+        if !ran.ok {
+            return Err(format!("story join: {}", ran.why()));
+        }
+        r["story"] = json!({"name": story.name, "invited": world, "world": world, "joined": true});
+        self.say(format!("request {} joined story {}", r["id"].as_str().unwrap_or(""), story.name));
+        Ok(())
+    }
+
     fn run_once(&mut self) -> Result<(), String> {
         for dir in [self.p.state().join("requests"), self.p.status()] {
             std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         }
         self.intake()?;
         self.progress()?;
+        self.welcome_story()?;
         self.apply_links()?;
         self.door_state()
     }
@@ -1242,6 +1335,11 @@ mod tests {
             } else if line.starts_with("init ") {
                 std::fs::create_dir_all(home.join("workspace")).unwrap();
                 std::fs::write(home.join("workspace/workspace.json"), "{}").unwrap();
+            } else if let Some(subject) = line.strip_prefix("story invite tale ") {
+                let invitation = json!({"type":"mini-story-invitation-v1","story":"tale","role":"player","grant":{"recipient":subject}});
+                return Ran { ok: true, stdout: format!("invited {subject} to tale as player; give them this line:\nstory join tale {invitation}\n"), stderr: String::new() };
+            } else if line.starts_with("story join ") && home.join("fail-join").exists() {
+                return Ran { ok: false, stdout: String::new(), stderr: "refused: the Host was busy".into() };
             }
             Ran { ok: true, stdout: String::new(), stderr: String::new() }
         }
@@ -1294,7 +1392,7 @@ mod tests {
         std::fs::write(&pin, r#"{"enrolAddress":"Fresh1111111111111111111111111111111111111"}"#).unwrap();
         let me = std::fs::metadata(&root).map(|m| std::os::unix::fs::MetadataExt::uid(&m)).unwrap();
         let cfg = DoorConfig { funding: 1000, free_cap: 2, invite_reserve: 0, invite_codes: None, daily_cap: 10, per_run: 4, sponsor_floor: 500, link_ttl_s: 3600,
-            login_host: "demo.example".into(), pay: pay.then(|| PayConfig { enrol_pin: pin, birth_context: None, network: "devnet".into(), symbol: "DREGG".into(), rpc: "https://api.devnet.solana.com".into() }) };
+            login_host: "demo.example".into(), story: None, pay: pay.then(|| PayConfig { enrol_pin: pin, birth_context: None, network: "devnet".into(), symbol: "DREGG".into(), rpc: "https://api.devnet.solana.com".into() }) };
         Processor { ops: Fake { p: p.clone(), me, balance: RefCell::new(3000), calls: RefCell::new(Vec::new()), fail_reenroll: RefCell::new(false) },
             p, cfg, now: 1_000_000, sponsor: None, log: Vec::new() }
     }
@@ -1341,6 +1439,56 @@ mod tests {
         assert!(matches!(Request::parse(bytes.as_bytes()).unwrap(), Request::Join { ssh_key, .. } if ssh_key.is_empty()));
         let paid = Request::Join { id: door::new_request_id().unwrap(), at: 1, name: "cy".into(), ssh_key: String::new(), discord: false, route: Route::Paid, research: false, invite: None };
         assert!(Request::parse(paid.to_json().to_string().as_bytes()).is_err());
+    }
+
+    #[test]
+    fn every_enrolled_member_joins_the_story_once_per_world_and_a_failed_join_retries_only_the_join() {
+        let mut w = world("story", false);
+        w.cfg.story = Some(StoryConfig { author: "box".into(), name: "tale".into() });
+        std::fs::create_dir_all(w.p.config().parent().unwrap()).unwrap();
+        std::fs::write(w.p.config(), b"world one").unwrap();
+        let r = join("alice", KEY, Route::Free, false);
+        std::fs::create_dir_all(w.p.home("alice")).unwrap();
+        std::fs::write(w.p.home("alice").join("fail-join"), b"").unwrap();
+        submit(&w, &r);
+        run(&mut w);
+        let count = |w: &Processor<Fake>, prefix: &str| w.ops.calls.borrow().iter().filter(|c| c.starts_with(prefix)).count();
+        let s = status(&w, r.id());
+        assert_eq!(s["phase"], "enrolled", "a failed story step never touches enrolment: {s}");
+        assert!(s["story"]["error"].as_str().unwrap().contains("the Host was busy"), "{s}");
+        assert_eq!((count(&w, "box: story invite tale 4100"), count(&w, "alice: story join tale @tale-invite.json")), (1, 1));
+        let handed = std::fs::read_to_string(w.p.home("alice").join("requests/tale-invite.json")).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&handed).unwrap()["grant"]["recipient"], "4100", "the member's own invitation, in HOME/requests");
+        // The next run retries the join alone: a second invite would find the member's cell born.
+        std::fs::remove_file(w.p.home("alice").join("fail-join")).unwrap();
+        run(&mut w);
+        assert_eq!((count(&w, "box: story invite"), count(&w, "alice: story join")), (1, 2));
+        let s = status(&w, r.id());
+        assert_eq!(s["story"]["joined"], true, "{s}");
+        assert!(s["story"]["error"].is_null());
+        // Joined in this world: nothing more.
+        run(&mut w);
+        assert_eq!((count(&w, "box: story invite"), count(&w, "alice: story join")), (1, 2));
+        // A re-genesis is a new world, where nobody has joined: invited and joined again.
+        std::fs::write(w.p.config(), b"world two").unwrap();
+        run(&mut w);
+        assert_eq!((count(&w, "box: story invite"), count(&w, "alice: story join")), (2, 3));
+        assert_eq!(status(&w, r.id())["story"]["joined"], true);
+    }
+
+    #[test]
+    fn without_a_story_configured_no_member_is_invited_and_a_bad_story_name_is_refused() {
+        let mut w = world("nostory", false);
+        std::fs::create_dir_all(w.p.config().parent().unwrap()).unwrap();
+        std::fs::write(w.p.config(), b"world one").unwrap();
+        submit(&w, &join("alice", KEY, Route::Free, false));
+        run(&mut w);
+        assert!(!w.ops.calls.borrow().iter().any(|c| c.contains("story")), "{:?}", w.ops.calls.borrow());
+        let cfg = w.p.etc().join("door-story.json");
+        std::fs::write(&cfg, r#"{"version":1,"story":{"author":"box","name":"tale"}}"#).unwrap();
+        assert_eq!(DoorConfig::load(&cfg).unwrap().story.map(|s| (s.author, s.name)), Some(("box".into(), "tale".into())));
+        std::fs::write(&cfg, r#"{"version":1,"story":{"author":"box; rm","name":"tale"}}"#).unwrap();
+        assert!(DoorConfig::load(&cfg).unwrap_err().contains("story is"));
     }
 
     #[test]
