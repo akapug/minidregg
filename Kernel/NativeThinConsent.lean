@@ -404,13 +404,13 @@ opened entries; the member patch applies to it. Returns the displayed post. -/
 def checkOpened (deployment : Deployment) (command : Command) (target : Target)
     (view : List UInt8) : Except Refusal (Store target.layout) := do
   let (packedBytes, frame, items) ← servedOpening target view
-  unless frame = StoreCodec.frame targetWire target do .error (.viewMalformed target.target)
-  unless StoreHiding.rootOfItems targetWire target items = target.expectedTargetRoot do
+  unless frame = StoreCodec.frame (targetWire target) do .error (.viewMalformed target.target)
+  unless StoreHiding.rootOfItems (targetWire target) items = target.expectedTargetRoot do
     .error (.servedRootMismatch target.target)
   let some packed := CanonicalCellRegistry.cellCodec.decode packedBytes
     | .error (.viewMalformed target.target)
   let some cell := selectTarget deployment target packed | .error (.viewRole target.target)
-  unless (StoreCodec.entries targetWire target cell.logical).map (StoreCodec.entryBytes targetWire target) =
+  unless (StoreCodec.entries (targetWire target) cell.logical).map (StoreCodec.entryBytes (targetWire target)) =
       openedBytes items do .error (.openingMismatch target.target)
   let patch ← memberPatch command target cell.logical
   if Patch.ValidFrom cell.logical patch then .ok (Patch.run cell.logical patch)
@@ -450,9 +450,9 @@ def OpenedDisplayIsCommitStatement : Prop :=
     (packedBytes frame : List UInt8) (items : List StoreHiding.Item),
     checkOpened deployment command target view = .ok shown →
     servedOpening target view = .ok (packedBytes, frame, items) →
-    OpeningCollision targetWire target items prepared.pre.logical ∨
+    OpeningCollision (targetWire target) items prepared.pre.logical ∨
       ∀ address, ¬ KernelOwned target address →
-        ¬ SealedIn targetWire target items prepared.pre.logical address →
+        ¬ SealedIn (targetWire target) items prepared.pre.logical address →
         prepared.post address = shown address
 
 /-- **Teeth.** (1) A view whose opening roots to anything but the signed root is refused
@@ -462,17 +462,17 @@ def OpenedViewRefusedStatement : Prop :=
   (∀ (deployment : Deployment) (command : Command) (target : Target) (view packedBytes frame : List UInt8)
       (items : List StoreHiding.Item),
     servedOpening target view = .ok (packedBytes, frame, items) →
-    frame = StoreCodec.frame targetWire target →
-    StoreHiding.rootOfItems targetWire target items ≠ target.expectedTargetRoot →
+    frame = StoreCodec.frame (targetWire target) →
+    StoreHiding.rootOfItems (targetWire target) items ≠ target.expectedTargetRoot →
     checkOpened deployment command target view = .error (.servedRootMismatch target.target)) ∧
   (∀ (deployment : Deployment) (command : Command) (target : Target) (view packedBytes frame : List UInt8)
       (items : List StoreHiding.Item) (packed : CellRegistry.PackedCell Registry) (cell : TargetCell target),
     servedOpening target view = .ok (packedBytes, frame, items) →
-    frame = StoreCodec.frame targetWire target →
-    StoreHiding.rootOfItems targetWire target items = target.expectedTargetRoot →
+    frame = StoreCodec.frame (targetWire target) →
+    StoreHiding.rootOfItems (targetWire target) items = target.expectedTargetRoot →
     CanonicalCellRegistry.cellCodec.decode packedBytes = some packed →
     selectTarget deployment target packed = some cell →
-    (StoreCodec.entries targetWire target cell.logical).map (StoreCodec.entryBytes targetWire target) ≠
+    (StoreCodec.entries (targetWire target) cell.logical).map (StoreCodec.entryBytes (targetWire target)) ≠
       openedBytes items →
     checkOpened deployment command target view = .error (.openingMismatch target.target))
 
