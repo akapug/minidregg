@@ -1,6 +1,7 @@
 /- The generated DAV rule table has inhabited positive and adversarial poles. -/
 module
 public import Effects.Revival.HostedDavStatements
+public import Theory.AxiomPin
 import all Effects.Revival.HostedDav
 import all Init.Data.List.Basic
 import all Init.Data.String.Bootstrap
