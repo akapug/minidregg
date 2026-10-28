@@ -73,6 +73,7 @@ fi
 ok_ "members: $BOX=$BOXS $SAGE=$SAGES public=$PUBLIC"
 
 # --- 1. documents: build a document from a one-paragraph-per-line file, publish it to the public reader
+# (the grant's MAX-COST is a per-read ceiling: every read costs its encoded intent's length, so 0 covers no read)
 doc_build() { # MEMBER NAME FILE
   local m=$1 n=$2 f=$3 i=0 l id fail=0
   as "$m" "doc show $n" || as "$m" "doc new $n draft" || { fail_ "doc $n: doc new: $(errtail_)"; return 1; }
@@ -86,9 +87,11 @@ doc_build() { # MEMBER NAME FILE
   [ "$fail" = 0 ] && ok_ "doc $n: $i lines"
 }
 publish_public() { # MEMBER REF
-  local id="pub-$2"
+  # pubr-: the first publications (id pub-) carried MAX-COST 0, which covers no read; a world that holds
+  # them is published again under this id, and the public reader's import replaces the dead reference.
+  local id="pubr-$2"
   if have "$1" "$id"; then skip_ "publish $2 to the public reader: done"; return 0; fi
-  as "$1" "delegate $id $2 $PUBLIC observe 0" && as "$1" "submit $id" && as "$1" "publish $id" \
+  as "$1" "delegate $id $2 $PUBLIC observe 50000" && as "$1" "submit $id" && as "$1" "publish $id" \
     && ok_ "publish $2 to the public reader" || fail_ "publish $2: $(errtail_)"
 }
 for d in what-is-mini a-refusal-explains-itself the-lost-reply the-lamplighters-note house-rules field-notes; do

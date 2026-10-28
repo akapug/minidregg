@@ -27,6 +27,10 @@
 #   parity             every verb x subcommand leaf in `help` has a route, a no-JS form, and its
 #                      placeholder-filled form plans through the shell (/verb/NAME/dry)          -> none missing, 0 refusals
 #   parity-redproof    a verb the shell lacks has no face                                          -> 404
+#   publish / public-read-published / public-front-doc / public-read-unpublished / unpublish / public-read-revoked
+#                      the member publishes a document to a second member (the public reader); an anonymous GET
+#                      reads its text (200) and the front page shows it; an unpublished document is refused;
+#                      after Unpublish the Host refuses the visitor (403)
 #   verb-index         /verb lists the catalog                                                       -> 200
 #   verb-run           POST /verb/whoami through the derived form                                    -> answered, the subject
 #   tour               GET /tour: twelve steps with the real forms                                      -> 200, 12
@@ -89,21 +93,25 @@ if [ -n "${SPONSOR_WS:-}" ] && [ -f "$SPONSOR_WS/workspace.json" ]; then
       "$MINI" shell --socket "$SOCKET" --workspace "$1" --home "$2" --host "$HOST" --config "$CONFIG" --line "$3" 2>"$M/last.err"
     }
     pinned=$(jq -r '.socket // empty' "$SPONSOR_WS/workspace.json" 2>/dev/null); [ -z "$pinned" ] || SOCKET=$pinned
+    # provision_jwf [DIR]: enrol and initialise one member whose HOME is DIR/home (default $M); a second
+    # call with another DIR makes the public reader (a distinct subject), see PUBREAD below.
     provision_jwf() {
+      local P=${1:-$M}; mkdir -p -m 700 "$P/home/requests" "$P/home/provision"
       # A fresh account name each time a member is provisioned: a world that outlives the step
       # (a box kept between runs) already holds the earlier ones.
-      local NAME; NAME=jwf-$(date +%s | tail -c 6)$$; printf '%s\n' "$NAME" >"$M/name"
-      mline "$WS" "$M/home" "keygen mini.key" >/dev/null || return 1
-      install -m 0600 "$M/home/keys/mini.key" "$M/sponsor-home/keys/$NAME.key" || return 1
-      mline "$SPONSOR_WS" "$M/sponsor-home" "enroll plan $NAME $NAME.key $(xxd -p -c 256 "$M/home/keys/mini.key.next.pub") $(xxd -p -c 256 "$M/home/keys/mini.key.next.cosign")" >/dev/null || return 1
+      local NAME; NAME=jwf-$(date +%s | tail -c 6)$$$([ "$P" = "$M" ] || echo p); printf '%s\n' "$NAME" >"$P/name"
+      mline "$WS" "$P/home" "keygen mini.key" >/dev/null || return 1
+      install -m 0600 "$P/home/keys/mini.key" "$M/sponsor-home/keys/$NAME.key" || return 1
+      mline "$SPONSOR_WS" "$M/sponsor-home" "enroll plan $NAME $NAME.key $(xxd -p -c 256 "$P/home/keys/mini.key.next.pub") $(xxd -p -c 256 "$P/home/keys/mini.key.next.cosign")" >/dev/null || return 1
       mline "$SPONSOR_WS" "$M/sponsor-home" "enroll seal $NAME" >/dev/null || return 1
-      mline "$SPONSOR_WS" "$M/sponsor-home" "enroll submit $NAME" >"$M/submit.out" || return 1
+      mline "$SPONSOR_WS" "$M/sponsor-home" "enroll submit $NAME" >"$P/submit.out" || return 1
       rm -f "$M/sponsor-home/keys/$NAME.key"
-      local subject; subject=$(jq -r '.subject // empty' "$M/submit.out"); [ -n "$subject" ] || return 1
-      printf '%s\n' '{"type":"all","predicates":[]}' >"$M/permit-all.json"
-      "$MINI" workspace --action provision --dir "$SPONSOR_WS" --name "$NAME" --holder "$subject" --funding 1000 --account-predicate "$M/permit-all.json" --factory-ref factory >"$M/provision.out" 2>"$M/provision.err" || return 1
-      install -m 0600 "$SPONSOR_WS/provisions/$NAME/birth-context.json" "$M/home/provision/birth-context.json" || return 1
-      mline "$M/home/workspace" "$M/home" "init mini.key $subject" >/dev/null || return 1
+      local subject; subject=$(jq -r '.subject // empty' "$P/submit.out"); [ -n "$subject" ] || return 1
+      printf '%s\n' '{"type":"all","predicates":[]}' >"$P/permit-all.json"
+      "$MINI" workspace --action provision --dir "$SPONSOR_WS" --name "$NAME" --holder "$subject" --funding 1000 --account-predicate "$P/permit-all.json" --factory-ref factory >"$P/provision.out" 2>"$P/provision.err" || return 1
+      install -m 0600 "$SPONSOR_WS/provisions/$NAME/birth-context.json" "$P/home/provision/birth-context.json" || return 1
+      mline "$P/home/workspace" "$P/home" "init mini.key $subject" >/dev/null || return 1
+      [ "$P" = "$M" ] || return 0
       # The door's last enrolment step for a stranger who ticked "contribute my data for research":
       # the member's research-consent fact, as the member (door::research_consent_lines(true)).
       for l in "create research-consent declared open 1" "invoke research-consent-0 research-consent create 1 1" "submit research-consent-0"; do
@@ -120,6 +128,18 @@ if [ -n "${SPONSOR_WS:-}" ] && [ -f "$SPONSOR_WS/workspace.json" ]; then
     else
       echo "jwf: could not provision its own member ($(tail -1 "$M/last.err" 2>/dev/null; tail -1 "$M/provision.err" 2>/dev/null)); using the newcomer" >&2
     fi
+    # PUBREAD: the public reader is a second member (a distinct subject) with its own workspace, as
+    # on the box ("the hosted member public"); the member publishes to ITS subject, and the front
+    # page is the member's published document. Without it the public body is the member itself.
+    if [ "$WS" = "$M/home/workspace" ]; then
+      PUBP=$M/pub
+      [ -f "$PUBP/home/workspace/workspace.json" ] || { mkdir -p -m 700 "$PUBP"; provision_jwf "$PUBP" || true; }
+      if [ -f "$PUBP/home/workspace/workspace.json" ] && [ "$(jq -r '.birthContext != null' "$PUBP/home/workspace/workspace.json")" = true ]; then
+        PUBREAD_SUBJECT=$(jq -r .subject "$PUBP/home/workspace/workspace.json"); PUBREAD_WS=$PUBP/home/workspace; PUBREAD_HOME=$PUBP/home
+      else
+        echo "jwf: could not provision the public reader ($(tail -1 "$M/last.err" 2>/dev/null; tail -1 "$PUBP/provision.err" 2>/dev/null)); the public rows will say so" >&2
+      fi
+    fi
   fi
   BIN=$(dirname "$MINI")
   GATEWAY=${MINI_WEB_BIN:-$BIN/mini-web}; HELPER=${MINI_WEB_SPAWN_BIN:-$BIN/mini-web-spawn}
@@ -129,14 +149,16 @@ if [ -n "${SPONSOR_WS:-}" ] && [ -f "$SPONSOR_WS/workspace.json" ]; then
   # A workspace that pins its Host's socket must be addressed by that exact path.
   pinned=$(jq -r '.socket // empty' "$WS/workspace.json" 2>/dev/null); [ -z "$pinned" ] || SOCKET=$pinned
   R=$D/jwf; mkdir -p "$R/state" "$R/home" "$R/pubhome"
+  DOC="jwf$(od -An -N3 -tu4 /dev/urandom | tr -d ' ' | cut -c1-6)"; DOC2=${DOC}x
   # Unix sockets need a short path (sun_path); the step directory can be long.
   RUNDIR=$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/jwf.XXXXXX"); trap 'stop; rm -rf "$RUNDIR" ${JWF_MEMBER_DIR:+"$JWF_MEMBER_DIR"}' EXIT
   HOMEDIR=${JWF_HOME:-$R/home}
-  cat >"$R/dev.json" <<EOF
-{"mini":"$MINI","host":"$HOST","config":"$CONFIG","socket":"$SOCKET","wrapper":"$WRAPPER",
- "sessions":{"alice":{"workspace":"$WS","home":"$HOMEDIR"}},
- "public":{"workspace":"$WS","home":"$R/pubhome"}}
-EOF
+  jq -n --arg mini "$MINI" --arg host "$HOST" --arg config "$CONFIG" --arg socket "$SOCKET" --arg wrapper "$WRAPPER" \
+    --arg aws "$WS" --arg ahome "$HOMEDIR" --arg pws "${PUBREAD_WS:-$WS}" --arg phome "${PUBREAD_HOME:-$R/pubhome}" \
+    --arg psub "${PUBREAD_SUBJECT:-}" --arg front "$DOC" \
+    '{mini:$mini,host:$host,config:$config,socket:$socket,wrapper:$wrapper,
+      sessions:{alice:{workspace:$aws,home:$ahome}}, public:{workspace:$pws,home:$phome}}
+     + (if $psub == "" then {} else {publicSubject:$psub,frontDoc:$front} end)' >"$R/dev.json"
   HSOCK=$RUNDIR/spawn.sock
   nohup "$HELPER" --dev "$R/dev.json" --socket "$HSOCK" --state "$R/state" --run "$RUNDIR" >"$R/helper.log" 2>&1 &
   echo $! >"$R/helper.pid"; PIDS+=("$R/helper.pid")
@@ -196,7 +218,7 @@ row term-open "$([ -n "$WSPATH" ] && echo 1 || echo 0)" "${TERM_PATH:-none} ws=$
 COOKIE_VALUE=$(awk -v n="$COOKIE_NAME" '$6==n {print $7}' "$JAR" | tail -1)
 out=$(python3 -I "$HERE/jweb-frontend-ws.py" "127.0.0.1" "$PORT" "$WSPATH" "$ORIGIN" "$COOKIE_NAME=$COOKIE_VALUE" "$SUBJECT" 2>"$R/ws.err"); ws_rc=$?
 row term-whoami "$([ "$ws_rc" = 0 ] && echo 1 || echo 0)" "$(tail -c 200 <<<"$out" | tr '\n' ' ' | cut -c1-160) $(tail -1 "$R/ws.err")"
-DOC="jwf$(od -An -N3 -tu4 /dev/urandom | tr -d ' ' | cut -c1-6)"
+[ -n "${DOC:-}" ] || DOC="jwf$(od -An -N3 -tu4 /dev/urandom | tr -d ' ' | cut -c1-6)"
 page=$(req POST /doc/new --data-urlencode "csrf=$CSRF" --data-urlencode "name=$DOC" --data-urlencode "law=note")
 printf '%s\n' "$page" >"$R/doc-new.html"
 row doc-new "$(grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-120)"
@@ -210,6 +232,39 @@ row receipt "$([ "$(st)" = 200 ] && grep -q 'outcome admitted' <<<"$page" && ech
 # The receipt's anchor: the sealed call's digest and the Host's confirmation point, labelled as a
 # point and not as a proof (A10's inclusion opening is pending).
 row receipt-anchor "$(grep -qE 'sha256 [0-9a-f]{64}' <<<"$page" && grep -q 'acceptedCount' <<<"$page" && grep -q 'inclusion proof pending' <<<"$page" && echo 1 || echo 0)" "$(grep -o 'acceptedCount [0-9?]*' <<<"$page" | head -1) $(grep -o 'worldRoot [0-9?]*' <<<"$page" | head -1)"
+# Publication, end to end (lane/un-public-read): the member publishes DOC to the public reader (a second
+# member with its own subject), the helper hands the reference over, and an ANONYMOUS visitor reads
+# the text (200) on /doc/DOC and on the front page; an unpublished document (DOC2) is refused; after
+# Unpublish the Host refuses the visitor again (403 no-grant). A grant whose cost ceiling is 0 covers no
+# read, which is how every published document once answered 403.
+anon() { curl -s -o "$R/anon.body" -w '%{http_code}' -m 60 "$BASE$1"; }
+if [ "$mode" = --box ]; then
+  printf 'UNCONFIGURED\tpublication\tthe box has its own public reader; seed.sh and the rehearsal check /welcome anonymously\n'
+elif [ -z "${PUBREAD_SUBJECT:-}" ]; then
+  row public-reader-member "0" "no second member could be provisioned (needs SPONSOR_WS): the publication rows cannot run"
+else
+  req POST /doc/new --data-urlencode "csrf=$CSRF" --data-urlencode "name=$DOC2" --data-urlencode "law=note" >/dev/null
+  TEXT2="never published $(date +%s)"
+  req POST "/doc/$DOC2/append" --data-urlencode "csrf=$CSRF" --data-urlencode "text=$TEXT2" >/dev/null
+  page=$(req POST "/doc/$DOC/publish" --data-urlencode "csrf=$CSRF")
+  row publish "$(grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-120)"
+  # The helper's sweep runs every 60 s; the public body imports at its next render of / or /doc.
+  pstatus=0; for _ in $(seq 1 24); do anon / >/dev/null; pstatus=$(anon "/doc/$DOC"); [ "$pstatus" = 200 ] && break; sleep 5; done
+  row public-read-published "$([ "$pstatus" = 200 ] && grep -q "$TEXT" "$R/anon.body" && echo 1 || echo 0)" "anonymous GET /doc/$DOC -> $pstatus $(grep -o 'data-refusal>[^<]*' "$R/anon.body" | head -1 | cut -c1-140)"
+  fstatus=$(anon /)
+  row public-front-doc "$([ "$fstatus" = 200 ] && grep -q "$TEXT" "$R/anon.body" && echo 1 || echo 0)" "anonymous GET / -> $fstatus"
+  ustatus=$(anon "/doc/$DOC2")
+  row public-read-unpublished "$([ "$ustatus" != 200 ] && ! grep -q "$TEXT2" "$R/anon.body" && echo 1 || echo 0)" "anonymous GET /doc/$DOC2 -> $ustatus"
+  page=$(req POST "/doc/$DOC/unpublish" --data-urlencode "csrf=$CSRF")
+  row unpublish "$(grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-120)"
+  rstatus=$(anon "/doc/$DOC")
+  row public-read-revoked "$([ "$rstatus" = 403 ] && ! grep -q "$TEXT" "$R/anon.body" && echo 1 || echo 0)" "anonymous GET /doc/$DOC after unpublish -> $rstatus"
+  # Published again (a new grant for the same document): the public reader replaces its dead reference
+  # and the same name reads again (a re-run of the seed on a world that holds an older publication).
+  page=$(req POST "/doc/$DOC/publish" --data-urlencode "csrf=$CSRF")
+  pstatus=0; for _ in $(seq 1 24); do anon / >/dev/null; pstatus=$(anon "/doc/$DOC"); [ "$pstatus" = 200 ] && break; sleep 5; done
+  row public-republish "$(grep -q 'outcome admitted' <<<"$page" && [ "$pstatus" = 200 ] && grep -q "$TEXT" "$R/anon.body" && echo 1 || echo 0)" "republish then anonymous GET /doc/$DOC -> $pstatus"
+fi
 # Research consent (ember's ruling): the door wrote the member's fact at enrolment (ticked: CC0);
 # /export shows it with the sentence; the member flips it there (a write on their own cell); the
 # export's manifest carries the value the world holds.

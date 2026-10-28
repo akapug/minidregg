@@ -19,12 +19,19 @@ use std::os::fd::FromRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::process::{Command, Stdio};
 
+/// The cost ceiling of a publication's `observe` grant. Every signed read is judged with a cost
+/// (the encoded intent's length, `Kernel/NativeObservationController.lean` `requestAt`) and a
+/// grant covers it only while `cost <= maxCost`; a grant with ceiling 0 therefore covers no read at
+/// all and the Host answers every visitor `no-grant`. 50000 is the ceiling the seed's member grants
+/// use (`deploy/demo-seed/seed.sh`); it bounds one read, it is not a budget.
+pub(super) const PUBLIC_READ_MAX_COST: u64 = 50000;
+
 /// The shell's paths this body runs lines with.
 pub(super) struct Shell {
     pub host: PathBuf,
     pub config: PathBuf,
     pub home: PathBuf,
-    /// The public reader's subject: who a member publishes to (`delegate ID DOC SUBJECT observe 0`).
+    /// The public reader's subject: who a member publishes to (`delegate ID DOC SUBJECT observe MAX`, MAX = [`PUBLIC_READ_MAX_COST`]).
     pub public_subject: Option<String>,
     /// The published document the public reader's front page shows (`--front-doc`, from the
     /// operator's `/etc/mini/front-doc` through `mini-web-spawn`); `None`: the front page is the index.
@@ -560,8 +567,9 @@ fn publish_form(name: &str, subject: &str) -> String {
 }
 
 /// The public reader imports what the helper handed it (`HOME/inbox/NAME.TARGET.json`): the
-/// first publication of a name gets NAME, a later one with another capability NAME-CAPABILITY, so
-/// no author takes over another's page; a capability already imported is skipped. Import records a
+/// first publication of a name gets NAME; a later one of the same target replaces it (a fresh
+/// grant for the same document), one of another target with another capability gets
+/// NAME-CAPABILITY, so no author takes over another's page; a capability already imported is skipped. Import records a
 /// hint; the signed read decides what is shown.
 fn import_inbox(site: &Site) {
     let Some(shell) = site.shell.as_ref() else { return };
@@ -585,10 +593,20 @@ fn import_inbox(site: &Site) {
             continue;
         }
         let mut chosen = name.to_owned();
-        if site.root.join("refs").join(format!("{chosen}.json")).exists() {
-            chosen = format!("{name}-{capability}");
-            if chosen.len() > 64 {
-                chosen = format!("p-{capability}");
+        let existing = site.root.join("refs").join(format!("{chosen}.json"));
+        if existing.exists() {
+            // The same document published again with a new grant (the earlier one revoked, expired or
+            // too narrow to cover a read): the author's newer publication replaces the hint, so the
+            // name a front page or a link uses reads again. Another target keeps the old name apart.
+            let target = fs::read(&file).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).and_then(|v| v["target"].as_str().map(str::to_owned));
+            let held_target = fs::read(&existing).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).and_then(|v| v["target"].as_str().map(str::to_owned));
+            if target.is_some() && target == held_target && fs::remove_file(&existing).is_ok() {
+                // import under the same name below
+            } else {
+                chosen = format!("{name}-{capability}");
+                if chosen.len() > 64 {
+                    chosen = format!("p-{capability}");
+                }
             }
         }
         let _ = Command::new(&exe)
@@ -796,7 +814,7 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
         ["doc", name, "publish"] => {
             let Some(subject) = site.shell.as_ref().and_then(|s| s.public_subject.clone()) else { return simple(400, "Publish", "this box has no public reader") };
             let id = fresh_id();
-            act(site, &format!("Publish {name}"), vec![format!("delegate {id} {} {subject} observe 0", quote(name)), format!("submit {id}"), format!("publish {id}")], &id, &[("the document", &format!("/doc/{name}"))])
+            act(site, &format!("Publish {name}"), vec![format!("delegate {id} {} {subject} observe {PUBLIC_READ_MAX_COST}", quote(name)), format!("submit {id}"), format!("publish {id}")], &id, &[("the document", &format!("/doc/{name}"))])
         }
         ["doc", name, "unpublish"] => {
             let Some(subject) = site.shell.as_ref().and_then(|s| s.public_subject.clone()) else { return simple(400, "Unpublish", "this box has no public reader") };
