@@ -299,7 +299,7 @@ resident (`RESIDENT`, default `mini-h-INSTANCE`, made by `preflight`) for
 Hermes's subjects, controller, resident and workers, through its own operator
 route (step `route`). Steps, in order:
 
-    install-hermes preflight route subjects room runtime create handoff summon controller dispatch resident
+    install-hermes preflight route consent subjects room runtime create handoff summon controller dispatch resident
 
 Its rehearsal is J14 on the same candidate with `J14_ROUTE=pool` (the
 operator's sealed pool key, the metered tariff quoted from the upstream's
@@ -433,7 +433,7 @@ set`, `--action grant` to their own grain's runner).
 tariffs):
 
     INSTANCE=glm BASE=9871000 MODEL=glm-5.3-flash ROOM=subscribers TIER=1 POOL_ROW=zai-glm \
-      HERMES_ROOT=OUT demo/install-hermes preflight route subjects room concierge runtime create handoff summon controller dispatch resident
+      HERMES_ROOT=OUT demo/install-hermes preflight route consent subjects room concierge runtime create handoff summon controller dispatch resident
 
 `concierge` installs `mini-concierge-subscribers.timer` (one pass a minute).
 
@@ -471,7 +471,7 @@ resident is installed before the seed (deploy/demo-seed/README.md) by:
 
 ```sh
 INSTANCE=lobby BASE=9872000 ROOM=lobby BUDGET=100 FOUNDER_MEMBER=house MEMBER_ROOT=/var/lib/mini/sessions \
-  HERMES_ROOT=OUT demo/install-hermes preflight route subjects room runtime create handoff summon controller dispatch resident
+  HERMES_ROOT=OUT demo/install-hermes preflight route consent subjects room runtime create handoff summon controller dispatch resident
 ```
 
 `FOUNDER_MEMBER` makes the hosted member the room's founder: its own tenant account runs the room,
@@ -569,6 +569,14 @@ attempts remain under `JOURNEY_STEP_DIR/oracle`, including a named failure when 
   delivers through); the rest are refused by name. The control listener passes `status` only. The
   route is a strict subset of the public surface. Clients pin the listener creator with
   `MINI_OPERATOR_PEER_UID=0` (or `--operator-peer-uid`).
+- **Consent:** the resident's full consent replays the Store, whose checkpoint MAC key
+  (`deployment/checkpoint.key`, the operator's 0600) the resident must never read. Step `consent`
+  renders `mini-resident-consent-INSTANCE.socket` (`run/consent.sock`, the resident's) and
+  `.service` (`mini serve-controller-consent` as the operator, `--controller-uid` the resident), the
+  same delegation a hosted member's `mini-consent@NAME` and spk-host's controllers use, and writes
+  the selection to `consent.env` (root 0644). Every resident command and both units
+  (`EnvironmentFile=/var/lib/mini/INSTANCE/consent.env`) select it; the resident gains no read
+  access, only answers to its own frames.
 - **Create split:** `grain-runtime create SPEC --birth-socket OPERATOR-SOCKET` (operator: the
   sponsor-signed birth only, authored at the current height through Host op 91 with the
   deployment's provider routes), root `chown -R` the root, then the resident's `create SPEC`, which
