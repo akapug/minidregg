@@ -298,6 +298,7 @@ pub(crate) const FEATURED: &[(&str, &str)] = &[
     ("r8y55acmnwm0r8a2k3jp8m74pdf2xg7v2v5pxc07mcsqpq0ag3zh", "JSON: POST /api/new-game makes a puzzle, PUT /api/game/<id> saves the board, GET /api/game/<id> reads it"),
     ("zxent02jw0z9ckkagz1uscdxesaf1f1wgzdunx2wrcj0jt9uf9rh", "POST /api.php saves the high score; GET /api.php?action=getbestscore and /highscores.php read it"),
     ("yp9xt15y8s0rsuntnhgnr510qpcvm2tatd9mn1gzwr2au8h2n4p0", "direct capnp, no bridge: POST /chats appends a line, PUT /topic sets the topic; GET /chats and /topic read them"),
+    ("p04q48xd2kgkystkrda5n77kdns6u569wnactgh904tf7s3vev70", "MediaWiki API: GET /api.php?action=query&meta=tokens, POST action=edit with the token, read back with action=parse or action=raw"),
 ];
 
 pub(crate) fn featured(app_id: &str) -> Option<(usize, &'static str)> {
@@ -1545,7 +1546,7 @@ mod tests {
         assert_eq!(all.len(), entries.len());
         let names: Vec<&str> = all.iter().take(FEATURED.len()).map(|e| e.name.as_str()).collect();
         assert_eq!(names[0], "Etherpad");
-        assert_eq!(names.len(), 25, "every featured appId is in the recorded index: {names:?}");
+        assert_eq!(names.len(), 26, "every featured appId is in the recorded index: {names:?}");
         assert!(all[FEATURED.len()..].iter().all(|e| featured(&e.app_id).is_none()));
         let pad = entry_json(all[0], &Verdict { state: "unverified".into(), reason: None, raw_bytes: None, signed_app_id: None, running: 0 });
         assert_eq!(pad["featured"]["rank"], 1);
