@@ -3,17 +3,24 @@
 rt_py="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/rt-sio.py"
 
 # WBO 1.20 (github.com/lovasoa/whitebophir): server.js `socket.on("getboard")` joins the board and answers one
-# `broadcast` event with the board's items (_children); `socket.on("broadcast")` applies {board, data:{tool,type,
-# id,...}}. The write is a Rectangle broadcast and the read-back is a SECOND socket's getboard (rt-sio.py wbo),
-# the app's own protocol. The saved-file route GET /download/<board> (board-<name>.json after the 2 s save) is
-# recorded as extra evidence only: /boards/<name>.json is no route (404), and /download answered 500 in the
-# b26630168 run for a reason the app's log would show (the world is gone).
+# `broadcast` event with the board's items; `socket.on("broadcast")` applies {board, data:{tool,type,id,...}}.
+# A getboard on a second socket proves only the server's memory. The row passes only when the item is also in the
+# SAVED board: boardData.js writes $WBO_HISTORY_DIR (/var/wbo_data) board-<name>.json after SAVE_INTERVAL (2 s) of
+# inactivity, and GET /download/<board> serves that file (a missing or unreadable file is a 500, serveError). So
+# the row needs both the getboard read-back and /download/<board> holding the id after the save interval; a save
+# that fails is a product red (data loss on restart), reported with the app's own error line.
 write_WBO() {
   local board=featured res
   res=$(python3 -I "$rt_py" wbo "$dir" "$board" 2>&1 | tail -1)
-  local dl; dl=$(req GET "/download/$board")
-  [[ $res == *'"ok": true'* ]] && { echo "1 socket.io broadcast Rectangle, read back by a second socket's getboard (${res:0:100}); GET /download/$board $dl"; return; }
-  echo "0 socket.io write/read-back: ${res:0:200}; GET /download/$board $dl [$(head -c 100 "$body" | tr '\r\n\t' '   ')]"
+  [[ $res == *'"ok": true'* ]] || { echo "0 socket.io write or getboard read-back: ${res:0:200}"; return; }
+  local id; id=$(sed 's/.*"id": "\([^"]*\)".*/\1/' <<<"$res")
+  local dl try
+  for try in 1 2 3 4 5 6; do
+    dl=$(req GET "/download/$board")
+    [[ $dl == 200 ]] && grep -q "$id" "$body" && { echo "1 socket.io broadcast Rectangle $id: in memory (second socket's getboard) and saved (GET /download/$board $dl, try $try)"; return; }
+    sleep 4
+  done
+  echo "0 item $id is in the server's memory (getboard) but not in the saved board: GET /download/$board $dl after $try tries [$(head -c 100 "$body" | tr '\r\n\t' '   ')]"
 }
 
 # HedgeDoc 1.9.8: GET /new makes a note (303 to /<id>, row evidence from the featured table's
