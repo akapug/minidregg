@@ -31,6 +31,9 @@ Every run first refuses a TWIN: a literal spelling, outside the registry, of an
 identity the registry composes from a version constant (a bump of the constant would
 miss the literal). `--twins` runs only that check (no Lean); `--selftest` checks the
 bump forms and the twin rule on fixtures.
+After the pins are written (and under --check), the census is built with its own
+`#assert_persisted_codec_tags`: an identity reachable from the Host and unregistered in
+Compiler/PersistedCodecTags (or registered and unreachable) exits 3.
 --check: emit and compare only; exit 1 if the pins are out of date.
 """
 import os, pathlib, re, shutil, subprocess, sys, tempfile
@@ -55,6 +58,19 @@ def build():
             command = [str(slot), *command]
             break
     subprocess.run(command, cwd=ROOT, check=True)
+
+
+def assert_census():
+    """The census itself, with its tag-set assertion: an identity reachable from the Host but
+    absent from Compiler/PersistedCodecTags (or the reverse) stops the regen here, not a later
+    consent stage. The emitter alone never runs that assertion."""
+    command = ["lake", "build", "Compiler.PersistedCodecTagCensus"]
+    if shutil.which("swarm-build"):
+        command = ["swarm-build", *command]
+    if subprocess.run(command, cwd=ROOT).returncode != 0:
+        print("census refused after the pins were written: register or delete the identities "
+              "it names in Compiler/PersistedCodecTags.lean, then rerun")
+        sys.exit(3)
 
 
 def emit():
@@ -343,6 +359,7 @@ def main():
                       f"{len(set(fresh) - set(current))} unpinned, {len(set(current) - set(fresh))} stale")
                 sys.exit(1)
             print("pins up to date")
+            assert_census()
             return
         unbumped, done = [], set()
         for hexid, text in moved:
@@ -361,6 +378,7 @@ def main():
                 print(f"RE-PINNED bare prefix {text} (a strict prefix of the bumped {child})")
             PINS.write_text(fresh_text)
             print(f"wrote {PINS.relative_to(ROOT)}: {len(fresh)} pins (round {round_})")
+            assert_census()
             return
         if manual:
             print("structure moved under identities with no mechanical bump (edit by hand, then rerun):")
