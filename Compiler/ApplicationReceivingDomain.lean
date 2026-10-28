@@ -6,6 +6,7 @@ freshness, replay, renewal and physical-custody distinctions behind those bytes.
 module
 
 public import Init
+public import Effects.Revival.HostedDav
 
 @[expose] public section
 
@@ -75,6 +76,9 @@ def receivingContract : List UInt8 :=
    "owner-signed-policy-install-and-current-revocable-object-delegation-required;" ++
    "lifecycle-manager-no-program-admin-or-share-issuer-transfer;" ++
    "managed-app-package-exact-same-owner-manager-source-linkage;" ++
-   "dispatch-owner-issuer-preserved-manager-derived-from-authenticated-app-law").toUTF8.toList
+   "dispatch-owner-issuer-preserved-manager-derived-from-authenticated-app-law;" ++
+   "dav-api-destination-exact-relative-signed-prefix-browser-same-origin;" ++
+   "dav-method-specific-parameters-and-exact-values:").toUTF8.toList ++
+   Minidregg.Effects.Revival.HostedDav.contract
 
 end Minidregg.Compiler.ApplicationReceivingDomain

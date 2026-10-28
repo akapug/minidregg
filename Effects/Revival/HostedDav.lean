@@ -9,6 +9,8 @@ def rules : List (String × List String × List String) := [
   ("destination", ["COPY", "MOVE"], []),
   ("overwrite", ["COPY", "MOVE"], ["T", "F", "t", "f"]),
   ("lock-token", ["UNLOCK"], []) ]
+def contract : List UInt8 := "DREGG/HOSTED-DAV/v1:[{\"methods\":[\"PROPFIND\",\"COPY\",\"LOCK\",\"REPORT\"],\"name\":\"depth\",\"values\":[\"0\",\"1\",\"infinity\"]},{\"methods\":[\"COPY\",\"MOVE\"],\"name\":\"destination\",\"values\":[]},{\"methods\":[\"COPY\",\"MOVE\"],\"name\":\"overwrite\",\"values\":[\"T\",\"F\",\"t\",\"f\"]},{\"methods\":[\"UNLOCK\"],\"name\":\"lock-token\",\"values\":[]}]".toUTF8.toList
+
 def headerAllowed (method name value : List UInt8) : Bool :=
   rules.any fun (n, methods, values) =>
     name == n.toUTF8.toList &&

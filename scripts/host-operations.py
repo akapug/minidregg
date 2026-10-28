@@ -375,7 +375,7 @@ namespace Minidregg.Effects.Revival.HostedDav
 /-- Physical parameter vocabulary; empty values means nonempty transport text.
 Destination origin/prefix resolution is the receiving adapter's custody obligation. -/
 def rules : List (String × List String × List String) := [
-""" + ",\n".join(rows) + """ ]
+""" + ",\n".join(rows) + " ]\n" + "def contract : List UInt8 := " + json.dumps("DREGG/HOSTED-DAV/v1:" + json.dumps(data["dav_header_rules"], sort_keys=True, separators=(",", ":"))) + ".toUTF8.toList\n" + """
 def headerAllowed (method name value : List UInt8) : Bool :=
   rules.any fun (n, methods, values) =>
     name == n.toUTF8.toList &&
