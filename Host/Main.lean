@@ -7491,6 +7491,33 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                             let opened ← sessionOpened pinnedConfig state
                             let outcome := NativeHost.platformLookupLoaded pinnedConfig opened payload
                             return ((243 : UInt8), outcomeCodec.encode outcome)
+                        | 244 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let plan ← IO.ofExcept (NativeHost.meterRefillPlanLoaded pinnedConfig opened payload)
+                            let bytes := PlatformCellDomain.signingPlanCodec.encode plan
+                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "meter refill plan exceeds host frame bound")
+                            return ((244 : UInt8), bytes)
+                        | 245 =>
+                            -- plan, then the controller's signature
+                            let (planBytes, signature) ← splitPair payload
+                            let some plan := PlatformCellDomain.signingPlanCodec.decode planBytes
+                              | throw (RequestRefusal.malformed "noncanonical meter refill plan")
+                            let ingress ← IO.ofExcept (NativeHost.meterRefillAssemble plan signature)
+                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "meter refill ingress exceeds host frame bound")
+                            return ((245 : UInt8), ingress)
+                        | 246 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let outcome ← NativeHost.meterRefillSubmitLoaded pinnedConfig
+                              (sessionConfirmed pinnedConfig state) opened payload
+                            -- Blind, as the platform install (242): the operator's log keeps the reason.
+                            return ((246 : UInt8),
+                              outcomeCodec.encode (NativeHost.publicSubmissionOutcome outcome))
+                        | 247 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let outcome := NativeHost.meterRefillLookupLoaded pinnedConfig opened payload
+                            return ((247 : UInt8), outcomeCodec.encode outcome)
                         | 193 =>
                             let (planBytes, signatureBytes) ← splitPair payload
                             let signatures ← decodeSignatures signatureBytes

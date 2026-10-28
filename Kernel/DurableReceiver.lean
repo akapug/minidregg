@@ -91,11 +91,14 @@ structure IntentRecord where
   event : StableEvent
   /-- The signing subject (`DataIntent.subject`). -/
   subject : Option SubjectId
+  /-- The meter credit (`DataIntent.credit`): zero but for the seed-meter refill. Replay
+  reproduces the meter from it (durable log and image frame v3). -/
+  credit : Charge := 0
 
 def IntentRecord.ofIntent {rootBytes : List UInt8 → Digest}
     (intent : DataIntent rootBytes) : IntentRecord :=
   ⟨intent.transactionId, intent.writes, intent.readGuards, intent.nullifiers,
-    intent.exactCharge, intent.event, intent.subject⟩
+    intent.exactCharge, intent.event, intent.subject, intent.credit⟩
 
 def IntentRecord.bind? (rootBytes : List UInt8 → Digest) (record : IntentRecord) :
     Option (DataIntent rootBytes) :=
@@ -112,7 +115,8 @@ def IntentRecord.bind? (rootBytes : List UInt8 → Digest) (record : IntentRecor
           event := record.event
           subject := record.subject
           postRootsBound := by simpa using roots
-          guardsReadOnly := by simpa using guards }
+          guardsReadOnly := by simpa using guards
+          credit := record.credit }
     else none
   else none
 

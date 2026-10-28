@@ -2126,6 +2126,61 @@ def platformLookupLoaded (config : Config) (opened : Opened config) (bytes : Lis
           | some original => .confirmed .replayed original
           | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
 
+/-! ## The seed-meter refill (M2): session operations 244–247
+
+The controller's refill of the commit protocol's meter: plan, assembly, submission and a
+receipt-only lookup, as the platform install (240–243). The plan reuses the platform
+signing-plan frame (domain, semantics, command bytes, header). -/
+
+def meterRefillPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
+    Except String PlatformCellDomain.SigningPlan := do
+  let some command := MeterRefillReceiver.commandCodec.decode commandBytes
+    | .error "noncanonical meter refill command"
+  let header ← MeterRefillReceiver.signingHeader config.deployment config.profile.semantics
+    ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable command
+  pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
+    CredentialSignedEnvelopeController.headerCodec.encode header⟩
+
+/-- Assembly transports the controller's detached signature over the plan's header;
+submission rechecks the signature, the capability, the controller and the exact authority
+root. -/
+def meterRefillAssemble (plan : PlatformCellDomain.SigningPlan) (signature : List UInt8) :
+    Except String (List UInt8) := do
+  check (decide (signature.length = 64)) "meter refill signature must be 64 bytes"
+  check (MeterRefillReceiver.commandCodec.decode plan.commandBytes).isSome
+    "noncanonical meter refill plan command"
+  let header ← need "noncanonical meter refill header"
+    (CredentialSignedEnvelopeController.headerCodec.decode plan.header)
+  let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
+  pure (MeterRefillReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
+
+def meterRefillSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config)
+    (bytes : List UInt8) : IO Outcome := do
+  match ← MeterRefillReceiver.receiveLoaded config.deployment config.profile.semantics
+      ⟨config.federation, logicalHeight config opened.durable⟩ config.signature config.transport
+      opened.durable bytes with
+  | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
+  | .rejected reason => return refused .operationRejected "meter-refill" s!"{repr reason}"
+  | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
+  | .durableRejected reason => return durableRefusal reason
+  | .contention => return .contention
+  | .unavailable detail => return .unavailable detail.toUTF8.toList
+  | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+/-- Receipt-only historical lookup of a meter refill. Absence never submits fresh work. -/
+def meterRefillLookupLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) : Outcome :=
+  match MeterRefillReceiver.decodeIngress bytes with
+  | none => refused .malformed "meter-refill" "noncanonical signed ingress"
+  | some ingress =>
+      match MeterRefillReceiver.replay config.deployment.domain config.profile.semantics
+          opened.durable ingress with
+      | none => .absent
+      | some (.error _) => refused .conflict "replay" "transaction identity conflict"
+      | some (.ok receipt) =>
+          match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
+          | some original => .confirmed .replayed original
+          | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
+
 /-- The public view of the pay cell (no assignment map). -/
 def payViewLoaded (config : Config) (opened : Opened config) : Except String PayCellDomain.View := do
   let pay ← need "pay cell unavailable" (PayCellDomain.load config.deployment opened.durable.snapshot)

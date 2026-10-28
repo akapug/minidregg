@@ -56,6 +56,7 @@ public import Kernel.ParticipantFactoryProvisioningReceiver
 public import Kernel.FleetTurnReceiver
 public import Kernel.PayBookReceiver
 public import Kernel.PlatformInstallReceiver
+public import Kernel.MeterRefillReceiver
 public import Kernel.PayAssignmentReceiver
 public import Kernel.RealmWellReceiver
 public import Kernel.ClockTickReceiver
@@ -1253,6 +1254,10 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       (accepted : PlatformInstallReceiver.AcceptedInstall config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
       NativeAdmission config opened (PlatformInstallReceiver.intent accepted)
+  | meterRefill {ingress : MeterRefillReceiver.DecodedIngress}
+      (accepted : MeterRefillReceiver.AcceptedRefill config.deployment config.profile.semantics
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+      NativeAdmission config opened (MeterRefillReceiver.intent accepted)
   | payAssignment {ingress : PayAssignmentReceiver.DecodedIngress}
       (accepted : PayAssignmentReceiver.AcceptedAssignment config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
@@ -1409,6 +1414,39 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       (accepted : FnEmptyPollAdmissionAtV2.Accepted config opened cursor registration ingress) :
       NativeAdmission config opened
         (accepted.intent config opened cursor registration ingress)
+
+/-- **Keystone M2-b at the replay arms (`credit_confined`).** Every admission the replay can
+re-admit carries no meter credit, except a meter refill, whose intent is exactly the
+accepted refill's (`MeterRefillReceiver.intent`: no write, no charge, its marker's nullifier,
+the signed amount as credit, `MeterRefillReceiver.AcceptedRefill.sound`). Replay compares
+the complete record codec (`recordMatches`), credit included, so a committed record whose
+credit its arm does not reproduce is refused. -/
+theorem NativeAdmission.credit_confined {config : Config} {opened : Opened config}
+    {intent : DataIntent rootBytes} (admission : NativeAdmission config opened intent) :
+    intent.credit = 0 ∨
+      ∃ (ingress : MeterRefillReceiver.DecodedIngress)
+        (accepted : MeterRefillReceiver.AcceptedRefill config.deployment config.profile.semantics
+          ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress),
+        intent = MeterRefillReceiver.intent accepted := by
+  cases admission with
+  | meterRefill => rename_i accepted; exact Or.inr ⟨_, accepted, rfl⟩
+  | bootstrapBundle => rename_i accepted; left; rw [accepted.intentExact]; rfl
+  | jointReserve => rename_i reserved; exact Or.inl reserved.uncredited
+  | activity =>
+      rename_i verdict
+      left
+      cases verdict with
+      | accepted accepted => exact ActivitySeatEnd.AdmittedTurn.finalIntent_credit _ _ _ _
+      | failed => rfl
+  | applicationLifecycleClaimV3 =>
+      rename_i admitted
+      left
+      unfold ClaimAtV3.intent ApplicationLifecycleClaimV3Core.Conditional.intent
+      split <;> rfl
+  | _ => exact Or.inl rfl
+
+#assert_axioms NativeAdmission.credit_confined
+
 
 structure OrdinaryAt (config : Config) (opened : Opened config)
     (intent : DataIntent rootBytes) where
@@ -2568,6 +2606,13 @@ private def derive (config : Config) (opened : Opened config)
     | .ok accepted =>
         return .ok ⟨PlatformInstallReceiver.intent accepted,
           .platformInstall accepted, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
+  if let some ingress := MeterRefillReceiver.decodeIngress bytes then
+    match ← MeterRefillReceiver.admitDecodedNative config.deployment config.profile.semantics
+        ⟨config.federation, height⟩ opened.durable config.signature ingress with
+    | .error reason => return .error s!"meter refill refused: {repr reason}"
+    | .ok accepted =>
+        return .ok ⟨MeterRefillReceiver.intent accepted,
+          .meterRefill accepted, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := PayAssignmentReceiver.decodeIngress bytes then
     match ← PayAssignmentReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height⟩ opened.durable config.signature ingress with

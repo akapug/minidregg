@@ -68,6 +68,7 @@ def IntentRecord.erase (record : IntentRecord) :
   nullifiers := record.nullifiers
   exactCharge := record.exactCharge
   event := { writes := record.writes, readGuards := record.readGuards, event := record.event }
+  credit := record.credit
 
 theorem IntentRecord.erase_bind {rootBytes : List UInt8 → Digest} {record : IntentRecord}
     {intent : DataIntent rootBytes} (bound : record.bind? rootBytes = some intent) :
