@@ -18843,6 +18843,12 @@ fn main() -> ExitCode {
                 if ready { println!("{response}"); ExitCode::SUCCESS }
                 else { eprintln!("grain-runtime admin: {response}"); ExitCode::from(1) }
             }
+            Ok(response) if command.starts_with("reconcile prompt audited ") => {
+                let id = command.strip_prefix("reconcile prompt audited ").unwrap();
+                if prompt_outcome::successful_admin_reply(id, &response) {
+                    println!("{response}"); ExitCode::SUCCESS
+                } else { eprintln!("grain-runtime admin: {response}"); ExitCode::from(1) }
+            }
             Ok(response) if command.starts_with("recover foreground api-unreserved ") => {
                 let request_id = command.strip_prefix("recover foreground api-unreserved ").unwrap();
                 let ready = serde_json::from_str::<Value>(&response).ok().is_some_and(|value|
