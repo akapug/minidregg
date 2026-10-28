@@ -1080,7 +1080,15 @@ mod tests {
     #[test]
     fn resident_operator_proxy_forwards_its_operations_and_refuses_the_rest_by_name() {
         let (fixture, backend) = Fixture::new(Bounds { resident_uid: Some(mini_sdk::private::euid()), ..bounds() });
-        for request in [vec![0u8], vec![2, 1], vec![3, 1], vec![5, 1], vec![98, 1], [vec![151], b"{}".to_vec()].concat()] {
+        // The kernel activity ops carry the await bridge (`mini_answer_await`,
+        // `bend deliver`): plan, assembly (an exact plan/signature pair),
+        // submit, lookup and the public view.
+        let mut assembly = vec![211u8];
+        assembly.extend_from_slice(&1u32.to_le_bytes());
+        assembly.push(1);
+        assembly.extend_from_slice(&[0; 64]);
+        for request in [vec![2u8, 1], vec![3, 1], vec![5, 1], vec![98, 1], [vec![151], b"{}".to_vec()].concat(),
+            vec![210, 1], assembly, vec![212, 1], vec![213, 1], vec![214]] {
             let operation = request[0];
             let frame = envelope(CONFIG, &request);
             let mut client = fixture.client();
@@ -1093,7 +1101,9 @@ mod tests {
         // Operator-only operations (lifecycle, dispatch, fn namespace custody
         // signing, fn ACK, agent reserve) and public ones off the resident's
         // route are refused by name before any upstream connection.
-        for operation in [13u8, 22, 26, 34, 43, 58, 76, 121, 183, 206] {
+        // Public reads a resident never makes (describe, profile, codec ops,
+        // application births, fleet topic/head/incoming reads) are off it too.
+        for operation in [0u8, 6, 7, 8, 11, 13, 22, 26, 30, 31, 34, 43, 58, 76, 100, 101, 121, 180, 183, 206] {
             let mut client = fixture.client();
             transport::write_frame(&mut client, &envelope(CONFIG, &[operation, 1])).unwrap();
             let reply = transport::read_frame(&mut client).unwrap().unwrap();

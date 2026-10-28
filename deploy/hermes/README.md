@@ -554,8 +554,9 @@ to a candidate whose host carries bc88a5ab, and add `J14_AWAIT=1` for the bridge
   (`run/mini.sock` fd3, `run/mini.control` fd4, `SocketUser` the resident) and `.service`
   (`mini serve-resident-operator-proxy` as the operator). Only the resident uid connects; Host
   frames pass only if the public relay would pass them AND the operation is in
-  `transport::RESIDENT_OPERATIONS` (0-11, 17, 19, 30, 31, 96-102, 144, 151, 153, 180); the rest
-  are refused by name. The control listener passes `status` only. The route is a strict subset of
+  `transport::RESIDENT_OPERATIONS` (1-5, 17, 19, 96-99, 102, 144, 151, 153, 210-214: what
+  J14's `host-ops.txt` shows the controller and resident use, their recovery reads, and the activity
+  ops the await bridge answers and delivers through); the rest are refused by name. The control listener passes `status` only. The route is a strict subset of
   the public surface, so it needs no Lean-side statement. Clients pin the listener creator with
   `MINI_OPERATOR_PEER_UID=0` (or `--operator-peer-uid`, now accepted on every command).
   The list is seeded from run 24's retained custody; **confirm it** from `host-ops.txt` of the first
