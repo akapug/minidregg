@@ -4,7 +4,7 @@
 The platform cell (Kernel/PlatformCellLayout.lean) owns the creation tariff, the grain-birth
 tariff, the completion custodian key and the factory template's owner budget and lifetime.
 `profile.template` stays in the semantics digest, so any site that still reads
-`template.ownerBudget`/`template.lifetime`, `config.tariff`, `grainBirthTariffValue` or
+`template.ownerBudget`/`template.lifetime`, `config.tariff`, `grainBirthTariffValue`, `config.grainBirthTariff` or
 `config.completionCustodianKey` keeps serving the genesis value after an install, silently.
 
 scripts/platform-field-readers.json lists every such reader per file and pattern, with a
@@ -37,6 +37,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 CENSUS = ROOT / "scripts" / "platform-field-readers.json"
 PATTERN = re.compile(r"template\.(?:ownerBudget|lifetime)|config\.tariff\b|grainBirthTariffValue"
+                     r"|config\.grainBirthTariff\b"
                      r"|config\.completionCustodianKey"
                      r"|(?<!templateAt )(?<!templateAt config\.)profile\.template\b"
                      r"(?!\.(?:issuer|birthSlack|ownerBudget|lifetime)\b)")

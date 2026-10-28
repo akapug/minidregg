@@ -1050,7 +1050,13 @@ def profileDescription (config : NativeHost.Config)
         [("base", n tariff.base), ("perBirth", n tariff.perBirth)])]
   Lean.Json.mkObj (base ++ grainBirthFields ++ serviceFields)
 
-def descriptionLoaded (config : NativeHost.Config) : Lean.Json := Id.run do
+/-- The deployment's description on the loaded image. A grain birth is offered while that
+image's platform record prices it (`record.grainBirth`), the same record the grain receiver
+reads (`GrainResourceBirthAdmission.grainTariffAt`). -/
+def descriptionLoaded (config : NativeHost.Config) (opened : NativeHost.Opened config) :
+    Lean.Json := Id.run do
+  let grainBirth := ((PlatformCellDomain.recordOn config.deployment opened.durable.snapshot).bind
+    (·.grainBirth)).isSome
   let n := fun value : Nat => toJson (toString value)
   return Lean.Json.mkObj
     [("runtime", toJson "minidregg-native"),
@@ -1064,14 +1070,14 @@ def descriptionLoaded (config : NativeHost.Config) : Lean.Json := Id.run do
        ((["birth", "invoke", "install", "delegate", "revoke", "renounce",
           "fn-selected-public-release", "application-lifecycle-begin",
           "selected-source-publication"] : List String) ++
-         if config.grainBirthTariff.isSome then ["grain-birth"] else [])),
+         if grainBirth then ["grain-birth"] else [])),
      ("nockFSync", n config.nockFSync),
      ("jointInvocation", toJson true), ("typedContent", toJson true),
      ("authorizedQueries", toJson true), ("delegation", toJson true)]
 
 def description (config : NativeHost.Config) : IO Lean.Json := do
-  discard <| IO.ofExcept (← NativeHost.openExisting config)
-  return descriptionLoaded config
+  let opened ← IO.ofExcept (← NativeHost.openExisting config)
+  return descriptionLoaded config opened
 
 /-- Measurement: time the per-state costs a request pays on this Store. -/
 def storeBench (config : NativeHost.Config) : IO Unit := do
@@ -2228,8 +2234,8 @@ def dispatchSession (config : NativeHost.Config)
   match operation with
   | 0 =>
       unless payload.isEmpty do throw (RequestRefusal.malformed "describe does not accept a payload")
-      discard <| sessionOpened config state
-      return (0, (descriptionLoaded config).compress.toUTF8.toList)
+      let opened ← sessionOpened config state
+      return (0, (descriptionLoaded config opened).compress.toUTF8.toList)
   | 1 =>
       let t0 ← IO.monoMsNow
       let session ← sessionCurrent config state

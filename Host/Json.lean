@@ -4323,15 +4323,19 @@ def payEnrolQuoteLoadedJson (config : NativeHost.Config) (opened : NativeHost.Op
   if mode = "renew" ∧ !enrolled then throw "pay quote: key not enrolled"
   let height := NativeHost.logicalHeight config opened.durable
   let identities := PayEnrolReceiver.ids config.deployment.domain miniKey
+  -- The receiver's own ambient: the platform record's creation tariff and template.
+  let ambient := NativeHost.payEnrolAmbient config opened
+  unless PayEnrolReceiver.ambientCurrent config.deployment config.profile opened.durable ambient do
+    throw "pay quote: platform cell unavailable"
   let birthFee := if mode = "renew" then 0 else
-    PayEnrolReceiver.birthFee config.deployment config.profile.semantics config.profile.template
-      config.tariff opened.authority.snapshot.cell height identities 0
+    PayEnrolReceiver.birthFee config.deployment config.profile.semantics ambient.template
+      ambient.tariff opened.authority.snapshot.cell height identities 0
   -- One room+founder stream, document, application and application session,
   -- plus one hundred ordinary transaction base charges for an initial work
   -- session: 105 transactions, eight births, sixteen grants. Provider tokens
   -- and compute have separate tariffs and are not promised by this allowance.
   -- Byte-priced deployments choose a budget explicitly; counts cannot quote bytes.
-  let suggestion := PayStarterAllowance.recommendation config.tariff (mode == "renew")
+  let suggestion := PayStarterAllowance.recommendation ambient.tariff (mode == "renew")
   let starterInput ← field "$" "starterCredit" obj
   let starter ← if starterInput == .null then
       match suggestion with

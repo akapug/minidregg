@@ -286,7 +286,7 @@ def quoteLoadedJson (config : NativeHost.Config) (opened : NativeHost.Opened con
   let normalized ← if obj.get? "kind" == some (.str "purchase") ∧
       obj.get? "starter" == some .null then do
     let recommended ← need "byte-priced deployment requires explicit starter"
-      (PayStarterAllowance.recommendation config.tariff (obj.get? "mode" == some (.str "renew")))
+      (PayStarterAllowance.recommendation opened.pins.tariff (obj.get? "mode" == some (.str "renew")))
     pure (Json.mkObj (obj.foldl (init := []) (fun fields key value =>
       (key, if key == "starter" then decimal recommended else value) :: fields)))
     else pure json

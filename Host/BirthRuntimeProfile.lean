@@ -13,6 +13,12 @@ open Minidregg.Compiler
 
 set_option autoImplicit false
 
+/-- The runtime profile a birth source authors under. Against a deployed runtime, the
+supplied genesis coordinates (deployment, federation, template, creation tariff, genesis
+height) must be the deployed genesis's, and the deployed profile is used. The grain-birth
+tariff is not compared: a composite carries today's price, which is the platform record's
+(checked against the record by the loaded author and by the grain receiver), not the
+genesis value the profile was derived from. -/
 def select (supplied : NativeHost.Config) (deployed : Option NativeHost.Config) :
     Except String (CanonicalRuntimeProfile.Profile NativeHostProfile.Field) := do
   match deployed with
@@ -22,8 +28,7 @@ def select (supplied : NativeHost.Config) (deployed : Option NativeHost.Config) 
           supplied.federation == config.federation &&
           supplied.template == config.template &&
           supplied.tariff == config.tariff &&
-          supplied.genesisHeight == config.genesisHeight &&
-          supplied.grainBirthTariff == config.grainBirthTariff do
+          supplied.genesisHeight == config.genesisHeight do
         throw "birth source coordinates differ from the deployed runtime"
       return config.profile
 
