@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Composed scenario on one supplied, already-running Mini world.
 
-  composed-scenario.py check SPEC           validate the spec and world inventory; no effects
+  composed-scenario.py check SPEC           validate the spec, the world inventory and every
+                                            phase input checkable without the world; no effects
   composed-scenario.py run SPEC             run, or resume, the scenario's retained ledger
   composed-scenario.py status SPEC          retained ledger and phase report; no native call
   composed-scenario.py settle SPEC STEP absent|confirmed EVIDENCE REASON
@@ -25,11 +26,21 @@ scenario phases use forced Mini SSH sessions. App and resident adapters use
 checked native workspaces; outside entrance authorization is qualified separately.
 
 Phases run in order: rooms, churn, documents, apps, connector, residents,
-restart. A phase whose adapter is absent from source is reported UNBUILT; one
-whose input or prerequisite phase is absent is BLOCKED with the reason. No
-phase is faked. `run` exits 0 with blocked or unbuilt phases (a development
-report); `gate` does not: for the deploy gate an undeclared, blocked, unbuilt
-or partly blocked phase is a FAIL, named.
+restart, store-restart. A phase whose adapter is absent from source is reported
+UNBUILT; one whose input or prerequisite phase is absent is BLOCKED with the
+reason. No phase is faked. `run` exits 0 with blocked or unbuilt phases (a
+development report); `gate` does not: for the deploy gate an undeclared,
+blocked, unbuilt or partly blocked phase is a FAIL, named.
+
+The run keeps going. A phase that fails is recorded as "fail: REASON" (the
+refusal line its adapter retained, not just its exit code), and every LATER
+phase still runs unless it depends on the failed one (REQUIRES), in which case
+it is "blocked: prerequisite X has not passed". Each phase keeps its own step
+ledger, so an undecided effect in one phase fences only that phase. One run
+yields the whole red table. Before any effect, `preflight` (also run first
+inside `run`) checks every declared phase input that can be checked without the
+world (the app selection's connector fields, the resident binding's fields and
+fixtures) and reports every such red at once.
 
 Restart has two forms. {"binding": B} retains the typed resident's own
 crash/restart (residents' binding). {"world": "restart"} restarts the world's
@@ -71,18 +82,21 @@ import subprocess
 import sys
 import threading
 import time
+import types
 
 HERE = Path(__file__).resolve().parent
 _spec = importlib.util.spec_from_file_location("step_ledger", HERE / "step_ledger.py")
 step_ledger = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(step_ledger)
 
-PHASES = ("rooms", "churn", "documents", "apps", "connector", "residents", "restart")
+PHASES = ("rooms", "churn", "documents", "apps", "connector", "residents", "restart", "store-restart")
 REQUIRES = {"rooms": (), "churn": ("rooms",), "documents": ("rooms",), "apps": ("rooms",),
-            "connector": ("apps",), "residents": ("rooms",), "restart": ()}
+            "connector": ("apps",), "residents": ("rooms",), "restart": (), "store-restart": ("rooms",)}
 # The deploy gate's definition of "reaches the end" (G-product-journey §1 rows
-# 6-13): every phase, each exactly "pass". Changing this set weakens the gate.
+# 6-13): every phase, each exactly "pass". Removing a phase weakens the gate.
 GATE_PHASES = PHASES
+# Phases that take the world form {"world": "restart"} (the Store restart).
+WORLD_RESTART = ("restart", "store-restart")
 SPK = HERE.parent.parent / "scripts" / "spk-platform"
 SCRIPTS = HERE.parent.parent / "scripts"
 # In-source adapters each phase composes with. The typed resident adapter
@@ -237,12 +251,15 @@ def plan(spec):
         require(spec["connector"]["app"] in spec.get("apps", {})
                 and "worldInputs" in spec["apps"][spec["connector"]["app"]],
                 "derived connector requires an app with worldInputs")
-    restart = spec.get("restart", {})
-    if "world" in restart:
-        require(restart == {"world": "restart"}, "world restart is spelled {\"world\": \"restart\"}")
-        argv = world.get("restart", {}).get("argv")
-        require(isinstance(argv, list) and argv and all(isinstance(a, str) for a in argv)
-                and Path(argv[0]).is_absolute(), "world restart needs the inventory's absolute restart argv")
+    for phase in WORLD_RESTART:
+        restart = spec.get(phase, {})
+        if phase == "store-restart":
+            require(not restart or restart == {"world": "restart"}, "store-restart is spelled {\"world\": \"restart\"}")
+        if "world" in restart:
+            require(restart == {"world": "restart"}, "world restart is spelled {\"world\": \"restart\"}")
+            argv = world.get("restart", {}).get("argv")
+            require(isinstance(argv, list) and argv and all(isinstance(a, str) for a in argv)
+                    and Path(argv[0]).is_absolute(), "world restart needs the inventory's absolute restart argv")
     for phase in ("residents", "restart"):
         value = spec.get(phase, {})
         if "binding" in value:
@@ -295,8 +312,10 @@ def readiness(spec, p):
                 report[phase] = "unbuilt: connector capture/publication journey absent"
             else:
                 report[phase] = "ready"
-        elif phase == "restart" and "world" in spec.get(phase, {}):
+        elif phase in WORLD_RESTART and "world" in spec.get(phase, {}):
             report[phase] = "ready" if p["rooms"] else "blocked: world restart verifies rooms; none declared"
+        elif phase == "store-restart":
+            report[phase] = "blocked: no store-restart declared"
         elif "binding" in spec.get(phase, {}):
             report[phase] = "ready" if ADAPTERS["resident"].is_file() else "unbuilt: typed resident adapter absent"
         else:
@@ -310,6 +329,71 @@ def input_builder():
     builder = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(builder)
     return builder
+
+
+def resident_module():
+    spec = importlib.util.spec_from_file_location("same_world_resident", ADAPTERS["resident"])
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+CHECKED = (ValueError, RuntimeError, KeyError, OSError, TypeError, json.JSONDecodeError)
+
+
+def preflight(spec, p, passed=()):
+    """Every declared phase input that can be checked without a native call.
+
+    Returns {phase: reason} for each red, all at once. A check that needs an
+    earlier phase's product (the rooms phase writes the founder's room
+    reference) is deferred until that phase has passed, never reported red.
+    """
+    reds = {}
+    for key, binding in spec.get("apps", {}).items():
+        inputs = binding.get("worldInputs")
+        if not inputs or "apps" not in p["phases"]:
+            continue
+        try:
+            # World() reads files only: platform inputs, manifest and config
+            # pins, genesis, and the named selection against the inventory.
+            world = input_builder().World(inputs["platformInputs"], inputs["selection"], p["worldPath"])
+        except CHECKED as error:
+            reds["apps"] = f"apps:{key} inputs: {error}"
+            continue
+        if spec.get("connector", {}).get("app") == key and "connector" in p["phases"]:
+            try:
+                input_builder().connector_selection(types.SimpleNamespace(selection=world.selection))
+            except CHECKED as error:
+                reds["connector"] = f"connector selection (app {key}): {error}"
+    for phase in ("residents", "restart"):
+        binding = spec.get(phase, {}).get("binding")
+        if binding is None or phase not in p["phases"]:
+            continue
+        try:
+            module = resident_module()
+            _, _, missing = module.validate(read(binding), p["world"])
+            if missing:
+                reds[phase] = "resident fixtures missing: " + ", ".join(missing)
+        except CHECKED as error:
+            if "shared document reference is absent" in str(error) and "rooms" not in passed:
+                continue
+            reds[phase] = f"resident binding: {error}"
+    return reds
+
+
+def failure_line(stderr):
+    """The refusal an adapter retained: its last line, and the last line of the
+    native command stderr it names ("retained /path.stderr"), if any."""
+    lines = [l for l in stderr.splitlines() if l.strip()]
+    if not lines:
+        return "no stderr"
+    last = lines[-1].strip()
+    match = re.search(r"retained (/\S+\.stderr)", last)
+    if match and Path(match.group(1)).is_file():
+        inner = [l for l in Path(match.group(1)).read_text(errors="replace").splitlines() if l.strip()]
+        if inner:
+            last += " <- " + inner[-1].strip()
+    return last[:400]
 
 
 class Scenario:
@@ -333,7 +417,10 @@ class Scenario:
                               "rows": [], "phases": {}}
                 self.persist()
             (self.root / "evidence").mkdir(mode=0o700, exist_ok=True)
-            self.ledger = step_ledger.StepLedger(self.state, self.persist, lock=self.lock)
+            # One ledger per phase: an undecided step fences its own phase only.
+            self.ledgers = {phase: step_ledger.StepLedger(self.state, self.persist, key="phase:" + phase, lock=self.lock)
+                            for phase in PHASES}
+            self.current = PHASES[0]
             for pin in self.state.get("derivedInputPins", {}).values():
                 require(sha(pin["path"]) == pin["sha256"], "retained world-derived input bytes changed")
             for pin in self.state.get("worldInputSourcePins", {}).values():
@@ -345,6 +432,23 @@ class Scenario:
     def persist(self):
         with self.lock:
             save(self.state_path, self.state)
+
+    @property
+    def ledger(self):
+        """The running phase's ledger."""
+        return self.ledgers[self.current]
+
+    def done_any(self, label):
+        return any(ledger.done(label) for ledger in self.ledgers.values())
+
+    def result_any(self, label):
+        for ledger in self.ledgers.values():
+            if ledger.done(label):
+                return ledger.result(label)
+        return None
+
+    def pending(self):
+        return {phase: ledger.pending() for phase, ledger in self.ledgers.items() if ledger.pending()}
 
     def row(self, row):
         with self.lock:
@@ -595,7 +699,7 @@ class Scenario:
         room = self.p["rooms"][key]
         if who == room["owner"]:
             return room["name"]
-        if self.ledger.done(f"room:{key}:rejoin:{who}:import"):
+        if self.done_any(f"room:{key}:rejoin:{who}:import"):
             return room["alias"][:58] + "-again"
         return room["alias"]
 
@@ -648,20 +752,20 @@ class Scenario:
                                                 "--binding", binding["binding"], "--output", binding["output"]],
                          reentrant=False)
 
-    def world_restart(self):
+    def world_restart(self, prefix="restart"):
         """Restart the world's Store; every member's view must survive it."""
         before = {}
         for key, room in self.p["rooms"].items():
             for who in room["members"]:
                 label = f"room:{key}:resolve:{who}"
-                if self.ledger.done(label):
-                    before[(key, who)] = json.loads(self.ledger.result(label))["target"]
+                if self.done_any(label):
+                    before[(key, who)] = json.loads(self.result_any(label))["target"]
         require(before, "world restart needs the rooms phase's resolved targets")
-        self.adapter("restart:world", list(self.p["restartArgv"]), reentrant=False)
+        self.adapter(f"{prefix}:world", list(self.p["restartArgv"]), reentrant=False)
         for (key, who), target in sorted(before.items()):
             room = self.p["rooms"][key]
             name = self.alias(key, who)
-            self.read(self.ledger, f"restart:{key}:resolve:{who}", who, f"room resolve {name}/notes",
+            self.read(self.ledger, f"{prefix}:{key}:resolve:{who}", who, f"room resolve {name}/notes",
                       check=lambda out, t=target: (json.loads(out)["target"] == t,
                                                    "the same notes cell as before the restart"))
         for key in self.p["documents"].get("rooms", []):
@@ -669,17 +773,17 @@ class Scenario:
             markers = [f"{self.p['op']}-{key}-{who} composed member text" for who in room["members"]
                        if self.lane(f"documents:{key}:{who}").done(f"documents:{key}:{who}:submit")]
             for who in room["members"]:
-                self.read(self.ledger, f"restart:{key}:read:{who}", who, f"doc show {self.alias(key, who)}/notes",
+                self.read(self.ledger, f"{prefix}:{key}:read:{who}", who, f"doc show {self.alias(key, who)}/notes",
                           check=lambda out, ms=markers: (all(out.count(m) == 1 for m in ms),
                                                          f"each of {len(ms)} pre-restart writes exactly once"))
         for key, room in self.p["rooms"].items():
-            owner, op = room["owner"], f"{self.p['op']}-{key}-after-restart"
+            owner, op = room["owner"], f"{self.p['op']}-{key}-after-{prefix}"
             marker = f"{op} owner text after restart"
-            self.local(self.ledger, f"restart:{key}:append", owner,
+            self.local(self.ledger, f"{prefix}:{key}:append", owner,
                        f"doc append {op} {room['name']}/notes {json.dumps(marker)}", operation=op)
-            self.effect(self.ledger, f"restart:{key}:submit", owner, "submit " + op)
+            self.effect(self.ledger, f"{prefix}:{key}:submit", owner, "submit " + op)
             for who in room["members"]:
-                self.read(self.ledger, f"restart:{key}:after:{who}", who, f"doc show {self.alias(key, who)}/notes",
+                self.read(self.ledger, f"{prefix}:{key}:after:{who}", who, f"doc show {self.alias(key, who)}/notes",
                           check=lambda out, m=marker: (out.count(m) == 1, "the post-restart write, once"))
 
     def adapter(self, label, argv, reentrant, check=None):
@@ -694,6 +798,8 @@ class Scenario:
             stem.with_suffix(".out").write_bytes(done.stdout)
             stem.with_suffix(".err").write_bytes(done.stderr)
             good, detail = done.returncode == 0, ""
+            if not good:
+                detail = failure_line(done.stderr.decode(errors="replace"))
             if good and check is not None:
                 try:
                     check(done.stdout)
@@ -702,7 +808,7 @@ class Scenario:
             self.row({"id": label, "status": "pass" if good else "fail", "rc": done.returncode,
                       "seconds": round(time.monotonic() - start, 3), "loadBefore": before,
                       "loadAfter": loadavg(), "argv": argv, "evidence": str(stem), "detail": detail})
-            require(good, f"{label}: adapter failed: {detail}; see {stem}")
+            require(good, f"{label}: {detail}; see {stem}.err")
         self.ledger.step(label, action, into, reentrant=reentrant)
 
     def derived_input(self, command, app, dependency=None):
@@ -842,21 +948,30 @@ class Scenario:
     def _run(self):
         ready = readiness(self.spec, self.p)
         statuses = self.state["phases"]
+        passed = {phase for phase, status in statuses.items() if str(status).startswith("pass")}
+        reds = preflight(self.spec, self.p, passed)
+        self.state["preflight"] = reds
+        self.persist()
         for phase in self.p["phases"]:
+            self.current = phase
             required = REQUIRES[phase]
             if "binding" in self.spec.get(phase, {}):
                 required = (*required, "connector" if phase == "residents" else "residents")
-            if phase == "restart" and "world" in self.spec.get(phase, {}):
+            if phase in WORLD_RESTART and "world" in self.spec.get(phase, {}):
                 required = (*required, "rooms", *(("documents",) if self.p["documents"].get("rooms") else ()))
             missing = [r for r in required
                        if r in self.p["phases"] and not str(statuses.get(r, "")).startswith("pass")]
             if str(statuses.get(phase, "")).startswith(("pass", "fail (probes)")) and (
                     phase != "connector" or self.ledger.done("connector:journey")):
                 continue
-            if missing:
+            if phase in reds:
+                # Checked without the world; running it would only meet the same red later.
+                statuses[phase] = "fail: preflight: " + reds[phase]
+                self.row({"id": f"{phase}:preflight", "status": "fail", "detail": reds[phase]})
+            elif missing:
                 statuses[phase] = f"blocked: prerequisite {', '.join(missing)} has not passed"
             elif phase == "documents" and not self.p["documents"].get("rooms") and not any(
-                    k in self.p["documents"] for k in ("protected", "ordinary")):
+                k in self.p["documents"] for k in ("protected", "ordinary")):
                 statuses[phase] = "blocked: no document rooms or supplied-world bindings declared"
             elif ready[phase].startswith(("blocked", "unbuilt")) and phase != "documents":
                 statuses[phase] = ready[phase]
@@ -866,18 +981,17 @@ class Scenario:
                 try:
                     if phase in ("rooms", "churn", "documents"):
                         getattr(self, phase)()
-                    elif phase == "restart" and "world" in self.spec.get(phase, {}):
-                        self.world_restart()
+                    elif phase in WORLD_RESTART and "world" in self.spec.get(phase, {}):
+                        self.world_restart(phase)
                     else:
                         self.generic(phase)
                 except (step_ledger.LedgerFenced, Undecided, ValueError, RuntimeError, KeyError, OSError,
                         json.JSONDecodeError) as error:
-                    statuses[phase] = "stopped: " + str(error)
-                    for later in self.p["phases"][self.p["phases"].index(phase) + 1:]:
-                        if not str(statuses.get(later, "")).startswith(("pass", "fail (probes)")):
-                            statuses[later] = f"not reached: stopped at {phase}; would be {ready[later]}"
+                    # Keep going: this phase is red, its dependents are blocked
+                    # by REQUIRES above, every other phase still runs.
+                    statuses[phase] = "fail: " + str(error)
                     self.persist()
-                    return self.report()
+                    continue
                 mine = [r for r in self.state["rows"] if r["id"].startswith(phase + ":")
                         or (phase == "churn" and (r["id"].startswith("lockout:") or ":rejoin:" in r["id"]))]
                 latest = {r["id"]: r.get("status") for r in mine}  # a retried row's last outcome
@@ -893,7 +1007,8 @@ class Scenario:
     def report(self):
         rows = self.state["rows"]
         return {"type": "mini-composed-scenario-result-v1", "state": str(self.root),
-                "phases": self.state["phases"], "pending": self.ledger.pending(),
+                "phases": self.state["phases"], "preflight": self.state.get("preflight", {}),
+                "pending": self.pending(),
                 "lanesPending": {k: v["pending"] for k, v in self.state.items()
                                  if k.startswith("lane:") and v.get("pending")},
                 "failed": [r["id"] for r in rows if r.get("status") == "fail"],
@@ -921,9 +1036,12 @@ def status(spec):
     root = Path(spec["state"])
     state = read(root / "state.json")
     require(state["spec"] == spec, "retained scenario spec differs")
-    ledger = state.get("steps", {"done": [], "pending": None, "settled": []})
-    return {"type": "mini-composed-scenario-status-v1", "phases": state["phases"], "done": ledger["done"],
-            "pending": ledger["pending"], "settled": ledger.get("settled", []),
+    ledgers = {k[len("phase:"):]: v for k, v in state.items() if k.startswith("phase:")}
+    return {"type": "mini-composed-scenario-status-v1", "phases": state["phases"],
+            "preflight": state.get("preflight", {}),
+            "done": {phase: v["done"] for phase, v in ledgers.items() if v["done"]},
+            "pending": {phase: v["pending"] for phase, v in ledgers.items() if v.get("pending")},
+            "settled": {phase: v["settled"] for phase, v in ledgers.items() if v.get("settled")},
             "lanesPending": {k: v["pending"] for k, v in state.items() if k.startswith("lane:") and v.get("pending")}}
 
 
@@ -942,6 +1060,12 @@ def generate(world_path, state, count, op, residents=None, app_inputs=None, docu
             "churn": {"rooms": {"shared": {"member": population[-1]}}},
             "documents": {"rooms": ["shared"]},
             "restart": {"world": "restart"} if residents is None else {"binding": residents}}
+    if residents is not None:
+        # The typed resident's own restart leaves the Store restart unexercised;
+        # it is its own phase, independent of the app/connector/resident chain.
+        spec["store-restart"] = {"world": "restart"}
+    else:
+        spec["phases"].remove("store-restart")
     if residents is not None:
         spec["residents"] = {"binding": residents}
     if documents is not None:
@@ -962,6 +1086,8 @@ def gate(spec, spec_path, result_path):
     phases, reasons = report["phases"], []
     for phase in GATE_PHASES:
         status = phases.get(phase)
+        if phase == "store-restart" and "world" in spec.get("restart", {}):
+            continue  # the restart phase already restarts the Store
         if phase not in spec.get("phases", PHASES):
             reasons.append(f"{phase}: not declared in the spec")
         elif status != "pass":
@@ -1004,18 +1130,21 @@ def main(argv=None):
         p = plan(spec)
         result = {"type": "mini-composed-scenario-check-v1", "effects": False,
                   "inventorySha256": inventory_sha(p["world"]),
-                  "population": p["population"], "rooms": p["rooms"], "phases": readiness(spec, p)}
+                  "population": p["population"], "rooms": p["rooms"], "phases": readiness(spec, p),
+                  "preflight": preflight(spec, p)}
     elif words[0] == "status" and len(words) == 2:
         result = status(spec)
     elif words[0] == "run" and len(words) == 2:
         result = Scenario(spec, words[1]).run()
     elif words[0] == "settle" and len(words) == 6:
         scenario = Scenario(spec, words[1])
-        lane = scenario.ledger
-        if scenario.ledger.pending() is None or scenario.ledger.pending()["name"] != words[2]:
+        lane = next((ledger for ledger in scenario.ledgers.values()
+                     if (ledger.pending() or {}).get("name") == words[2]), None)
+        if lane is None:
             for key, value in scenario.state.items():
                 if key.startswith("lane:") and (value.get("pending") or {}).get("name") == words[2]:
                     lane = scenario.lane(key[len("lane:"):])
+        require(lane is not None, f"no unsettled step named {words[2]}")
 
         def write_record(record):
             path = scenario.evidence("settlement").with_suffix(".json")
