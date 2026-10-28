@@ -3,10 +3,15 @@ named by its identity. Loading does not parse or type the artifact's typed core:
 a receiver re-runs the front end on the artifact's package and requires the core
 to be that replay's rendering (`ObjectiveBendPublication.Replayed`), then types the
 replayed term. Consumers retain the actual current read and its CAS dependency. -/
-import Compiler.ObjectiveBendSourceArtifact
-import Kernel.ContentResource
-import Kernel.ResourceObservationAdmission
-import Theory.AssertAxioms
+module
+
+public import Compiler.ObjectiveBendSourceArtifact
+public import Kernel.ContentResource
+public import Kernel.ResourceObservationAdmission
+public import Theory.AssertAxioms
+
+@[expose] public section
+
 namespace Minidregg.Kernel.ObjectiveBendArtifactSource
 open Minidregg.Compiler
 open Minidregg.Compiler.Tower256ConcreteBackend

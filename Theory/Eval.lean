@@ -1,3 +1,7 @@
+module
+
+@[expose] public section
+
 /-
 # Theory.Eval — the run outcomes every evaluator shares
 

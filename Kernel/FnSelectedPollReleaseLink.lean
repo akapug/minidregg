@@ -3,9 +3,13 @@ Select the original owner release from a fully native-verified recipient history
 The four-field receipt is paired with that original record by the same replay
 walk. Neither fn transport nor a caller-supplied receipt can mint this link.
 -/
-import Kernel.FnSelectedPollCoverage
-import Kernel.FnSelectedPollReleaseShape
-import Kernel.NativeHostReplay
+module
+
+public import Kernel.FnSelectedPollCoverage
+public import Kernel.FnSelectedPollReleaseShape
+public import Kernel.NativeHostReplay
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnSelectedPollReleaseLink
 

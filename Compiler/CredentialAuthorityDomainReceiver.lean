@@ -12,11 +12,30 @@ the snapshot's root of the same cell.  There is no catalogue to rewrite, no
 shard to place and no auxiliary create; the write is a function of the post
 cell's logical content alone (`write_of_planes`).
 -/
-import Compiler.CanonicalCellRegistry
-import Compiler.CredentialAuthorityDomain
-import Compiler.CredentialAuthorityReplay
-import Compiler.DurableReceiverCore
-import Theory.ResourceBirthAuthority
+module
+
+public import Compiler.CanonicalCellRegistry
+public import Compiler.CredentialAuthorityDomain
+public import Compiler.CredentialAuthorityReplay
+public import Compiler.DurableReceiverCore
+public import Theory.ResourceBirthAuthority
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.CredentialAuthorityDomainReceiver
 

@@ -24,11 +24,32 @@ authority. The operation marker is the intent's durable nullifier (the Store's
 consumed set; the authority cell is not written), so an exact repeat replays
 and a changed command under the same identity conflicts.
 -/
-import Kernel.ParticipantKeyEnrollment
-import Compiler.NativeHostCodec
-import Kernel.StreamWrite
-import Compiler.WorldKindLawDependencies
-import Compiler.PhysicalLawResolution
+module
+
+public import Kernel.ParticipantKeyEnrollment
+public import Compiler.NativeHostCodec
+public import Kernel.StreamWrite
+public import Compiler.WorldKindLawDependencies
+public import Compiler.PhysicalLawResolution
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FleetTurn
 

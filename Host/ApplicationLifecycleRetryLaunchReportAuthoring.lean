@@ -4,11 +4,15 @@ completion. The host supplies observations of its protected process and
 volume; Mini derives the volume identity and canonical report/signing frames.
 This is not physical attestation or native completion admission.
 -/
-import Kernel.ApplicationLifecycleRetryCompletionV4Report
-import Host.ApplicationLifecycleLaunchReportAuthoring
-import Host.ApplicationLifecycleCompletionAuthoring
-import Kernel.ApplicationLifecycleRetryCompletionV4Ingress
-import Kernel.ApplicationLifecycleResidentProfile
+module
+
+public import Kernel.ApplicationLifecycleRetryCompletionV4Report
+public import Host.ApplicationLifecycleLaunchReportAuthoring
+public import Host.ApplicationLifecycleCompletionAuthoring
+public import Kernel.ApplicationLifecycleRetryCompletionV4Ingress
+public import Kernel.ApplicationLifecycleResidentProfile
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationLifecycleRetryLaunchReportAuthoring
 

@@ -2,9 +2,13 @@
 request supplies artifact custody and a nonce, never replacement state or an
 admission assertion. Independent operator authority comes from Host settings.
 This module stages a verified target; it never publishes a live service pointer. -/
-import Compiler.NeutralCarriedSegmentIO
-import Host.CarryInspection
-import Host.Json
+module
+
+public import Compiler.NeutralCarriedSegmentIO
+public import Host.CarryInspection
+public import Host.Json
+
+@[expose] public section
 
 namespace Minidregg.Host.NeutralCarryReceiving
 

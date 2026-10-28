@@ -4,9 +4,13 @@ The JSON is not authority: the physical host must retain the raw op26 callback
 bytes, compare the echoed frame byte-for-byte, and check the descriptor
 against one signature-verified SPK parse before launching its pinned unit.
 -/
-import Kernel.ApplicationLifecycleClaimProjection
-import Kernel.ApplicationLifecycleResidentProfile
-import Lean.Data.Json
+module
+
+public import Kernel.ApplicationLifecycleClaimProjection
+public import Kernel.ApplicationLifecycleResidentProfile
+public import Lean.Data.Json
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationLifecycleClaimInspection
 

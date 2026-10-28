@@ -4,8 +4,12 @@ image. The JSON parser supplies typed identities and funding; the loaded image
 supplies current height and authority epochs. A genesis description is checked
 against the pinned seed but never used as today's authority state.
 -/
-import Host.Json
-import Kernel.NativeHost
+module
+
+public import Host.Json
+public import Kernel.NativeHost
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationCurrentBirthAuthoring
 

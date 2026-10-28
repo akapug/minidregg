@@ -6,8 +6,29 @@ its grain birth bytes and old descriptor remain opaque. The original receipt's r
 is read from the source Store at use (`AuditedSource.reader`), never by replaying the
 source history from its genesis.
 -/
-import Compiler.CarriedSegmentIO
-import Kernel.ApplicationShareIssueGrainReceiver
+module
+
+public import Compiler.CarriedSegmentIO
+public import Kernel.ApplicationShareIssueGrainReceiver
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Compiler.CarriedApplicationProvenance
 

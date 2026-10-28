@@ -19,9 +19,28 @@ remainder comparator below uses a one-limb modulus (`q < base`).  A separately p
 scalar-times-multi-limb-constant block covers the BFV-scale `q0`; composing that block
 with the comparator for a full wide-modulus `ModularView` is also an explicit residual.
 -/
-import Compiler.AirBignum
-import Compiler.EmitSerialize
-import Theory.CrossModulus
+module
+
+public import Compiler.AirBignum
+public import Compiler.EmitSerialize
+public import Theory.CrossModulus
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.AirModularView
 

@@ -39,8 +39,27 @@ receiver accepts a job only when its installed law IS the job law at some
 parameters (`isJobLaw`, `isJobLaw_sound`), so the law cannot be one that lets
 an ordinary write move the money fields.
 -/
-import Kernel.PurseRefill
-import Kernel.Job
+module
+
+public import Kernel.PurseRefill
+public import Kernel.Job
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.JobMoney
 

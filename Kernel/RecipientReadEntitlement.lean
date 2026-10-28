@@ -5,11 +5,31 @@ manufactures Authorized nor releases bytes. Candidate provenance, authenticated
 complete enrollment/device records and final CAS composition remain outer
 controller obligations. The genesisHeight argument is a deployment receiver
 parameter, never an untrusted request value. -/
-import Kernel.ResourceObservationAdmission
-import Compiler.ObjectAudienceRoster
-import Kernel.ResourceTransaction
-import Compiler.PhysicalLawResolution
-import Compiler.WorldKindLawDependencies
+module
+
+public import Kernel.ResourceObservationAdmission
+public import Compiler.ObjectAudienceRoster
+public import Kernel.ResourceTransaction
+public import Compiler.PhysicalLawResolution
+public import Compiler.WorldKindLawDependencies
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Kernel.RecipientReadEntitlement
 open Minidregg.Compiler
 open Minidregg.Compiler.CanonicalPolicyAdmission

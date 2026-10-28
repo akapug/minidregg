@@ -14,7 +14,26 @@ by name if they write any coordinate at or above `reservedBase`
 activity's own typed turns write them (`Kernel.ObjectiveActivityReceiver` under
 `ControlFacet.objectiveActivity`).
 -/
-import Kernel.ProtectedCell
+module
+
+public import Kernel.ProtectedCell
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ObjectiveActivityCell
 

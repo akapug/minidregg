@@ -3,10 +3,15 @@ or engine arrivals, occupy the shared consensus prefix. Physical allocation
 receives only an actual read-back receipt; this module does NOT export YES.
 SourceReady needs a real custody/privateRecovery receiver, still a separate join.
 -/
-import Kernel.JointReceiverAdmission
-import Kernel.NativeHostContext
-import Compiler.GenericSimplexIO
-import Kernel.NativeHostServed
+module
+
+public import Kernel.JointReceiverAdmission
+public import Kernel.NativeHostContext
+public import Compiler.GenericSimplexIO
+public import Kernel.NativeHostServed
+
+@[expose] public section
+
 namespace Minidregg.Kernel.JointReceiver
 open Minidregg.Theory
 open Minidregg.Theory.TypedAuthorization

@@ -85,6 +85,17 @@ the newest built main that passed the gate; each is reported in one line, and in
 | 7e8a09b7e result | — | host stage OOM-killed 08:57 (1735 s; Kernel.PayEnrolReceiver 882 s at 15.5 GB, rc 137; Kernel.PayObservationReceiver 15.6 GB; box 29/30 GB under the old 28G cap). The seat table already weights both at 19.4 GB, so the table was not low; the cap was. No candidate |
 | citer-b cause | — | apps:sheet "grain refused: No such file or directory": grain-host.json `.miniOperatorSocket` (node/operator/mini.sock) absent in jworld-scratch 026d132; infra's dregg-infra 7d2c765 serves it. gate-cut6.sh now defaults EDGE_REV=7d2c765 (copy at integ4/dregg-infra-7d2c765); citer2.sh = citer.sh on 7d2c765 |
 | full | 7280f9db8 | 09:0x `integ4/main-full2.sh` (main-full.pid) with SWARM_MEM_MAX=24G; = 7e8a09b7e + un-deputy 9994a748e + un-spk-ioctx 5cb33bbdf (spk-host io errors name operation and path). Tidy-up `integ4/tidy-10-28.sh` (pid file tidy-10-28.pid) ran beside it, each item logged with its size in COMMANDS.log; ci-e89b kept |
+| 7280f9db8 result | — | host stage OOM-killed 09:09:25 (502 s) at the swarm.slice level (scope peak 14.8G; slice oom_kill 15; ~3.5G of the slice is reparented tmpfs of dead scopes: /tmp/japps.*, /run/user/1000/jwf-m-*). Relaunched `main-full2.sh` at 0032ea0f0 with SWARM_MEM_MAX=18G (integration-build.sh now honours the env, default 24G); tests green 09:14:39, host from 09:14:39 (main-full.pid = launcher subshell 212608) |
+| 0032ea0f0 result | — | host stage rc=1 09:17 (163 s at 18G): everything compiled except Kernel.PayEnrolReceiver, refused by name as over the cap (table weight 19.3 GB). Coordinator cleared ~5 GB of stale tmpfs (/tmp/japps.*, /run/user/1000/jwf-m-*), the un-ns-owner w1/w2 worlds and 13 leaked fake-body.py servers. Relaunched `main-full2.sh` at f1b7add21 with SWARM_MEM_MAX=22G 09:19 (main-full.pid 228063, build.pid 228077); the host stage compiles only the Pay modules |
+| leak fix | de3b67abe | dev_flow's Procs kills each server's process group and removes scratch; JWF removes its jwf-m-* member dir on every exit (JWF_KEEP_MEMBER=1 keeps it) |
+| full | f1b7add21 | 09:14 relaunch of main-full2.sh at 22G (main-full.pid 228063; build.pid 228077); tests green 09:19; host stage from 09:19:13 (must compile Kernel.PayEnrolReceiver) |
+| f1b7add21 host | — | host stage CLEAN 09:32:38 (805 s at 22G; Kernel.PayEnrolReceiver compiled); consent from 09:32:38 |
+| main since f1b7add21 | b7e16c951 | app-market-b8 3b9280829 (Mercurial in FEATURED, 13→14; `apps_search_shows_the_featured_set_first` passes on the Mac) |
+| main since f1b7add21 | c3dcaf00f | app-market-b3 63ff068c2 (EtherDraw, Scrumblr, SwaggerEditor in FEATURED, 17; filtered apps_search 2/2 on the Mac) |
+| f1b7add21 result | — | consent rc=1 09:37 (270 s), census only (PersistedCodecTagCensus.lean:322): structure moved under DREGG/APPLICATION/DISPATCH-OBSERVATION/v6 (ApplicationDispatchAdmission.observationContext) and DREGG/GRAIN-RESOURCE-BIRTH/JOINT/v5 (GrainResourceBirthTransaction.plan), from Lean already in iter-speed's frozen 694415d5d. No candidate; default: no regen inside the conversion freeze, the conversion landing re-pins both with the epoch move. Asked the coordinator (a) wait vs (b) regen now |
+| main since f1b7add21 | 1d5902832 | rows-ledger c6cc9b4a3 and 45fc4d30a (ROWS-OWED §0 app tables); umbrellas stage 842d8fb75 |
+| umbrellas stage | 842d8fb75 | coordinator 10-28: no stage elaborated Fixtures/ObjectiveProofs/CensusChecks, so NativeDocWriteFixture sat red unseen. `lane-build.sh umbrellas` (after host, seated, `--umbrella --umbrella-only`, targets from `umbrella-targets --unshipped`) reds the candidate; integration-build.sh runs host, consent, umbrellas, rust (backup .bak-umbrellas). One-off run on integ8 at f1b7add21: `integ4/umbrellas-now.sh` (pid file integ4/umbrellas-now.pid; builder copy src/scripts/bnh-umbrella-oneoff.sh, untracked; log integ8/logs/umbrellas.log) started 09:5x |
+| f1b7add21 decision | — | no regen inside the conversion freeze: the conversion landing re-pins DISPATCH-OBSERVATION/v6 and GRAIN-RESOURCE-BIRTH/JOINT/v5 with the epoch move; the next build is the conversion candidate. Recorded fixtures (NativeDocWriteFixture, NativeAcceptedFixture) are regenerated once, from the first READY candidate carrying the conversion AND lean-audit-c + M2 (L1e: M2 moves the turn digest and the v3 frames, so a conversion-only fixture goes stale again); until then the umbrellas stage is expected red on Fixtures only |
 Gate harness rule (coordinator, 10-28): the tour and composed harness (scripts/, native/resource-client/*.sh|*.py, journey.d/) come from main at gate time over the candidate's source.tar and binaries (`integ4/harness-overlay.sh DEST SHA`; `HARNESS=<sha>` in tour-run2.sh and composed-full2.sh; gate-cut4.sh resolves main's tip, adds `harnessCommit` to the gate file after gate-from-runs.py, which binds only the candidate's SHA256SUMS). Infra was asked to copy harnessCommit in gate-from-runs.py itself (optional).
 Runner rule (coordinator, 10-28): launch builds with `integ4/main-full2.sh`, which gates with `gate-cut5.sh`: it copies tour-run2.sh, composed-full2.sh and harness-overlay.sh into `$G/runner` at gate start, runs only from that copy and writes `runnerSha256sums` beside `harnessCommit` in the gate file. Never edit a script a running job reads; change it under a new name.
 Merge-subject slip: 8e7940fea and 1a3240483 name the un-deputy sha in their subjects; their parents are un-story-install 733dd948f and red-authority-zero-field 108083a35. 733dd948f was a red-first test (shared_names.rs:1144), cleared by a8376ce8f (d2b639068).
@@ -118,7 +129,7 @@ main's tip with land.py and sends its sha (one planned StoreEpoch move; the next
 sends a green sha; all of it rides one codec regen. The uncommitted `ownerless` census check merges 3-way onto
 iter-speed's PersistedCodecTagCensus.lean, never overwriting it. lane/thin-birth 1e0f741d3 LANDED on main eda65ced8 (after the 7027e0ace report, before the conversion; so land.py converts its Lean (Kernel/NativeThinBirth, NativeThinConsent, Host/ThinBirthConsent, ClientConsentCore, SourceAgreementJson, HostOperations) and it rides the one regen; told a0fd127abfb9aac75 and L1e. On the first built main carrying it, run `journey.sh --only JP2` (row 19 thin birth succeeds; the swapped-plan row refused birthSourceChanged). After it lands, delete dregg-ref:/build/lanes/thin-birth-scratch/ and /build/lanes/thin-birth (finished session lane), listed in COMMANDS.log first.
 
-Red routing: lean-audit-c and lean-audit-c-m2 are L1e's (a58f907aef8926430; L1d ad6d6eff243f32816 has stopped): its green sha comes from and its reds go to L1e directly; when the module conversion lands on main, tell L1e (it merges the conversion into lean-audit-c and sends a green sha) and L1d's old address; Hermes to L4b (ad81db6d6fd317d3a); L13 a1618140607ac439b; un-stream-continuity reds
+Infra is a298031c78e86d651 (10-28; older mentions of ae95a4eac63b0715e/aed5ecf506cf840af in the table are history). Red routing: lean-audit-c and lean-audit-c-m2 are L1e's (a58f907aef8926430; L1d ad6d6eff243f32816 has stopped): its green sha comes from and its reds go to L1e directly; when the module conversion lands on main, tell L1e (it merges the conversion into lean-audit-c and sends a green sha) and L1d's old address; Hermes to L4b (ad81db6d6fd317d3a); L13 a1618140607ac439b; un-stream-continuity reds
 (ApplicationStreamContinuityFresh pole proofs, NativeHostReplay.lean:3816) to the deputy a308118209b4a48ea; all
 others through the coordinator. Expected reds, not new: the eight hand-rolled genesis writers (acceptance.sh,
 application-acceptance.sh, authority-acceptance.sh, selected-release-acceptance.sh, grain-runtime/acceptance.sh,
@@ -132,8 +143,21 @@ gates main and fixes reds itself.
 
 ## Rulings (do not re-ask)
 
+- Held for the conversion: lane/thin-birth 9509996a0 (b00bc41ff + docs; ad0906325ab57d1c3; continuation docs/THIN-BIRTH-2026-10-28.md §11; checkOpened, the re-encoding twin deleted; JP2 71/71 and THIN on e89fe7b8b with its consent binary). Tell it when the conversion is on main; it merges and re-converts, then sends a sha.
+- Held for the conversion window (touches .lean, Effects.lean imports it): lane/effects-revival 6b5464201 (owner a26c13b24522dee35 after the a83b7949ba401cca5 hand-off; it also owes a regenerated Fixtures/NativeDocWriteFixture.lean (stale since 3315a908), regenerated from the conversion candidate after READY and landed with its Effects sha; Engine, Statements, EngineProofs). After the conversion the lane merges main, converts its Effects files and sends one sha; land that, through a box build.
+- Held for the build after the conversion candidate (one .lean file): lane/app-market-b5 84938f78c
+  (Kernel/ApplicationSpkPackageIdentity.lean, safeApiTail admits a final segment with no trailing slash; OwnTracks
+  re-qualifies on the candidate carrying it; deputy a308118209b4a48ea). Land after the conversion, re-converted if
+  its header conflicts.
+- Rehearsal (ember, 10-28): the conversion candidate ships from its gate (tour + composed on EDGE_REV 7d2c765);
+  build at 22G; candidate line and verdict to the coordinator and infra a298031c78e86d651 (infra handed off from ae95a4eac63b0715e, 10-28). un-ingest-stale-stage
+  1f9a757de is in (256a98cbd).
+- Not held, nothing coming: lane/un-ns-owner 587c5acbd is the superseded work-in-progress branch; its clean
+  form lane/un-ns-owner-clean (3a8109059, box-elaborated, plus e80f56422 and cf3c5d433) is on main (coordinator 10-28).
 - Module-conversion window: from iter-speed's (a0fd127abfb9aac75) "re-deriving now" until it sends its sha, no .lean or lakefile.toml change lands on main; Rust, shell and docs continue.
 - Row requirements: a row asserting behaviour newer than the oldest candidate a harness may judge gets a line in scripts/gates/row-requires.tsv in the same commit (5 JWF rows → 588855a71, 9b36d6d37).
+- Pay weights stay at 19.3 GB in the seat table (coordinator 10-28: never lower a weight to a kill-time peak); a
+  host stage that must compile a Pay module runs at SWARM_MEM_MAX=22G on a slice cleared of leftovers.
 - Memory on dregg-build (coordinator 10-28): every build runs with SWARM_MEM_MAX=24G (exported in
   /build/lanes/integration-build.sh; swarm-build's default and swarm.slice MemoryMax are 24G too, infra 08:58), so
   the OS and sshd keep ~6 GB. Kernel.PayEnrolReceiver and PayObservationReceiver (15.5-19.4 GB) take all four seats;
@@ -153,7 +177,7 @@ gates main and fixes reds itself.
   the auditor's acceptance; L1d (ad6d6eff243f32816) coordinates the order with the integrator and the iter-speed
   successor (a0fd127abfb9aac75).
 - closure.pid on dregg-ref (empty for jobs started before lanes joined group `closure`) is infra's
-  (ae95a4eac63b0715e), not the integrator's.
+  (a298031c78e86d651), not the integrator's.
 - Transitive bumps through registry constants: closed, no. Nesting already propagates through the regen's round
   loop; both stops were spelling forms, now handled.
 - Owner-less pins: the census refuses a registered DREGG identity no definition spells or names, landed once

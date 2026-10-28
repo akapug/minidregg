@@ -4,9 +4,28 @@ The requested index names a retry BEGIN-v4 in the same verified replay history.
 The request never supplies an app state, resource root, grant, header, or the
 recovery selector: the selector is the one retained in the admitted BEGIN-v4.
 -/
-import Host.ApplicationLifecycleClaimOperator
-import Kernel.ApplicationLifecycleRetryClaimV4Core
-import Kernel.NativeHostReplay
+module
+
+public import Host.ApplicationLifecycleClaimOperator
+public import Kernel.ApplicationLifecycleRetryClaimV4Core
+public import Kernel.NativeHostReplay
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationLifecycleRetryClaimV4Authoring
 

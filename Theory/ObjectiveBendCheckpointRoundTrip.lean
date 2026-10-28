@@ -1,8 +1,28 @@
 /- The checkpoint codec round trip: every machine State, in particular every
 quiescent yielded activity, is restored exactly from its token encoding.
 Fuel is the token count, so no separate depth bound is assumed. -/
-import Theory.ObjectiveBendCheckpoint
-import Theory.AxiomPin
+module
+
+public import Theory.ObjectiveBendCheckpoint
+public import Theory.AxiomPin
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Theory.ObjectiveBendCheckpointRoundTrip
 open ObjectiveBendOpenRecursion ObjectiveBendDemandMachine ObjectiveBendCheckpoint
 set_option autoImplicit false

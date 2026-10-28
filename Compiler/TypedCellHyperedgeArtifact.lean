@@ -20,8 +20,27 @@ legacy carrier and could describe only `EffectDeclaration` effects.  The header
 schema version is 3.
 -/
 
-import Kernel.TypedCellHyperedge
-import Compiler.TypedAuthorizationRequestCodec
+module
+
+public import Kernel.TypedCellHyperedge
+public import Compiler.TypedAuthorizationRequestCodec
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.TypedCellHyperedgeArtifact
 

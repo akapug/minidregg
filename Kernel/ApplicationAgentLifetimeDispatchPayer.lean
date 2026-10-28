@@ -3,9 +3,13 @@ The current signed purse witness for a grant-bound event26 reserve. Its v3
 nonce commits the immutable grant identity; the old event21 payer witness
 and signature domain remain untouched.
 -/
-import Kernel.ApplicationAgentLifetimeDispatchReserveCore
-import Kernel.ApplicationDispatchAgentPayer
-import Kernel.NativeHostServed
+module
+
+public import Kernel.ApplicationAgentLifetimeDispatchReserveCore
+public import Kernel.ApplicationDispatchAgentPayer
+public import Kernel.NativeHostServed
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationAgentLifetimeDispatchPayer
 

@@ -6,7 +6,11 @@ the PayCell schema. Numeric public operation allocation belongs to the native
 control registry; this leaf does not claim that routing metadata is a
 runtime-profile input.
 -/
-import Init
+module
+
+public import Init
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PayReceivingContract
 

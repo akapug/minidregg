@@ -3,8 +3,12 @@ Exact-CAS reservation for the one-use repeat-CREATE claim (event70). The
 fresh-tip handoff carries the versioned committed projection; a replayed or
 recovered receipt never carries launch power.
 -/
-import Kernel.ApplicationLifecycleRetryClaimV4Projection
-import Kernel.NativeHostReplay
+module
+
+public import Kernel.ApplicationLifecycleRetryClaimV4Projection
+public import Kernel.NativeHostReplay
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Receiver
 

@@ -4,9 +4,28 @@ codec describes Mini's checked identity and post-claim physical tip. It does
 not by itself attest a systemd process, package SHA-256 conversion, or a
 completed lifecycle operation; only the exact-CAS receiver may emit it.
 -/
-import Kernel.ApplicationLifecycleClaimIngress
-import Kernel.ApplicationSpkPackageIdentity
-import Compiler.NativeHostCodec
+module
+
+public import Kernel.ApplicationLifecycleClaimIngress
+public import Kernel.ApplicationSpkPackageIdentity
+public import Compiler.NativeHostCodec
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleClaimProjection
 

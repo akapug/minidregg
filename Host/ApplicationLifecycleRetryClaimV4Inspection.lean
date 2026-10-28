@@ -1,7 +1,11 @@
 /- Read-only operator presentation of one source-authored retry CLAIM-v4 plan. -/
-import Host.ApplicationLifecycleRetryClaimV4Authoring
-import Host.ApplicationLifecycleRetryBeginV4Inspection
-import Lean.Data.Json
+module
+
+public import Host.ApplicationLifecycleRetryClaimV4Authoring
+public import Host.ApplicationLifecycleRetryBeginV4Inspection
+public import Lean.Data.Json
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationLifecycleRetryClaimV4Inspection
 

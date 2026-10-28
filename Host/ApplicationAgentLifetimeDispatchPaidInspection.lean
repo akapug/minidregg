@@ -3,8 +3,12 @@ Read-only presentation of source-authored event26 signing plans. Decoded JSON
 is custody data, not a permit: the native event26 receiver rechecks the
 original grant and reserve history and current image before CAS.
 -/
-import Kernel.ApplicationAgentLifetimeDispatchPaidAuthoring
-import Lean.Data.Json
+module
+
+public import Kernel.ApplicationAgentLifetimeDispatchPaidAuthoring
+public import Lean.Data.Json
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationAgentLifetimeDispatchPaidInspection
 

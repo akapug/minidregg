@@ -13,13 +13,32 @@ Account views add only that account's sparse balance cut from the same image;
 neither the policy projection nor the returned value contains the shared Book.
 This is a snapshot read, not a timing-noninterference or malicious-host claim.
 -/
-import Compiler.NativeObservationCodec
-import Compiler.GrainResourceBirthHostCodec
-import Kernel.ResourceObservationAdmission
-import Compiler.StoreHiding
-import Kernel.CapabilityRenounce
-import Kernel.StreamWrite
-import Kernel.RunComputeView
+module
+
+public import Compiler.NativeObservationCodec
+public import Compiler.GrainResourceBirthHostCodec
+public import Kernel.ResourceObservationAdmission
+public import Compiler.StoreHiding
+public import Kernel.CapabilityRenounce
+public import Kernel.StreamWrite
+public import Kernel.RunComputeView
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.NativeObservationController
 

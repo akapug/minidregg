@@ -7,15 +7,34 @@ and the one constructor of a root-bound `DataIntent` from post images.
 Nothing here decides anything: it is the byte layer the two kernel modules
 judge with. Every decoder is strict (a decoded value re-encodes to exactly the
 bytes it came from), so a cell holds one spelling of each value. -/
-import Kernel.DurableDataIntent
-import Theory.ObjectiveBendCheckpoint
-import Theory.ObjectiveBendDemandData
-import Theory.ObjectiveBendTyping
-import Compiler.Tower256ConcreteBackend
-import Compiler.PolicyRecordCodec
-import Compiler.ResourceBirthCodec
-import Theory.AssertAxioms
-import Theory.ResourceCost
+module
+
+public import Kernel.DurableDataIntent
+public import Theory.ObjectiveBendCheckpoint
+public import Theory.ObjectiveBendDemandData
+public import Theory.ObjectiveBendTyping
+public import Compiler.Tower256ConcreteBackend
+public import Compiler.PolicyRecordCodec
+public import Compiler.ResourceBirthCodec
+public import Theory.AssertAxioms
+public import Theory.ResourceCost
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ObjectiveActivityWire
 open Minidregg.Theory Minidregg.Compiler

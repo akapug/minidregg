@@ -37,11 +37,30 @@ bespoke receiver produced (same writes, guards, nullifier, event, subject and
 charge on every lane; `proofWork` is the one claim), so the journal and its
 replay are unchanged.
 -/
-import Compiler.SigningKeyCommitment
-import Kernel.ParticipantKeyEnrollment
-import Kernel.Receiving
-import Kernel.ReceivingLaw
-import Theory.KeyPreRotation
+module
+
+public import Compiler.SigningKeyCommitment
+public import Kernel.ParticipantKeyEnrollment
+public import Kernel.Receiving
+public import Kernel.ReceivingLaw
+public import Theory.KeyPreRotation
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.SubjectKeyRotation
 

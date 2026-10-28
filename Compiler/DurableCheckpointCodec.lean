@@ -33,17 +33,48 @@ The world root is the parameterised `Checkpoint.check` of DATAMODEL B2 over
 the current cell-root function (`rootBytes`), until C1 supplies the world-root
 function; it is recomputed from the checkpoint's cells, never trusted.
 -/
-import Compiler.PersistedCodecTags
-import Compiler.PersistedCodecShapes
-import Compiler.CanonicalCellRegistry
-import Compiler.DurableReceiverCodec
-import Compiler.Sp800185Cshake256
-import Compiler.Sp800185Kmac256
-import Kernel.DurableCheckpoint
-import Kernel.WorldRootCache
-import Kernel.WorldSystemCodec
-import Theory.AssertAxioms
-import Theory.AssertCompiled
+module
+
+public import Compiler.PersistedCodecTags
+public import Compiler.PersistedCodecShapes
+public import Compiler.CanonicalCellRegistry
+public import Compiler.DurableReceiverCodec
+public import Compiler.Sp800185Cshake256
+public import Compiler.Sp800185Kmac256
+public import Kernel.DurableCheckpoint
+public import Kernel.WorldRootCache
+public import Kernel.WorldSystemCodec
+public import Theory.AssertAxioms
+public import Theory.AssertCompiled
+meta import Compiler.PersistedCodecTags
+meta import Compiler.PersistedCodecShapes
+meta import Compiler.CanonicalCellRegistry
+meta import Compiler.DurableReceiverCodec
+meta import Compiler.Sp800185Cshake256
+meta import Compiler.Sp800185Kmac256
+meta import Kernel.DurableCheckpoint
+meta import Kernel.WorldRootCache
+meta import Kernel.WorldSystemCodec
+meta import Theory.AssertAxioms
+meta import Theory.AssertCompiled
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+meta import Compiler.PersistedCodecTagRegistry
+
+@[expose] public section
 
 namespace Minidregg.Compiler.DurableCheckpointCodec
 

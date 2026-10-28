@@ -1,4 +1,8 @@
-import Theory.ObjectAudience
+module
+
+public import Theory.ObjectAudience
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ObjectAudience
 open Minidregg.Theory.ObjectAudience

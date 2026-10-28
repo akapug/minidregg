@@ -3,7 +3,11 @@ Exact-CAS receiving for launch-bound lifecycle BEGIN. Event23 records a durable
 pending operation, not physical execution. Continue admission is gated by the
 Verified original completed-create certificate in NativeHostReplay.
 -/
-import Kernel.NativeHostReplay
+module
+
+public import Kernel.NativeHostReplay
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleBeginV3Receiver
 

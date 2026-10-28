@@ -3,9 +3,13 @@ Read-only operator custody projection for a source-authored event-22
 grain-backed share request and detached signing plan. Neither JSON nor a
 decoded signing header is native admission or signer authority.
 -/
-import Kernel.ApplicationShareIssueGrainAuthoring
-import Kernel.ApplicationAgentLifetimeGrant
-import Lean.Data.Json
+module
+
+public import Kernel.ApplicationShareIssueGrainAuthoring
+public import Kernel.ApplicationAgentLifetimeGrant
+public import Lean.Data.Json
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationShareIssueGrainInspection
 

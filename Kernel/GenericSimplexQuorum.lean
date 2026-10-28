@@ -1,5 +1,10 @@
-import Mathlib.Data.Finset.Card
-import Theory.AssertAxioms
+module
+
+public import Mathlib.Data.Finset.Card
+public import Theory.AssertAxioms
+
+@[expose] public section
+
 namespace Minidregg.Kernel.GenericSimplexQuorum
 set_option autoImplicit false
 /-- Same concrete committee/model as Config.wellFormed. This supplies the honest

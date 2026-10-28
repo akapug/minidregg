@@ -43,6 +43,17 @@ for dir in "$base" "$base/inbox" "$base/packages"; do
 done
 exec 9>>"$base/.ingest.lock"
 flock -n 9 || { echo 'another SPK ingest is active' >&2; exit 1; }
+# The lock above is held, so no other ingest of this store is running: a `.spk-stage-*` directory
+# here was left by an ingest that was killed mid-materialization (its RuntimeMaxSec expired, the
+# box ran out of memory, the box lost power). Staging is mode 0555 once sealed, so it is made
+# writable before it is removed. Without this sweep one timed-out install leaves a stage behind,
+# and every later install of the world "succeeds" and then fails the check at the end of this
+# script with `SPK staging remains after unit success`. (e89fe7b8b tables, 2026-10-28: OrgTodo
+# timed out, then SandCal, HackerCMS and HakyllCMS failed that way in the same worlds.)
+while IFS= read -r -d '' stale; do
+  chmod -R u+rwX -- "$stale" && rm -rf -- "$stale"
+  echo "removed stale SPK staging left by a killed ingest: $(basename "$stale")" >&2
+done < <(find "$base/packages" -mindepth 1 -maxdepth 1 -type d -name '.spk-stage-*' -print0)
 input_sha=$(sha256sum "$package" | cut -d ' ' -f1)
 unit=mini-spk-ingest-s$store_id-$$
 systemd-run --user --unit="$unit" --wait --pipe --collect -p Type=exec \

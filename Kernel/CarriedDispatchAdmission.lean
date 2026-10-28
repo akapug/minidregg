@@ -3,9 +3,30 @@ Current dispatch admission joined to an authenticated carried issue.
 Old scope commitments retain exact descriptor bytes; current roots, epochs,
 revocation, grants, policy linkage and all signed reads are checked anew.
 -/
-import Compiler.CarriedDispatchProvenance
-import Kernel.ApplicationDispatchPending
-import Kernel.NativeHostServed
+module
+
+public import Compiler.CarriedDispatchProvenance
+public import Kernel.ApplicationDispatchPending
+public import Kernel.NativeHostServed
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.CarriedDispatchAdmission
 

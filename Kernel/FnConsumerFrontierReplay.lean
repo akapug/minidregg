@@ -4,10 +4,14 @@ tag9 records. NativeHostReplay calls it after the original signed invocation
 has been admitted, its complete record matched, and its successor validated.
 No caller can turn this pure parser into a verified-history certificate.
 -/
-import Kernel.FnConsumerFrontierCore
-import Kernel.FnConsumerProgressHistory
-import Kernel.FnConsumerNamespaceAdmissionAt
-import Kernel.FnConsumerNamespaceHistory
+module
+
+public import Kernel.FnConsumerFrontierCore
+public import Kernel.FnConsumerProgressHistory
+public import Kernel.FnConsumerNamespaceAdmissionAt
+public import Kernel.FnConsumerNamespaceHistory
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnConsumerFrontierReplay
 

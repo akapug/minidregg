@@ -2,7 +2,27 @@
 requires equality with the independently discovered reachable tag/frame set,
 including string prefixes and binary version suffixes. No receiving modules
 need to import this registry; an added or changed tag must update it to build. -/
-import Compiler.PersistedCodecTagRegistry
+module
+
+public import Compiler.PersistedCodecTagRegistry
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+meta import Compiler.PersistedCodecTagRegistry
+
+@[expose] public section
 
 namespace Minidregg.Compiler.PersistedCodecTags
 

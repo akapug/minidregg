@@ -1,6 +1,10 @@
 /- Receipt-only exact-ingress lookup of a previously admitted event66 recovery. It neither repeats reconciliation nor performs a physical process effect. -/
-import Kernel.ApplicationFailedStartRecoveryCore
-import Kernel.NativeHostReplay
+module
+
+public import Kernel.ApplicationFailedStartRecoveryCore
+public import Kernel.NativeHostReplay
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationFailedStartRecoveryLookup
 

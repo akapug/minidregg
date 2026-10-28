@@ -1,7 +1,11 @@
 /- Event19 empty-page progress uses the same replay-minted frontier as event17.
 Its historical lookup returns only the exact original receipt. -/
-import Kernel.FnEmptyPollAdmissionV2
-import Kernel.NativeHost
+module
+
+public import Kernel.FnEmptyPollAdmissionV2
+public import Kernel.NativeHost
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnEmptyPollReceiverV2
 

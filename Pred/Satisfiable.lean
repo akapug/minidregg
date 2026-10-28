@@ -44,7 +44,27 @@ candidate step; if one is, the walk through it is searched for a cycle of negati
 
 Core Lean plus `Pred.Leaf` (for the J13 board-law pole), within the Pred boundary.
 -/
-import Pred.Leaf
+module
+
+public import Pred.Leaf
+meta import Pred.Leaf
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Pred.Sat
 

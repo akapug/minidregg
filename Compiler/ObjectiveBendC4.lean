@@ -1,7 +1,12 @@
 /- C4 linearization (ltuo §7.4.4): C3 plus the suffix property. A port of
 pommette.scm `c4-linearize`; its published vectors are compiled theorems in
 `Compiler.ObjectiveBendC4Vectors`. Specifications are identified by declaration keys. -/
-import Std.Data.HashMap
+module
+
+public import Std.Data.HashMap
+
+@[expose] public section
+
 namespace Minidregg.Compiler.ObjectiveBendC4
 set_option autoImplicit false
 

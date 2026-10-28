@@ -80,12 +80,30 @@ regeneration, no decisions ledger, no census of the research tree, no accepted-r
 - **Think ahead; run a check once per coherent batch.** A lane does not rerun a build to see what
   changed; it reads the first run, plans the whole fix, applies it, and runs again. One build per
   batch, filtered tests only (`-E 'test(<pattern>)'`), never an unfiltered suite.
-- **Lean is REPL-first.** Each edit is checked with `lean-ask check <File.lean>` on the box (`--reload`
-  after a fetch or rebase; never a bare `lake env lean` then: it reads stale import oleans) or, on the
-  Mac, `lake env lean <file>` when its `.lake` is warm (§5). The Host closure builds once per batch,
-  not per edit.
+- **The Lean loop: per file in seconds, interface against importers in minutes, the closure only on main**
+  (iteration-speed lane, measured on dregg-ref 2026-10-27; details and the table in `docs/ITER-SPEED-STATE.md`).
+  The tree is on Lean 4.30's module system (`module`, `public import`, `@[expose] public section`, written by
+  `scripts/lean-modularize.py`, never by hand): a theorem's proof lives in the module's private olean, so a
+  proof edit leaves every importer's input unchanged and Lake rebuilds nothing downstream. A statement or
+  definition edit rebuilds its importers, as it must.
+  - **Inner loop, one file**: `scripts/pipeline/lane-check FILE.lean` on a box tree, the ONLY per-file entry
+    point. It asks Lake whether FILE's imports are current (`lake build --no-build`), rebuilds stale ones
+    through the box's slot or `closure-lock`, then elaborates FILE with `lake lean` (which passes the
+    lakefile's `leanOptions`; `lake env lean` does not, and gives false errors on a module). Never a bare
+    `lake lean` or `lake env lean`: the first silently builds stale imports outside the lock, the second
+    checks against the wrong options or stale oleans. Measured: 5-33 s per file against warm imports.
+  - **Live session**: `scripts/pipeline/lean-ask check FILE` keeps a `lake serve` per tree (PID in
+    `TREE/.lake/lean-ask/pid`, `lean-ask stop`) and re-elaborates only from the first changed command;
+    `lean-ask check FILE --stdin < FILE` checks text edited elsewhere against the box's warm session.
+  - **Interface check**: after a statement or definition change, `lane-check` each direct importer (the
+    module system guarantees nothing further moves unless those change).
+  - **The closure** builds only on main, continuously (§4); a lane never waits on it.
+  - **When a converted file will not elaborate**: `scripts/module-hidden-bodies.sh FILE` names the imported
+    definitions FILE reaches without bodies (an unexposed definition arrives as an axiom), as the `import all`
+    lines to add to `scripts/lean-modularize.py` (RULES or PER_FILE); then rerun the converter. A file that
+    must see every body (the persisted-codec census) stays a non-module, with its importers, in `KEEP`.
 - **Linux checks run where Linux is**: `ssh dregg-build`, a worktree under `/build/lanes/<lane>`,
-  `cargo nextest run -p <crate> -E '...'`, `lake env lean <file>`, every build under `swarm-build`.
+  `cargo nextest run -p <crate> -E '...'`, `scripts/pipeline/lane-check <file>`, every build under `swarm-build`.
   There is no more "owed to hbox": a lane that cannot run something on the Mac runs it there
   itself. What truly cannot run anywhere the lane reaches (a demo-box drill, a mainnet pay) goes in
   the lane's **BATCH FOR THE PARENT**, one list at the end of the report, not a message per item.
@@ -161,7 +179,7 @@ regeneration, no decisions ledger, no census of the research tree, no accepted-r
 - **No lane waits on its own closure build** (ember, 2026-10-27 night: "we need to avoid having the dependence on these closure builds"). A lane per-file elaborates its changed files and their direct importers, pushes, and moves on; the continuous build of main is the closure, and its reds are named within minutes and fixed forward by the owning lane. A lane's own closure runs only in the background (dregg-ref, closure-lock) when a change touches importers it cannot check per file. The iteration-speed lane is replacing per-file batch checks with a live Lean server per lane and Lean 4.30's module system.
 - **One Lean closure per box at a time; the cut's is on `dregg-build`, the lanes' on `dregg-ref`.**
   `dregg-build` builds main's Host closure continuously; a lane elaborates per file (`lean-ask`,
-  `lake env lean`) and runs its closure on `dregg-ref` through `closure-lock swarm-build <cmd>` (one closure at a time on the box, `closure-lock --who` names the holder; the nightly at 00:03 UTC and M7's reference build hold the same lock; seed only `.lake/packages`, never a hard-linked `build/`) (the lanes' second Linux box, shared with
+  `lane-check`) and runs its closure on `dregg-ref` through `closure-lock swarm-build <cmd>` (one closure at a time on the box, `closure-lock --who` names the holder; the nightly at 00:03 UTC and M7's reference build hold the same lock; seed only `.lake/packages`, never a hard-linked `build/`) (the lanes' second Linux box, shared with
   nanodregg's announced measurement windows: ember, 2026-10-27 evening, "USE all these machines while we
   have them"), or on the Mac's warm `.lake`, or waits for the cut (2026-10-27
   afternoon: four concurrent closures put the box at load 25 and a cut's host build was killed by
@@ -180,7 +198,7 @@ regeneration, no decisions ledger, no census of the research tree, no accepted-r
 
 | box | what it is for | the one wrapper | never |
 |---|---|---|---|
-| **the Mac** | editing, `cargo check`, filtered unit tests that run on macOS, `lake env lean` only when `.lake` is warm | none | a Lean rebuild (its `.lake` is stale); an unfiltered suite |
+| **the Mac** | editing, `cargo check`, filtered unit tests that run on macOS | none | any Lean elaboration or build (2026-10-27: out of swap); an unfiltered suite |
 | **`dregg-build`** (Hetzner `ccx33`, 8 dedicated vCPU / 32 GB, Debian 13, fsn1, `178.105.4.114`; dregg-infra `edge/tofu-build/`) | every lane's Linux checks (the fake Lean Host, `mini-spk-volume-helper`, broker fixtures, hermes), Lean builds, the integration build, candidates, the nightly (§6), **and every journey row that times anything** (`growth`, `births`, `perf`) on its SSD volume | `swarm-build <cmd>` (MemoryMax 28 G, swap 0, prints the build's peak RSS); Lean fan-out bounded by `scripts/build-native-host.sh`'s seats (`MINIDREGG_LEAN_SEATS=2`) | production secrets; any key to the demo box; the hcloud token; `pkill`/`killall` (stop by PID file only) |
 | **hbox** | the pipeline's standing run and the warm base; co-tenant (nanodregg builds, codex's `poly`); a one-slot queue | `swarm-build` (there: 96 G cap, `taskset 0-15`) | a lane's default box; any timing measurement (`/tank` is an HDD mirror with no SLOG: §1) |
 | **`dregg-demo`** (`ccx23`, `167.233.199.225`) | rehearsals and the opening; the box drills; the published performance numbers (the baseline is the demo's own: write p50 1.35 s, max 1.56 s at the measured level) | `ship.sh` from the Mac | a build; a credential for another box |

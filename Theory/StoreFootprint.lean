@@ -1,6 +1,10 @@
 /- One typed-store field footprint, shared by native and world-defined layouts. -/
-import Theory.Store
-import Theory.TypedAuthorization
+module
+
+public import Theory.Store
+public import Theory.TypedAuthorization
+
+@[expose] public section
 
 namespace Minidregg.Theory.StoreFootprint
 open Minidregg.Theory.Store

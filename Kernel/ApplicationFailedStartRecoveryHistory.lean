@@ -1,7 +1,11 @@
 /- Select the exact original START claim at its historical prefix, including the complete committed claim projection. Native replay must additionally match it to the same admitted chronological walk. -/
-import Kernel.ApplicationFailedStartRecoverySource
-import Kernel.NativeHistorySelection
-import Kernel.ApplicationLifecycleClaimV3Core
+module
+
+public import Kernel.ApplicationFailedStartRecoverySource
+public import Kernel.NativeHistorySelection
+public import Kernel.ApplicationLifecycleClaimV3Core
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationFailedStartRecoveryHistory
 

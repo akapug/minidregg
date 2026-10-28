@@ -22,10 +22,29 @@ IS the protocol replay (`DurableReceiver.replay`) under `view`, and
 `resume_eq_resumeFast` (`@[csimp]`) makes every compiled `resume` run it. No
 statement changes: the spec is what the theorems name; this is what runs.
 -/
-import Kernel.DurableCheckpoint
-import Kernel.CellTable
-import Kernel.SessionIndex
-import Std.Data.HashSet.Lemmas
+module
+
+public import Kernel.DurableCheckpoint
+public import Kernel.CellTable
+public import Kernel.SessionIndex
+public import Std.Data.HashSet.Lemmas
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.DurableEngine
 

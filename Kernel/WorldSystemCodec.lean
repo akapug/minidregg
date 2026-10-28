@@ -11,10 +11,29 @@ after a reopen is `overAllowance`).  It is `StoreCodec.payloadStream` over one
 `Wire`, so the bytes are the canonical sorted entry list and the roundtrip is
 the codec law (`systemStream.decodePrefix_encode`).
 -/
-import Kernel.World
-import Kernel.DurableDataIntent
-import Compiler.StoreCodec
-import Theory.AssertAxioms
+module
+
+public import Kernel.World
+public import Kernel.DurableDataIntent
+public import Compiler.StoreCodec
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.WorldSystemCodec
 
