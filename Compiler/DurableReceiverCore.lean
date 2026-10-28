@@ -1034,7 +1034,7 @@ structure Loaded (rootBytes : List UInt8 → Digest) where
   base : State
   /-- The state at the head, as data (`DurableEngine.Engine`): the one
   representation a session holds. `Loaded.snapshot` is its view. -/
-  engine : DurableEngine.Engine
+  engine : DurableEngine.Engine rootBytes
   /-- The engine's view (`snapshotExact`), kept beside it: O(1) to build, and
   an opaque field to every consumer that reasons about the snapshot (unfolding
   the view into its closures makes defeq checks evaluate the root hash). -/
@@ -1270,8 +1270,8 @@ structure OpenState (rootBytes : List UInt8 → Digest) (suffix : List Entry) wh
   chainsEq : chains = DurableLogTags.chainPrefixesStored baseChain (suffix.map (·.record))
   frontier : List (Nat × Digest)
   /-- The suffix replayed from the checkpoint state alone. -/
-  engine : DurableEngine.Engine
-  replayed : (DurableEngine.Engine.ofState base.2.1 []).replay rootBytes records = some engine
+  engine : DurableEngine.Engine rootBytes
+  replayed : (DurableEngine.Engine.ofState rootBytes base.2.1 []).replay rootBytes records = some engine
   /-- The checkpoint's World with the suffix folded as turns (or why there is none). -/
   world : Except String HostRefinesWorld.DWorld
 
@@ -1305,10 +1305,10 @@ def openState (key : MacKey) (rootBytes : List UInt8 → Digest) (logStart : Dig
         {records : List IntentRecord // List.Forall₂
           (fun bytes record => recordFrame.decode bytes = some record) (suffix.map (·.record)) records})
   let frontier ← walkFrontier base.1 base.2.2.1 (suffix.zip chains.tail)
-  let ⟨engine, replayed⟩ ← match found : (DurableEngine.Engine.ofState base.2.1 []).replay rootBytes records with
+  let ⟨engine, replayed⟩ ← match found : (DurableEngine.Engine.ofState rootBytes base.2.1 []).replay rootBytes records with
     | none => throw "durable log suffix does not replay through the canonical executor"
-    | some engine => pure (⟨engine, found⟩ : {engine : DurableEngine.Engine //
-        (DurableEngine.Engine.ofState base.2.1 []).replay rootBytes records = some engine})
+    | some engine => pure (⟨engine, found⟩ : {engine : DurableEngine.Engine rootBytes //
+        (DurableEngine.Engine.ofState rootBytes base.2.1 []).replay rootBytes records = some engine})
   return ⟨base, baseChain, records, decoded, chains, rfl, frontier, engine, replayed,
     start.bind fun w => foldRecords rootBytes w base.1 records⟩
 
@@ -1358,7 +1358,7 @@ def openLoaded (key : MacKey) (rootBytes : List UInt8 → Digest) (logStart : Di
     rw [← prefixDecoded.length_eq, List.length_map]; exact count
   -- The session's engine: the replayed head state over every record (journal, history and the
   -- consumed and recorded sets from the records; no record executed).
-  let engine := DurableEngine.Engine.ofState (DurableEngine.Engine.headState opened.engine) image.accepted
+  let engine := DurableEngine.Engine.ofState rootBytes (DurableEngine.Engine.headState opened.engine) image.accepted
   have resumed : resume rootBytes image baseHeight base = some (engine.view rootBytes) := by
     rw [DurableEngine.Engine.view_ofState, ← height]
     exact DurableEngine.resume_suffix rootBytes
@@ -1860,8 +1860,8 @@ theorem Loaded.admissibleAt_iff {rootBytes : List UInt8 → Digest} (loaded : Lo
 prefix's nullifiers and transaction ids read off the session's first-index
 tables (`spentAt`, `txs`) against `height`. Nothing walks the prefix. -/
 def Loaded.engineAt {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) (height : Nat)
-    (state : State) : DurableEngine.Engine :=
-  DurableEngine.Engine.ofIndexed state loaded.image.accepted height
+    (state : State) : DurableEngine.Engine rootBytes :=
+  DurableEngine.Engine.ofIndexed rootBytes state loaded.image.accepted height
     (fun nullifier => (loaded.spentAt[nullifier]?).any fun first => decide (first < height))
     (SessionIndex.KeyIndex.below_eq loaded.spentAtExact height)
     (fun transactionId => (loaded.txs[transactionId]?).any fun first => decide (first < height))
