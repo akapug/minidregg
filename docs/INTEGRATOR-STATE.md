@@ -152,7 +152,9 @@ gates main and fixes reds itself.
 ## Rulings (do not re-ask)
 
 - thin-birth: landed after the conversion at fb0acbfbe (main 6fd993d43); its lane-check on dregg-ref was still running at landing, reds come back to ad0906325ab57d1c3. lane/thin-birth Phase-3 work lands only on a sha its owner sends after the auditor accepts.
-- Held for the conversion window (touches .lean, Effects.lean imports it): lane/effects-revival 6b5464201 (owner a26c13b24522dee35 after the a83b7949ba401cca5 hand-off; it also owes a regenerated Fixtures/NativeDocWriteFixture.lean (stale since 3315a908), regenerated from the conversion candidate after READY and landed with its Effects sha; Engine, Statements, EngineProofs). After the conversion the lane merges main, converts its Effects files and sends one sha; land that, through a box build.
+- effects-revival LANDED 10-28 at 65b813888 (main 4d059a29b; converted, `lake build Effects` green on hbox);
+  owner a26c13b24522dee35 still owes Fixtures/NativeDocWriteFixture.lean regenerated from the conversion(+M2)
+  candidate after READY. Its reds from the next build go to that owner.
 - Held for the build after the conversion candidate (one .lean file): lane/app-market-b5 84938f78c
   (Kernel/ApplicationSpkPackageIdentity.lean, safeApiTail admits a final segment with no trailing slash; OwnTracks
   re-qualifies on the candidate carrying it; deputy a308118209b4a48ea). Land after the conversion, re-converted if
