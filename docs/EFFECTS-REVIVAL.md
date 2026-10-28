@@ -312,7 +312,10 @@ controller) worth keeping for the inversion work.
 syntactic invariant `Emits` over the lowering's progress proved helper by helper and action
 by action (`step_emits`, `run_emits`), `run_executes`, and the rotation's guard (no content
 write touches the blinding).  The declared table `contentActionFrame` held for all fifteen
-actions with no change.  The Statements closure is now built in the hbox tree too, so the
+actions with no change.  `contentNarrowed_incomplete` (the narrowed half of `ContentTeeth`: a
+link is admitted and written at `annotations`, outside the narrowed frame) sits beside it, so
+`ContentComplete` carries its teeth (law 2); the ghost half waits for the fixture.  The
+Statements closure is now built in the hbox tree too, so the
 live proofs check there in seconds.
 
 **Where to check.**  The kernel-free files: hbox `/tank/lanes/effects-revival/src`, a

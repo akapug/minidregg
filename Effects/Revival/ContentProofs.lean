@@ -479,8 +479,50 @@ theorem contentComplete : ContentComplete := by
           exact present
         · trivial
 
+/-! ## The narrowed half of `ContentTeeth`. -/
+
+/-- A transaction context: every field a zero, the authority cell empty. -/
+def sampleCtx : LiveCtx where
+  snapshot := CredentialAuthorityDomain.Snapshot.ofCell ⟨0⟩ 0 (fun _ => false) ⟨0⟩
+  semantics := ⟨0⟩
+  ambient := { federation := ⟨0⟩, height := 0 }
+  command := { subject := ⟨0⟩, nonce := 0, targets := [] }
+  kind := .object
+  target := 0
+  capability := ⟨0⟩
+
+/-- One link, with no source range, to an external target. -/
+def sampleLink : Hyperdocument.LinkId := ⟨⟨0⟩⟩
+
+def sampleLinkCommand : ContentResource.Command :=
+  ⟨[.link sampleLink none (.external [] [] []) ⟨0⟩]⟩
+
+/-- **Frame teeth.**  The declaration whose frame omits `annotations` is not complete: a
+link (field `annotations`) is admitted by the lowering and written outside that frame. -/
+theorem contentNarrowed_incomplete : ¬ contentNarrowed.Complete := by
+  intro complete
+  have emitted : contentNarrowed.sem sampleCtx sampleLinkCommand (0 : ContentResource.ContentStore) =
+      .ok [.allocate .links sampleLink
+        ⟨ContentResource.documentOf sampleCtx.target, none, .external [] [] [], ⟨0⟩,
+          ⟨sampleCtx.command.subject, sampleCtx.kind, sampleCtx.capability⟩,
+          DeclaredResourceController.contentOperation sampleCtx.snapshot sampleCtx.semantics
+            sampleCtx.command, none⟩] := by
+    simp [contentNarrowed, contentSpec, contentSem, sampleLinkCommand, ContentResource.run,
+      ContentResource.step, ContentResource.allocate, Except.map, bind, Except.bind, pure,
+      Except.pure]
+    rfl
+  have inFrame := (complete sampleCtx sampleLinkCommand (0 : ContentResource.ContentStore) _ emitted).1
+  have written := inFrame ⟨.links, sampleLink⟩ (by
+      change ⟨.links, sampleLink⟩ ∈ (Option.toFinset (some ⟨.links, sampleLink⟩) ∪
+        ((storeSubstrate Hyperdocument.layout).footprint
+          (contentNarrowed.rotate sampleCtx (0 : ContentResource.ContentStore))) : Finset CAddr)
+      exact Finset.mem_union_left _ (Option.mem_toFinset.mpr rfl)) rfl
+  simp [contentNarrowed, contentSpec, contentFrame, contentActionFrame, sampleLinkCommand,
+    ResourceObservationAdmission.contentFieldAt, ResourceObservationAdmission.contentField] at written
+
 /-! ## Axiom pins. -/
 
 #assert_axioms contentComplete
+#assert_axioms contentNarrowed_incomplete
 
 end Minidregg.Effects.Revival
