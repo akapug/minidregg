@@ -282,7 +282,12 @@ broker_client=$base/etc/mini/keys-client.json
   || resident_reasons+=("residentsKeyBrokerRequired: $broker_client is not a root-owned key broker client config (the resident's credential custody); a rootless scratch world has none: edge/infra")
 launch_gate=$(jq -r .launchGate "$out/manifest.json")
 [[ -x $(dirname "$launch_gate")/bwrap ]] || resident_reasons+=("residentsWorkerLauncherRequired: no executable bwrap beside the manifest's launch-gate ($(dirname "$launch_gate")); the resident's worker launcher is installed there by the frame: candidate packaging / edge/infra")
-resident_reasons+=("residentsRootHandoffsRequired: the typed resident waits (exit 75) for two root acts mid-run, the provider custody copy (controller-entry provider-custody-copy v2: BASE/etc/mini/providers.json and receiving/provider-copy-ready.json) and the controller registration receipt ($out/resident-registration-receipt.json, controller-entry.py register); the composed scenario has no step that performs them: harness (composed-scenario residents phase) with edge/infra (controller-entry under sudo -n)")
+# The two root acts are performed by the resident adapter (same-world-resident.py root_handoffs) only
+# beside a real root frame: COMPOSED_ROOT_HANDOFFS=sudo and a working `sudo -n` (a container whose root
+# is the world's root). Elsewhere they are unavailable.
+if [[ ${COMPOSED_ROOT_HANDOFFS:-} != sudo ]] || ! sudo -n true 2>/dev/null; then
+  resident_reasons+=("residentsRootHandoffsRequired: the typed resident waits (exit 75) for two root acts mid-run, the provider custody copy (controller-entry provider-custody-copy v2: BASE/etc/mini/providers.json and receiving/provider-copy-ready.json) and the controller registration receipt ($out/resident-registration-receipt.json, controller-entry.py register); the composed scenario has no step that performs them: harness (composed-scenario residents phase) with edge/infra (controller-entry under sudo -n)")
+fi
 [[ $connector != null ]] || resident_reasons+=("residentsConnectorRequired: the resident consumes the connector's saved export, and the connector is unavailable (above)")
 for reason in "${resident_reasons[@]}"; do unavailable RESIDENTS "$reason"; done
 document=$(jq -r '.connector.document // empty' "$out/app-selection.json")

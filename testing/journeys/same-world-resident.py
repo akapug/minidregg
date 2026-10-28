@@ -141,6 +141,40 @@ def capture_context(room, result, result_path, native_page):
                                "callSha256": result["callSha256"], "receipt": checked}
     return context
 
+def root_handoffs(binding, receiving):
+    """The resident's two mid-run root acts, performed here only where this harness runs beside a
+    real root frame (COMPOSED_ROOT_HANDOFFS=sudo: a container whose root is the world's root, never a
+    shared build box). Each is the frame's own root entry (dregg-infra controller-entry.py) under
+    `sudo -n`, as the box's operator would run it: the provider custody copy once its request is
+    published, the controller registration once the resident's ready.json names its configs. Returns
+    True when it performed one, so the resident is resumed."""
+    if os.environ.get("COMPOSED_ROOT_HANDOFFS") != "sudo":
+        return False
+    base, task = Path(binding["base"]), str(binding["task"])
+    entry = base / "usr/local/lib/mini/controller-entry.py"
+    require(entry.is_file(), "root hand-offs: the frame has no controller-entry.py at " + str(entry))
+    env = ["env", "MINI_ROOT=" + str(base), "MINI_GRAIN_FIXTURE_UID=" + str(os.getuid()),
+           "MINI_GRAIN_CONTROLLER_MANAGER=user"]
+    def root(words):
+        done = subprocess.run(["sudo", "-n", *env, sys.executable, "-I", str(entry), *words],
+                              stdin=subprocess.DEVNULL, capture_output=True, check=False)
+        sys.stderr.buffer.write(done.stderr)
+        require(done.returncode == 0, "root hand-off " + words[0] + " refused: "
+                + done.stderr.decode(errors="replace").strip()[-300:])
+        return done.stdout
+    request, ack = receiving / "provider-copy-request.json", receiving / "provider-copy-ready.json"
+    if request.is_file() and not ack.exists():
+        root(["provider-custody-copy", task, str(request)])
+        return True
+    ready, receipt = receiving / "ready.json", Path(binding["registration"])
+    if ready.is_file() and not receipt.exists():
+        names = load(ready)
+        out = root(["register", task, names["controller"], names["resident"]])
+        resident = module("resident_source", HERE / "shared-resident-useful-work.py")
+        resident.publish(receipt, out)
+        return True
+    return False
+
 def execute(binding_path, world_path, result_path, output, through):
     binding, world = load(binding_path), load(world_path)
     context, manifest, missing = validate(binding, world)
@@ -177,6 +211,9 @@ def execute(binding_path, world_path, result_path, output, through):
     else:
         resident.publish(capture, (json.dumps(value, indent=2) + "\n").encode())
     done = invoke(through)
+    # A resident that waits (75) for a root act gets it here when this harness may perform it.
+    while done.returncode == 75 and root_handoffs(binding, receiving):
+        done = invoke(through)
     if done.returncode:
         return done.returncode
     checks = load(receiving / "checks.json")
