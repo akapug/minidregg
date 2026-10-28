@@ -45,6 +45,8 @@ import argparse,hashlib,json,os,pathlib,secrets,subprocess,sys,time
 os.umask(0o077)
 HERE=pathlib.Path(__file__).resolve().parent
 REPO=HERE.parent.parent
+sys.path.insert(0,str(HERE))
+from activity_world import TARIFF as POLICY_TARIFF  # the one source of the policy's rates
 ap=argparse.ArgumentParser()
 ap.add_argument('verb',choices=['all','summary','world','publish','publish-variant','invoke','refuse','retry-submit','readback','lookup','reopen','stop'])
 for f in ['bin','root','method','entry','label','byte','tariff-base','tariff-tick','request-edit','mutation','argument','expect','prepare-only','move-source','disable','expect-detail','maximum','sponsor-balance','tariff-replay','tariff-core']:
@@ -170,10 +172,10 @@ elif a.verb=='world':
     if root.exists():raise SystemExit('root exists')
     root.mkdir(mode=0o700);T.mkdir()
     constants=json.loads(sh('constants',host,'/dev/null','objective-constants').stdout)
-    tariff={'version':'4','base':a.tariff_base or '1','typeFuel':'0','sourceTicks':a.tariff_tick or '1','heap':'0',
+    tariff={'version':'4','base':a.tariff_base or POLICY_TARIFF['base'],'typeFuel':'0','sourceTicks':a.tariff_tick or POLICY_TARIFF['sourceTicks'],'heap':'0',
         'stack':'0','outputNodes':'0','outputBytes':'0', 'extractTicks': '0','inputBytes':'0',
         # Edition 4 (as edition 3) refuses a zero front-end rate; the measured rates (activity_world.TARIFF).
-        'replayBytes':a.tariff_replay or '61','coreBytes':a.tariff_core or '16','domainWork':'0'}
+        'replayBytes':a.tariff_replay or POLICY_TARIFF['replayBytes'],'coreBytes':a.tariff_core or POLICY_TARIFF['coreBytes'],'domainWork':'0'}
     maxima=dict(MAXIMUM)
     for kv in filter(None,(a.maximum or '').split(',')):
         k,v=kv.split('=');
