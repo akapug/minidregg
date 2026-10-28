@@ -26,7 +26,9 @@ green on dregg-ref. Its full closure is the main build after 327096423.
 + lane/perf-roots 5cebf6301. Closure on dregg-ref: unit `perf-batch1-closure` (lanes,
 `XDG_RUNTIME_DIR=/run/user/1000`), script `/srv/lanes/perf-batch1-closure.sh`, log
 `/srv/lanes/perf-batch1-closure.log` (EXIT= line), tree `/srv/lanes/perf-rake` checked out at
-c97273985, `LEAN_NUM_THREADS=4`, `SWARM_MEM_MAX=24G` (lake has no -j). Green: send the
+c97273985, `LEAN_NUM_THREADS=4`, `SWARM_MEM_MAX=24G` (lake has no -j). RESULT (18:51Z): red at
+`Theory/CellSlot.lean:287` and `:289` (two `rw` patterns not found; the roots lane's
+Materialized/PackedCell change), 3061 of 3101 modules built before it. Fix those, rerun the script. Green: send the
 integrator the batch sha as ONE landing. Red: fix forward on lane/perf-batch1 (the sub-lane
 notes in docs/PERF-CODEC-WRITER-STATE.md and docs/PERF-ROOTS-STATE.md name the likely reds:
 `Materialized.ext rfl` where a proof relied on `materialize M c.logical` being `c`; the
