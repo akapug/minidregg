@@ -626,6 +626,12 @@ tools-run.sh with `C=` that candidate, J14_TOOLS=1 J14_AWAIT=1, root `hroot-q2`;
   items, this measurement, and an interim quota of 48/56 MiB and 10K/12K inodes pending ember. The
   32 MiB / 2,000-inode target is not met yet. Owed: compact the room workspace residue (the latest
   prompt's reads and the room-operations-referenced writes), then send infra the smaller figure.
+- **install-hermes on the box:** infra a298031c78e86d651 is running it in demo-dry with item 1 written
+  (a resident euid takes the manifest from candidate/current; root re-checks state.json in
+  ExecStartPre). Reds fixed so far: the provider-table check runs as root (20a7abaf); each account
+  names its consent anchor directory (cb638b87; the resident's is /var/lib/mini/INSTANCE/anchors,
+  and infra adds the same `Environment=` to the resident's units). The resident is uid 981 in
+  mini-sessions; broker provider peers [994, 981]. Fix forward whatever it sends next.
 - The allowlist stays as seeded until the await rows run on their own ask. The used set on every run
   so far: 1-5, 17, 19, 96-98, 144.
 - Every J14 pass runs from main's scripts and a candidate's source (coordinator); a J5 red from an
