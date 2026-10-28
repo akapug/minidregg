@@ -16,7 +16,7 @@ byte entry point, and `ByteRun.toBytes` its C ABI wire form
 
 `Ran` is one fueled evaluation in a single pass, the shape the kernel's referee
 consumes (`Kernel.Run`): the value and the count, or the failure and the count at
-which it stopped. EVAL §1.1's `Except Outcome (Output × Nat)` would drop the count
+which it stopped. docs/EVAL.md §1.1's `Except Outcome (Output × Nat)` would drop the count
 on a crash and on exhaustion, and the kernel's refusals report it (`crash k`,
 `exhausted k`). `FieldWrite` is what a run's product names: the writes a command
 must make for its claim to be admitted (K-RAN), whatever evaluator produced them.

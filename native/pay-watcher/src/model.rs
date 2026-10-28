@@ -34,7 +34,7 @@ pub enum Reason {
     NoTokenAccount,
     PageBound,
     IgnoredReceiptName,
-    /// An enrollment-index credit under `enrol.journalFloor`: never submitted (PAY.md §11.7).
+    /// An enrollment-index credit under `enrol.journalFloor`: never submitted (docs/PAY.md §11.7).
     BelowJournalFloor,
     // notes: an observation WAS emitted, or state was kept; this journals why
     /// An enrollment observation whose transaction carries two or more memo instructions.
@@ -153,17 +153,17 @@ impl std::fmt::Display for Refusal {
     }
 }
 
-/// The finalized tip the observer saw (`Clock` in PAY.md §2.4).
+/// The finalized tip the observer saw (`Clock` in docs/PAY.md §2.4).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Clock {
     pub slot: u64,
     pub block_time: u64,
 }
 
-/// One PAY.md §2.4 `Observation`: a finalized transfer that added `amount` atomic units of
+/// One docs/PAY.md §2.4 `Observation`: a finalized transfer that added `amount` atomic units of
 /// `mint` to token accounts owned by book `address`.
 ///
-/// `memo`/`memo_error` (PAY.md §11.9) are read for the ENROLLMENT index only: `memo` is the raw
+/// `memo`/`memo_error` (docs/PAY.md §11.9) are read for the ENROLLMENT index only: `memo` is the raw
 /// bytes of the transaction's one memo instruction; the kernel parses them. Both are `None` for
 /// every other index, and for an enrollment payment with no memo instruction.
 #[derive(Clone, Debug, PartialEq, Eq)]

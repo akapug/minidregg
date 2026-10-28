@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# J-EVAL (EVAL.md §7, lanes E2/E3): the evaluator registry, end to end.
+# J-EVAL (docs/EVAL.md §7, lanes E2/E3): the evaluator registry, end to end.
 #
 # Journey hook contract (journey.sh header): HOST, MINI, STORE, VERIFIER and
 # JOURNEY_STEP_DIR exported; it bootstraps its OWN fresh Stores under

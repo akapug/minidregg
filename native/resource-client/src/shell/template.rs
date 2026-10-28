@@ -1,4 +1,4 @@
-//! Room templates: files of shell lines (PLACE §4.9). A template is exactly
+//! Room templates: files of shell lines (docs/PLACE.md §4.9). A template is exactly
 //! what a friend could type: `room new NAME --template T` binds `$ROOM` and
 //! `$ME` (the founder's subject) and runs the lines in order as the founder;
 //! `room welcome NAME SUBJECT --template T` runs the template's member lines

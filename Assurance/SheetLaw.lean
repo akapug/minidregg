@@ -676,7 +676,7 @@ theorem dead_stays_dead_without_clock (p : Params) :
     exact dead_stays_dead_without_clock p t.post ts acc.tail
       (fun s hs => noClock s (by simp [stepsOf, hs])) post0
 
-/-- **`owner_alive_monotone_over_history`** (MUD.md §5 item 6): along any accepted history of the
+/-- **`owner_alive_monotone_over_history`** (docs/MUD.md §5 item 6): along any accepted history of the
 sheet, `deaths` is monotone, and `alive` rises only through clause 23's revive. -/
 theorem owner_alive_monotone_over_history (p : Params) (v : Values) (ts : List Turn)
     (acc : Accepted (sheetLaw p) v ts) :
@@ -1031,7 +1031,7 @@ theorem owner_revive_history_refused :
     ¬ Accepted (sheetLaw tidewrack) live [strikeTurn, prayTurn, ownerReviveTurn] := by
   decide
 
-/-- **`death_is_reachable`** (MUD.md §2.3 / §5 item 6). A live sheet can be killed by an admitted
+/-- **`death_is_reachable`** (docs/MUD.md §2.3 / §5 item 6). A live sheet can be killed by an admitted
 turn (the strike above), and no admitted turn raises `alive` except clause 23's revive by the
 referee (for every realm's constants and every pair of views). -/
 theorem death_is_reachable :

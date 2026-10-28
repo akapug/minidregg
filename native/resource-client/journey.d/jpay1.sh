@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# J-PAY-1 (PAY.md §6 row P1): the pay watcher on its fixtures, no network, no keys.
+# J-PAY-1 (docs/PAY.md §6 row P1): the pay watcher on its fixtures, no network, no keys.
 #
 # For every vector in native/pay-watcher/fixtures/<vector>/ (except enrol-*, which are
 # J-PAY-E1's, journey.d/jpay-e1.sh) it runs the watcher binary in

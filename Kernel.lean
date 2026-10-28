@@ -110,7 +110,7 @@ import Kernel.AgentGrain
 import Kernel.CapabilityRevocationReceiver
 import Kernel.CapabilityRenounce  -- K-RENOUNCE: a holder revokes a capability it holds (signature first, then Theory.Renounce.gateAt)
 import Kernel.ResourceTransactionAudit
-import Kernel.World  -- DATAMODEL §3.3 B2: World (cells + system cell: journal/head/retired/parent/spent/allowance), Turn (creates carry their ROM image, T3b), admit/step, fold, Checkpoint; replay exactness, checkpoint soundness, journal exactness, fail-closed admission, frame, rom_cell_immutable_after_birth, poles
+import Kernel.World  -- docs/DATAMODEL.md §3.3, §5 B2: World (cells + system cell: journal/head/retired/parent/spent/allowance), Turn (creates carry their ROM image, T3b), admit/step, fold, Checkpoint; replay exactness, checkpoint soundness, journal exactness, fail-closed admission, frame, rom_cell_immutable_after_birth, poles
 import Kernel.WorldBench  -- B2 exit: compiled 1000-turn fold over the real step (native_decide, pinned)
 import Kernel.TurnCensus  -- T1/T3b: each admission constructor's census shape (48) is accepted by World.admit at w0, its negation refused by name; census_shapes_admitted_at_w0, theList_empty (ROM births included); step_conserves for Book postings
 import Compiler.TurnCensusCoverage  -- BRAID-PROOF: fails the build unless TurnCensus.Ctor and NativeAdmission name the same constructors
@@ -131,11 +131,11 @@ import Kernel.ObjectiveRefinesWorld -- Exact payload bridge and receiver-essenti
 import Kernel.ObjectiveTurnTotality  -- Constructed seedless-create/stateless-member absence poles
 import Kernel.ObjectiveTurnTotalityStorage  -- the receiver storage lane IS the World storage; full images = value writes + classified framing (no longer charged)
 import Kernel.HostRefinesWorld  -- T3/T3b: Represents : Loaded -> World; ofIntent_run; deployed_refines_step; host_trace_represents_fold; confirmed_represents (rebase included); policy_source_birth_is_turn; birth_rom_image; poles appendOnly_rewrite_has_no_turn, policy_source_rewrite_has_no_turn; host_submit_is_step stated for T4
-import Kernel.DurableCheckpoint -- DATAMODEL C2: resume from a materialized checkpoint; honest resume = genesis replay
+import Kernel.DurableCheckpoint -- docs/DATAMODEL.md §5 C2: resume from a materialized checkpoint; honest resume = genesis replay
 import Kernel.DurableView -- KN2: executing against a per-request view; declared-key families
-import Kernel.WorldRoot  -- DATAMODEL §3.2/§3.4 C1: world root = AuthTrie compressed trie over (slot -> slot root), last value per key; RootBinding carrier discharging resume_sound, explicit-collision reduction, deployed cSHAKE node hash WORLD-ROOT/v2 (256-bit hashed index), deployedRoot_binds premise-free up to a cSHAKE collision, cSHAKE History; honest/tampered poles
+import Kernel.WorldRoot  -- docs/DATAMODEL.md §3.2/§3.4, §5 C1: world root = AuthTrie compressed trie over (slot -> slot root), last value per key; RootBinding carrier discharging resume_sound, explicit-collision reduction, deployed cSHAKE node hash WORLD-ROOT/v2 (256-bit hashed index), deployedRoot_binds premise-free up to a cSHAKE collision, cSHAKE History; honest/tampered poles
 import Kernel.DocumentHistory  -- K-DOC-HISTORY: doc diff = DocumentHistory.diff over the two doc show line lists (added_iff, removed_iff, changed_iff)
-import Kernel.PresenceIndex  -- PLACE K-INDEX: lastSeen (cell, subject) and touched cell as exact folds of the accepted log (lastSeen_exact, touched_exact, index_monotone)
+import Kernel.PresenceIndex  -- docs/PLACE.md §2.5 K-INDEX: lastSeen (cell, subject) and touched cell as exact folds of the accepted log (lastSeen_exact, touched_exact, index_monotone)
 import Kernel.LinkIndex  -- K-DOC-INDEX: links and backlinks as an exact fold of the accepted log (ofRecords_exact, backlinks_sound, backlinks_complete, backlinks_covered)
 import Kernel.WorldRootCache -- C2: the world root kept (RootCache = AuthTrie.Cache): one walk per write, RootsExact a Prop, no injectivity flag or fallback rebuild; cache = spec root, honest openings verify, stale cache refuted
 import Kernel.ApplicationGrainLaws
@@ -144,11 +144,11 @@ import Kernel.ApplicationSpkProfileProofs
 import Kernel.FnSelectedHistoricalStep
 import Kernel.FnSelectiveReleaseProofs
 import Kernel.NativeHostBookInvariant
-import Kernel.StreamResource  -- per-author streams: append leg theorems, author law, rooms (PLACE §2.3/§4.4, K-STREAM)
+import Kernel.StreamResource  -- per-author streams: append leg theorems, author law, rooms (docs/PLACE.md §2.3/§4.4, K-STREAM)
 import Kernel.PrivateRoomKeys  -- private room wrapping law
-import Kernel.PrivateRoomWrapGrant  -- J-PRIV-1: a member grant reads only its own wraps (AUTHORED, NOT COMPILED)
+import Kernel.PrivateRoomWrapGrant  -- J-PRIV-1: a member grant reads only its own wraps
 import Kernel.StreamWrite  -- stream head and immutable entry writes
-import Kernel.DomainEpoch  -- channel epoch record, absent opening, ChannelLaw, omission theorems (CHANNELS §2.4, CH-EPOCH)
+import Kernel.DomainEpoch  -- channel epoch record, absent opening, ChannelLaw, omission theorems (docs/CHANNELS.md §2.4, CH-EPOCH)
 import Kernel.DomainEpochStream  -- the channel law at the kernel append: refusals by name (CH-EPOCH)
 import Kernel.DomainEpochExport  -- the relay byte entry points: tick root, seal, opening, topic (CH-RELAY-1)
 import Kernel.DomainEpochLaw  -- the kernel side of the epoch record: ChannelLaw, admitAppend, ChannelStoreLaw (split from DomainEpoch, CH-CLIENT-1)

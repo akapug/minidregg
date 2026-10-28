@@ -1,5 +1,5 @@
 -- kind: job
--- The job law (COMPUTE.md §2.3): the whole lifecycle of one job cell as one law. A job is a cell
+-- The job law (docs/COMPUTE.md §2.3): the whole lifecycle of one job cell as one law. A job is a cell
 -- with this law; the kernel has no job object. Clause numbers are the indices in the installed law
 -- (an `all` of the clauses below, clause 0 first). Do not re-sort: the order is the order refusals
 -- are reported in. Every clause but 0 is guarded to writes (`not (verb == 2)`): a signed read is
@@ -15,7 +15,7 @@
 --   "now > D"          leSlotsOff field D clock now -1    (positive: a missing clock refuses it;
 --                      `not (leSlots clock now field D)` would PASS without a clock)
 -- States: 0 open · 1 claimed · 2 answered · 3 upheld · 4 slashed · 5 void · 6 closed.
--- The money columns of §2.3 are K-JOB-MONEY's (C3): fund, claim and close are money turns, and a write
+-- The money edges (docs/COMPUTE.md §2.6) are K-JOB-MONEY's (C3): fund, claim and close are money turns, and a write
 -- that moves escrow or bond, claims or closes carries the slot only that receiver projects
 -- (`slot "authority/operation/job-money"`, clause 44). The amounts are the receiver's
 -- (`JobMoney.decideMoney`, `payouts`), checked against the Book; this law fixes which edge moves what.

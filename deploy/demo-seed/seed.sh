@@ -124,10 +124,15 @@ post "$BOX" "$(cat "$D/lobby/hermes-intro.txt")"
 publish_public "$BOX" lobby
 
 # --- 4. the story table, its law, a first scene
+# `story new` is skipped once the story exists; `story seal` is idempotent (an already sealed table writes
+# nothing), so it runs every time and a seal that failed on an earlier pass is finished on this one.
 if as "$BOX" "story list" && grep -qw tale <<<"$OUT"; then skip_ "story tale exists"
 else
-  as "$BOX" "story new tale --from tale --gm $SAGES" 600 && as "$BOX" "story seal tale" 600 \
-    && ok_ "story tale installed under the sealed law, GM $SAGE" || fail_ "story new/seal: $(errtail_)"
+  as "$BOX" "story new tale --from tale --gm $SAGES" 600 || fail_ "story new: $(errtail_)"
+fi
+if as "$BOX" "story list" && grep -qw tale <<<"$OUT"; then
+  as "$BOX" "story seal tale" 600 \
+    && ok_ "story tale installed under the sealed law, GM $SAGE" || fail_ "story seal: $(errtail_)"
 fi
 if as "$SAGE" "story list" && grep -qw tale <<<"$OUT"; then skip_ "$SAGE already in story tale"
 elif as "$BOX" "story invite tale $SAGES gm"; then

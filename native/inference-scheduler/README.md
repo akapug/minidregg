@@ -140,12 +140,12 @@ is not an implicit operator reload.
 
 ## Operation and supervision
 
-The candidate package ships `bin/mini-inference-scheduler` (`deploy/candidate/package.py:55`,
-`deploy/candidate/INTERFACES.md:76`). **Nothing in this repository runs it.** There is no
+The candidate package ships `bin/mini-inference-scheduler` (role `inferenceScheduler` in `ROLES`,
+`deploy/candidate/package.py`). **Nothing in this repository runs it.** There is no
 `mini-inference.service` here (`deploy/hermes/` holds no unit for it), the demo's
-controller template names provider `pool` and no `providerTask.homelab`
-(`deploy/hermes/controller.demo.json`), and the only deployment reference is the
-installer patch's unit list (`deploy/door/infra/dregg-infra.patch:214`), which names a
+controller, written by `deploy/hermes/demo/install-hermes`, pins a `pool` provider row and no
+`providerTask.homelab`, and the only deployment reference is the
+installer patch's unit list (`deploy/door/infra/dregg-infra.patch`), which names a
 `mini-inference.service` that lives in the dregg-infra repository, not here. Whether a
 box has that unit enabled, and its inventory at `/etc/mini/inference.json`, is not
 recorded in this repository. The inventory is root-owned and carries

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# J-NOCK-5 (NOCK.md §2.7, N11): a NockApp kernel door, refereed by re-execution.
+# J-NOCK-5 (docs/NOCK.md §2.7, N11): a NockApp kernel door, refereed by re-execution.
 #
 # Journey hook contract (journey.sh header): HOST, MINI, STORE, VERIFIER and
 # JOURNEY_STEP_DIR exported; it bootstraps its OWN fresh Store and service under

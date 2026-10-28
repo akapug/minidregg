@@ -13,7 +13,7 @@ the box only relays its frames. A proxy key's session is a byte pipe to the
 public socket: `mini socket-proxy` accepts socket frames that name the
 deployment's pinned config and a public-socket operation, relays each on its own
 socket connection, and closes the pipe on anything else (a stray byte, a wrong
-config pin, an operator operation; `native/resource-client/src/proxy.rs:1-14`). The
+config pin, an operator operation; the module header of `native/resource-client/src/proxy.rs`). The
 one other thing a proxy key can ask for is a signed provider-credential exchange,
 relayed to the box's key broker (`mini-socket-proxy`). It never runs a shell;
 `ssh friend@host 'cmd'` exits 64. There is no workspace or home on the box for a proxy key.
@@ -78,20 +78,22 @@ The default (full) provider reads a locally admitted Store, which a friend's own
 `MINI_THIN_CONSENT=1` the client uses consent frames 230-232, which read no Store:
 the provider checks what custody signs against its own command and the target
 views the Host served under the member's observe grants, and refuses a turn it
-cannot display, naming the unsigned input (`native/resource-client/src/client_consent.rs:119-146`;
-the statement is `Kernel/NativeThinConsent.lean`). It displays invocations and
-delegations; a birth (`create`) is refused by name before anything is signed,
-because its plan is derived from the Store (`native/resource-client/src/workspace.rs:4870-4876`).
+cannot display, naming the unsigned input (`thin_mode` and `thin_plan` in
+`native/resource-client/src/client_consent.rs`; the statement is `Kernel/NativeThinConsent.lean`).
+It displays invocations and delegations. A birth (`create`) signs through its own thin arm,
+frames 234/235: the provider re-authors the member's retained source at the coordinates the
+Host's draft carries and checks the plan against it, still reading no Store (`birth` in
+`native/resource-client/src/workspace.rs`, `set_thin_birth_source`; the statement is
+`Kernel/NativeThinBirth.lean`).
 Status: **exists** (code and unit tests). It is **not journeyed**: the scripts are
 `native/resource-client/journey.d/jpriv2.sh` (enrol, then write and read over
-`--remote`, with a consent config naming no Store, `:134-150`) and
-`native/resource-client/journey.d/jthin-consent.sh`, but no recorded passing run of
-either is in `docs/evidence/`, and `docs/review/2026-10-26-deploy/INTEGRATION-2.md:128`
-lists both as not yet classified. The macOS client has no consent pair
-(`consent: null` in provenance, `deploy/candidate/build.sh:263`) and cannot sign.
+`--remote`, with a consent config naming no Store) and
+`native/resource-client/journey.d/jthin-consent.sh`, and no recorded passing run of
+either is in `docs/evidence/`. The macOS client has no consent pair
+(`consent: null` in its `clients_json` provenance entry, `deploy/candidate/build.sh`) and cannot sign.
 When the client is given a Host path and `MINI_CONSENT_HOST` is unset, it takes
 `minidregg-client-consent` beside that Host (the hosted shell's case, since the
-candidate ships both in `bin/`; `client_consent.rs:50-52`), and the provider then
+candidate ships both in `bin/`; `with_consent` in `client_consent.rs`), and the provider then
 reads the deployment config and its Store with the session's own permissions.
 
 Under split tenancy a hosted member's account (`mini-s-NAME`) cannot read the Store, which the
@@ -108,7 +110,7 @@ consent answer for its own request. The service ends after `--idle-seconds` (600
 connection and restarts from its retained frontier on the next connection. The unit pair is the
 one `deploy/spk-host/controller-world.py` renders for controllers.
 
-The sponsor's side, in their (hosted) shell (grammar: `native/resource-client/src/shell_grammar.rs:429-438`):
+The sponsor's side, in their (hosted) shell (grammar: `ENROLL` and `PROVISION` in `native/resource-client/src/shell_grammar.rs`):
 
 ```
 enroll plan NAME PUBLIC-KEY-HEX NEXT-PUBLIC-KEY-HEX COSIGN-HEX   # the three lines `mini join --key` printed
@@ -181,7 +183,7 @@ them from disk.
 ## Endings
 
 stdout carries the client's own output. stderr ends every failed verb with one
-line whose first word says who decided (the reply bytes are `native/host-operations.rs:401-405`):
+line whose first word says who decided (the reply bytes are `RESPONSE_NO_RECORD`, `RESPONSE_NEVER_FORWARDED` and `RESPONSE_HOST_OUTCOME` in `native/host-operations.rs`):
 
 | exit | first word | meaning |
 |---|---|---|
@@ -203,4 +205,4 @@ the sponsor's session home (`keys/KEYFILE`); it is for keys that already live on
 box. The hex form above never puts the newcomer's secret on the box. Both need the
 newcomer's next public key and its co-signature (their words, never a file in the
 sponsor's home), or `--no-prerotation` to enrol without one
-(`native/resource-client/src/shell.rs:1202-1250`).
+(the `enroll plan` grammar in `shell_grammar.rs` and its `--no-prerotation` flag).

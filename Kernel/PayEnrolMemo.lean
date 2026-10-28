@@ -1,5 +1,5 @@
 /-
-# Kernel.PayEnrolMemo — the self-enrollment memo (PAY §11.3), its frames and refusals
+# Kernel.PayEnrolMemo — the self-enrollment memo (docs/PAY.md §11.3), its frames and refusals
 
 The memo a friend attaches to the enrollment payment is 400 ASCII bytes:
 
@@ -384,7 +384,7 @@ theorem parse_canonical {bytes : List UInt8} {memo : Memo} (accepted : parse byt
     · simp [t] at accepted
   next => simp at accepted
 
-/-! ## What each signature is over (PAY §11.3) -/
+/-! ## What each signature is over (docs/PAY.md §11.3) -/
 
 /-- `"DREGG/PAY/ENROL/POSSESSION/v1"` as bytes. -/
 def possessionTag : List UInt8 :=
@@ -488,7 +488,7 @@ def memoFieldStream : StreamCodec MemoField where
       rfl
   cursorNative := true
 
-/-! ## Journal reasons (PAY §11.3) -/
+/-! ## Journal reasons (docs/PAY.md §11.3) -/
 
 inductive JournalReason
   | memoMissing

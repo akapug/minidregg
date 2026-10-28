@@ -3260,7 +3260,7 @@ private def payObservationCommand (json : Lean.Json) : Result (List UInt8) := do
       observations := ← list "$.observations" payObservationRecord (← field "$" "observations" obj) }
   return PayObservation.commandCodec.encode command
 
-/-- The observer's submission of ONE enrollment-index transfer (PAY §11.4,
+/-- The observer's submission of ONE enrollment-index transfer (docs/PAY.md §11.4,
 P3b-2): the watcher's record, the tip, `C_enrol` and the two roots read. -/
 private def payEnrolCommand (json : Lean.Json) : Result (List UInt8) := do
   let obj ← exactObject "$" ["observer", "capability", "nonce", "expectedAuthorityRoot",
@@ -3733,7 +3733,7 @@ private def payMemoRefusalName : PayEnrolMemo.Refusal → String
   | .shape => "memoShape" | .version => "memoVersion" | .badMiniKey => "memoBadMiniKey"
   | .badSshKey => "memoBadSshKey" | .badMiniSig => "memoBadMiniSig" | .badSshSig => "memoBadSshSig"
 
-/-- The kernel's reading of raw memo bytes (PAY §11.3): the four fields and
+/-- The kernel's reading of raw memo bytes (docs/PAY.md §11.3): the four fields and
 what each signature is over, or the named refusal. -/
 def payEnrolMemoJson (bytes : List UInt8) : Lean.Json :=
   match PayEnrolMemo.parse bytes with

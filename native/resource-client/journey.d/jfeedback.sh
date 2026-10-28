@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# JFEEDBACK (PLACE §2.3, §5 item 4, client half): a member reports a problem
+# JFEEDBACK (docs/PLACE.md §2.3, §5 item 4, client half): a member reports a problem
 # into its own feedback room through `mini shell` on this journey's live Store;
 # the operator reads it with its context; no other member can read it.
 #

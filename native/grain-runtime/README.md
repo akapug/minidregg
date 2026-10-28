@@ -62,6 +62,14 @@ cohorts; an idle-task receipt with `fullConsent: null` makes no full-consent cla
 It does not extend an active call's budget or promise that future Store changes
 will require no further verification.
 
+New `grain-runtime create` controllers with a dispatch purse enable this setting
+automatically after the selected Mini and its actual consent provider confirm
+full readiness. This bounded preparation precedes signed work in the Whole
+phase and retains its acknowledgement and input hashes in `create/`. It requires
+a supporting toolchain; unsupported or failed preparation refuses provisioning.
+Plain grains retain thin consent, and an already published controller keeps its
+existing setting unchanged.
+
 Hard EOF or explicit disconnect signals the owned process group immediately;
 the persistent controller then stops its remaining members and sends Mini a
 signed `interrupt` generation fence. A soft transport close leaves its current
@@ -408,15 +416,6 @@ ordinary Mini events after reserve but refuses a later provider write; it is a
 check at send time, not an atomic lease across the external HTTP request.
 Missing or changed evidence keeps the provider allowance held for audit.
 
-The [local-provider acceptance](../../native/hermes-test-provider/evidence/2026-09-26/gateway-r1/)
-used real upstream Hermes with a deterministic local HTTP endpoint and signed
-Mini provider reserve, tool publication and fixed-charge settlement. That
-earlier runtime used the conservative whole-world root; the op17
-continuity consumer requires a separate source-matched native run before its
-receiving claim. The existing
-Mini/fn two-Store evidence is in fn's `planning/evidence/two-store-join-1a9dd747-2026-09-24.md`;
-this runtime does not reinterpret that synthetic acceptance as a hosted agent.
-
 A delivered provider response whose original settlement already committed can be
 retired by ordinary `recover`. The controller requires exact replay/response/quote
 custody, physical quiescence, and lookup of the original settlement receipt on the
@@ -442,3 +441,14 @@ never transparent re-signing. A before-signing guard refusal can retire only its
 exact unsubmitted Pending after fresh sender-stop proof and retained artifact
 validation; the financial hold and response remain. These source consumers require
 the corresponding native feature bundle and native qualification before deployment.
+
+## Other documents in this directory
+
+- [TERMINAL.md](TERMINAL.md): `grain-runtime terminal`, one controller as a text conversation (hard or soft attach).
+- [SYSTEMD-MANAGERS.md](SYSTEMD-MANAGERS.md): the root-owned controller registration
+  (`mini-controller-registration-v1`) and which systemd manager runs the controller and its workers.
+- [BYOK.md](BYOK.md): member provider keys and the member's choice of controller route.
+- [RESIDENT-REQUESTS.md](RESIDENT-REQUESTS.md): custody of a room resident's accepted assignments
+  (`grain-runtime hermes-room resident`).
+- [RESIDENT-DELIVERY.md](RESIDENT-DELIVERY.md): a completed model turn versus a delivered room reply.
+- [fixture/RECEIPT-RECOVERY.md](fixture/RECEIPT-RECOVERY.md): the `publicationReceipts` lost-reply fixture.

@@ -1,7 +1,7 @@
 /-
 # Kernel.World -- the world, the turn record, and history as a fold
 
-DATAMODEL §3.3/§3.9, step B2.  The kernel's durable state is one value:
+docs/DATAMODEL.md §3.3/§3.9, step B2.  The kernel's durable state is one value:
 
 * `World` is a finite map of cells `Π₀ c : CellId, Option (Cell R)` together
   with a distinguished **system cell**, itself a `Theory.Store` over a fixed
@@ -44,7 +44,7 @@ room; then (T1) one `allocate spent n ()` per nullifier and one
 monotone height are the store's own allocation/write guards, not a second
 checker.
 
-## One home per fact (T1, SURPASS §2(b))
+## One home per fact (T1, docs/SURPASS.md §2(b))
 
 * **Spent nullifiers** live in `spent`; the deployed durable consumed set is the
   twin T4 deletes.  **The clock** is the head's height (`fold_head`); a turn's
@@ -107,7 +107,7 @@ set_option autoImplicit false
 /- `World.World` is the world type of the `World` module. -/
 set_option linter.dupNamespace false
 
-/-- Cell identifiers are the `Nat`s `create` names (DATAMODEL §3.2). -/
+/-- Cell identifiers are the `Nat`s `create` names (docs/DATAMODEL.md §3.2). -/
 abbrev CellId := Nat
 
 /-! ## Cells and the registry -/
@@ -730,7 +730,7 @@ def genesis (cells : Cells R) : World R TxId D :=
 end Step
 
 
-/-! ## The fold: monoid-action laws and replay exactness (DATAMODEL §4.3) -/
+/-! ## The fold: monoid-action laws and replay exactness (docs/DATAMODEL.md §4.3) -/
 
 section Fold
 
@@ -2050,7 +2050,7 @@ theorem journal_exact {g W : World R TxId D} {log : List (Turn R TxId Ev D)}
                   exact absurd hid.symm hx
                 · rw [if_neg hi'] at ht'; cases ht'
 
-/-- The DATAMODEL §4.9 form: the journal's height for an id is the log
+/-- The docs/DATAMODEL.md §4.9 form: the journal's height for an id is the log
 position carrying it. -/
 theorem journal_height_iff {g W : World R TxId D} {log : List (Turn R TxId Ev D)}
     (hg : Genesis H g) (hf : fold H g log = some W) (x : TxId) (i : Nat) :
@@ -2327,7 +2327,7 @@ theorem step_meter {w w' : World R TxId D} {t : Turn R TxId Ev D}
   (charge_le_allowance H stepped).2 l
 
 /-- **The storage charge is the patch bytes** (D2's
-`storage_charge_is_written_bytes`, as SURPASS §2(b).6's `charge_is_patch_bytes`). -/
+`storage_charge_is_written_bytes`, as docs/SURPASS.md §2(b).6's `charge_is_patch_bytes`). -/
 theorem charge_is_patch_bytes {w w' : World R TxId D} {t : Turn R TxId Ev D}
     (h : World.step H w t = some w') : t.charge .storageBytes = patchBytes H t := by
   obtain ⟨height, logRoot, _, hk⟩ := admit_ok_turnCheck H ((step_eq_some H).1 h)

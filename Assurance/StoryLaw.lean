@@ -1,7 +1,7 @@
 /-
 # Assurance.StoryLaw — a sealed story's table is the law on every player's cell
 
-A story (PLACE §2.8, item 8) is a transition table a friend writes and then seals. After
+A story (docs/PLACE.md §2.8, §5 item 8) is a transition table a friend writes and then seals. After
 `story seal`, the client (`native/resource-client/src/story.rs`, `table_law`) installs one law
 on every player's cell, generated from the table:
 

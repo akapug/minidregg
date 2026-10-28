@@ -1,7 +1,7 @@
 /-
 # Kernel.TurnOfIntent -- the turn a deployed intent is: the diff against the held cell
 
-SURPASS §2(b).1, lane T3.  Every Host admission ends in one
+docs/SURPASS.md §2(b).1, lane T3.  Every Host admission ends in one
 `DurableDataIntent.DataIntent`: the 37 `NativeHostReplay.NativeAdmission`
 constructors are indexed by it, so one function covers all of them.
 `Turn.ofIntent` reads each written cell's canonical post image at its registry

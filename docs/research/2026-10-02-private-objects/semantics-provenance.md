@@ -1,9 +1,0 @@
-# Semantics lane provenance
-
-Baseline: b57acedaaae02edf2b2cfd8e33675b3cbf40daa8; remote immutable reads only. Exact extracts in current/Kernel__ResourceTransaction.lean, Kernel__DeclaredResourceController.lean, Kernel__NockProgramCell.lean, Compiler__NockProgramCodec.lean, Compiler__PolicySourceCell.lean, Kernel__ResourceBirthPolicyController.lean, Kernel__ApplicationSpkLaunchDescriptor.lean, Kernel__CanonicalPolicyRegistry.lean, Compiler__CanonicalCellRegistry.lean, Theory__PolicyInstall.lean, Pred__Core.lean. No builds/tests/runtime evidence.
-
-Kagi queries: “dynamic software updating capability preserving schema migration local first Cambria 2024 2025”; “2024 2025 dynamic software updating state migration verification effect capability paper”. First results mostly older DSU/Cambria or VM migration, not authority preservation.
-
-Scry academic.catalog query (metadata, limit 8): published_year>=2024, title phrase schema evolution/dynamic software updating/live migration, ordered cited_by_count. Response saved semantics-scry.json. Coverage observed_on maximum 2026-09-26, execution record ea4d12c6-0470-40b8-980b-9cdec6bd6fed, complete for query, not exhaustive current literature. Abstract column unexpectedly includes serialized source metadata; do not mistake it for fulltext. Identified 2412.06269; VM migration and generic schema papers excluded as poor fit.
-
-Primary fulltext inspected through web: Ink & Switch Cambria essay; mhicks.me/papers/kitsune.pdf §§2.2,2.3,5; arxiv.org/html/2606.10920v1 §§3.1–3.3,4.2,6; arxiv.org/pdf/2412.06269 §§1–3; semver.org/spec/v2.0.0.html §§1–11. Source word budgets respected in report by keeping each literature summary below 200 words. Faré selected local original text: eoomi2024 §§3,4; poof-paper §§1.1–1.3; persist-model Schema Upgrade and cross-domain atomicity.

@@ -30,13 +30,13 @@ import Compiler.GateTraceRelationExt6 -- extends eta aggregation to the entire p
 import Compiler.NextgenLightClientPublicInputs -- exact current binary light-client public schema: consuming decoder round-trip/injectivity, canonical BabyBear cells, exact framed length, and public-prefix uniqueness; handwritten native code remains unverified
 import Compiler.TypedAuthorizationRequestCodec  -- `LawfulCodec (Request .object)` on the landed `StreamCodec` prefix framework: one of the three codecs a Hyperdocument `Config` demands, with teeth that the encoding separates target and effects digest
 import Compiler.HyperdocumentCodec  -- the Hyperdocument value type tree on the wire: identifiers, finite tags, records, atom kinds, embeds, and stable ranges, all on `StreamCodec`; the remaining half of what a `Config` demands
-import Compiler.HyperdocumentCell  -- hyperdocument content, event-log and link-index cells are StoreCodec at declared wires; the four-slot/overflow pages and the bounded-page catalog, registry and upgrade are deleted (DATAMODEL §5 B1)
-import Compiler.CredentialAuthorityCell  -- the authority domain is one StoreCodec cell over typed planes; revoked/nullifier/registered are append-only presence planes; the page and LOOM/AUTH/STATE codecs are deleted (DATAMODEL §5 B1)
+import Compiler.HyperdocumentCell  -- hyperdocument content, event-log and link-index cells are StoreCodec at declared wires; the four-slot/overflow pages and the bounded-page catalog, registry and upgrade are deleted (docs/DATAMODEL.md §5 B1)
+import Compiler.CredentialAuthorityCell  -- the authority domain is one StoreCodec cell over typed planes; revoked/nullifier/registered are append-only presence planes; the page and LOOM/AUTH/STATE codecs are deleted (docs/DATAMODEL.md §5 B1)
 import Compiler.StreamCell  -- a stream is a head cell (binding, count, tail key) plus one cell per entry; an append = one head write + one fresh entry cell, bytes independent of the stream length (FLEET-TOPIC-ON-STREAM)
-import Compiler.StoreCodec  -- the unbounded canonical store codec: sorted address-byte support, length-prefixed, no capacity or shard; general round-trip/canonicity, layout-digest frame (DATAMODEL §5 A2)
+import Compiler.StoreCodec  -- the unbounded canonical store codec: sorted address-byte support, length-prefixed, no capacity or shard; general round-trip/canonicity, layout-digest frame (docs/DATAMODEL.md §5 A2)
 import Compiler.PlanFootprintCodec  -- a plan footprint as canonical bytes: (wire address, optional wire value) reads, carried by the signed header (Theory.PlanBinding)
 import Compiler.IntStream  -- the one integer byte codec: zigzag base-255; the Book's Sum codec is deleted
-import Compiler.DeclaredEffectCell  -- declared object/program/account-metadata cells are StoreCodec at the effect wire; the four-slot page is deleted (DATAMODEL §5 B1)
+import Compiler.DeclaredEffectCell  -- declared object/program/account-metadata cells are StoreCodec at the effect wire; the four-slot page is deleted (docs/DATAMODEL.md §5 B1)
 import Compiler.StoreCodecBook  -- the finite Book as a store at the Book layout: pointwise adapter, round-trip, explicit-zero refusal, transcode from the existing Book codec
 import Compiler.RefusalReason  -- the closed set of named Host refusals and the capability-component classifier
 import Compiler.CredentialAuthorityPolicyRegistry  -- the bounded authority page drives exact compiled-policy selection and a root-guarded durable intent
@@ -107,7 +107,7 @@ import Compiler.CommittedTerminalFiatShamir  -- [CT-fiat-shamir-lanes] + [CT-joi
 import Compiler.CommittedTerminalFactoredProver  -- [CT-factored-prover]: the honest prover for the seven factored openings — dense bit-corner tables + pairwise fold, check7 / check7_accepts, gateProof7_sound, sumcheck7_prob_le, and the bridge gammaBatched_eq_sum_table; Stage 0 compiled, demo decided (check7_complete_demo). Named, not closed: [CT-factored-prover-honest] (FactoredProverHonest : the fold messages read to factoredRounds), with its consumer factoredProver_complete_of_honest PROVED.
 import Compiler.Sp800185Kmac256 -- SP 800-185 KMAC256 on the Lean Keccak core (host checkpoint/log MAC); compiled through the kernel seam (HOT-PATH 2d)
 import Compiler.Sp800185Kmac256Conformance -- the KMAC256 known answers, evaluated through the kernel seam (the Rust KMAC256 KAT at every build)
-import Compiler.DurableCheckpointCodec -- DATAMODEL C2: seed/log/checkpoint frames, log MAC chain, sealed checkpoints
+import Compiler.DurableCheckpointCodec -- docs/DATAMODEL.md §5 C2: seed/log/checkpoint frames, log MAC chain, sealed checkpoints
 import Compiler.DurableHistoryReader -- KN2: the history read at use, verified against the MAC'd, anchor-bound head (MMR log accumulator + spent trie)
 import Compiler.DurableStoreAudit -- KN2: the Store-backed history Reader and `store audit` (every entry, node, spent row and checkpoint re-derived from genesis)
 import Compiler.CredentialAuthorityServed -- KN2 2b-1: the served state (no history) and its directory and authority cell

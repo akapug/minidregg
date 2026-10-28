@@ -11,6 +11,9 @@
 //! (`SO_PEERCRED` names the member); every reply is a decoded outcome: decided
 //! or undecided with its exact retry, never a spinner that lies.
 
+#[path = "apps_qualification.rs"]
+mod qualification;
+
 #[path = "apps_front.rs"]
 pub(crate) mod front;
 #[path = "apps_worker.rs"]
@@ -407,6 +410,12 @@ fn entry_json(entry: &Entry, verdict: &Verdict) -> Value {
     })
 }
 
+fn qualified_entry_json(entry: &Entry, verdict: &Verdict, qualification: &qualification::Qualification) -> Value {
+    let mut value = entry_json(entry, verdict);
+    value["qualification"] = qualification.get(entry).cloned().unwrap_or(Value::Null);
+    value
+}
+
 /// Where the fetcher takes the package from: the pin's URL, the market's
 /// package URL, or (a pin without a URL) a box-local file the operator adopts.
 fn package_url(entry: &Entry) -> String {
@@ -430,6 +439,7 @@ fn verdict_line(verdict: &Verdict) -> String {
 }
 
 struct Paths {
+    qualification: Option<PathBuf>,
     index: PathBuf,
     meta: PathBuf,
     verdicts: PathBuf,
@@ -445,6 +455,8 @@ fn paths(args: &mut Args) -> Paths {
             .unwrap_or_else(|| PathBuf::from(default))
     };
     Paths {
+        qualification: args.optional("qualification").map(PathBuf::from)
+            .or_else(|| std::env::var_os("MINI_APPS_QUALIFICATION").map(PathBuf::from)),
         index: from(args, "index", "MINI_MARKET_INDEX", DEFAULT_INDEX),
         meta: from(args, "meta", "MINI_MARKET_META", DEFAULT_META),
         verdicts: from(args, "verdicts", "MINI_APPS_VERDICTS", DEFAULT_VERDICTS),
@@ -636,7 +648,15 @@ fn install(mut args: Args, paths: &Paths, as_json: bool, dir: Option<std::ffi::O
     };
     let mut request = retained.clone();
     request["verb"] = json!(if is_retry { "retry" } else { "install" });
-    let reply = worker_call(&paths.socket, &request)?;
+    // The worker answers an install at once (`pending` while it runs); a reply lost after the
+    // request was sent leaves the request with the worker, so the member is shown its follow-up.
+    let reply = worker_call(&paths.socket, &request).map_err(|error| {
+        if error.starts_with("worker reply lost") || error.starts_with("worker closed without") {
+            format!("undecided: request {id} was sent and the worker may be running it; it continues without this command ({error}); exact retry: mini apps install --app {} --retry {id}", entry.app_id)
+        } else {
+            error
+        }
+    })?;
     let outcome = requests.join(format!("{id}.outcome.json"));
     crate::workspace::atomic_json(&outcome, &reply, None).or_else(|_| {
         // A second reply for the same id (the exact retry) replaces nothing:
@@ -658,13 +678,14 @@ fn catalogue(action: &str, mut args: Args, paths: &Paths, as_json: bool) -> Resu
     };
     args.finish()?;
     let entries = load_index(&paths.index)?;
+    let qualification = qualification::Qualification::load(paths.qualification.as_deref())?;
     match action {
         "search" => {
             let found = search(&entries, &term, category.as_deref());
             if as_json {
                 let list: Vec<Value> = found
                     .iter()
-                    .map(|e| entry_json(e, &verdict(&paths.verdicts, &paths.meta, &e.package_id)))
+                    .map(|e| qualified_entry_json(e, &verdict(&paths.verdicts, &paths.meta, &e.package_id), &qualification))
                     .collect();
                 println!("{}", serde_json::to_string_pretty(&json!({"apps":list,"total":entries.len()})).map_err(|e| e.to_string())?);
                 return Ok(());
@@ -685,7 +706,7 @@ fn catalogue(action: &str, mut args: Args, paths: &Paths, as_json: bool) -> Resu
                     truncate(&e.version, 22),
                     truncate(&e.author, 24),
                     e.app_id,
-                    verdict_line(&v),
+                    format!("{}; {}", verdict_line(&v), qualification::line(qualification.get(e))),
                     hook.map(|(_, h)| format!("\n      agent hook: {h}")).unwrap_or_default()
                 );
             }
@@ -695,7 +716,7 @@ fn catalogue(action: &str, mut args: Args, paths: &Paths, as_json: bool) -> Resu
             let selector = selector.unwrap_or_default();
             let entry = resolve(&entries, &selector)?;
             let v = verdict(&paths.verdicts, &paths.meta, &entry.package_id);
-            let value = entry_json(entry, &v);
+            let value = qualified_entry_json(entry, &v, &qualification);
             if as_json {
                 println!("{}", serde_json::to_string_pretty(&value).map_err(|e| e.to_string())?);
                 return Ok(());
@@ -708,6 +729,7 @@ fn catalogue(action: &str, mut args: Args, paths: &Paths, as_json: bool) -> Resu
             println!("  categories {}", entry.categories.join(", "));
             println!("  links      {}  {}", entry.web_link, entry.code_link);
             println!("  verdict    {}", verdict_line(&v));
+            println!("  sweep      {}", qualification::line(qualification.get(entry)));
             println!("  size       {}", v.raw_bytes.map_or("not fetched here".to_owned(), |b| format!("{b} bytes raw")));
             match &entry.pinned {
                 Some(pin) => println!("  class      {}  (operator-pinned; sha256 {})", pin.class.as_deref().unwrap_or(suggested_class(v.raw_bytes)), pin.sha256),

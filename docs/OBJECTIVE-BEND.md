@@ -8,10 +8,9 @@ calculus, **Core4**; the proof-producing checker types that term; the demand mac
 runs it. Mini supplies what the language does not: durable identity (objects), current
 authority, admission, funding and the laws that judge every write.
 
-This page is the overview. It is written against the code; where it names a theorem, the
-theorem is pinned in its module's contract manifest, `scripts/gates/objective-manifest/<Module>.tsv`
-(Core4, kernel and front end alike). Companion
-documents:
+This page is the overview, written against the code. A theorem it names is checked by
+`lake build ObjectiveProofs` (`scripts/check-objective-proofs.sh proofs`), and its axioms are
+pinned in its module by `#guard_msgs` over `#print axioms`. Companion documents:
 
 - [OBJECTIVE-BEND-TUTORIAL.md](OBJECTIVE-BEND-TUTORIAL.md): the language from zero, every
   result re-run by a gate.
@@ -760,11 +759,9 @@ edition 1.
 
 The Core4 proofs live in `Theory/ObjectiveBend*.lean`; the kernel's and front end's in the
 named modules. They build in the `ObjectiveProofs` library (`ObjectiveProofs.lean`), not the
-default target. The gate `scripts/check-objective-proofs.sh proofs` builds it and requires the
-every declaration's statement, definition closure (a SHA-256 Merkle hash of the body of every
-repository definition its statement reaches) and exact axiom set to match its row in the
-per-module contract manifests, or a reviewed line of `scripts/gates/objective-contract-decisions.txt`
-to admit that exact change (additions pass); every pinned axiom set is within `propext`, `Classical.choice`, `Quot.sound`. Compiled code
+default target. The gate `scripts/check-objective-proofs.sh proofs` builds it; each module pins
+its theorems' axiom sets with `#guard_msgs` over `#print axioms`, and every pinned set is within
+`propext`, `Classical.choice`, `Quot.sound`. Compiled code
 runs the machine through proven-equal `@[csimp]` replacements (`stepRaw_eq_fast`,
 `step_eq_fast`, `runBounded_eq_fast`, `forceWith_eq_fast`): the compiler's substitution is
 trusted, the equalities are theorems.

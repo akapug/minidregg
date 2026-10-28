@@ -2,7 +2,7 @@
 # Compiler.CanonicalCellRegistry — one executable receiving registry
 
 The production registry of deployed cell roles.  Every role's materializer is
-a `StoreCodec` cell at its layout (DATAMODEL B1): the hyperdocument content and
+a `StoreCodec` cell at its layout (docs/DATAMODEL.md §5 B1): the hyperdocument content and
 event-log cells (`HyperdocumentCell`), the one credential-authority cell
 (`CredentialAuthorityCell`), the declared-effect cells (`DeclaredEffectCell`),
 the canonical resource Book, and immutable policy source cells.  There are no

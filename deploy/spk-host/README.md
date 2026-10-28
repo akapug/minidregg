@@ -16,7 +16,7 @@ admits through sudoers; the broker's own endpoint is described in
 
 | process | identity | what it does |
 |---|---|---|
-| `mini-spk-broker@STORE.service` | operator, systemd **user** unit | one JSON line per connection on `WORLD/runtime-STORE/broker.sock` (operator-owned 0600, peer uid = operator); the verbs are the `Request` enum (`native/spk-host/src/broker.rs:308`); renders the per-generation resident unit (`broker.rs:1062-1075`), its class slice (`broker.rs:922`) and its hardening drop-in (`broker_home.rs:211-230`) |
+| `mini-spk-broker@STORE.service` | operator, systemd **user** unit | one JSON line per connection on `WORLD/runtime-STORE/broker.sock` (operator-owned 0600, peer uid = operator); the verbs are the `Request` enum in `native/spk-host/src/broker.rs`; renders the per-generation resident unit (the `Request::InstallUnit` arm of `Broker::handle`), the app's slice under its class slice (`Request::SetCgroup`; the class slices are `render_static`'s) and its hardening drop-in (`hardening` in `broker_home.rs`) |
 | `mini-spk-s<store>-a<app>-g<gen>.service` | operator, user unit | `spk-host resident-bootstrap`: bwrap creates a user namespace, `newuidmap`/`newgidmap` map exactly {operator, app} into it, the resident joins it, forks the launch worker as the app, drops every capability, and serves the app's routes |
 | the app | the broker-placed app uid inside that namespace | bubblewrap with the floor below; fd 3 is its Cap'n Proto bridge |
 | `mini-spk-volume-helper` | root, via sudoers | creates, attests and mounts the app's preallocated ext4 `/var` |
@@ -35,14 +35,14 @@ volume.
 
 ## The app's sandbox floor
 
-`sandbox::FIXED_ARGS` (`native/spk-host/src/sandbox.rs:43-64`) and `native/spk-host/seccomp/resident-web.policy`:
+`sandbox::FIXED_ARGS` (`native/spk-host/src/sandbox.rs`) and `native/spk-host/seccomp/resident-web.policy`:
 
 - new user, PID, IPC, UTS, cgroup and network namespaces (loopback only),
   `--disable-userns`, `--cap-drop ALL`, hostname `sandbox`;
 - the package root read-only from an open fd, the bounded ext4 `/var`, a
   128 MiB `/tmp`, `/proc`, and a read-only 64 KiB `/dev` holding only null,
   zero, full, random, urandom and the /dev/fd link;
-- RLIMIT_NOFILE 1024 (hard), set at spawn (`spawn_gate.rs:25`);
+- RLIMIT_NOFILE 1024 (hard), set at spawn (`APP_MAX_FILES` in `spawn_gate.rs`);
 - a default-ENOSYS seccomp allowlist: AF_UNIX/INET/INET6 sockets only, no
   namespaces, mounts, ptrace, bpf, io_uring, keyrings or module calls; and,
   as Sandstorm's supervisor refuses them, no `seccomp`/`PR_SET_SECCOMP`,
@@ -54,17 +54,17 @@ volume.
 the production bootstrap and spawn path, run as the operator on Linux, inside
 a transient user unit carrying the resident unit's hardening properties
 (`RESIDENT_PROPS` in the script), and names the openat2 class if bwrap's own
-stderr reports `Function not implemented`. One recorded run: Debian 13.7,
-bubblewrap 0.12.0, audit root `/var/lib/spk-floor-audit`, both audit tests
-exit 0 (32 floor checks held, 21 expected pre-floor breaches), at lane/fence
-`408296cb` on `dregg-build`
-(`docs/evidence/2026-10-27-sandbox-floor-dregg-build/README.md`). The
-script's detector matches only bwrap's own `bwrap: ...` lines; the run above
-used an earlier detector that also matched the probe's JSON, so its
-`results.txt` carries an openat2 line on a passing run.
+stderr reports `Function not implemented` (the detector matches only bwrap's own
+`bwrap: ...` lines). The recorded run on `dregg-build` (Debian 13.7, bubblewrap 0.12.0,
+audit root `/var/lib/spk-floor-audit`) exits 0 for both audit tests: 32 floor checks held
+and the 21 expected pre-floor breaches
+(`docs/evidence/2026-10-27-sandbox-floor-dregg-build/README.md`; that run's
+`results.txt` shows an openat2 line from an earlier detector that also matched the
+probe's JSON).
 
 **bwrap version dependence.** bubblewrap 0.11 and later (Debian 13 ships
-0.12.0) need `openat2` (`broker_home.rs:265`). Any unit setting that installs a
+0.12.0) need `openat2` (the test
+`hardening_drop_in_is_never_empty_and_never_blocks_newuidmap` in `broker_home.rs`). Any unit setting that installs a
 systemd seccomp layer returning ENOSYS for `openat2` kills bwrap at its first
 mount (`bwrap: Can't mkdir parents for /dev: Function not implemented`).
 systemd 257's `RestrictSUIDSGID=yes` does; so the resident and every
@@ -82,17 +82,21 @@ The app's own seccomp policy allows `openat2` (`seccomp/resident-web.policy:72`)
 - The dispatch fence and outcomes: [MINI-CLAIM-DISPATCH-CONTRACT.md](MINI-CLAIM-DISPATCH-CONTRACT.md).
 - WebSockets and their authority leases: [BROWSER-WEBSOCKETS.md](BROWSER-WEBSOCKETS.md),
   [WS-AUTHORITY-LEASES.md](WS-AUTHORITY-LEASES.md), [STREAM-CONTINUITY.md](STREAM-CONTINUITY.md).
+- Adding a participant route to a running resident: [HOT-ROUTE-ENROLLMENT.md](HOT-ROUTE-ENROLLMENT.md).
+- Rebinding retained generations to a compatible upgraded profile: [PROFILE-UPGRADE.md](PROFILE-UPGRADE.md).
+- Attaching SPK apps to an existing Store, and ordinary checkpoints: [SAME-STORE-AND-CHECKPOINT.md](SAME-STORE-AND-CHECKPOINT.md).
+- A separate controller account per world: [CONTROLLER-SETUP.md](CONTROLLER-SETUP.md).
 - START and STOP are lifecycle v3 (`lifecycle_v3_*_native.rs`); a governed
   repeat CREATE uses the v4 lane (`lifecycle_v4_retry_*_native.rs`). The
   opcodes live in the Lean kernel (`Kernel/ApplicationGrain.lean`), not here.
   A lost submit reply is answered by the lookup, never a resend.
 - A crashed generation fails its unit; `OnFailure=` starts the broker-rendered
-  supervisor instance (`broker_runtime_adoption.rs:447-461`, `Restart=on-failure`),
+  supervisor instance (`supervisor_text` in `broker_runtime_adoption.rs`, `Restart=on-failure`),
   which runs `spk-host grain supervise-instance GRAINS_ROOT STORE-APP`
-  (`grain.rs:1564`). It STOPs the dead generation through Mini and continues on
-  the same `/var`; an uncertain record is reported, never retried (exit 3,
-  `grain.rs:1307-1312`). A START that failed after its claim is reconciled
-  through `reconcileFailedStart` (`grain_export.rs:315`), on either lane's
+  (`supervise` in `grain.rs`). It STOPs the dead generation through Mini and continues on
+  the same `/var`; an uncertain record is reported, never retried (exit 3: `unresolved`
+  in `grain.rs`, mapped by `main.rs`). A START that failed after its claim is reconciled
+  through `reconcileFailedStart` (`reconcile_failed_start` in `grain_export.rs`), on either lane's
   retained artifacts.
 
 ## Ingest and volumes
@@ -113,7 +117,7 @@ and publishes the `DREGG/SPK-VAR-CUSTODY/v1` witness the resident checks
 against the Mini-selected volume before launch. Imported images are parsed in
 userspace by e2fsprogs as the app uid and never mounted from operator bytes.
 
-Size classes are `broker::CLASSES` (`broker.rs:59`) (S/M/L memory, CPU, tasks, IO weight,
+Size classes are `broker::CLASSES` (S/M/L memory, CPU, tasks, IO weight,
 `/var` size, WebSocket caps); they are operator policy until a Lean
 declaration pins them.
 

@@ -5,9 +5,9 @@ The source-owned receiving process is `Host/Main.lean`, with Lake target
 installation, and delegation receivers. It does not evaluate a second policy
 language, accept raw durable intents, or supply native signature verdicts.
 
-Implementation status and measured checks belong in the sprint evidence, not
-this interface document. Adding a target does not establish that its linked
-executable or complete user journey has passed.
+This document describes the interface. Status is in [`STATUS.md`](STATUS.md); a journey row
+(`scripts/pipeline/journey-rows`) is what shows a path runs. Adding a target does not establish
+that its linked executable or a user journey passes.
 
 ## Building and exercising the native interface
 

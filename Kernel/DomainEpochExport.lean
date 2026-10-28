@@ -1,10 +1,11 @@
 /-
-# Kernel.DomainEpochExport — the relay's byte entry points for the epoch (CHANNELS.md §2.4, §9 row 9)
+# Kernel.DomainEpochExport — the relay's byte entry points for the epoch (docs/CHANNELS.md §2.4, §9 row 9)
 
 CH-CELL exported the cell codec, `assemble` and `fanout`; CH-EPOCH defined the record, the opening, the
-absent commitment and the honest seal, with no byte entry point. This module adds them, so the native
-relay (`mini relay`, `native/resource-client/src/relay.rs`) links the kernel's own definitions and never
-re-implements cSHAKE256 framing, the tick root, the record codec or the opening:
+absent commitment and the honest seal, with no byte entry point. This module adds them, so a native
+relay links the kernel's own definitions and never re-implements cSHAKE256 framing, the tick root, the
+record codec or the opening. (The native relay that linked them was deleted on 2026-10-26; see
+docs/CHANNELS.md §4.)
 
 | symbol | function | tied to the definition by |
 |---|---|---|
@@ -21,8 +22,8 @@ the schedule, fill and received cells those byte calls denote. The fill is one P
 (`pads t`); as a `FillPrf` it reads the stream of the header's tick.
 
 Every theorem is `#assert_axioms`-clean (at most `propext`, `Classical.choice`, `Quot.sound`); the pins
-are in `Kernel.DomainEpochAudit`, so this module's import closure — the closure `channel-lib/build.sh`
-links into every relay, member and witness — has no Mathlib. `topicBytesList_is_recordAppend` relates
+are in `Kernel.DomainEpochAudit`, so this module's import closure — what a relay, member or witness
+would link — has no Mathlib. `topicBytesList_is_recordAppend` relates
 the topic export to the kernel's `recordAppend` (`Kernel.DomainEpochLaw`), so it is stated there too. No
 statement evaluates the hash: binding is CH-EPOCH's `Collision` carrier, not restated here.
 -/
@@ -434,7 +435,7 @@ def topicBytes (domain : UInt16) (epoch : UInt64) : ByteArray :=
 /-! ## §8. The record's tick roots, for a member's own-slot check (CH-CLIENT-1) -/
 
 /-- `domain 2 | epoch 8 | the E tick roots` of a canonical record, empty otherwise. A member compares
-each root with the one it verified on the signed frame and the vector the frame carried (CHANNELS §4
+each root with the one it verified on the signed frame and the vector the frame carried (docs/CHANNELS.md §4
 step 6; `own_omission_evident`'s `Included`). -/
 def recordRootsBytesList (bytes : List UInt8) : List UInt8 :=
   match EpochRecord.decode bytes with

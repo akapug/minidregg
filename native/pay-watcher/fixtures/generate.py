@@ -313,7 +313,7 @@ def happy():
     return ep
 
 
-# Enrolment (PAY.md §11) ---------------------------------------------------------------------
+# Enrolment (docs/PAY.md §11) ---------------------------------------------------------------------
 # The enrollment address is the book row named by config `enrol.index`. Its observations carry
 # the transaction's one memo as raw bytes; the kernel parses them. The memos below follow the
 # §11.3 grammar, enrol:v1:<mini hex 64>:<ssh blob base64 68>:<mini-sig hex 128>:<ssh-sig hex 128>
@@ -326,7 +326,7 @@ ATA5 = b58(key("token account 5"))
 EXCHANGE = b58(key("exchange hot wallet"))
 EXCHANGE_TA = b58(key("exchange token account"))
 ROUTER = b58(key("a router program"))
-FLOOR = 1_000_000  # 1 DREGG (PAY §11.8)
+FLOOR = 1_000_000  # 1 DREGG (docs/PAY.md §11.8)
 
 
 def ssh_blob(label):

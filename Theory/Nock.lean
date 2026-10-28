@@ -17,7 +17,7 @@ is `*[a c]`; a dynamic hint `[11 [b c] d]` evaluates `c` (a crash there
 crashes) and returns `*[a d]`. Nothing in a hint is trusted.
 
 `exec d b s f` is the interpreter: `b` is the step budget (one unit per rule
-application — the count NOCK §2.5 meters), `d` a structural depth bound that
+application — the count docs/NOCK.md §2.5 meters), `d` a structural depth bound that
 never binds first when `b ≤ d` (as in `run`, where both are the fuel). It
 returns `ok v rem`, `crash rem`, or `exhausted`. `exhausted` is ours: Nock
 has no fuel, so exhaustion says nothing about the term

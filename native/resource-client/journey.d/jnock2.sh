@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# J-NOCK-2b (NOCK.md K-NOCK-CELL): a friend's Nock program becomes a program cell.
+# J-NOCK-2b (docs/NOCK.md §2.1, K-NOCK-CELL): a friend's Nock program becomes a program cell.
 #
 # Journey hook contract (journey.sh header): HOST, MINI, STORE, VERIFIER and
 # JOURNEY_STEP_DIR exported; it bootstraps its OWN fresh Store and service under

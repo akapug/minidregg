@@ -1,4 +1,4 @@
-//! Chat in a room (PLACE §2.3): `say`, `tail`, `topic`, `pin`/`unpin`, `react`,
+//! Chat in a room (docs/PLACE.md §2.3): `say`, `tail`, `topic`, `pin`/`unpin`, `react`,
 //! and the room template `chat new|invite|join|enter|rooms|name`.
 //!
 //! A room `R` is a declared cell whose law lets only its founder write it. It
@@ -185,7 +185,7 @@ pub(crate) enum Line {
     /// `reports [--since H] [-n N] [--digest] [--json]`: the operator reads every `feedback-NAME`
     /// room it founded.
     Reports { since: Option<u64>, count: usize, digest: bool, json: bool },
-    /// `summon`, `ask`, `dismiss` (PLACE §2.7): `crate::hermes`.
+    /// `summon`, `ask`, `dismiss` (docs/PLACE.md §2.7): `crate::hermes`.
     Hermes(crate::hermes::Line),
     Join { room: String, invitation: String },
     Enter(String),
@@ -1910,7 +1910,7 @@ fn tail(session: &Session, room: &Room, count: usize, since: Option<u64>, follow
     };
     // The roster keeps a row for everyone ever invited; who is a member NOW is
     // the Host's `who` view (the subjects whose capability covers the room), so a
-    // kicked or departed member is not counted (AUDIT-ROOMS, client defect 7).
+    // kicked or departed member is not counted (JDISCLOSE row d7).
     let (roster, former) = if held { (roster, Vec::new()) } else { current_members(session, room, roster)? };
     let mut out = std::io::stdout();
     let shown = shown_entries(&feed, since, entry);

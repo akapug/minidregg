@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# J12 (PLACE §2.2, §2.4, §5 item 1): two friends co-write a document through
-# J12W (DEOS §2.2 item #4, P-DOC-WRITE): a friend writes in their own editor;
+# J12 (docs/PLACE.md §2.2, §2.4, §5 item 1): two friends co-write a document through
+# J12W (docs/DEOS.md §2.2 item #4, P-DOC-WRITE): a friend writes in their own editor;
 # the kernel still judges per line.
 #
 #   doc pull NAME           prints the document's live lines, bytes exact, and

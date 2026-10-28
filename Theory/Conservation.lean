@@ -1,7 +1,7 @@
 /-
 # Theory.Conservation -- conservation is membership in a kernel
 
-DATAMODEL.md §3.1 ("Value"), §3.9, §4.1.  For a namespace whose values form an
+docs/DATAMODEL.md §3.1 ("Value"), §3.9, §4.1.  For a namespace whose values form an
 additive group `G`, a transition's *delta* is `post − pre` read with absence as
 `0`.  Conservation is not a property of one operation at a time: it is the
 statement that the delta lies in the kernel of the per-asset sum

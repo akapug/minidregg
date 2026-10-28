@@ -1,26 +1,6 @@
-PRIVATE ROOMS — devnet design (lane W1.9b, 2026-10-04). Code: native/resource-client/src/{roomkey,private}.rs.
-Tags: READ = re-read at source in this clone (c8fdd000); DECIDED = this note's design choice.
-
-0. WHAT HEAD WAS at c8fdd000 (READ at that commit; HISTORICAL)
-Superseded by the landing of this design: commit 4564a8fa (2026-10-03) implements the sections
-below and deletes the always-refusing stubs and current_recipient_source.rs. At main 5216e02f
-roomkey.rs contains none of authenticate_current_wraps, authorize_wrap_publication or
-current_recipient_source (READ, grep). The text of this section is kept as the record of what
-the design replaced; do not read it as the state of main.
-Private rooms are dead three ways at c8fdd000, not one: (a) authenticate_current_wraps always
-refuses (roomkey.rs:371); (b) authorize_wrap_publication always refuses (:1349), so no wrap can be
-written; (c) every write path (found/invite/rotate/rewrap) builds UNSIGNED wraps and write_wraps
-refuses unsigned wraps (:1210) — even with (a),(b) fixed nothing could be founded. Recipient
-authority goes through current_recipient_source -> with_current_source(CurrentRecipient), whose
-Lean entry Host/CurrentRecipientVerifier.lean is imported only by ResearchWip.lean (no Host verb
-dispatches it) and whose image approval is a hard-coded sha256 no build produces.
-The member-oo r18 intake (roomkey-source-consumer-r18.tar, sha256 2614af8b…, roomkey.rs sha256
-58b69e43…) replaces (a) with with_current_source(RoomHead) and adds verified_applied(RoomApplied).
-Neither variant exists in ANY tree (grep of the lane, the warm base and /tank lanes): r18 does not
-compile against its own lane, and with the variants added it can never succeed — there is no Lean
-RoomHead/RoomApplied producer, no Host verb, no approved image. Landing r18 verbatim would replace
-an honest always-refuse with a dishonest one. r18 also DELETES the ring-epoch monotonicity
-refusals, which the brief requires kept.
+PRIVATE ROOMS — devnet design. Code: native/resource-client/src/{roomkey,private}.rs; Lean:
+Kernel/PrivateRoomKeys.lean, Kernel/PrivateRoomWrapGrant.lean.
+Tags: READ = read at source; DECIDED = this note's design choice; BUILT = implemented.
 
 1. THREAT MODEL (DECIDED)
 Assets: room keys k_R^e; plaintext of sealed entries/atoms; membership integrity (who can read
@@ -219,7 +199,7 @@ what the new key signed: the founder was locked out of its own room until every 
    refuses a feed that says private, says nothing, or mixes the two; `outbound` accepts only the entries it
    yields. No setting lifts it. (A mirror that is a hosted MEMBER of a private room is the invite rule above.)
 
-9. J-PRIV-1: PER-WRAP GRANTS (DESIGNED; kernel work AUTHORED, NOT COMPILED; see the lane STATUS)
+9. J-PRIV-1: PER-WRAP GRANTS ((a) BUILT in the default Lean build; (b) and (c) client work NOT BUILT)
 Today every member's room grant reads the whole keys cell, so a member sees every wrap (ciphertext it
 cannot open: with hybrid wraps nothing is gained from copying them, but a leaked read capability shows
 the whole membership/epoch structure and every ciphertext to a harvester). Wanted: a member reads only
@@ -230,11 +210,10 @@ its own wraps, releases and record. What it needs, and where each part stands:
      not subset), `contentField` maps an atoms-namespace address to `atomsOf (atomLow id)`, the capability
      codec/Host JSON name it `atoms:M`. Low-half granularity (not per (epoch, member) atom) is deliberate:
      a member's future wraps carry new epochs and generations but the same low half, so ONE grant covers
-     every epoch without a re-delegation per rotation. Commit "lean(J-PRIV-1)": Theory/TypedAuthorization.lean
-     COMPILED as a whole file; the new module's theorems and the codec label lemma checked in a standalone
-     harness; the edits inside ResourceObservationAdmission, DeclaredResourceController and WorldKindDescriptor
-     AUTHORED, NOT COMPILED (need lake build of their closure before landing).
- (b) CLIENT, once (a) lands: `room invite` delegates observe with fields=[atoms:M] (+ the certificate
+     every epoch without a re-delegation per rotation. Built: `CellField.atomsOf` (Theory/TypedAuthorization),
+     `atomField` (Kernel/ResourceObservationAdmission), the `atoms:N` label (Compiler/CredentialAuthorityEntryCodec)
+     and Kernel/PrivateRoomWrapGrant (imported by Kernel.lean).
+ (b) CLIENT: `room invite` delegates observe with fields=[atoms:M] (+ the certificate
      region, below) instead of the whole cell. The existing flat hiding root already shows a narrowed
      reader sealed leaves for uncovered atoms (count and positions, not values); the per-address tree view
      of K-FIELDS-OBSERVE would hide those too and is NOT on main.
@@ -244,7 +223,7 @@ its own wraps, releases and record. What it needs, and where each part stands:
      each epoch certificate and each founder-key transition its own atom in a region every member's
      field covers (low half 0), and let a narrowed reader check (1) the certificate/transition chain
      from those, and (2) only ITS OWN wraps against ITS OWN releases. This changes the wire (certificates
-     leave the wrap payload) and the order of the release state machine; it is Rust-side but pointless to
-     land before (a). Filed with the next concrete step in cv.
-Until (a)-(c) land: every member reads every wrap; the label says so (R6).
+     leave the wrap payload) and the order of the release state machine; it is Rust-side and
+     lands with (b).
+Until (b) and (c) land: every member reads every wrap; the label says so (R6).
 

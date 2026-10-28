@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# C14 TAIL-BOUND (COMPUTE.md §5.2, §6): a node cannot run more than L heights
+# C14 TAIL-BOUND (docs/COMPUTE.md §5.2, §6): a node cannot run more than L heights
 # past its last certified head.
 #
 # Journey hook contract (journey.sh header): executed with MINI, HOST, STORE,

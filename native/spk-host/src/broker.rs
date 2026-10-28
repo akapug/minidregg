@@ -50,7 +50,7 @@ pub struct SizeClass {
     pub io_weight: u32,
     pub volume_mib: u64,
     /// Concurrent WebSockets one grain generation may hold open. The open is
-    /// a Mini dispatch; frames are unmetered by design (SPK-HOSTING §348), so
+    /// a Mini dispatch; frames are not Mini writes and carry no fee, so
     /// this and `ws_bytes_per_minute` are their physical bound. The open past
     /// the cap is refused `wsConcurrencyCap` before any Mini write.
     pub ws_max_open: usize,
@@ -1279,7 +1279,13 @@ pub fn serve(config_path: &Path) -> io::Result<()> {
         let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
         let cred = match peer_credentials(&stream) {
             Ok(cred) => cred,
-            Err(_) => continue,
+            Err(error) => {
+                broker.log(&json!({
+                    "at":SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
+                    "ok":false,"error":format!("peer credentials unavailable: {error}"),
+                }));
+                continue;
+            }
         };
         let mut line = Vec::new();
         let read = BufReader::new((&stream).take(MAX_REQUEST + 1)).read_until(b'\n', &mut line);

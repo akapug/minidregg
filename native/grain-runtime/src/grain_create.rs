@@ -429,7 +429,7 @@ impl Spec {
             "grants":self.sponsor.grants})
     }
 
-    fn controller(&self, witness: &str, provider_witness: Option<&str>, dispatch_witness: Option<&str>) -> Value {
+    fn controller(&self, witness: &str, provider_witness: Option<&str>, dispatch_witness: Option<&str>, consent_readiness: Option<bool>) -> Value {
         let state = self.root.join("state");
         let mut args = vec![
             "--workspace".to_owned(), self.worker.workspace.display().to_string(),
@@ -467,6 +467,9 @@ impl Spec {
         if let (Some(dispatch), Some(witness)) = (&self.dispatch, dispatch_witness) {
             config["dispatchTask"] = dispatch.controller(witness);
         }
+        if let Some(enabled) = consent_readiness {
+            config["consentFullReadiness"] = json!(enabled);
+        }
         if let Some(class) = &self.sandbox {
             let sandbox = crate::sandbox_tools::Sandbox::for_class(class).expect("sandbox class checked in validate");
             config["sandbox"] = serde_json::to_value(sandbox).expect("sandbox serializes");
@@ -489,13 +492,56 @@ impl DispatchPurse {
 }
 
 fn run(command: &mut Command, what: &str) -> Result<Vec<u8>> {
+    run_with_limit(command, what, deadline::NATIVE_CALL)
+}
+
+fn run_with_limit(command: &mut Command, what: &str, limit: Duration) -> Result<Vec<u8>> {
     // A timeout is a lost reply: the signed step is then resolved by lookup.
-    let output = deadline::output(command.stdin(Stdio::null()), deadline::NATIVE_CALL)
+    let output = deadline::output(command.stdin(Stdio::null()), limit)
         .map_err(|e| deadline::describe(what, e))?;
     if !output.status.success() {
         return Err(format!("{what} exited {}: {}", output.status, String::from_utf8_lossy(&output.stderr).trim()));
     }
     Ok(output.stdout)
+}
+
+/// New dispatch controllers will use lifecycle authoring, so establish full
+/// consent on their actual signing provider before Whole performs signed work.
+/// Existing published configs keep their exact opt-in state; plain grains keep
+/// the thin-consent path. An unsupported cohort is an error, never an opt-out.
+fn provision_consent_readiness(spec: &Spec, work: &Path) -> Result<Option<bool>> {
+    let config_path = spec.root.join("controller.json");
+    match fs::symlink_metadata(&config_path) {
+        Ok(_) => {
+            let existing: Config = serde_json::from_slice(&bounded_regular_file(&config_path, 524_288)?)
+                .map_err(|e| format!("existing controller config: {e}"))?;
+            return Ok(existing.consent_full_readiness);
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("existing controller config: {e}")),
+    }
+    if spec.dispatch.is_none() { return Ok(None); }
+    let pins = json!({"mini":spec.mini, "miniSha256":sha256_file(&spec.mini)?,
+        "host":spec.host, "hostSha256":sha256_file(&spec.host)?,
+        "hostConfig":spec.host_config, "hostConfigSha256":sha256_file(&spec.host_config)?});
+    let output = run_with_limit(Command::new(&spec.mini).arg("consent-full-ready")
+        .arg("--host").arg(&spec.host).arg("--config").arg(&spec.host_config),
+        "prepare dispatch controller full consent", deadline::startup_limit(None)?)?;
+    let receipt = ConsentFullReadiness::parse(&output)?;
+    let after = json!({"mini":spec.mini, "miniSha256":sha256_file(&spec.mini)?,
+        "host":spec.host, "hostSha256":sha256_file(&spec.host)?,
+        "hostConfig":spec.host_config, "hostConfigSha256":sha256_file(&spec.host_config)?});
+    if after != pins { return Err("full-consent provisioning inputs changed during preparation".into()); }
+    let bytes = serde_json::to_vec_pretty(&json!({"type":"mini-grain-create-consent-readiness-v1",
+        "inputs":pins,"receipt":receipt})).map_err(|e| e.to_string())?;
+    let path = work.join("consent-full-readiness.json");
+    match fs::read(&path) {
+        Ok(old) if old == bytes => {}
+        Ok(_) => return Err("retained full-consent provisioning receipt differs".into()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => write_private_new(&path, &bytes)?,
+        Err(e) => return Err(format!("full-consent provisioning receipt: {e}")),
+    }
+    Ok(Some(true))
 }
 
 fn confirmed(outcome: &Path) -> Result<bool> {
@@ -693,6 +739,10 @@ pub(crate) fn create_phase(spec_path: &Path, phase: Phase) -> Result<Value> {
         write_private_new(&work.join("spec.sha256"), format!("{spec_sha}\n").as_bytes())?;
     }
 
+    let consent_readiness = if matches!(phase, Phase::Whole) {
+        provision_consent_readiness(&spec, &work)?
+    } else { None };
+
     // 1. The birth: both grains in one sponsor-signed intent. Once its outcome is
     // confirmed nothing here runs again, and genesis is not read.
     let birth = work.join("birth");
@@ -756,7 +806,7 @@ pub(crate) fn create_phase(spec_path: &Path, phase: Phase) -> Result<Value> {
     }
 
     // 4. The controller config, decoded through the controller's own type.
-    let config = spec.controller(&witness, provider_witness.as_deref(), dispatch_witness.as_deref());
+    let config = spec.controller(&witness, provider_witness.as_deref(), dispatch_witness.as_deref(), consent_readiness);
     let typed: Config = serde_json::from_value(config.clone()).map_err(|e| format!("controller config refused by its own type: {e}"))?;
     // The same checks `serve` runs at open, so a bad config refuses here.
     crate::validate(&typed).map_err(|e| format!("controller config refused by the controller's validation: {e}"))?;
@@ -936,6 +986,68 @@ esac
     }
 
     #[test]
+    fn create_full_consent_skips_plain_grains_and_preserves_published_config() {
+        let fixture = BirthFixture::new();
+        let mut spec = fixture.spec();
+        spec.root = fixture.0.clone();
+        // No executable exists: plain creation must not probe or replay consent.
+        assert_eq!(provision_consent_readiness(&spec, &fixture.0).unwrap(), None);
+        spec.dispatch = serde_json::from_value(with_dispatch()["dispatch"].clone()).unwrap();
+        for setting in [None, Some(false), Some(true)] {
+            let config = spec.controller("8790", None, Some("8792"), setting);
+            let bytes = serde_json::to_vec_pretty(&config).unwrap();
+            fs::write(spec.root.join("controller.json"), &bytes).unwrap();
+            assert_eq!(provision_consent_readiness(&spec, &fixture.0).unwrap(), setting);
+            assert_eq!(fs::read(spec.root.join("controller.json")).unwrap(), bytes);
+        }
+        assert!(!fixture.0.join("consent-full-readiness.json").exists());
+    }
+
+    #[test]
+    fn create_dispatch_enables_full_consent_only_after_exact_native_ack() {
+        let fixture = BirthFixture::new();
+        let mut spec: Spec = serde_json::from_value(with_dispatch()).unwrap();
+        spec.root = fixture.0.clone();
+        spec.mini = fixture.0.join("mini");
+        spec.host = fixture.0.join("host");
+        spec.host_config = fixture.0.join("host-config.json");
+        fs::write(&spec.host, b"pinned Host").unwrap();
+        fs::write(&spec.host_config, b"pinned settings").unwrap();
+        // A transport double, not native admission: it rejects all signed verbs.
+        fs::write(&spec.mini, r#"#!/bin/sh
+set -eu
+[ "$1" = consent-full-ready ] || exit 90
+root=${0%/*}
+printf '%s\n' "$*" >> "$root/readiness-calls"
+cat "$root/readiness-reply"
+"#).unwrap();
+        fs::set_permissions(&spec.mini, fs::Permissions::from_mode(0o700)).unwrap();
+        for reply in ["unsupported", "", r#"{"type":"mini-consent-full-readiness-v1","ready":false}"#,
+            r#"{"type":"mini-consent-full-readiness-v1","ready":true,"extra":1}"#] {
+            fs::write(fixture.0.join("readiness-reply"), reply).unwrap();
+            assert!(provision_consent_readiness(&spec, &fixture.0).is_err());
+            assert!(!fixture.0.join("consent-full-readiness.json").exists());
+            assert!(!fixture.0.join("controller.json").exists());
+        }
+        fs::write(fixture.0.join("readiness-reply"),
+            br#"{"type":"mini-consent-full-readiness-v1","ready":true}"#).unwrap();
+        let selected = provision_consent_readiness(&spec, &fixture.0).unwrap();
+        assert_eq!(selected, Some(true));
+        let config = spec.controller("8790", None, Some("8792"), selected);
+        assert_eq!(config["consentFullReadiness"], true);
+        let evidence = fixture.0.join("consent-full-readiness.json");
+        let original = fs::read(&evidence).unwrap();
+        let proof: Value = serde_json::from_slice(&original).unwrap();
+        assert_eq!(proof["inputs"]["miniSha256"], sha256_file(&spec.mini).unwrap());
+        assert_eq!(proof["receipt"]["ready"], true);
+        assert_eq!(provision_consent_readiness(&spec, &fixture.0).unwrap(), Some(true));
+        assert_eq!(fs::read(&evidence).unwrap(), original);
+        fs::write(&spec.host_config, b"different settings").unwrap();
+        assert!(provision_consent_readiness(&spec, &fixture.0).unwrap_err().contains("receipt differs"));
+        assert_eq!(fs::read(&evidence).unwrap(), original);
+    }
+
+    #[test]
     fn create_spec_refuses_every_missing_field_and_unknown_field() {
         let full = spec_json();
         serde_json::from_value::<Spec>(full.clone()).unwrap();
@@ -955,7 +1067,7 @@ esac
     #[test]
     fn create_writes_a_config_the_controller_type_accepts() {
         let spec: Spec = serde_json::from_value(spec_json()).unwrap();
-        let config = spec.controller("8790", None, None);
+        let config = spec.controller("8790", None, None, None);
         let typed: Config = serde_json::from_value(config.clone()).unwrap();
         assert_eq!(typed.task, "8751");
         assert_eq!(config["toolTask"]["parentCapability"], "8790");
@@ -975,14 +1087,14 @@ esac
         let intent = spec.birth_intent(&json!({}));
         assert_eq!(intent["birth"]["resources"][0]["workerSubjects"], json!(["9", "10"]));
         assert_eq!(intent["birth"]["resources"][2]["owner"], "10");
-        let config = spec.controller("8790", Some("8791"), None);
+        let config = spec.controller("8790", Some("8791"), None, None);
         assert_eq!(config["providerTask"]["parentCapability"], "8791");
         assert_eq!(config["providerTask"]["subject"], "10");
         serde_json::from_value::<Config>(config).unwrap();
         with["dispatch"] = with_dispatch()["dispatch"].clone();
         let both: Spec = serde_json::from_value(with.clone()).unwrap();
         both.check_values().unwrap();
-        let config: Config = serde_json::from_value(both.controller("8790", Some("8791"), Some("8792"))).unwrap();
+        let config: Config = serde_json::from_value(both.controller("8790", Some("8791"), Some("8792"), Some(true))).unwrap();
         let workers = ordered_worker_subjects(
             config.tool_task.as_ref().map(|v| v.subject.as_str()),
             config.provider_task.as_ref().map(|v| v.subject.as_str()),
@@ -1011,7 +1123,7 @@ esac
         let birth = spec.birth_intent(&json!({}));
         assert_eq!(birth["birth"]["resources"][0]["workerSubjects"], json!(["9", "11"]));
         let resource = &birth["birth"]["resources"][2];
-        let typed: Config = serde_json::from_value(spec.controller("8790", None, Some("8792"))).unwrap();
+        let typed: Config = serde_json::from_value(spec.controller("8790", None, Some("8792"), Some(true))).unwrap();
         let dispatch = typed.dispatch_task.unwrap();
         assert_eq!(dispatch.task, resource["target"]);
         assert_eq!(dispatch.subject, resource["owner"]);

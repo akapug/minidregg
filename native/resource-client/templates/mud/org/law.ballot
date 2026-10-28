@@ -1,9 +1,9 @@
 -- kind: ballot
--- MUD §2.7 ballot cell {REALM}-org-{G}-ballot-{N}. Installed as `law.management ; law.ballot`.
+-- docs/MUD.md §2.7 ballot cell {REALM}-org-{G}-ballot-{N}. Installed as `law.management ; law.ballot`.
 -- Eight seats, vote-0..vote-7 born 0 (= no vote) when the ballot opens; candidates are 1..ncand (<= 3).
 -- Seats map to members at `ballot open` ({SEAT_k} = the member's subject; an empty seat is bound to {NOBODY}).
 -- Each seat is scoped by LAW here (clause 4), so one-vote-each does not wait for K-FIELDS; K-FIELDS would add
--- the same fact on the capability side (MUD A6).
+-- the same fact on the capability side.
 -- 1 pinned
 any [ not (verb == 2), all [ field id == {N}, field org == {G}, field office == {OFFICE}, field ncand == {NCAND} ] ];
 -- 2 range

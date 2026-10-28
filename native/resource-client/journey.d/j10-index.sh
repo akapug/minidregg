@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# journey.d/j10-index.sh — the index the world keeps (PLACE K-INDEX) and a read
+# journey.d/j10-index.sh — the index the world keeps (docs/PLACE.md §2.5 K-INDEX) and a read
 # at a past height (K-HISTORY-READ), on the journey's fresh Store, after K10
 # (which made the room `lab`, `note` born in it, and B's observe invite).
 #

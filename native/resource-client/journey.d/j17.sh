@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# journey.d/j17.sh — P-CREDIT (PLACE §2.10, J17): a week in the place.
+# journey.d/j17.sh — P-CREDIT (docs/PLACE.md §2.10, J17): a week in the place.
 #
 # On this journey's live Store (after J5). Friends are enrolled, provisioned
 # and `init`ed exactly as J12/K10C do; every friend line is typed into that

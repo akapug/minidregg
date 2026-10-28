@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# J-PAY-6 (PAY.md P6): a Book burn funds an AgentGrain purse in one joint turn,
+# J-PAY-6 (PAY P6): a Book burn funds an AgentGrain purse in one joint turn,
 # on a fresh private Store.
 #
 # Follows the journey hook contract (journey.sh header): executed with HOST,

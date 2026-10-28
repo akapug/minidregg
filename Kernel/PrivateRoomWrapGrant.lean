@@ -1,17 +1,10 @@
 /-
 # Kernel.PrivateRoomWrapGrant -- J-PRIV-1: a member's grant reads only its own wraps
 
-EVIDENCE (lane s9-rooms, 2026-10-04; there was no warm Lean base, so no `lake build`):
- * COMPILED, whole file: `Theory/TypedAuthorization.lean` (`lean` on the one file against
-   a Mathlib build, exit 0, no warning, every pinned `#guard_msgs` axiom line matches).
- * CHECKED IN A STANDALONE HARNESS (not committed; it copies the few definitions these
-   proofs stand on): every theorem of THIS module, and `fieldOfLabel_label` with the
-   `atoms:N` names of `Compiler/CredentialAuthorityEntryCodec`; 0 errors, 0 warnings.
- * AUTHORED, NOT COMPILED: the edits to `Kernel/ResourceObservationAdmission`
-   (`atomField`, `contentFieldAt`, `fieldOf .content`, the two reader theorems and the
-   changed pole), `Kernel/DeclaredResourceController` (two lines), `Compiler/WorldKindDescriptor`
-   (`bound_scope_covers_only_descriptor`), and this module inside the real import closure
-   (`lake build Kernel.PrivateRoomWrapGrant`).  Those need a Lean build before this lands.
+This module is imported by `Kernel.lean` and builds with the Kernel library, together with
+what it stands on: `atomField` and `contentFieldAt` in `Kernel/ResourceObservationAdmission`,
+`CellField.atomsOf` in `Theory/TypedAuthorization`, and `bound_scope_covers_only_descriptor`
+in `Compiler/WorldKindDescriptor`.
 
 ## What it states
 
@@ -33,7 +26,7 @@ and no other member's, no link, no annotation.
   It cannot today: `verify_lineage` checks the whole certificate chain over all
   wraps (docs/PRIVATE-ROOMS-DESIGN.txt section 9(c)); the certificates and the
   founder-key transitions need atoms of their own in a region every member's field
-  covers.  That is client work, blocked on this module compiling and landing.
+  covers.  That is client work.
 * Hiding: a narrowed reader still receives sealed leaves for the atoms it does not
   cover under the flat root (`narrowPacked`); the per-address tree view of
   K-FIELDS-OBSERVE would also hide their count and positions, and is not on main.

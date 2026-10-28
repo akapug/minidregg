@@ -46,9 +46,11 @@ with identical receipt bytes. The route-latency lane owns that shared change.
 A byte-array codec rewrite is a larger follow-on, not the first experiment.
 
 Old q3 measurements reported by its acceptance owner remain useful capacity
-warnings: around 125 events, consent cold readiness took about seven minutes
+warnings: when the retained signed query164 challenge reported `height=125`,
+consent cold readiness took about seven minutes
 and peaked at 1,858,396,160 bytes in its cgroup, while the controller itself was
-about 57 MiB. Keeping dozens of controllers light does not make simultaneous
+about 57 MiB. That challenge height is not labeled as an accepted-event count;
+the START receipts carry their own acceptedCount fields. Keeping dozens of controllers light does not make simultaneous
 full consent cold starts affordable. Resident reuse and explicit startup
 readiness avoid repeated work and misplaced deadlines; a measured replay
 optimization is still needed to reduce the first verification's CPU and RSS.
@@ -58,3 +60,42 @@ Source: `Host/ApplicationAgentLifetimeGrantInspection.lean`,
 `Host/ClientConsentCore.lean`, `Kernel/DurableEngine.lean`,
 `Kernel/ApplicationDispatchPending.lean`; existing route profile
 `lane/un-route-latency:docs/review/2026-10-27-untouched-areas/ROUTE-LATENCY-STATE.md`.
+
+## Sharing independent verification across controllers
+
+The delegated service already shares one independently verified basis across
+connections from its configured controller UID. Further sharing requires the same full `NativeHost.Config`: deployment, federation,
+profile/template/tariff, genesis and seed pins, Store transport and checkpoint
+key, and stable signature semantics. A shared Store path alone is insufficient.
+Per-caller consent settings also retain provider-route schedules, lifecycle
+management and Objective adapter pins; requests still name their own signer.
+
+The current delegated proxy already shares one independently admitted frontier
+across connections, but authenticates exactly one controller UID. Its handshake
+pins the provider image, exact settings bytes and peer identity. The deployed
+service unit is named per Store. The installer allocates one `mini-c-STORE`
+UID/home and stages one controller configuration (or one worker task). That
+controller already holds distinct native parent, tool, provider and dispatch
+subjects and launches sandboxed workers under the same trusted UID. Many native
+principals or application routes therefore do not imply many consent processes.
+The app-market worker likewise serves many members/apps through one configured
+world/profile. The capacity unit to measure is the Store/controller allocation.
+
+Separate Hermes room instances use `mini-h-INSTANCE` UIDs and may point at the
+same Node host configuration. Those distinct OS trust domains, rather than the
+number of native subjects inside one controller, are where cross-UID sharing
+could remove duplicate verification. Their actual configuration/binding equality
+must be established before choosing a pool.
+
+A shared service must keep authenticated caller channels and each caller's held
+anchor/prefix check, while reusing an immutable basis admitted by consent itself.
+Rollback, rewritten-prefix and failed-suffix observations must retain their
+refusal/poisoning behavior. A serving Host's claimed verification is not a
+replacement for independent consent. The bounded follow-up is to map actual Store/controller allocations and measure
+per-Store RSS first. Where compatible independent instances duplicate a basis,
+separate that shared source basis from per-caller settings and held-frontier
+state, with receiving-path checks for isolation. This change adds no new pool.
+
+Source: `Kernel.ConsentAnchor.Basis`, `Host.ClientConsentCore.Settings.config`,
+`native/resource-client/src/consent_proxy.rs` (`Selection`, `Worker`, `serve`),
+and `deploy/spk-host/controller-world.py`.

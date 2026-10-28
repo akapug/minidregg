@@ -82,7 +82,9 @@ state_paths() {
       }
   fi
 }
-state_paths
+# Stopping the recorded Store services needs their PID/socket identities only.
+# A resumed teardown may already have removed the grain profile and volumes.
+[ "$MODE" = stop-services ] || state_paths
 # Resource coordinates: GRAIN_A..GRAIN_I are the two-digit prefixes of
 # instance a..i's app (NN01), session (NN10) and ticket (NN20). CLASS_X is
 # its size class (S, M or L); IMPORT_X (an export directory) with IMPORT_KEY

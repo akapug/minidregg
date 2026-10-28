@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# J-NOCK-3P (COMPUTE.md C2, K-RUN-PIN): a pinned program's claim is good at every
+# J-NOCK-3P (docs/COMPUTE.md §8 C2, K-RUN-PIN): a pinned program's claim is good at every
 # height where the fields it reads are unchanged.
 #
 # Journey hook contract (journey.sh header): HOST, MINI, STORE, VERIFIER and

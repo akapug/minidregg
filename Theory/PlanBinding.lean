@@ -1,7 +1,7 @@
 /-
 # Theory.PlanBinding — a plan binds the values at the addresses it reads
 
-DATAMODEL §3.2 / §3.4 / §3.5 / §4.8.  A signed plan used to bind the whole root
+docs/DATAMODEL.md §3.2 / §3.4 / §3.5 / §4.8.  A signed plan used to bind the whole root
 of the cell it read.  Every admitted operation writes into the shared authority
 cell, so every admission moved that root and invalidated every other agent's
 pending plan (lane M8's contention finding).  This module states the binding

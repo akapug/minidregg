@@ -1,4 +1,4 @@
-//! The sealed-bid market (PRIVACY §3.4, MUD §2.7/§2.8): one declared cell under
+//! The sealed-bid market (docs/MUD.md §2.8): one declared cell under
 //! the law `native/resource-client/templates/market/sealed/law.market`, a founder who sells
 //! `supply` units at one uniform price, and up to four sealed bids.
 //!

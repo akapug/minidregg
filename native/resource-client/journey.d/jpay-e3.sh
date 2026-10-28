@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# J-PAY-E3 (PAY.md §11.9 P3b-2): the self-enrollment RECEIVER on a fresh Store.
+# J-PAY-E3 (docs/PAY.md §11.9 P3b-2): the self-enrollment RECEIVER on a fresh Store.
 #
 # Follows the journey hook contract (journey.sh header): executed with HOST,
 # MINI, STORE, VERIFIER and JOURNEY_STEP_DIR exported; it starts its OWN Host on

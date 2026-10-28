@@ -20,7 +20,7 @@ import all Init.Data.List.Scan.Basic
 /-
 # Theory.Channel.Cell — the channel class, the fixed-size cell and its canonical codec
 
-CHANNELS.md §2.1–§2.2 (revision 2). A *class* is the tuple `(C, r, E, δ, δ_relay, μ)`; every slot of a
+docs/CHANNELS.md §2.1–§2.2 (revision 2). A *class* is the tuple `(C, r, E, δ, δ_relay, μ)`; every slot of a
 room's schedule emits one `C`-byte cell every tick. Two layouts share the size:
 
 ```
@@ -79,7 +79,7 @@ def dutyPublicLen : Nat := 160
 /-- The largest sealing overhead (`viewTag 1 | frag 4 | epk 32`, X25519 mode). -/
 def maxSealOverhead : Nat := 37
 
-/-- A channel class `(C, r, E, δ, δ_relay, μ)` (CHANNELS.md §2 notation, §3 class menu). Times are in
+/-- A channel class `(C, r, E, δ, δ_relay, μ)` (docs/CHANNELS.md §2 notation, §3 class menu). Times are in
 milliseconds and the rate in millihertz, so P0's 0.1 Hz is exact. The two proof fields are the codec's
 well-formedness: a duty cell's sealed part holds the largest sealing overhead, and a tick index fits
 the header's two bytes. Timing well-formedness is the separate decidable `Profile.Timed`, so that a
@@ -310,7 +310,7 @@ instance {P : Profile} : DecidableEq (Cell P) := fun a b =>
 /-- The cell's bytes: `header ++ body`. -/
 def Cell.encode {P : Profile} (c : Cell P) : List UInt8 := c.header.encode ++ c.body.encode
 
-/-- **`cell_size_exact`** (CHANNELS.md §2.2): every cell of class `P` is exactly `C` bytes, in both
+/-- **`cell_size_exact`** (docs/CHANNELS.md §2.2): every cell of class `P` is exactly `C` bytes, in both
 layouts. -/
 theorem cell_size_exact {P : Profile} (c : Cell P) : c.encode.length = P.C := by
   have := P.C_ge
@@ -407,7 +407,7 @@ theorem cell_decode_encode {P : Profile} (c : Cell P) : Cell.decode P c.encode =
   simp only [c.bodyBlob.property, ↓reduceDIte]
   exact congrArg some (Cell.ofRaw_bodyBlob c)
 
-/-- **`cell_decode_canonical`** as CHANNELS.md §2.2 states it: a decoded cell re-encodes to exactly the
+/-- **`cell_decode_canonical`** as docs/CHANNELS.md §2.2 states it: a decoded cell re-encodes to exactly the
 bytes it came from. With `cell_decode_encode` the codec is a bijection onto its accepted set. -/
 theorem cell_decode_canonical {P : Profile} {bytes : List UInt8} {c : Cell P}
     (accepted : Cell.decode P bytes = some c) : c.encode = bytes := by

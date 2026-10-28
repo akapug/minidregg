@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# journey.d/jpriv1.sh — J-PRIV-1 (PRIVACY §3.1, row 7): a private room on this
+# journey.d/jpriv1.sh — J-PRIV-1 (private rooms, docs/PRIVATE-CELL.md): a private room on this
 # journey's live Store (after J5), through `mini shell` for the room verbs and
 # the client contract for stream appends and tails (the `say`/`tail` verbs are
 # P-CHAT's; they call the same sealing this hook drives with `--private`).

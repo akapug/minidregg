@@ -1,7 +1,7 @@
 //! pay-watcher --config FILE --out DIR [--rpc-fixture DIR]... [--spool DIR]
 //!
 //! Live mode (no `--rpc-fixture`): endpoints come from `PAY_RPC_ENDPOINTS` (whitespace- or
-//! comma-separated URLs; PAY.md §3.5 keeps them in `/etc/mini/pay/rpc.env`), each reached with
+//! comma-separated URLs; docs/PAY.md §3.5 keeps them in `/etc/mini/pay/rpc.env`), each reached with
 //! `/usr/bin/curl` through a private spool (`--spool`, default `--out`). Fixture mode: each
 //! `--rpc-fixture DIR` is one endpoint answered from files (see `transport::fixture_key`).
 //!

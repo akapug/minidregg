@@ -209,6 +209,22 @@ dregg-build 2026-10-27 20:36-21:13Z on w11 / `app-batch-*-runs`.
 | DAV rows (Davros WebDAV tree, SandCal CalDAV probe) | `market-writes/dav.sh` | a candidate carrying `dfdecbbac` (on main) | not run | not run |
 | member install debit (`apps-e2e.sh`) | | `MEMBER_FUNDING=10000 APPS_MAX=50000 apps-e2e.sh $RUN/WORLD.env OUT <appIds>` after `mini apps bootstrap` | not run (needs lean-l13-laws in the candidate) | debit into INSTALL.md §4 |
 
+### Generic whole-store sweep (cx-store-sweep, 2026-10-28)
+
+`store-sweep.sh` now covers the entire public index through the real grain lifecycle, with
+seven apps per world, no app-specific writes, candidate/package-scoped resume, and checked
+serial teardown. On hbox, candidate `aae3e2e372b045dd43493183144db08212d51659` (carrying the
+76758dba6 install/start fixes) judged **22 of 98 apps: 20 PASS, 2 FAIL**. This is three full
+worlds plus the earlier one-app smoke; a targeted retry selected the native large import
+profile for a package exceeding the standard segment limit. The run's stages, refusals and
+evidence paths are in [the TSV](evidence/2026-10-28-store-sweep/verdicts.tsv), with
+[run details and continuation](evidence/2026-10-28-store-sweep/README.md).
+
+The candidate-shipped `deploy/market/store-qualification.json` supplies `mini apps search`
+and `show` with package-specific lifecycle evidence. It does not change local ingest authority
+or certify app writes. **76 apps remain unswept**; the same output root resumes them in 11
+worlds. Owner: cx-store-sweep; [runner instructions](../scripts/spk-platform/STORE-SWEEP.md).
+
 ## 4. World-native effects rows (un-effects; `docs/evidence/2026-10-27-world-native/EFFECTS-STATE.md`)
 
 Run on a worktree at the candidate's commit, one `swarm-build`, PID file. Evidence under

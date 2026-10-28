@@ -692,7 +692,7 @@ fn read_bounded(path: &Path, max: usize) -> Result<Vec<u8>> {
 
 // ---------------------------------------------------------------- room tools
 
-/// Hermes's tools in a room (PLACE §2.7, §5 row 7). Each is one or two lines
+/// Hermes's tools in a room (docs/PLACE.md §2.7, §5 item 7). Each is one or two lines
 /// of the pinned `mini` client's shell, run under HERMES'S OWN workspace (its
 /// key, its references, its grants): no tool holds or lends authority the
 /// workspace lacks, and a line the Host refuses comes back as the Host's
@@ -705,7 +705,7 @@ fn read_bounded(path: &Path, max: usize) -> Result<Vec<u8>> {
 /// refuses that payment at plan (`bookRefused`) and the write is not
 /// attempted: the error starts `out of budget:`.
 ///
-/// Seams: `mini_doc_quote` and `mini_doc_history` (DEOS §2.3) wait for the
+/// Seams: `mini_doc_quote` and `mini_doc_history` (docs/DEOS.md §2.3) wait for the
 /// docuverse-on-final lane (the content cell's transclusion action and the
 /// history view); they are not offered.
 #[derive(Clone, Debug, Serialize, Deserialize)]
