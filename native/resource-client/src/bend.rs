@@ -47,9 +47,9 @@ const TICK_RATE: u128 = 1;
 const REPLAY_RATE: u128 = 61;
 const CORE_RATE: u128 = 16;
 /// The source ticks a bend's birth declares (`activity_world.TICKS`) and the multiple of its price the
-/// default deposit reserves (the activity acceptance's `DEPOSIT`: comfortably the first await).
+/// default deposit reserves: the pair of envelopes the first await escrows (resume and timeout, `activity_world.PAIR`) and one more price. A larger purse is `--deposit N`; a program that awaits again needs one.
 const TICKS: u128 = 3000;
-const DEPOSIT_PRICES: u128 = 7;
+const DEPOSIT_PRICES: u128 = 3;
 /// The declared state type `{total: Nat}` (the checker's type JSON) `Tally` and its siblings keep.
 const TOTAL_STATE: &str = r#"{"tag":"field","name":"total","member":{"tag":"natural"},"tail":{"tag":"emptyRow"}}"#;
 
@@ -180,6 +180,11 @@ fn ending(error: String) -> Result<()> {
     } else {
         Err(error)
     }
+}
+
+/// The refusal for a payer that cannot cover the run: nothing is submitted.
+fn unfunded_refusal(name: &str, object_ref: &str, held: u128, cost: u128) -> String {
+    format!("refused: unfunded: run {name} on {object_ref} costs {cost} (its purse deposit plus the birth envelope's price) and your account holds {held}; nothing was submitted (--deposit N sets a smaller purse)")
 }
 
 /// The Host-free refusal for an object name that is not here: nothing is submitted.
@@ -479,6 +484,13 @@ fn run_bend(bend: &Bend, mut args: Args) -> Result<()> {
     let before = balance(&view, &payer);
     let object_cell = view.pointer("/objects/0/objectCell").and_then(Value::as_str).ok_or("bend: view names no object cell")?;
     let has_record = cell_of(&view, object_cell).and_then(|c| c.get("kind")).and_then(Value::as_str) == Some("object-record");
+    // The run costs its deposit (the activity's purse) plus the birth envelope's price. A payer that
+    // holds less is told so before anything is signed, with the figures (the Host would refuse it
+    // `unfunded` after the create turn already landed).
+    let cost = deposit.unwrap_or(DEPOSIT_PRICES * price(TICKS, replay, core)) + price(TICKS, replay, core);
+    if let Some(held) = before.filter(|held| *held < cost) {
+        return ending(unfunded_refusal(&name, &object_ref, held, cost));
+    }
     let mut created = None;
     if !has_record {
         let state_type = state_type.unwrap_or_else(|| serde_json::from_str(TOTAL_STATE).expect("a constant"));
@@ -779,6 +791,13 @@ mod tests {
         assert!(absent_object(&root, "fresh").is_none());
         assert!(absent_object(&root, "room/shared").is_none(), "a shared name resolves through its room");
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_unfunded_run_says_what_it_costs_and_what_the_account_holds() {
+        let text = unfunded_refusal("tally", "lobby-tally", 874, 2162240);
+        assert!(text.starts_with("refused: unfunded: run tally on lobby-tally costs 2162240") && text.contains("holds 874"), "{text}");
+        assert_eq!(price(3000, 1500, 900), 1 + 3000 + 61 * 1500 + 16 * 900);
     }
 
     #[test]

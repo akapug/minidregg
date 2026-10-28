@@ -13,7 +13,7 @@ the activity route (Host ops 7 author / 210 plan / 211 assemble / 212 submit / 2
   bend-run       `bend run tally counter`: the object is created pinning Tally and born under a full
                  envelope; the Host's outcome line names height, world root and receipt; the object's
                  declared state read back through the VIEW (not the shell's line) is Tally's `{total: 0}`;
-                 the activity's purse holds the deposit the line states, which is seven envelope prices as
+                 the activity's purse holds the deposit the line states, which is three envelope prices as
                  activity_world prices them; the member's account paid at least that
   bend-show      `bend show counter`: the public view agrees with the view this driver reads
   bend-refusal   `bend publish bad @Bad.obend` with a malformed source: refused (exit 3) by the Host's
@@ -44,7 +44,7 @@ def shell(label, line, ok=(0, 1, 2, 3, 4)):
 
 
 try:
-    w.bring_up(['counter', 'lost'], sponsor_balance='100000000000')
+    w.bring_up(['counter', 'lost'], sponsor_balance='100000000000', second_balance='10000')
     # The member's account: the sponsor's own, named once (`bend` finds the workspace's one account reference).
     w.sh('account-reference', w.mini, 'workspace', '--action', 'import', '--dir', w.sponsor, '--name', 'account',
          '--kind', 'account', '--target', w.SPONSOR_ACCOUNT, '--observe-capability', w.SPONSOR_SPEND,
@@ -85,7 +85,7 @@ try:
             height_n, root, tx, event, state, purse, deposit, was, now, charge = m.groups()
             w.check('run-is-admitted-after-the-publish', int(height_n) > published_at, {'publish': published_at, 'run': height_n})
             w.check('line-state-is-the-tallys', state == '{total=0}', state)
-            w.check('deposit-is-seven-envelope-prices', int(deposit) == 7 * AW.PRICE, {'line': deposit, 'world': 7 * AW.PRICE})
+            w.check('deposit-is-three-envelope-prices', int(deposit) == 3 * AW.PRICE, {'line': deposit, 'world': 3 * AW.PRICE})
             w.check('purse-holds-the-deposit', 0 < int(purse) <= int(deposit), {'purse': purse, 'deposit': deposit})
             w.check('account-paid-at-least-the-deposit', int(charge) >= int(deposit) and int(was) - int(now) == int(charge),
                     {'was': was, 'now': now, 'charge': charge, 'deposit': deposit})
@@ -152,7 +152,34 @@ try:
         acct = acct0
         w.check('one-charge', acct(b0) - acct(end) == first_charge,
                 {'before': acct(b0), 'afterLost': acct(mid), 'afterRetry': acct(end), 'firstRunCharge': first_charge})
-        w.check('purse-is-one-deposit', s['purse'] == 7 * AW.PRICE, s['purse'])
+        w.check('purse-is-one-deposit', s['purse'] == 3 * AW.PRICE, s['purse'])
+
+    with w.group('bend-demo-sized-member'):
+        # the seed's shape: a member holding a demo-sized balance (10,000) publishes (a fee of a few credits)
+        # and is told, by name and with the amounts, that the run costs more than the account holds
+        phome = w.root / 'poor-home'
+        (phome / 'requests').mkdir(parents=True, mode=0o700)
+        (phome / 'requests' / 'PoorTally.obend').write_text((w.repo / 'world/activity/Tally.obend').read_text() + '# the demo-sized member\n')
+        (phome / 'requests' / 'PoorTally.obend').chmod(0o600)
+
+        def pshell(label, line):
+            r = w.sh(label, w.mini, 'shell', '--socket', w.sock, '--host', w.host, '--config', w.config, '--workspace', w.second,
+                     '--home', phome, '--line', line, ok=(0, 1, 2, 3, 4))
+            return r.returncode, r.stdout.decode(errors='replace').strip(), r.stderr.decode(errors='replace').strip()
+        w.sh('poor-account', w.mini, 'workspace', '--action', 'import', '--dir', w.second, '--name', 'account', '--kind', 'account',
+             '--target', w.SECOND, '--observe-capability', w.SECOND_SPEND, '--operation-capability', w.SECOND_SPEND)
+        rc, out, err = pshell('poor-publish', 'bend publish poor @PoorTally.obend --entry tally')
+        w.check('poor-publish-admitted', rc == 0 and out.startswith('admitted: bend publish poor'), {'rc': rc, 'out': out[:200], 'err': err[-300:]})
+        rc, out, err = pshell('poor-create', 'create poor-cell content open')
+        w.check('poor-cell-made', rc == 0, {'rc': rc, 'err': err[-300:]})
+        held = w.balance(w.view('poor-balance', {'accounts': [w.SECOND]}), w.SECOND)
+        before = int(w.view('poor-height', {})['height'])
+        rc, out, err = pshell('poor-run', 'bend run poor poor-cell')
+        m = re.search(r'costs (\d+) .* holds (\d+);', err)
+        w.check('demo-sized-run-refused-by-name-with-the-amounts',
+                rc == 3 and err.startswith('refused: unfunded: run poor on poor-cell costs') and m is not None and int(m.group(2)) == held and int(m.group(1)) > held
+                and int(m.group(1)) == 4 * AW.PRICE, {'rc': rc, 'err': err[-400:], 'held': held, 'price': AW.PRICE})
+        w.check('nothing-submitted-by-the-unfunded-run', int(w.view('poor-height-after', {})['height']) == before, 'height unchanged')
 
     with w.group('bend-refusal'):
         before = height('height-before-refusal')

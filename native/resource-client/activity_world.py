@@ -272,7 +272,7 @@ class World:
             return {'unparsed': text[-800:]}
 
     # --- the world -------------------------------------------------------------------
-    def bring_up(self, object_names, sponsor_balance='1000000000'):
+    def bring_up(self, object_names, sponsor_balance='1000000000', second_balance='100000000000'):
         """Genesis with the Objective policy and a second enrolled subject, then one native resource
         (object cell + operation capability) per name, none of them an object yet (no record)."""
         root = self.root
@@ -286,7 +286,7 @@ class World:
                                'activeFrom': '0', 'activeUntil': '1000000',
                                'nextKeyDigest': None},
                        'accountId': self.SECOND, 'spendCapabilityId': self.SECOND_SPEND, 'controlCapabilityId': '4003',
-                       'factoryObserveCapabilityId': '4004', 'initialBalance': '100000000000',
+                       'factoryObserveCapabilityId': '4004', 'initialBalance': second_balance,
                        'accountPredicate': {'type': 'all', 'predicates': []}}]
         (root / 'enrollment-second.json').write_text(json.dumps(enrollment))
         self.W = root / 'w'
