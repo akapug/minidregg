@@ -100,18 +100,18 @@ The auditor is af7a93e7b8ba729d4; passes 16–23 are on lane/audit-platform.
 - Pass 24: item 7 witnesses. Signed poles go over a recorded transcript; a native_decide
   module is the fallback, thresholded on the module's total gate time.
 
-### Queued after landing
+### Landed and after
 
-- **Birth-authoring twin, ordered by the coordinator under law 1.** The box authors births with
-  Host.Json, and the thin-consent provider re-authors with `Host.SourceAgreementJson.birthAt`.
-  They are identical copies (lane/thin-birth 1e0f741d3, docs/THIN-BIRTH-2026-10-28.md); if they
-  ever diverge, honest thin births are refused `draftNotAuthored`. Collapse them into one
-  function both call, keep the better copy, and prove agreement with rfl or a filtered test. Do
-  this after lean-audit-c and thin-birth are both on main.
-- thin-birth is on main (eda65ced8); the DurableFastForwardProofs fix is on main (455f59d57, the same
-  edit as cdda94d42). Expect overlap with this lane in
-  Host/SourceAgreementJson.lean (`birthCurrent`) and Host/HostOperations.lean when merging the
-  converted main.
+- 18ade1e4a is on main (0af55d21c): the conversion, lean-audit-c and M2. The integrator's next
+  build runs the one codec regen and the epoch move, and re-records NativeAcceptedFixture and
+  NativeDocWriteFixture.
+- **53d66406f, sent green:** the birth-authoring twin is collapsed. Host.Json's copy is deleted,
+  and every author (op 91, the loaded authors, thin consent) calls SourceAgreementJson's.
+  `birthCurrent_eq_birthAt` is rfl.
+- Open, put to the coordinator: the two loaded authors read the platform record through
+  different functions. Host.CurrentResourceBirthAuthoring uses `NativeHost.platformRecordIn`;
+  Host.SourceAgreementBirth uses `PlatformCellDomain.recordOn`. They read the same bytes, but it is
+  a second reader beside the census's one.
 
 ### Box trees
 
