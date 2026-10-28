@@ -268,6 +268,13 @@ for app in "$@"; do
     row "the install of $name debited the member's own account" "$([ "$bal_after" -lt "$bal_before" ] && echo 1 || echo 0)" "before=$bal_before after=$bal_after debit=$((bal_before - bal_after))"
   fi
   bal_before=$bal_after
+  # The Host's side of the install, whatever the worker did after it: the tool reservation and the
+  # application birth admitted (the request record keeps the birth receipt), not law-denied.
+  adm=""; for rec in "$out"/state/requests/*.json; do case $rec in *.outcome.json) continue ;; esac
+    adm=$(jq -r --arg a "$app" 'select(.appId == $a or .packageId == $a) | .documents.birthReceipt.effect // empty' "$rec" 2>/dev/null | head -1); [ -n "$adm" ] && break; done
+  row "the first install of $name is admitted by the Host at the tool reservation and the application birth (not law-denied)" \
+    "$([ "$adm" = admitted ] && ! grep -q 'law-denied' "$out/install-$app.err" "$out/install-$app.json" 2>/dev/null && echo 1 || echo 0)" \
+    "birth ${adm:-none}; $(grep -ohE 'law-denied|installRefused|no-grant|resourceBatch|birthStale' "$out/install-$app.err" "$out/install-$app.json" 2>/dev/null | sort -u | tr '\n' ' ')"
   if [ "$installed" = 0 ]; then
     grain=$(grep -oE '"grain": "a[0-9]+"' "$out/install-$app.json" | head -1 | grep -oE 'a[0-9]+')
     row "install $name as the member: running, grain $grain" 1 "$(jq -r '.receipt.origin' "$out/install-$app.json" 2>/dev/null)"
