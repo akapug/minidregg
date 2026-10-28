@@ -26,11 +26,18 @@ ranked by expected wall-time win on the request path. Maintained by the perf-rak
   real when the repeated work sits inside a lambda (per element or per lane), in
   separate functions, or behind a structure the compiler cannot see through.
 - **Document-submit benchmark** (`scripts/perf/doc-submit-bench.py`, a fresh scratch Store, N
-  appends to one document): on 349e59ef1 (dregg-build) the Host CPU per submit grows linearly
-  with the Store's history, about 60 ms per prior record: 420 ms at the 1st append, 1,380 ms at
-  the 20th, 2,890 ms at the 40th (propose 110 to 250 ms). The per-submit work is O(history) with a
-  large constant; that, more than any single hot function, is the 5.3 s. gdb samples of the
-  36th-40th submits on hbox are being taken to name the per-record loop.
+  appends to one document): on 349e59ef1 (dregg-build) the Host CPU per submit grows with each
+  append, about 60 ms per append: 420 ms at the 1st, 1,380 ms at the 20th, 2,890 ms at the 40th
+  (propose 110 to 250 ms). The document cell and the history grow together here. 46 gdb samples
+  of submits 26-30 on hbox (`/tank/lanes/perf-rake-bench/w1/samples`): 28 sat in `read` on the
+  signature verifier coprocess (`NativeCoprocess.readReply`; wall time, not CPU); the CPU samples
+  spread over the authority law legs (`DeclaredResourceController.collectLegs`/`admitAuthority`,
+  `ResolvedLawCompilation.witness`, `evalAlg`, `Pred.State.get`, the document law
+  `CanonicalCellRegistry.contentLawDecidable`/`documentAt`), store decode (`fromEntriesFast`,
+  `supportCached` sort) and history index reads (`DurableHistoryStore.byTx`,
+  `Reader.footprint`, `indexRows`). So the growth is whole-cell work on the growing document
+  (decode, law, root) repeated per submit, plus per-key index round trips: the targets of the
+  roots, writer and ordering changes. Rerun the benchmark on the candidate carrying them.
 - Performance is published, never a gate. No item below has a before/after submit
   number yet; the first candidate carrying the landed fixes is the build after
   9bd52317c, and the A/B runs there with `scripts/spk-platform/route-cpu-probe.sh`
