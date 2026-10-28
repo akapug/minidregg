@@ -242,7 +242,8 @@ theorem beyond_bound_refused (pre : System) (history : H)
     · rfl
     · have := (admitsHead_iff _ _).mp h
       omega
-  simp [judge, this, past]
+  simp only [judge, this, Bool.false_eq_true, if_false]
+  rw [past]
 
 /-- **Satisfiable pole** (general): the last height inside the bound is admitted. -/
 theorem at_bound_admitted (pre : System) (history : H)
