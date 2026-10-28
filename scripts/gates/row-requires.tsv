@@ -19,5 +19,5 @@ story-join	588855a7114dc794e0fac256d86ea106e535a41c	web-parity 588855a71: the gr
 story-page-joined	588855a7114dc794e0fac256d86ea106e535a41c	web-parity 588855a71: the grant form on room-new rooms and the JWF helper fix this row needs
 story-move	588855a7114dc794e0fac256d86ea106e535a41c	web-parity 588855a71: the grant form on room-new rooms and the JWF helper fix this row needs
 story-refused	588855a7114dc794e0fac256d86ea106e535a41c	web-parity 588855a71: the grant form on room-new rooms and the JWF helper fix this row needs
-narrow-owner	235a7812e	the owner reads the clause with its value (LawLeaf.explained without the neutral selector guard)
-narrow-guess*	87b96eecc	computeTarget refuses a guard over an unnamed field before any guard runs (no field-value oracle)
+narrow-owner	235a7812e1d2fbf71c4d311270bcda20c5c4db53	the owner reads the clause with its value (LawLeaf.explained without the neutral selector guard)
+narrow-guess*	87b96eecc55e1918ee858cba3401d78e03235a66	computeTarget refuses a guard over an unnamed field before any guard runs (no field-value oracle)
