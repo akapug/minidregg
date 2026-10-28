@@ -224,7 +224,7 @@ pub(crate) fn assemble_once(
     write_new(parent, "lifecycle-completion-v2-active.json", &active)?;
     let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_COMPLETION_PLAN, &fixed.selector.framed(&request)?)?;
     write_new(attempt_dir, "op70-frame.bin", &reply)?;
-    let plan = framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_COMPLETION_PLAN, PLAN_TAG)?;
+    let plan = framed_payload("launch completion plan", &reply, crate::host_operations::APPLICATION_LAUNCH_COMPLETION_PLAN, PLAN_TAG)?;
     let plan_path = write_new(attempt_dir, "plan.bin", plan)?;
     let inspected = operator.tool(
         "inspect",
@@ -264,7 +264,7 @@ pub(crate) fn assemble_once(
     write_new(attempt_dir, "op71-requested.bin", &pair)?;
     let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_COMPLETION_ASSEMBLE, &pair)?;
     write_new(attempt_dir, "op71-frame.bin", &reply)?;
-    let ingress = framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_COMPLETION_ASSEMBLE, INGRESS_TAG)?.to_vec();
+    let ingress = framed_payload("launch completion assemble", &reply, crate::host_operations::APPLICATION_LAUNCH_COMPLETION_ASSEMBLE, INGRESS_TAG)?.to_vec();
     write_new(attempt_dir, "completion-v2.bin", &ingress)?;
     Ok(AssembledLaunchCompletion {
         attempt_dir: attempt_dir.to_path_buf(),
@@ -387,7 +387,7 @@ pub(crate) fn submit_fresh_once(
     )?;
     let reply = operator.invoke(crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_SUBMIT, &assembled.ingress)?;
     write_new(attempt, "op38-frame.bin", &reply)?;
-    let outcome = framed_payload(&reply, crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_SUBMIT, OUTCOME_TAG)?;
+    let outcome = framed_payload("lifecycle completion submit", &reply, crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_SUBMIT, OUTCOME_TAG)?;
     let outcome_path = write_new(attempt, "op38-outcome.bin", outcome)?;
     let inspected = operator.tool(
         "inspect",
@@ -432,7 +432,7 @@ pub(crate) fn recover_receipt_only(
     let lookup_dir = attempt.join(format!("op39-lookup-{}", hex(&nonce)));
     DirBuilder::new().mode(0o700).create(&lookup_dir)?;
     let reply = operator.invoke(crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_LOOKUP, &assembled.ingress)?;
-    let payload = framed_payload(&reply, crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_LOOKUP, OUTCOME_TAG)?;
+    let payload = framed_payload("lifecycle completion lookup", &reply, crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_LOOKUP, OUTCOME_TAG)?;
     let payload_path = write_new(&lookup_dir, "outcome.bin", payload)?;
     let inspected = operator.tool(
         "inspect",
@@ -513,9 +513,9 @@ mod tests {
             result
         };
         let ingress = frame(crate::host_operations::APPLICATION_LAUNCH_COMPLETION_ASSEMBLE, INGRESS_TAG);
-        assert!(framed_payload(&ingress, crate::host_operations::APPLICATION_LAUNCH_COMPLETION_ASSEMBLE, INGRESS_TAG).is_ok());
-        assert!(framed_payload(&ingress, crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_SUBMIT, OUTCOME_TAG).is_err());
-        assert!(framed_payload(
+        assert!(framed_payload("launch completion assemble", &ingress, crate::host_operations::APPLICATION_LAUNCH_COMPLETION_ASSEMBLE, INGRESS_TAG).is_ok());
+        assert!(framed_payload("lifecycle completion submit", &ingress, crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_SUBMIT, OUTCOME_TAG).is_err());
+        assert!(framed_payload("launch completion assemble", 
             &ingress,
             crate::host_operations::APPLICATION_LAUNCH_COMPLETION_ASSEMBLE,
             b"DREGG/APPLICATION/LIFECYCLE-COMPLETION-INGRESS/v1"

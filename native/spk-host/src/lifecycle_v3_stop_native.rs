@@ -446,7 +446,7 @@ pub(crate) fn resume_fenced_exact(
     let retained_committed =
         read_private_artifact(&attempt_dir.join("committed-v3.bin"), MAX_FRAME)?;
     let original_frame = read_private_artifact(&attempt_dir.join("op26-frame.bin"), MAX_FRAME)?;
-    if framed_payload(&original_frame, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, COMMITTED_TAG)? != retained_committed {
+    if framed_payload("lifecycle claim submit", &original_frame, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, COMMITTED_TAG)? != retained_committed {
         return Err(invalid("STOP recovery original op26 frame differs"));
     }
     let requested: Value = serde_json::from_slice(&read_private_artifact(
