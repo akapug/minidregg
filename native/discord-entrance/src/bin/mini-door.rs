@@ -223,6 +223,11 @@ impl Door {
         page("Join the Mini demo", &body)
     }
 
+    /// The stranger's status page. Beside the login lines it says where the built-in story welcome
+    /// stands (`story` on the request: the author's invitation handed to the member's
+    /// HOME/requests, then the member's join): joined, on its way, or stopped with the processor's
+    /// reason. Joining and playing happen in the member's workspace (`/story`, same origin), where
+    /// the invitation waits; the door retries a failed join on its next run.
     fn status_page(&self, id: &str) -> (u16, Vec<u8>) {
         let Some(v) = read_json(&self.status.join(format!("{id}.json"))) else {
             if self.queue.join(format!("join-{id}.json")).exists() {
@@ -252,6 +257,7 @@ impl Door {
         if let Some(code) = v["linkCode"].as_str() {
             body.push_str(&format!("<p>In Discord, type (once, within 7 days):</p><pre>/mini line:link {}</pre>", html(code)));
         }
+        body.push_str(&story_section(&v["story"]));
         if phase == "sign" {
             if let Some(message) = v["sign"]["message"].as_str() {
                 body.push_str(&format!(
@@ -493,6 +499,24 @@ fn main() {
     }
 }
 
+/// The stranger's view of the story welcome (`story` on the published status), or nothing.
+fn story_section(story: &Value) -> String {
+    let Some(name) = story["name"].as_str().filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')) else {
+        return String::new();
+    };
+    let lead = format!("<section class=story data-story=\"{0}\"><h2>The story <code>{0}</code></h2>", html(name));
+    let state = if story["joined"] == true {
+        format!("<p data-story-state=joined>The box invited you to play <code>{0}</code> and you have joined it. Play it from your workspace: <a href=/story>your stories</a> (or <code>look</code> in your shell).</p>", html(name))
+    } else if let Some(error) = story["error"].as_str() {
+        format!("<p data-story-state=stopped>The box invited you to play <code>{0}</code>, but joining did not finish: <code>{1}</code>. The door tries again on its next run; or join it yourself from your workspace, where the invitation waits: <a href=/story#invitations>join {0}</a>.</p>", html(name), html(error))
+    } else if story["invited"].is_string() {
+        format!("<p data-story-state=invited>The box invited you to play <code>{0}</code>; the invitation is in your requests and the door joins you on its next run. <a href=/story#invitations>Join it now</a> from your workspace.</p>", html(name))
+    } else {
+        return String::new();
+    };
+    format!("{lead}{state}</section>")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -637,6 +661,24 @@ mod tests {
         std::fs::write(d.status.join("door-state.json"), r#"{"type":"minidregg-door-state-v1","free":true,"paid":false}"#).unwrap();
         let page = String::from_utf8(d.join_page()).unwrap();
         assert!(!page.contains("10000") && page.contains("published once"), "no number without the processor's");
+    }
+
+    #[test]
+    fn the_status_page_shows_the_story_welcome_joined_invited_or_stopped() {
+        let d = door("story");
+        let id = door::new_request_id().unwrap();
+        let shown = |story: serde_json::Value| {
+            std::fs::write(d.status.join(format!("{id}.json")), serde_json::json!({"phase":"enrolled","name":"alice","story":story}).to_string()).unwrap();
+            String::from_utf8(d.status_page(&id).1).unwrap()
+        };
+        let joined = shown(serde_json::json!({"name":"tale","invited":"w","world":"w","joined":true}));
+        assert!(joined.contains("data-story-state=joined") && joined.contains("href=/story"), "{joined}");
+        let invited = shown(serde_json::json!({"name":"tale","invited":"w"}));
+        assert!(invited.contains("data-story-state=invited") && invited.contains("/story#invitations"));
+        let stopped = shown(serde_json::json!({"name":"tale","invited":"w","error":"story join: refused: <busy>"}));
+        assert!(stopped.contains("data-story-state=stopped") && stopped.contains("refused: &lt;busy&gt;") && stopped.contains("/story#invitations"), "{stopped}");
+        assert!(!shown(serde_json::json!({"name":"Tale<x>","joined":true})).contains("data-story"), "a story name that is not a door word is not shown");
+        assert!(!shown(serde_json::Value::Null).contains("data-story"));
     }
 
     #[test]

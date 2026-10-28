@@ -12,6 +12,8 @@ pub const PLACES: &[(&str, &str, &str)] = &[
     ("Rooms", "/room", "Members, streams as chat, residents."),
     ("Apps", "/apps", "The app market: claims beside verdicts; install; your grains, opened on their own origins."),
     ("Receipts", "/receipts", "Every attempt and its decoded outcome."),
+    ("Stories", "/story", "The stories you play: invitations waiting, join, invite, enter."),
+    ("Programs", "/bend", "Your bend programs: what each activity awaits; answer a slot you decide."),
     ("Purse", "/purse", "Your account as a meter; pay, top up, tariffs."),
     ("Grants & laws", "/grants", "What your grants cover; delegate, revoke, install a law."),
     ("Subscribe", "/subscribe", "The subscriber tier: a house Hermes in the subscribers room; your window and its end."),

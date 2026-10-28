@@ -829,6 +829,22 @@ if [ -n "$J14_AWAIT" ]; then
   check await "program 2 is untouched: still awaiting alice, total 0" "awaiting $A {total=0}" "$(jq -r '"\(.phase) \(.decider) \(.stateText)"' "$OUT")"
 fi
 
+# WHO PATH OUT: one page of WHO's web face (`mini web`, the loopback face over the same renders the
+# browser gets) saved to OUT; the server is stopped by the PID in its PID file.
+web_page() {
+  local who=$1 path=$2 out=$3 url="" i
+  "$SHELL_BIN" web --dir "$(ws_of "$who")" --home "$H/$who" --listen 127.0.0.1:0 >"$SD/web-$who.out" 2>"$SD/web-$who.err" &
+  echo $! >"$SD/web-$who.pid"
+  for i in $(seq 1 100); do
+    url=$(grep -o 'http://127\.0\.0\.1:[0-9]*/[0-9a-f]*/' "$SD/web-$who.out" 2>/dev/null | head -1)
+    [ -n "$url" ] && break
+    kill -0 "$(cat "$SD/web-$who.pid")" 2>/dev/null || break
+    sleep 0.1
+  done
+  [ -n "$url" ] && curl -s -m 60 -o "$out" "$url${path#/}"
+  kill "$(cat "$SD/web-$who.pid")" 2>/dev/null; wait "$(cat "$SD/web-$who.pid")" 2>/dev/null; rm -f "$SD/web-$who.pid"
+}
+
 if [ -n "$J14_ORACLE" ]; then
   # -------------------------------------------- the Oracle through Hermes
   ORLOG=${PLOG%.log}.oracle.jsonl
@@ -840,7 +856,17 @@ if [ -n "$J14_ORACLE" ]; then
   tail_json >"$SD/tail-oracle-0.jsonl"
   checkp oracle "bob is told, in lab, that the room has not granted the oracle" \
     jq -s -e --arg h "$HS" --arg b "$B" 'any(.[]; .author == $h and .to == $b and .kind == "say" and (.text | test("oracle-not-granted")))' "$SD/tail-oracle-0.jsonl"
+  # The web face (docs/WEB-FRONTEND-2026-10-27.md §6): bob's resident page explains the refusal
+  # and points at the grant; the room's grant section shows the Oracle not granted.
+  web_page bob /room/lab/resident "$SD/web-oracle-0.html"
+  checkp oracle "bob's resident page explains oracle-not-granted and links where it is granted" \
+    sh -c "grep -q 'data-refusal=\"oracle-not-granted\"' '$SD/web-oracle-0.html' && grep -q 'room/lab/resident#hermes-tools\"' '$SD/web-oracle-0.html'"
+  checkp oracle "the page shows the room has not granted the Oracle" \
+    grep -q 'data-tool="oracle" data-granted="false"' "$SD/web-oracle-0.html"
   ok oracle alice "tariff lab set hermes/tools $(( ${J14_TOOLS:+7} + 8 ))"
+  web_page bob /room/lab/resident "$SD/web-oracle-1.html"
+  checkp oracle "after the founder's grant the page shows the Oracle granted" \
+    grep -q 'data-tool="oracle" data-granted="true"' "$SD/web-oracle-1.html"
   OT0=$(paid_turns)
   ok oracle bob "ask lab oracle: $QUESTION"
   hermes oracle "asks the Oracle grain and answers bob"

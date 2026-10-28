@@ -105,6 +105,12 @@ fn planted(lines: &[String]) -> Ending {
     if first.starts_with("inspect caps") {
         return ok(json!({PAYLOADS[0]: {"scope": PAYLOADS[1], "ancestors": [PAYLOADS[2], h]}}).to_string());
     }
+    if first.starts_with("bend await") {
+        // The slot and state come from a program a stranger may have written; the decider is me, so
+        // the answer form is drawn with the planted slot filled in.
+        return ok(json!({"type": "mini-bend-await-v1", "object": PAYLOADS[0], "transaction": PAYLOADS[1], "record": PAYLOADS[2],
+            "height": PAYLOADS[9], "phase": PAYLOADS[3], "stateText": h, "slot": PAYLOADS[6], "decider": "7", "deadline": PAYLOADS[7]}).to_string());
+    }
     if first.starts_with("history all") {
         return ok(format!("w-1 refused: {}\n{} admitted\n", PAYLOADS[0], PAYLOADS[1]));
     }
@@ -152,7 +158,23 @@ fn planted_payloads_render_inert_on_every_shell_backed_body_route() {
             (vec!["room"], "/room".into()),
             (vec!["board"], "/board".into()),
             (vec!["verb", "say"], "/verb/say".into()),
+            (vec!["bend"], "/bend".into()),
+            (vec!["bend", "await", "12", "34"], "/bend/await/12/34".into()),
+            (vec!["story"], "/story".into()),
+            (vec![], "/".into()),
         ];
+        // A story invitation and a story record carry an author's words; a bend registry row a
+        // program's; all three are files a stranger's grant can shape.
+        let home = root.join("home");
+        fs::create_dir_all(home.join("requests")).unwrap();
+        fs::create_dir_all(home.join("story")).unwrap();
+        fs::create_dir_all(root.join("bend/objects")).unwrap();
+        fs::write(home.join("requests/tale-invite.json"), json!({"type": "mini-story-invitation-v1", "story": "tale", "role": PAYLOADS[0],
+            "author": PAYLOADS[2], "gm": PAYLOADS[1], "grant": {"recipient": "7"}}).to_string()).unwrap();
+        fs::write(home.join("requests/odd-invite.json"), json!({"type": "mini-story-invitation-v1", "story": "odd", "role": PAYLOADS[3],
+            "author": PAYLOADS[6], "grant": {"recipient": PAYLOADS[1]}}).to_string()).unwrap();
+        fs::write(home.join("story/mine.json"), json!({"story": "mine", "role": PAYLOADS[0], "author": "7", "gm": PAYLOADS[7]}).to_string()).unwrap();
+        fs::write(root.join("bend/objects/x.json"), json!({"bend": PAYLOADS[0], "object": PAYLOADS[2], "transaction": "34"}).to_string()).unwrap();
         for (parts, target) in gets {
             let page = get(&site, &parts, &target);
             assert_inert(&target, &page.body);
@@ -167,6 +189,8 @@ fn planted_payloads_render_inert_on_every_shell_backed_body_route() {
             (vec!["room", "lab", "say"], form(&[("text", &h)])),
             (vec!["doc", "new"], form(&[("name", &h), ("law", &h), ("room", &h)])),
             (vec!["paste"], form(&[("line", "say hello")])),
+            (vec!["room", "lab", "hermes-tools"], form(&[("tool1", "on"), ("tool8", "on"), ("compute", "12"), ("was-tools", &h), ("was-compute", &h)])),
+            (vec!["room", "lab", "hermes-tools"], form(&[("compute", &h)])),
         ];
         for (parts, body) in posts {
             let page = post(&site, &parts, body.as_bytes());
