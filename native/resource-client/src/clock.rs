@@ -31,8 +31,9 @@
 //!
 //! A tick refused `staleAuthority` or `staleClock` (another turn moved a root it pinned
 //! between the view and the submit) is journaled like any refusal, then re-observed and
-//! re-authored within the same run, at most `STALE_ATTEMPTS` times; the reply lists each
-//! such refusal under `staleRefusals`, and the last one fails the run as before.
+//! re-authored within the same run by the client's re-plan loop (`--replan-max`, default
+//! 5 re-plans); the reply lists each such refusal under `staleRefusals`, and when the
+//! re-plans are spent the last one fails the run as before.
 //!
 //! `mini clock --action view --workspace DIR` prints the clock view.
 
@@ -241,14 +242,15 @@ fn resolve_pending(ws: &Workspace) -> Result<Vec<Value>> {
     Ok(resolved)
 }
 
-/// How many times one run re-observes and re-authors a tick refused stale. The tick pins
-/// the credential-authority root and the clock root it observed (`ClockTickReceiver.prepare`);
-/// the authority root moves with every turn that spends an authority nullifier, so under
-/// load another turn often lands between the view (op 129) and the submit (op 128). The
-/// tick asserts only wall time, never anything derived from that authority state, so a
-/// fresh view and a fresh command is the same proposal against the new roots; a revoked
-/// `C_tick` or a non-advancing clock then refuses by its own name.
-const STALE_ATTEMPTS: usize = 6;
+/// The tick pins the credential-authority root and the clock root it observed
+/// (`ClockTickReceiver.prepare`); the authority cell moves with every birth, grant,
+/// enrolment, delegation and policy install, so under load another turn often lands
+/// between the view (op 129) and the submit (op 128). The tick asserts only wall time,
+/// never anything derived from that authority state, so a fresh view and a fresh command
+/// is the same proposal against the new roots: the client's one re-plan loop
+/// (`replan::replan`, `--replan-max`) runs it again. A revoked `C_tick` or a
+/// non-advancing clock then refuses by its own name.
+const STALE_PREFIX: &str = "clock tick refused stale ";
 
 /// The pin a refused tick names, read from the Host's rendering of
 /// `ClockTickReceiver.Reject` at phase `clock-tick`; any other refusal is not stale.
@@ -286,18 +288,32 @@ fn tick(
         Some(now) => now,
         None => unix_now()?.to_string(),
     };
-    // Every stale refusal is definite, journaled and reported in `staleRefusals`; the
-    // run re-observes only for the two pins, and only STALE_ATTEMPTS times.
+    // Every stale refusal is definite and journaled by `resolve`, so there is no attempt
+    // to retire; it is reported in `staleRefusals`. Only the two pins re-plan.
     let mut stale = Vec::new();
-    let mut value = loop {
-        let value = tick_once(ws, capability, &now, slot.clone(), abandon, catch_up)?;
-        match stale_pin(&value) {
-            Some(pin) if stale.len() + 1 < STALE_ATTEMPTS => {
-                eprintln!("mini clock: tick refused {pin}; re-observing ({}/{STALE_ATTEMPTS})", stale.len() + 1);
-                stale.push(json!({"pin": pin, "asserted": value.get("asserted")}));
+    let mut last = None;
+    let replanned = crate::replan::replan(
+        "clock tick",
+        || {
+            let value = tick_once(ws, capability, &now, slot.clone(), abandon, catch_up)?;
+            match stale_pin(&value) {
+                Some(pin) => {
+                    stale.push(json!({"pin": pin, "asserted": value.get("asserted")}));
+                    let error = format!("{STALE_PREFIX}{pin}: {value}");
+                    last = Some(value);
+                    Err(error)
+                }
+                None => Ok(value),
             }
-            _ => break value,
-        }
+        },
+        |error, _| error.starts_with(STALE_PREFIX),
+        |_| Ok(()),
+    );
+    let mut value = match (replanned, last) {
+        (Ok(value), _) => value,
+        // Exhausted: the last stale refusal is the run's answer, and fails it.
+        (Err(error), Some(value)) if error.contains(STALE_PREFIX) => value,
+        (Err(error), _) => return Err(error),
     };
     if !stale.is_empty() {
         value["staleRefusals"] = json!(stale);

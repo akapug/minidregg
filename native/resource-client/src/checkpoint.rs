@@ -14,6 +14,16 @@
 //! N, and otherwise prints the view and succeeds: the timer's cadence is then a height
 //! cadence, and an idle node does not accrue one certify record per tick.
 //!
+//! The command names the exact head and chain it observed and pins the factory,
+//! authority and system roots (`CertifyReceiver.prepare`, `decideCertify`), so every
+//! write that lands between the view and the submit refuses it (`headMismatch`, or a
+//! stale root). Certifying the newer head is the same act, so such a refusal is run
+//! again through the client's one re-plan loop (`replan::replan`, `--replan-max`):
+//! nothing was admitted and nothing is retained, so a fresh observation authors a
+//! fresh command. The reply lists each raced refusal under `racedRefusals`; when the
+//! re-plans are spent the last one fails the run. A killed run likewise leaves nothing
+//! behind: the next run observes afresh.
+//!
 //! `mini checkpoint --action view --workspace DIR` prints the system view, including
 //! `tail` (head − certified) and `remaining` (heights left before the bound refuses).
 //!
@@ -107,7 +117,69 @@ fn view(ws: &Workspace) -> Result<Value> {
     inspect(ws, "certify-view", &bytes)
 }
 
+/// Refusals that name only a race with another admission between the view and the
+/// submit, read from the Host's rendering of `CertifyReceiver.Reject` at phase `certify`.
+/// `factoryUnavailable` is how `prepare` answers a moved factory root
+/// (`ResourceTargetAdmission.observe` at the pinned root); `notAdvancing` with the
+/// observed head means another certify landed first, and the re-observation is then
+/// `not-due`.
+const RACED: [&str; 6] = [
+    "staleAuthority", "staleSystem", "headMismatch", "chainMismatch", "factoryUnavailable", "notAdvancing",
+];
+const RACED_PREFIX: &str = "certify refused raced ";
+
+fn raced(outcome: &Value) -> Option<&'static str> {
+    if outcome.get("type").and_then(Value::as_str) != Some("refused") {
+        return None;
+    }
+    let text = |name: &str| {
+        outcome
+            .get(name)
+            .and_then(Value::as_str)
+            .and_then(|hex| mini_sdk::hex::decode(hex).ok())
+            .map(|bytes| String::from_utf8_lossy(&bytes).trim().to_string())
+    };
+    if text("phase").as_deref() != Some("certify") {
+        return None;
+    }
+    let detail = text("detail")?;
+    let name = detail.strip_prefix("Minidregg.Kernel.CertifyReceiver.Reject.")?;
+    RACED.into_iter().find(|raced| *raced == name)
+}
+
 fn certify(ws: &Workspace, control: &str, min_tail: Option<String>) -> Result<Value> {
+    let mut races = Vec::new();
+    let mut last = None;
+    let replanned = crate::replan::replan(
+        "certify",
+        || {
+            let value = certify_once(ws, control, min_tail.as_deref())?;
+            match raced(&value) {
+                Some(reason) => {
+                    races.push(json!({"reason": reason, "certified": value.get("certified")}));
+                    let error = format!("{RACED_PREFIX}{reason}: {value}");
+                    last = Some(value);
+                    Err(error)
+                }
+                None => Ok(value),
+            }
+        },
+        |error, _| error.starts_with(RACED_PREFIX),
+        |_| Ok(()),
+    );
+    let mut value = match (replanned, last) {
+        (Ok(value), _) => value,
+        // Exhausted: the last raced refusal is the run's answer, and fails it.
+        (Err(error), Some(value)) if error.contains(RACED_PREFIX) => value,
+        (Err(error), _) => return Err(error),
+    };
+    if !races.is_empty() {
+        value["racedRefusals"] = json!(races);
+    }
+    Ok(value)
+}
+
+fn certify_once(ws: &Workspace, control: &str, min_tail: Option<&str>) -> Result<Value> {
     let current = view(ws)?;
     if let Some(min_tail) = min_tail {
         let tail: u128 = field(&current, "tail")?.parse().map_err(|_| "view tail is not decimal")?;
@@ -172,4 +244,32 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         return Err(format!("certify not confirmed: {value}").into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn refused(phase: &str, detail: &str) -> Value {
+        json!({"type": "refused", "reason": "operation-rejected",
+            "phase": mini_sdk::hex::encode(phase.as_bytes()),
+            "detail": mini_sdk::hex::encode(detail.as_bytes())})
+    }
+
+    #[test]
+    fn raced_refusals_are_read_from_the_certify_receivers_rendering_only() {
+        let reject = |name: &str| format!("Minidregg.Kernel.CertifyReceiver.Reject.{name}");
+        for name in RACED {
+            assert_eq!(raced(&refused("certify", &reject(name))), Some(name));
+        }
+        // Teeth: a refusal that is not a race is final for the run.
+        for other in ["capabilityRejected", "replayedMarker", "validation", "systemUnavailable", "policyRejected"] {
+            assert_eq!(raced(&refused("certify", &reject(other))), None, "{other}");
+        }
+        assert_eq!(raced(&refused("clock-tick", &reject("headMismatch"))), None);
+        assert_eq!(raced(&refused("certify", "Minidregg.Kernel.ClockTickReceiver.Reject.staleAuthority")), None);
+        assert_eq!(raced(&refused("certify", &format!("{} extra", reject("headMismatch")))), None);
+        assert_eq!(raced(&json!({"type": "not-due"})), None);
+        assert_eq!(raced(&json!({"type": "contention"})), None);
+    }
 }

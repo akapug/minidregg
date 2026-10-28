@@ -18,6 +18,10 @@
 # whose reply was lost is resubmitted byte-for-byte by the next run (it resolves as
 # `replayed`). What stays is one line per tick in the rotating journal
 # /var/lib/mini/clock/clock-journal.tsv (1 MiB, one rotated generation).
+# A tick refused staleAuthority/staleClock (another turn moved a root it pinned between
+# the view and the submit) is re-observed within the run (`--replan-max`). A run slower
+# than the minute is not killed: a timer elapse while it is active starts nothing, and
+# TimeoutStartSec is only a hang ceiling.
 #
 # One-time setup, as the mini user, after genesis (genesis.sh made the clock key's
 # public half part of genesis; params .clock.subject and .clock.tickCapabilityId):
@@ -48,7 +52,7 @@ UMask=0077
 Environment=MINI=/var/lib/mini/candidate/current/bin/mini
 Environment=MINI_CLOCK_WORKSPACE=/var/lib/mini/clock
 ExecStart=/bin/sh -c 'exec "$MINI" clock --action tick --workspace "$MINI_CLOCK_WORKSPACE"'
-TimeoutStartSec=50
+TimeoutStartSec=10min
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict

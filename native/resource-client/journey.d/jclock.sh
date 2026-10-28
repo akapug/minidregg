@@ -271,7 +271,7 @@ row "200 ephemeral ticks by the clock subject" "200 confirmed; at most 1 attempt
 
 # A tick pins the authority root it observed; births move that root. Ticks run while the
 # sponsor births resources: each tick re-observes on staleAuthority/staleClock within its run
-# (clock.rs STALE_ATTEMPTS), so every tick confirms; staleRefusals counts the races it met.
+# (clock.rs, the client re-plan loop), so every tick confirms; staleRefusals counts the races it met.
 view vr0; aroot0=$(jq -r .authorityRoot "$D/vr0.out" 2>/dev/null)
 ( for i in $(seq 1 30); do
     "$MINI" workspace --action create --dir "$SPONSOR_WS" --name "race$i" --storage declared --predicate "$REQ/permit.json" >/dev/null 2>&1
