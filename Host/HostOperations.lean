@@ -44,7 +44,9 @@ def consentThinIntentFrame : UInt8 := 230
 def consentThinObservationFrame : UInt8 := 231
 def consentThinPlanFrame : UInt8 := 232
 def consentStoreRecheckFrame : UInt8 := 233
-def consentFrames : List UInt8 := [220, 221, 222, 224, 226, 227, 228, 229, 230, 231, 232, 233]
+def consentThinBirthIntentFrame : UInt8 := 234
+def consentThinBirthPlanFrame : UInt8 := 235
+def consentFrames : List UInt8 := [220, 221, 222, 224, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235]
 
 /-- `Kernel.ApplicationDispatchAdmission.ordinaryHeaderName`'s names (registry `ordinary_headers`). -/
 def ordinaryHeaderNames : List String := ["cookie", "accept", "accept-encoding", "content-type", "user-agent", "if-match", "if-none-match", "x-requested-with", "x-csrftoken", "x-csrf-token", "oc-total-length", "oc-chunk-size", "x-oc-mtime", "oc-fileid", "oc-chunked", "oc-checksum", "oc-chunk-offset", "oc-lazyops", "content-encoding"]

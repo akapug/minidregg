@@ -4872,21 +4872,22 @@ fn birth(
             .ok_or("historical create lookup did not confirm installed birth")?;
         return Ok((source, receipt, reservation));
     }
-    // Thin consent (`Kernel.NativeThinConsent.checkPlanThin`) displays invocations and
-    // delegations; a birth's plan (factory, authority, allocation and source slots) is derived by
-    // the planner from the Store's pins, height and authority snapshot, which thin consent does not
-    // read. Named here, before anything is signed, instead of the provider's "no served target
-    // views" (JP2 row 19). A re-run of an already bound attempt answers above without consent.
+    // Thin consent signs a birth through its own arm (`Kernel.NativeThinBirth`, frames 234/235):
+    // the provider re-authors the member's retained source at the coordinates the Host's draft
+    // carries, checks the plan's finalized descriptor against that draft and every header
+    // against the member's derivation of its branch, reading no Store. A re-run of an already
+    // bound attempt answers above without consent.
+    // The source is selected for exactly this birth's consent and cleared after it, so a later
+    // invocation in the same process is consented by its own arm.
     if crate::client_consent::thin_mode() {
-        return Err("thin consent signs invocations and delegations only; a birth (create) is planned \
-            against the Store and needs the full consent provider (MINI_THIN_CONSENT unset); nothing signed".into());
+        crate::client_consent::set_thin_birth_source(Some(author_dir.join("source.json")))?;
     }
     eprintln!("workspace birth attempt: {}", attempt.display());
     // A Host `stale-root` between the signed observation and prepare (or a
     // signed plan the state moved under) is re-planned inside `submit`: the
     // authored window (`notBefore` + birthSlack) is still open, so the SAME
     // intent is planned again in the same bound attempt path.
-    submit(
+    let submitted = submit(
         &host,
         &config,
         &intent_path,
@@ -4894,7 +4895,9 @@ fn birth(
         &member_path(workspace, "key")?,
         &attempt,
         false,
-    )?;
+    );
+    crate::client_consent::set_thin_birth_source(None)?;
+    submitted?;
     let receipt = accepted_outcome(&attempt)?.ok_or("birth returned without installed receipt")?;
     Ok((source, receipt, reservation))
 }

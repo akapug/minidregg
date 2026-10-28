@@ -98,6 +98,17 @@ inductive Refusal where
   | viewMalformed (target : Nat)
   /-- The served view does not hold this target's role. -/
   | viewRole (target : Nat)
+  /-- A birth this arm does not consent to: not an ordinary resource birth
+  (`Kernel.NativeThinBirth`). -/
+  | birthRoute (what : String)
+  /-- The intent's birth draft is not a canonical descriptor without auxiliary creates. -/
+  | birthMalformed
+  /-- The intent's birth draft is not the deployed authoring of the member's own source at
+  the draft's coordinates. -/
+  | draftNotAuthored
+  /-- The plan's finalized descriptor differs from the intent's draft beyond the kernel's
+  auxiliary creates. -/
+  | birthSourceChanged
   deriving DecidableEq, Repr
 
 /-- The part of a target's patch that the member authored: every input is the
