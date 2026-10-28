@@ -142,7 +142,7 @@ after re-running the Lean front end, and every turn reloads and replays the pair
 
 ### Turns
 
-Eleven, each one `DataIntent` that commits all together or not at all, each a signed native
+Fifteen (`Kernel/ObjectiveActivityReceiverCore.lean`), each one `DataIntent` that commits all together or not at all, each a signed native
 command (`Kernel/ObjectiveActivityReceiver.lean`: subject, nonce, authority root, turn, Ed25519
 header; command edition `COMMAND/v5`; Host operations 210-214 plan, assemble, submit, lookup,
 view; `mini activity`):
@@ -159,6 +159,9 @@ view; `mini activity`):
 | `topUp` | anyone | funds an activity's purse |
 | `invoke` | a capability holder with an account | a synchronous call tree (below) |
 | `deliverMessage` | anyone | delivers the head of an inbox (below) |
+
+The other five, `adopt`, `migrate`, `abortDrained`, `rebirth` and `registerDomain`, are listed
+in [OBJECTIVE-BEND.md](OBJECTIVE-BEND.md).
 
 The receiver writes only kernel cells and the Book (`intent_writes_activity_or_book`), and a
 native birth runs only the pinned package (`native_birth_on_pinned_object`). Journey rows:
@@ -350,6 +353,6 @@ a program, snapshot and rewind.
 
 ```text
 bash scripts/check-objective-frontend.sh             # front end, incl. activity-replay
-bash scripts/check-objective-proofs.sh proofs        # ObjectiveProofs + contract manifests (statement, definition closure, axioms)
+bash scripts/check-objective-proofs.sh proofs        # lake build ObjectiveProofs and the axiom pins
 bash scripts/check-objective-proofs.sh transparency  # stored checkpoint vs the machine's own yield
 ```

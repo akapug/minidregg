@@ -86,7 +86,7 @@ read the declaration it names.
 - [SDK](SDK.md), [SDK design](design/SDK-DESIGN.md), [post-quantum signing](SDK-PQ.md).
 - [Signing consent](CLIENT-SIGNING-CONSENT.md): the client derives what a key may sign.
 - [Receipt continuity](RECEIPT-CONTINUITY.md) and [custody across a carry](RECEIPT-CARRY.md).
-- [Key commitment adoption](KEY-COMMITMENT-ADOPTION.md).
+- [Key commitment adoption](../native/resource-client/KEY-ADOPTION.md).
 - [Fleet surface](FLEET-SURFACE.md) and [migrating helm to it](FLEET-MIGRATION.md).
 - [Resident context](RESIDENT-CONTEXT.md), [shared room names](SHARED-NAMES.md).
 
