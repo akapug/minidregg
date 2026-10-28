@@ -366,7 +366,8 @@ Lean never runs on the Mac.
    arm changes in the same commit.  The statements go to the auditor first.  Then re-prove
    ContentProofs (`computeTarget_content_header`, clause 3 of `contentAgreement`, the host
    witnesses), PrepareProofs and the HostTeethProofs header.  Never hand-edit the clause
-   outside this.
+   outside this.  **Owner: `a76c092a8eda237ca`, who took it on 10-28 on `lane/qualify-doc-contention`
+   with this design (its commit messages carry a pointer).  This lane only reviews.**
 3. **The migration commit** (§5 step 1; post-demo; prepare, never land without the
    coordinator's word).  The gate is `HostKeystone` and `HostLegacyCensus` (both provable
    only after it) plus the already-proved `PrepareFactors`.  Its shape:
