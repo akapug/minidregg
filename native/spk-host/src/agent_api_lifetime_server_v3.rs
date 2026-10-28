@@ -103,12 +103,21 @@ pub(crate) fn poll_once(
     // On a failed dispatch, close the socket. Before a source reserve, no
     // operation fingerprint exists; after it, an error may mean native or
     // physical uncertainty. A fabricated RefusedV3 would be unsafe.
-    if let Ok(reply) = resident.handle_once(&stream, request, &watch.cancelled) {
-        if let Ok(bytes) = serde_json::to_vec(&reply) {
-            if bytes.len() <= wire::MAX_REPLY_FRAME {
-                let _ = agent_api_wire::write_frame(&mut stream, &bytes);
+    let operation = match &request {
+        Request::HelloV3 { .. } => "hello".to_owned(),
+        Request::DispatchV3 { operation_id, .. } | Request::InspectV3 { operation_id, .. } => operation_id.clone(),
+    };
+    match resident.handle_once(&stream, request, &watch.cancelled) {
+        Ok(reply) => {
+            if let Ok(bytes) = serde_json::to_vec(&reply) {
+                if bytes.len() <= wire::MAX_REPLY_FRAME {
+                    let _ = agent_api_wire::write_frame(&mut stream, &bytes);
+                }
             }
         }
+        // This diagnostic belongs only to the operator log. Closing transport
+        // still means uncertainty; an internal error is not a native refusal.
+        Err(error) => eprintln!("spk-host: lifetime agent operation {operation} failed: {error}"),
     }
     Ok(true)
 }
