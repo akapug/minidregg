@@ -42,6 +42,8 @@ TAG = b"DREGG/NATIVE-HOST/OUTCOME/v8"
 rows = []; failed = []; latencies = []
 config = open(CONFIG, "rb").read()
 HOST_PIN = hashlib.sha256(open(HOST, "rb").read()).digest()  # envelope v2: the Host image pin (v1 is refused)
+NO_RECORD = 253  # protocol/host-operations.json response_markers: the decided no-append refusal
+                  # (Host/RequestRefusal.lean: 253 carries a `refused` verdict; 255 only undecided outcomes)
 
 def server_pid():
     return open(os.path.join(WORLD, "public", "server.pid")).read().strip()
@@ -177,7 +179,7 @@ def long_request():
     ok, wall, detail = honest_read()
     t.join()
     latencies.append(("(b) honest read behind the long request", wall))
-    slow_named = out["reply"] is not None and out["reply"][0] == 255 and b"op 7" in out["reply"]
+    slow_named = out["reply"] is not None and out["reply"][0] == NO_RECORD and b"op 7" in out["reply"]
     good = loaded and ok and slow_named and socket_refusal(bad, "invalid socket envelope") and bad_wall < 1.0 \
         and wall <= out["wall"] + base + 2.0
     return good, (f"long request {out['wall']:.3f} s (alone {alone:.3f} s) -> {show(out['reply'])!r}; "
@@ -203,7 +205,7 @@ def queue_bound():
     t.join()
     busy = sum(1 for r in replies if socket_refusal(r, "busy: host queue full"))
     answered = sum(1 for r in replies if r is not None and r[0] == 0)
-    named = out["reply"] is not None and out["reply"][0] == 255 and b"op 7" in out["reply"]
+    named = out["reply"] is not None and out["reply"][0] == NO_RECORD and b"op 7" in out["reply"]
     good = loaded and named and answered == 32 and busy == 8
     return good, (f"40 describes behind a long request: {answered} answered, {busy} refused `busy: host queue full`; "
                   f"Host load pending after submission: {loaded}; blocker -> {show(out['reply'])!r}")
@@ -235,7 +237,7 @@ def many_keys():
     ok, wall, detail = honest_read()
     t.join()
     latencies.append(("(b3) honest read behind a maximum admitted key object", wall))
-    named = out["reply"] is not None and out["reply"][0] == 255 and b"op 7" in out["reply"]
+    named = out["reply"] is not None and out["reply"][0] == NO_RECORD and b"op 7" in out["reply"]
     over, over_wall = timed(lambda: raw(oversized_keys_body))
     over_named = socket_refusal(over, "author request body exceeds its bound")
     good = loaded and named and ok and out["wall"] < 60 and wall <= out["wall"] + base + 2.0 \
@@ -249,9 +251,9 @@ guarded("(b3) maximum admitted distinct keys and the oversized 1M-key object",
         many_keys)
 def duplicate_key():
     reply = raw(bytes([7]) + struct.pack("<H", 6) + b"intent" + b'{"a":"1","a":"2"}', timeout=60)
-    return reply is not None and reply[0] == 255 and b"duplicate JSON object field: a" in reply, show(reply)
+    return reply is not None and reply[0] == NO_RECORD and b"duplicate JSON object field: a" in reply, show(reply)
 guarded("(b4) an op 7 object naming one key twice",
-        "255 refused malformed, `duplicate JSON object field: a`", duplicate_key)
+        "253 (NO_RECORD) refused malformed, `duplicate JSON object field: a`", duplicate_key)
 
 # ---------------------------------------------------------------- (c) silent connections
 def silent(n):
@@ -299,11 +301,11 @@ open(os.path.join(D, "route-mismatch-intent.json"), "wb").write(source)
 
 def route_mismatch_raw():
     reply = raw(bytes([7]) + struct.pack("<H", 12) + b"grain-intent" + source, timeout=60)
-    named = reply is not None and reply[0] == 255 and b"op 7" in reply and b"route-mismatch" in reply
+    named = reply is not None and reply[0] == NO_RECORD and b"op 7" in reply and b"route-mismatch" in reply
     fresh = describe()
     return named and fresh, f"{show(reply)!r}; fresh connection answered: {fresh}"
 guarded("(d) J-PAY-6 route-mismatch grain intent, raw op 7 frame",
-        "255 refused, phase op 7, `route-mismatch` named; the next connection answered", route_mismatch_raw)
+        "253 (NO_RECORD) refused, phase op 7, `route-mismatch` named; the next connection answered", route_mismatch_raw)
 
 def route_mismatch_client():
     out = os.path.join(D, "route-mismatch.bin")
