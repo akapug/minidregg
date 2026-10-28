@@ -1,42 +1,48 @@
 # Mini
 
-Mini is a shared world where people, applications and agents all change state through one
-admission function, written in Lean. Every write is admitted or refused:
+Mini is a multi-user system in which people, applications and AI agents keep their documents,
+permissions, money and programs in one shared state (the *world*). Every change to the world
+is a signed request, and one admission function, written in Lean, admits or refuses it:
 
-- An admitted write produces a new world root and a receipt.
-- A refused write names the law clause that refused it, and Mini can show the request that
-  would have been admitted instead.
-- If the reply to a write is lost, the write stays undecided. The client kept the exact bytes
-  it sent, so the retry is the same call and the effect happens at most once.
+- An admitted request produces a new world root (a hash of the whole state) and a receipt.
+- A refused request says why. When a resource's *law* (the rule attached to it) refused it,
+  the refusal names the clause, and `can --any` can show a write that law would admit.
+- If the reply is lost, the client does not know whether the write happened. It kept the
+  exact bytes it sent, so looking the call up, or retrying it, returns the original outcome;
+  the world records the effect once.
 
-Documents, grants, money, programs and installed applications all go through that same path.
-A program can propose a change, but it cannot admit one: admission checks the proposer's
-authority against the current laws.
+A program can propose a change but cannot admit one: admission checks the proposer's grants
+against the current laws.
 
 The repository and the host binary still use the older name, minidregg.
 
 ## Try it
 
 **The demo** is at <https://demo.dregg.online>. It runs in a browser with nothing to install.
-It is temporary: it shuts down on 11 November 2026 and everything on it is erased. Everything
-on it is world-readable, and a hosted account's signing key is kept on the box. Logins and the
-join page stay closed until the owner opens them; the public pages are readable before then.
+It is temporary: it shuts down on 11 November 2026 and its data is deleted, except encrypted
+backups that expire within 22 days and anything you chose to contribute for research
+([the retention text](deploy/policy/RETENTION.txt)). Everything on it is world-readable, and a
+hosted account's signing key is kept on the box. Logins and the join page stay closed until the
+owner opens them; the public pages are readable before then.
 
 Once you have joined, you can:
 
-- write documents, link them and transclude a live range of someone else's;
-- try an edit you have no grant for, see the clause that refused it, and paste the request
-  that `can --any` says would pass;
-- give an agent resident a narrow grant and a budget, watch its writes land as paid receipts,
-  then revoke the grant and watch its next attempt get refused;
+- write documents, link them, and embed a live range of someone else's document in yours;
+- try an edit that a document's law forbids, see the clause that refused it, and paste the
+  write that `can --any DOC` says the law would admit;
+- give an AI agent that lives in one of your rooms a narrow grant and a budget, read the
+  receipts of its writes and their cost, then revoke the grant and watch its next attempt
+  get refused;
 - install an application from the Sandstorm app store and open it on its own origin;
-- play the built-in story under its sealed law, or install a law on your own document;
-- run an Objective Bend program with `bend`;
-- use the same commands from the web pages or from `mini shell` over ssh, and post to your
-  rooms from Discord.
+- play the built-in story, whose law makes impossible moves fail, or install a law on your own
+  document;
+- publish and run Objective Bend programs (`bend publish`, `bend run`);
+- use the same commands from the web pages or from a shell over ssh
+  ([deploy/shell/README.md](deploy/shell/README.md)), and post to your rooms from Discord after
+  linking your account with `/mini line:link CODE`.
 
-[What this edition carries](https://emberian.github.io/minidregg/edition.html) says which of
-these are built and which are still landing.
+[The demo status page](https://emberian.github.io/minidregg/edition.html) says which of these
+are built and which are still landing.
 
 **The project site** is <https://emberian.github.io/minidregg/>, with pages on the
 [language](https://emberian.github.io/minidregg/language.html), the
@@ -47,6 +53,9 @@ these are built and which are still landing.
 
 Lean decides what is allowed. Rust handles the physical edges (clients, keys, storage,
 transport, the browser gateway, the application sandbox) and makes no admission decisions.
+`World.admit` in `Kernel/World.lean` is the model of a world transition;
+`Kernel/HostRefinesWorldCore.lean` proves that the Host's deployed path
+(`DurableDataIntent.execute`) refines it.
 
 | Directory | Contents |
 |---|---|
@@ -55,7 +64,7 @@ transport, the browser gateway, the application sandbox) and makes no admission 
 | `Effects/` | The effect derivation engine: an effect is declared once, and its executor, term and descriptor are derived from the declaration |
 | `Compiler/` | Wire codecs, refusal reasons, the Objective Bend front end, the arithmetization compilers |
 | `Theory/` | Metatheory; never imports the design it reasons about (`scripts/check-import-boundary.sh`) |
-| `Selvage/`, `Assurance/` | Proof-system mathematics, and the one place kernel objects meet proof-system objects |
+| `Selvage/`, `Assurance/` | Proof-system mathematics, and proofs that connect kernel objects to it |
 | `Host/` | The native Host; `Host.Main` builds the `minidregg-host` executable |
 | `TokenCensus/` | The census of private constructors: each must be minted only in its home module, and a planted forgery must be caught |
 | `protocol/` | The registry of Host operations, checked against the Host's receivers |
@@ -71,8 +80,9 @@ transport, the browser gateway, the application sandbox) and makes no admission 
 The main crates under `native/`:
 
 - `resource-client`: the `mini` command, its shell, and the server-rendered web pages.
-- `mini-sdk`, `mini-sdk-ts`: the client SDK (consent-gated signing, and the record that keeps
-  each attempt's exact retry).
+- `mini-sdk`: the client SDK (consent-gated signing, and the record that keeps each attempt's
+  exact retry). `mini-sdk-ts` is its TypeScript twin for building and signing; it has no
+  transport and no consent process.
 - `mini-web`, `mini-web-spawn`: the browser gateway and the helper that runs a member's
   session.
 - `spk-host`, `spk-rpc`, `grain-runtime`: Sandstorm applications and agent tasks, sandboxed.
@@ -83,31 +93,36 @@ The main crates under `native/`:
 
 ## Building and running
 
-Lean builds need a warm Lake cache (Mathlib is a dependency). Linux is the supported platform.
+Lean builds need a warm Lake cache (Mathlib is a dependency). Linux x86-64 is the supported
+platform. Build the Rust kernels first: Lean loads them while elaborating anything that hashes.
 
 ```sh
-lake env lean Kernel/World.lean            # check one Lean module
-lake build Minidregg                       # the whole Lean tree
 scripts/build-mini-kernels.sh              # the Rust kernels the compiled Lean links
+lake env lean Kernel/World.lean            # check one Lean module
+lake build Minidregg                       # the main umbrella target
 scripts/build-native-host.sh --help        # the native Host build
 cargo nextest run -p <crate> -E 'test(<pattern>)'   # a filtered Rust test run
 scripts/check-import-boundary.sh           # the import boundary between layers
 ```
 
-To build a candidate, start a Store from it and walk the end-to-end journey (files and formats
-in [deploy/candidate/INTERFACES.md](deploy/candidate/INTERFACES.md)):
+A *candidate* is a directory of pinned binaries for one commit. To build one, start a private
+Store (one world's durable state) from it, and run the end-to-end journey, which starts its
+own fresh Store (files, formats and prerequisites in
+[deploy/candidate/INTERFACES.md](deploy/candidate/INTERFACES.md)):
 
 ```sh
 deploy/candidate/build.sh --out /srv/mini/candidate-<commit>
 C=/srv/mini/candidate-<commit>
+cp $C/genesis-params.example.json /srv/mini/genesis-params.json   # then edit the operator's choices
 $C/params.sh fill-genesis /srv/mini/genesis-params.json
 $C/run.sh init  --manifest $C/manifest.json --params /srv/mini/genesis-params.json --state /srv/mini/store-a
 $C/run.sh start --state /srv/mini/store-a
 native/resource-client/journey.sh $C/manifest.json /srv/mini/journey-1
 ```
 
-The journey writes `journey-result.json`. Read its first step that did not pass, not just the
-exit status ([docs/JOURNEY.md](docs/JOURNEY.md)). [docs/DEVELOPING.md](docs/DEVELOPING.md) is
+This runs a Host and its Store, not the web front end; the demo box's other services are in
+`deploy/`. The journey writes `journey-result.json`. Read its first step that did not pass,
+not just the exit status ([docs/JOURNEY.md](docs/JOURNEY.md)). [docs/DEVELOPING.md](docs/DEVELOPING.md) is
 the developer guide.
 
 ## Read next
