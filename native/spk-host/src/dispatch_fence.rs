@@ -319,8 +319,8 @@ pub(crate) fn refused_before_submit(
     // so a reply under either marker, decided (NO_RECORD) or undecided
     // (HOST_OUTCOME), left no record: the member is refused and authors a new
     // request.
-    let lean = framed_payload(frame, RESPONSE_NO_RECORD, OUTCOME_TAG)
-        .or_else(|_| framed_payload(frame, RESPONSE_HOST_OUTCOME, OUTCOME_TAG))
+    let lean = framed_payload("dispatch outcome", frame, RESPONSE_NO_RECORD, OUTCOME_TAG)
+        .or_else(|_| framed_payload("dispatch outcome", frame, RESPONSE_HOST_OUTCOME, OUTCOME_TAG))
         .ok()
         .and_then(|payload| {
             let directory = attempt_dir.join(format!("op{opcode}-refusal"));
@@ -401,7 +401,7 @@ fn lookup(operator: &PrivateOperator, attempt_dir: &Path, ingress: &[u8]) -> io:
         }
     };
     write_new(&directory, "frame.bin", &reply)?;
-    let Ok(payload) = framed_payload(&reply, crate::host_operations::APPLICATION_DISPATCH_LOOKUP, OUTCOME_TAG) else {
+    let Ok(payload) = framed_payload("dispatch lookup", &reply, crate::host_operations::APPLICATION_DISPATCH_LOOKUP, OUTCOME_TAG) else {
         note(&directory, "op35 reply was not an op35 outcome frame")?;
         return Ok(None);
     };
@@ -457,9 +457,9 @@ pub(crate) fn decide(
     // marker it came under.
     let (marker, original) = match &reply {
         Reply::Frame(frame) => {
-            let payload = framed_payload(frame, crate::host_operations::APPLICATION_DISPATCH_SUBMIT, OUTCOME_TAG)
-                .or_else(|_| framed_payload(frame, RESPONSE_NO_RECORD, OUTCOME_TAG))
-                .or_else(|_| framed_payload(frame, RESPONSE_HOST_OUTCOME, OUTCOME_TAG));
+            let payload = framed_payload("dispatch submit", frame, crate::host_operations::APPLICATION_DISPATCH_SUBMIT, OUTCOME_TAG)
+                .or_else(|_| framed_payload("dispatch outcome", frame, RESPONSE_NO_RECORD, OUTCOME_TAG))
+                .or_else(|_| framed_payload("dispatch outcome", frame, RESPONSE_HOST_OUTCOME, OUTCOME_TAG));
             let view = match payload {
                 Ok(payload) => {
                     let directory = attempt_dir.join("submit-outcome");

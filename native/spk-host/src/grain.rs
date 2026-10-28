@@ -673,6 +673,30 @@ fn persistent_var(host: &Host, placement: &Placement) -> PathBuf {
         .join(broker::volume_name(&host.store, &placement.volume_resource))
 }
 
+/// An INSTALL whose BEGIN the Host refused with nothing appended
+/// (`lifecycle_v3_native::BEGIN_REFUSED_MARKER` in `begin-v3`), and which reached no claim
+/// and no prepared record, is settled. Its journal is renamed to `install-refused-<n>`
+/// (kept whole, as the refusal's evidence) so the next INSTALL begins afresh. Any other
+/// journal is left exactly as it is, and the attempt check below still holds it.
+fn set_aside_refused_install(journal: &Path) -> io::Result<()> {
+    if !exists(&journal.join("begin-v3").join(crate::lifecycle_v3_native::BEGIN_REFUSED_MARKER))? {
+        return Ok(());
+    }
+    for name in ["install-prepared-v2.json", "claim-v3-author", "claim-v3", "lifecycle-claim-v3-active.json"] {
+        if exists(&journal.join(name))? {
+            return Ok(());
+        }
+    }
+    let parent = journal.parent().ok_or_else(|| invalid("INSTALL journal parent absent"))?;
+    for n in 1..=1000u32 {
+        let aside = parent.join(format!("install-refused-{n}"));
+        if !exists(&aside)? {
+            return fs::rename(journal, &aside);
+        }
+    }
+    Err(invalid("INSTALL refused-attempt slots exhausted"))
+}
+
 const INSTALL_ATTEMPT_ARTIFACTS: &[&str] = &[
     "launch-descriptor",
     "lifecycle-begin-v3-active.json",
@@ -728,6 +752,7 @@ fn install(
     }
     let custody = write_custody(host, &selector)?;
     let journal = host.app_dir(&selector.app).join("install");
+    set_aside_refused_install(&journal)?;
     private_directory(&journal)?;
     let config_path = journal.join("install.json");
     let mut config = json!({

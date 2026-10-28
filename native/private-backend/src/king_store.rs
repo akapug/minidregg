@@ -151,7 +151,7 @@ fn king_outbox(ps: &[triple_king::Send]) -> Vec<u8> {
 }
 fn parse_king_outbox(b: &[u8], n: usize) -> Result<Vec<triple_king::Send>> {
     let mut c = Cursor::new(b)?;
-    let len = acss_id_store::count(&mut c)?;
+    let len = c.count()?;
     if len > crate::codec::MAX / 40 {
         return Err(bad("King outbox bound"));
     }
@@ -934,7 +934,7 @@ mod tests {
                 (t.holder(), vec![a, b, cc])
             })
             .collect::<Vec<_>>();
-        let polys = acss_id::polynomial(&points, 3).unwrap();
+        let polys = crate::reconstruction::polynomial(&points, 3).unwrap();
         assert_ne!(polys[0][0], Field(0));
         assert_ne!(polys[1][0], Field(0));
         assert_eq!(polys[0][0].mul(polys[1][0]), polys[2][0]);
@@ -942,10 +942,7 @@ mod tests {
             let tuple = t.triples()[0];
             for (i, v) in [tuple.0, tuple.1, tuple.2].iter().enumerate() {
                 let x = Field(t.holder() as u128 + 1);
-                let at = polys[i]
-                    .iter()
-                    .rev()
-                    .fold(Field(0), |a, k| a.mul(x).add(*k));
+                let at = crate::reconstruction::eval(&polys[i], x);
                 assert_eq!(*v, at, "holder {} component {i}", t.holder());
             }
         }
@@ -1283,5 +1280,43 @@ mod tests {
             (3, 3),
             "one dealer event per ACSS and per Sh2t instance"
         );
+    }
+}
+
+#[cfg(test)]
+mod pin_wire {
+    use super::*;
+    use crate::asks::PhaseMessage as PinPhase;
+    fn pin_sends() -> Vec<triple_king::Send> {
+        vec![
+            triple_king::Send { to: 1, message: Message { context: [7; 32], body: Body::InitialResult(PinPhase::Echo(vec![1])) } },
+            triple_king::Send { to: 3, message: Message { context: [7; 32], body: Body::InitialResult(PinPhase::Ready(vec![1])) } },
+        ]
+    }
+    /// Outbox wire: Nat count, then per packet u16 LE recipient and the
+    /// length-prefixed message wire; canonical, bounded, recipient-checked.
+    #[test]
+    fn pin_outbox_wire() {
+        let ps = pin_sends();
+        let b = king_outbox(&ps);
+        let mut want = vec![2, 255];
+        for s in &ps {
+            want.extend(s.to.to_le_bytes());
+            let m = encode_message(&s.message);
+            crate::codec::Nat::new(m.len() as u64).put(&mut want);
+            want.extend(m);
+        }
+        assert_eq!(&b[..4], &[2, 255, 1, 0]);
+        assert_eq!(b, want);
+        assert_eq!(parse_king_outbox(&b, 4).unwrap(), ps);
+        assert!(parse_king_outbox(&b, 3).is_err(), "recipient 3 is outside n = 3");
+        let mut trailing = b.clone();
+        trailing.push(0);
+        let b = trailing;
+        assert!(parse_king_outbox(&b, 4).is_err(), "trailing bytes refuse");
+        let mut huge = vec![];
+        crate::codec::Nat::new(crate::codec::MAX as u64).put(&mut huge);
+        let b = huge;
+        assert!(parse_king_outbox(&b, 4).is_err(), "an absurd count refuses");
     }
 }

@@ -210,7 +210,13 @@ jq -n --arg tool "$TOOL_PUBLIC" --arg provider "${PROVIDER_PUBLIC:-}" --arg with
       [{subject: 9, keyId: 9009, publicKey: $provider, accountId: 9, spendCapabilityId: 43,
         controlCapabilityId: 56, factoryObserveCapabilityId: 57, initialBalance: 100}] else [] end)' \
   >"$EVIDENCE/enrollments.json"
-overlay='.sponsor.initialBalance = 100'
+# The clock subject keeps its frame role but not the example's capability numbers 71-74: this
+# scenario's birth installs 71/72 (the controller task's owner and control capabilities) and later
+# delegates 73 (the parent witness), and a birth whose grants reuse an installed capability is refused
+# at prepare (ResourceBirthController `authorityBatch`).
+overlay='.sponsor.initialBalance = 100
+  | .clock += {tickCapabilityId: 4071, spendCapabilityId: 4072, controlCapabilityId: 4073,
+               factoryObserveCapabilityId: 4074}'
 if [ -n "$PROFILE" ]; then
   overlay="$overlay | .grainPlatform.grainBirthTariff = $(jq -c .operator.grainBirthTariff "$PROFILE")
     | .providerServices = $(jq -c .operator.providerServices "$PROFILE")
@@ -568,8 +574,14 @@ if [ -n "$CONTROLLER_UNIT" ]; then
       echo "controller unit is already in use: $CONTROLLER_UNIT ($current_state)" >&2
       exit 1 ;;
   esac
+  # An unregistered test controller selects its managers explicitly: the user manager for the
+  # controller and its workers, under its exact canonical unit (native/grain-runtime/SYSTEMD-MANAGERS.md;
+  # without them the runtime refuses "managed proof requires root registration or explicit user
+  # fixture selection").
   systemd-run --user --wait --pipe --collect --unit="${CONTROLLER_UNIT%.service}" \
     --description="$CONTROLLER_MARKER" \
+    --setenv=MINI_GRAIN_CONTROLLER_MANAGER=user --setenv=MINI_GRAIN_WORKER_MANAGER=user \
+    --setenv="MINI_GRAIN_CONTROLLER_UNIT=$CONTROLLER_UNIT" \
     --property=KillMode=control-group --property=RuntimeMaxSec=1800s \
     "$GRAIN" serve "$EVIDENCE/runtime-config.json" \
     >"$EVIDENCE/grain-service.stdout" 2>"$EVIDENCE/grain-service.stderr" &

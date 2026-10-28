@@ -9,6 +9,8 @@ fi
 
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 REPO=$(CDPATH='' cd -- "$HERE/../.." && pwd)
+. "$REPO/native/resource-client/journey.d/lib/wire.sh"
+CONTENT_VERSION=$(content_command_version "$REPO")
 HOST=$1
 CONFIG=$2
 KEY=$3
@@ -48,13 +50,13 @@ jq -e '.type == "resource" and .cell.entries == []' \
 NOTE_INITIAL_HEX=$(printf '%s' 'Workroom research note: verify the source receipt before reuse.' | od -An -tx1 -v | tr -d ' \n')
 NOTE_FINAL_HEX=$(printf '%s' 'Revised workroom note: Mini accepted the receipt; fn provenance remains a separate check.' | od -An -tx1 -v | tr -d ' \n')
 
-jq -n --slurpfile view "$EVIDENCE/before/view.json" \
+jq -n --arg version "$CONTENT_VERSION" --slurpfile view "$EVIDENCE/before/view.json" \
   --slurpfile challenge "$EVIDENCE/before/challenge.json" \
   --arg payload "$NOTE_INITIAL_HEX" \
   '{subject:"8",nonce:"50001",purpose:{type:"prepare",draft:{type:"invoke",
     command:{subject:"8",
       nonce:"50002",targets:[{kind:"object",target:"8001",capability:"95",
-        observeCapability:null,schemaVersion:"1",expectedTargetRoot:$view[0].cell.root,
+        observeCapability:null,schemaVersion:$version,expectedTargetRoot:$view[0].cell.root,
         payload:{type:"content",actions:[{type:"createAtom",atom:"7401",
           kind:{type:"text"},payload:$payload}]}}]}}},
     grants:[{kind:"object",target:"8001",capability:"95"}]}' \
@@ -68,13 +70,13 @@ jq -e --arg payload "$NOTE_INITIAL_HEX" '.cell.entries | length == 1 and
   .[0].type == "atom" and .[0].kind.type == "text" and .[0].payload == $payload' \
   "$EVIDENCE/created/view.json" >/dev/null
 
-jq -n --slurpfile view "$EVIDENCE/created/view.json" \
+jq -n --arg version "$CONTENT_VERSION" --slurpfile view "$EVIDENCE/created/view.json" \
   --slurpfile challenge "$EVIDENCE/created/challenge.json" \
   --arg payload "$NOTE_FINAL_HEX" \
   '{subject:"8",nonce:"50004",purpose:{type:"prepare",draft:{type:"invoke",
     command:{subject:"8",
       nonce:"50005",targets:[{kind:"object",target:"8001",capability:"95",
-        observeCapability:null,schemaVersion:"1",expectedTargetRoot:$view[0].cell.root,
+        observeCapability:null,schemaVersion:$version,expectedTargetRoot:$view[0].cell.root,
         payload:{type:"content",actions:[{type:"editAtom",atom:"7401",
           before:($view[0].cell.entries[0] |
             {document,kind,payload,createdBy,createdAt,tombstonedAt}),

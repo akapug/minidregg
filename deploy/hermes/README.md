@@ -555,6 +555,31 @@ to a candidate whose host carries bc88a5ab, and add `J14_AWAIT=1` for the bridge
   mini `resident_`, `operator_peer`, `agent_operator`. install-hermes has not run anywhere: it needs
   the demo box with infra's items.
 
+**Quest 2 on the first v8 candidate 0ce31391** (`/build/lanes/hermes-tier-run/hb-q2.sh RUN_DIR` =
+tools-run.sh with `C=` that candidate, J14_TOOLS=1 J14_AWAIT=1, root `hroot-q2`; run dirs
+`/build/lanes/hermes-live-run/hb-q2-N`):
+- run 1: J14 row 8, alice's 200000000 await funding exceeded the J14 sponsor's 100000; fixed
+  (b740e6f0, sponsor funded under J14_AWAIT).
+- run 2: 122/133, stopped at row 133. Row 122: the room write was refused at the tail bound (head 257
+  certified 0 bound 256); J14 never certified its World. Fixed (2aa94b0c, the operator certifies
+  before each resident pass). Compaction never ran (journal.providerSettlement persists as the next
+  call's anchor); fixed (2aa94b0c, keep from the latest settlement and prompt). `host-ops.txt`:
+  1, 2, 3, 4, 5, 17, 19, 96, 97, 98, 144, all on the allowlist; 0, 6-11, 30, 31, 99-102, 151,
+  153, 180 unused (narrow after the await rows run). Footprint before compaction: g 63.5 MiB /
+  13,329 inodes for 4 prompts and 14 model calls.
+- run 3: 126/137, stopped at row 137. Row 126: the tools pass ran out of budget at compute turn
+  57 of 180. The gate wrote no CPU record because the controller's stop killed it, so 1800 s was
+  charged. Fixed in 1d947aa9 (unverified): systemd's CPUUsageNSec is recorded before the kill.
+  **Open, undiagnosed:** the tools pass selected bob's earlier nogrant request ("please append
+  'typo fixed' to cell ..."), not his sandbox ask. Hermes was offered the seven sandbox tools
+  (provider.shown.jsonl) but answered the old request, so the test provider never took its sandbox
+  branch (hermes-test-provider `sandbox_reply_for` keys on `selectedRequest.text` containing
+  "sandbox"). Look at the resident's request selection after the nogrant pass
+  (`resident/requests.json` in the run's g/state).
+- run 4 (`hb-q2-4`, PID file `/build/lanes/hermes-tier-run/hb-q2-4.pid`): filtered tests, then the
+  same J14 on 1d947aa9. Read every row; the J5 red (6/8 stranger attempts rc=3, not refused) is
+  the integrator's.
+
 **Owed:**
 - Run J14_TOOLS and J14_AWAIT on a candidate carrying bc88a5ab and this lane (L4b quest 2:
   `/build/lanes/hermes-tier-run/tools-run.sh`, `C=` the candidate). The same run yields `host-ops.txt`.

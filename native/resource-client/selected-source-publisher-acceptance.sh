@@ -4,6 +4,7 @@
 # SELECTED_RELEASE_STOP_AFTER_ORIGINAL=1; no recipient mutation has occurred.
 set -eu
 umask 077
+. "$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)/native/resource-client/journey.d/lib/evidence.sh"
 
 if [ "$#" -ne 5 ]; then
   echo "usage: $0 HOST MINI PREPARED-DIR PRIVATE-POST.json NEW-EVIDENCE-DIR" >&2
@@ -39,7 +40,7 @@ SCRIPT=$HERE/selected-source-publisher-acceptance.sh
 CERTIFICATE=$(jq -er '.certificatePath' "$POST_CONFIG")
 [ -f "$CERTIFICATE" ] || { echo "missing pinned certificate" >&2; exit 2; }
 [ -x "$DROP_HOST" ] || { echo "missing test-only drop-reply shim" >&2; exit 2; }
-shasum -a 256 "$HOST" "$MINI" "$SCRIPT" "$DROP_HOST" \
+sha256 "$HOST" "$MINI" "$SCRIPT" "$DROP_HOST" \
   "$SOURCE_CONFIG" "$PACKET" "$ARTICLE" "$POST_CONFIG" "$CERTIFICATE" \
   >"$EVIDENCE/SHA256SUMS.start.private"
 
@@ -104,13 +105,13 @@ cmp "$EVIDENCE/post-result-before.json" \
   "$EVIDENCE/owner-publish/fn-post-result.json"
 test "$(find "$EVIDENCE/owner-publish" -name 'fn-post-attempt*' | wc -l | tr -d ' ')" = 1
 
-shasum -a 256 "$HOST" "$MINI" "$SCRIPT" "$DROP_HOST" \
+sha256 "$HOST" "$MINI" "$SCRIPT" "$DROP_HOST" \
   "$SOURCE_CONFIG" "$PACKET" "$ARTICLE" "$POST_CONFIG" "$CERTIFICATE" \
   >"$EVIDENCE/SHA256SUMS.end-inputs.private"
 cmp "$EVIDENCE/SHA256SUMS.start.private" \
   "$EVIDENCE/SHA256SUMS.end-inputs.private"
 cp "$EVIDENCE/SHA256SUMS.end-inputs.private" "$EVIDENCE/SHA256SUMS.end.private"
-shasum -a 256 \
+sha256 \
   "$EVIDENCE/owner-sign/ingress.bin" \
   "$EVIDENCE/drop-native-outcome.bin" \
   "$EVIDENCE/owner-publish/source-submit.bin" \
