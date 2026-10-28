@@ -50,7 +50,7 @@ inductive QueryView where
   /-- Only the exact observation grant used to authorize this query. -/
   | capability
   /-- The room's members, each with the greatest height at which it wrote a
-  cell under the room that the reader's grant covers (PLACE §2.5). -/
+  cell under the room that the reader's grant covers (docs/PLACE.md §2.5). -/
   | who
   /-- The log entries above this height that wrote a cell under the room that
   the reader's grant covers, with those cells alone. -/

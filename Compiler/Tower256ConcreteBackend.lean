@@ -140,6 +140,57 @@ def cursorOfPrefix {alpha : Type} (decode : List UInt8 -> Option (alpha × List 
     (bytes : ByteArray) (start : Nat) : Option (alpha × Nat) :=
   (decode (bytes.data.toList.drop start)).map fun result => (result.1, bytes.size - result.2.length)
 
+/-- Push every octet of `bytes` onto `out`, in order: the writer of a list of
+octets, in place while `out` is unshared. -/
+def pushOctets (out : ByteArray) : List UInt8 -> ByteArray
+  | [] => out
+  | octet :: rest => pushOctets (out.push octet) rest
+
+theorem push_data (out : ByteArray) (octet : UInt8) :
+    (out.push octet).data.toList = out.data.toList ++ [octet] := by
+  rw [ByteArray.data_push, Array.toList_push]
+
+theorem pushOctets_data (out : ByteArray) (bytes : List UInt8) :
+    (pushOctets out bytes).data.toList = out.data.toList ++ bytes := by
+  induction bytes generalizing out with
+  | nil => simp [pushOctets]
+  | cons octet rest ih => rw [pushOctets, ih, push_data, List.append_assoc, List.singleton_append]
+
+/-- Two buffers with the same octets are the same buffer. -/
+theorem bytes_ext {left right : ByteArray} (same : left.data.toList = right.data.toList) :
+    left = right := by
+  cases left
+  cases right
+  exact congrArg ByteArray.mk (Array.ext' same)
+
+/-- The octets of `bytes[0, index)` consed onto `acc`, read from the end: one cell per
+octet, no reversal. -/
+def octetsOnto (bytes : ByteArray) : (index : Nat) -> index ≤ bytes.size -> List UInt8 -> List UInt8
+  | 0, _, acc => acc
+  | index + 1, fits, acc => octetsOnto bytes index (by omega) (bytes[index]'(by omega) :: acc)
+
+theorem octetsOnto_eq (bytes : ByteArray) (index : Nat) (fits : index ≤ bytes.size) (acc : List UInt8) :
+    octetsOnto bytes index fits acc = bytes.data.toList.take index ++ acc := by
+  induction index generalizing acc with
+  | zero => simp [octetsOnto]
+  | succ index ih =>
+      rw [octetsOnto, ih, List.take_add_one]
+      have inside : index < bytes.data.size := by
+        rw [ByteArray.size_data]
+        omega
+      have octet : bytes.data.toList[index]? = some bytes[index] := by
+        rw [Array.getElem?_toList, Array.getElem?_eq_getElem inside,
+          ByteArray.getElem_eq_getElem_data]
+      simp only [octet, Option.toList_some, List.append_assoc, List.singleton_append]
+      rfl
+
+/-- The octets of a buffer as a list. -/
+def octetsOf (bytes : ByteArray) : List UInt8 := octetsOnto bytes bytes.size (Nat.le_refl _) []
+
+theorem octetsOf_eq (bytes : ByteArray) : octetsOf bytes = bytes.data.toList := by
+  rw [octetsOf, octetsOnto_eq, List.append_nil, List.take_of_length_le]
+  rw [Array.length_toList, ByteArray.size_data]
+
 /-- A prefix codec consumes exactly one value and returns the unconsumed
 suffix.  The append law makes sequential and list composition mechanical.
 
@@ -172,6 +223,17 @@ structure StreamCodec (alpha : Type) where
   every call, which inside a repetition would be quadratic. A dispatch bit, not
   a law: `decodeAt_spec` holds either way. -/
   cursorNative : Bool := false
+  /-- The encoder as a WRITER: append the encoding of `value` to `out`. The primitives
+  and combinators push octets straight into the buffer, so a nested record is written
+  in one pass with no intermediate list and no list append; a hand-written encoder gets
+  its list pushed (`pushOctets`). The compiled `encode` runs this writer
+  (`StreamCodec.encode_eq_encodeViaWriter`). -/
+  encodeInto : ByteArray -> alpha -> ByteArray := fun out value => pushOctets out (encode value)
+  /-- The writer appends exactly the encoding. -/
+  encodeInto_spec : forall out value,
+    (encodeInto out value).data.toList = out.data.toList ++ encode value := by
+    intro out value
+    exact Minidregg.Compiler.Tower256ConcreteBackend.pushOctets_data _ _
 
 /-- Discharges `StreamCodec.encode_decodePrefix` for a decoder that reads a
 `StreamCodec.nat` tag and dispatches on it: each known tag's arm is a chain of
@@ -202,6 +264,29 @@ macro "stream_canonical_tagged" : tactic => `(tactic| (
 namespace StreamCodec
 
 variable {alpha beta : Type}
+
+/-! ### The compiled encoder -/
+
+/-- The encoding of `value` in a fresh buffer, by the writer. -/
+def encodeBytes (codec : StreamCodec alpha) (value : alpha) : ByteArray :=
+  codec.encodeInto ByteArray.empty value
+
+theorem encodeBytes_data (codec : StreamCodec alpha) (value : alpha) :
+    (codec.encodeBytes value).data.toList = codec.encode value := by
+  rw [encodeBytes, codec.encodeInto_spec, ByteArray.data_empty, Array.toList_empty, List.nil_append]
+
+/-- `encode` as compiled: write into a buffer, then read the octets out once. A nested
+record costs one pass and one list, where the list encoders cost one append (two
+reversals of the left side) per combinator level. -/
+def encodeViaWriter (codec : StreamCodec alpha) (value : alpha) : List UInt8 :=
+  octetsOf (codec.encodeBytes value)
+
+/-- Same function (`encodeInto_spec`), so no statement about `encode` changes. No
+instance loops: a hand-written instance's default writer pushes its OWN encoder's list,
+never the `encode` projection of itself. -/
+@[csimp] theorem encode_eq_encodeViaWriter : @StreamCodec.encode = @StreamCodec.encodeViaWriter := by
+  funext alpha codec value
+  rw [encodeViaWriter, octetsOf_eq, encodeBytes_data]
 
 /-- A prefix codec becomes a lawful top-level codec by requiring full input
 consumption. -/
@@ -377,12 +462,15 @@ def toLawfulCursor (codec : StreamCodec alpha) : LawfulCodec alpha where
 theorem ext_fields {left right : StreamCodec alpha} (encodes : left.encode = right.encode)
     (decodes : left.decodePrefix = right.decodePrefix) (cursors : left.decodeAt = right.decodeAt)
     (natives : left.cursorNative = right.cursorNative) : left = right := by
-  cases left
-  cases right
+  obtain ⟨_, _, _, _, _, _, _, leftWriter, leftWrites⟩ := left
+  obtain ⟨_, _, _, _, _, _, _, rightWriter, rightWrites⟩ := right
   cases encodes
   cases decodes
   cases cursors
   cases natives
+  have writers : leftWriter = rightWriter :=
+    funext fun out => funext fun value => bytes_ext (by rw [leftWrites, rightWrites])
+  cases writers
   rfl
 
 /-- Change only the value view of a stream codec. -/
@@ -417,6 +505,8 @@ def xmap (codec : StreamCodec alpha) (toWire : beta -> alpha)
     simp only [cursorOfPrefix]
     cases codec.decodePrefix (bytes.data.toList.drop start) <;> rfl
   cursorNative := codec.cursorNative
+  encodeInto out value := codec.encodeInto out (toWire value)
+  encodeInto_spec out value := codec.encodeInto_spec out (toWire value)
 
 /-- Sequential product; no delimiter is needed because both sides are prefix
 decodable. -/
@@ -466,6 +556,10 @@ def product (left : StreamCodec alpha) (right : StreamCodec beta) :
         simp only [cursorOfPrefix, dropped]
         cases secondOk : right.decodePrefix afterFirst <;> simp [secondOk]
   cursorNative := left.cursorNative && right.cursorNative
+  encodeInto out value := right.encodeInto (left.encodeInto out value.1) value.2
+  encodeInto_spec := by
+    intro out value
+    rw [right.encodeInto_spec, left.encodeInto_spec, List.append_assoc]
 
 /-- Prefix-free binary sum. -/
 def sum (left : StreamCodec alpha) (right : StreamCodec beta) :
@@ -541,6 +635,14 @@ def sum (left : StreamCodec alpha) (right : StreamCodec beta) :
     · rw [dif_neg inside, octets_drop_end bytes (by omega)]
       rfl
   cursorNative := left.cursorNative && right.cursorNative
+  encodeInto
+    | out, .inl value => left.encodeInto (out.push 0) value
+    | out, .inr value => right.encodeInto (out.push 1) value
+  encodeInto_spec := by
+    intro out value
+    cases value with
+    | inl value => simp only [left.encodeInto_spec, push_data, List.append_assoc, List.singleton_append]
+    | inr value => simp only [right.encodeInto_spec, push_data, List.append_assoc, List.singleton_append]
 
 /-- Booleans as a one-byte tag. -/
 def bool : StreamCodec Bool where
@@ -574,6 +676,8 @@ def bool : StreamCodec Bool where
     · rw [dif_neg inside, octets_drop_end bytes (by omega)]
       rfl
   cursorNative := true
+  encodeInto out value := out.push (if value then 1 else 0)
+  encodeInto_spec out value := push_data out _
 
 /-- Optional values, tagged.  `none` costs one byte and `some` costs one byte
 plus the payload, so the absent case never has to be encoded as a sentinel
@@ -640,6 +744,14 @@ def option (codec : StreamCodec alpha) : StreamCodec (Option alpha) where
     · rw [dif_neg inside, octets_drop_end bytes (by omega)]
       rfl
   cursorNative := codec.cursorNative
+  encodeInto
+    | out, none => out.push 0
+    | out, some value => codec.encodeInto (out.push 1) value
+  encodeInto_spec := by
+    intro out value
+    cases value with
+    | none => exact push_data out 0
+    | some value => simp only [codec.encodeInto_spec, push_data, List.append_assoc, List.singleton_append]
 
 /-- Whether `expected` sits in `bytes` at `start`, octet by octet. -/
 def matchesAt (bytes : ByteArray) : Nat -> List UInt8 -> Bool
@@ -698,6 +810,8 @@ def literal (expected : List UInt8) : StreamCodec Unit where
     · rw [if_neg found, if_neg (fun taken => found ((matchesAt_iff bytes start expected).mpr taken))]
       rfl
   cursorNative := true
+  encodeInto out _ := pushOctets out expected
+  encodeInto_spec out _ := pushOctets_data out expected
 
 /-- `frame`, checked, then one value. -/
 def framed (frame : List UInt8) (codec : StreamCodec alpha) : StreamCodec alpha :=
@@ -745,6 +859,8 @@ def refine (codec : StreamCodec alpha) (accept : alpha -> Prop) [DecidablePred a
         obtain ⟨value, rest⟩ := pair
         by_cases accepted : accept value <;> simp [accepted]
   cursorNative := codec.cursorNative
+  encodeInto out value := codec.encodeInto out value.val
+  encodeInto_spec out value := codec.encodeInto_spec out value.val
 
 theorem refine_encode (codec : StreamCodec alpha) (accept : alpha -> Prop) [DecidablePred accept]
     (value : {value // accept value}) : (refine codec accept).encode value = codec.encode value.val :=
@@ -782,6 +898,8 @@ def byte : StreamCodec UInt8 where
     · rw [dif_neg inside, octets_drop_end bytes (by omega)]
       rfl
   cursorNative := true
+  encodeInto out value := out.push value
+  encodeInto_spec out value := push_data out value
 
 /-! ### Compact naturals and finite sequences
 
@@ -927,6 +1045,14 @@ theorem decodeNatAt_spec (bytes : ByteArray) (start : Nat) (fits : start ≤ byt
     rfl
 termination_by bytes.size - start
 
+/-- `encodeNat` as a writer: the digits, then the terminator, pushed. -/
+def encodeNatInto (out : ByteArray) (value : Nat) : ByteArray :=
+  (pushOctets out (natDigits value)).push 255
+
+theorem encodeNatInto_data (out : ByteArray) (value : Nat) :
+    (encodeNatInto out value).data.toList = out.data.toList ++ encodeNat value := by
+  rw [encodeNatInto, push_data, pushOctets_data, encodeNat, List.append_assoc]
+
 def nat : StreamCodec Nat where
   encode := encodeNat
   decodePrefix := decodeNatPrefix
@@ -935,10 +1061,24 @@ def nat : StreamCodec Nat where
   decodeAt := decodeNatAt
   decodeAt_spec := decodeNatAt_spec
   cursorNative := true
+  encodeInto := encodeNatInto
+  encodeInto_spec := encodeNatInto_data
 
 def encodeMany (codec : StreamCodec alpha) : List alpha -> List UInt8
   | [] => []
   | value :: values => codec.encode value ++ encodeMany codec values
+
+/-- `encodeMany` as a writer: each element written after the last. -/
+def encodeManyInto (codec : StreamCodec alpha) : ByteArray -> List alpha -> ByteArray
+  | out, [] => out
+  | out, value :: values => encodeManyInto codec (codec.encodeInto out value) values
+
+theorem encodeManyInto_data (codec : StreamCodec alpha) (out : ByteArray) (values : List alpha) :
+    (encodeManyInto codec out values).data.toList = out.data.toList ++ encodeMany codec values := by
+  induction values generalizing out with
+  | nil => simp [encodeManyInto, encodeMany]
+  | cons value values ih =>
+      rw [encodeManyInto, ih, codec.encodeInto_spec, encodeMany, List.append_assoc]
 
 def decodeMany (codec : StreamCodec alpha) : Nat -> List UInt8 ->
     Option (List alpha × List UInt8)
@@ -1045,6 +1185,11 @@ def list (codec : StreamCodec alpha) : StreamCodec (List alpha) where
         rw [decodeManyAt_spec codec bytes _ _ [] (Nat.sub_le _ _), nat.rest_at countOk]
         cases manyOk : decodeMany codec count afterCount <;> simp [manyOk]
   cursorNative := codec.cursorNative
+  encodeInto out values := encodeManyInto codec (encodeNatInto out values.length) values
+  encodeInto_spec := by
+    intro out values
+    rw [encodeManyInto_data, encodeNatInto_data, List.append_assoc]
+    try rfl
 
 end StreamCodec
 
@@ -1363,6 +1508,7 @@ theorem digest256_consumes_32 (octets : List UInt8) (digest : Digest256) (rest :
 #assert_axioms StreamCodec.decodeManyAt_spec
 #assert_axioms StreamCodec.matchesAt_iff
 #assert_axioms fixedValueAt_eq
+#assert_axioms StreamCodec.encode_eq_encodeViaWriter
 /-- The byte specialization of `StreamCodec.encodeMany` has no per-byte
 framing. Keep this equality explicit so the faster implementation below stays
 on the existing wire format. -/
@@ -1484,6 +1630,11 @@ def bytesStream : StreamCodec (List UInt8) where
           rw [dif_neg fits]
           simp [decodeBytesPrefix, short]
   cursorNative := true
+  encodeInto out values := pushOctets (StreamCodec.encodeNatInto out values.length) values
+  encodeInto_spec := by
+    intro out values
+    rw [pushOctets_data, StreamCodec.encodeNatInto_data, List.append_assoc]
+    try rfl
 
 theorem bytesStream_encode_eq_list_byte (values : List UInt8) :
     bytesStream.encode values = (StreamCodec.list StreamCodec.byte).encode values := by

@@ -1,5 +1,5 @@
 /-
-# Kernel.WorldBench -- a compiled 1000-turn fold (DATAMODEL §5 B2 exit)
+# Kernel.WorldBench -- a compiled 1000-turn fold (docs/DATAMODEL.md §5 B2 exit)
 
 A deterministic log over the real `World.step`: 100 creates (one cell each,
 allocating key 0), then 900 writes, each guarded at the cell's current value

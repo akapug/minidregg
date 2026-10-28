@@ -863,7 +863,7 @@ theorem v1_tail_view_refused (payload : List UInt8) :
     decide +kernel
   simp only [tailViewCodec, NativeHostCodec.framed_decode, ← len, List.take_left', ne, if_false]
 
-/-! ## Presence and past views (PLACE §2.5 K-INDEX, §4.5 K-HISTORY-READ)
+/-! ## Presence and past views (docs/PLACE.md §2.5 K-INDEX, §4.5 K-HISTORY-READ)
 
 `who`, `since` and `at` are ordinary queries: the footprint is the one target
 and its grant is checked by the same source-owned observation admission as a
@@ -1923,7 +1923,7 @@ theorem challenge_absent_target_refused (context : Context deployment)
     bind, Except.bind, Except.mapError, pure, Except.pure]
   rfl
 
-/-- **Challenge binding (DATAMODEL §3.4).**  A challenge carries the world root
+/-- **Challenge binding (docs/DATAMODEL.md §3.4).**  A challenge carries the world root
 and the height of the one loaded image it was computed from. -/
 theorem challengeAt_bound {context : Context deployment}
     {profile : CanonicalRuntimeProfile.Profile F} {federation : FederationId}

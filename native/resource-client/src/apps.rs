@@ -11,6 +11,9 @@
 //! (`SO_PEERCRED` names the member); every reply is a decoded outcome: decided
 //! or undecided with its exact retry, never a spinner that lies.
 
+#[path = "apps_qualification.rs"]
+mod qualification;
+
 #[path = "apps_front.rs"]
 pub(crate) mod front;
 #[path = "apps_worker.rs"]
@@ -407,6 +410,12 @@ fn entry_json(entry: &Entry, verdict: &Verdict) -> Value {
     })
 }
 
+fn qualified_entry_json(entry: &Entry, verdict: &Verdict, qualification: &qualification::Qualification) -> Value {
+    let mut value = entry_json(entry, verdict);
+    value["qualification"] = qualification.get(entry).cloned().unwrap_or(Value::Null);
+    value
+}
+
 /// Where the fetcher takes the package from: the pin's URL, the market's
 /// package URL, or (a pin without a URL) a box-local file the operator adopts.
 fn package_url(entry: &Entry) -> String {
@@ -430,6 +439,7 @@ fn verdict_line(verdict: &Verdict) -> String {
 }
 
 struct Paths {
+    qualification: Option<PathBuf>,
     index: PathBuf,
     meta: PathBuf,
     verdicts: PathBuf,
@@ -445,6 +455,8 @@ fn paths(args: &mut Args) -> Paths {
             .unwrap_or_else(|| PathBuf::from(default))
     };
     Paths {
+        qualification: args.optional("qualification").map(PathBuf::from)
+            .or_else(|| std::env::var_os("MINI_APPS_QUALIFICATION").map(PathBuf::from)),
         index: from(args, "index", "MINI_MARKET_INDEX", DEFAULT_INDEX),
         meta: from(args, "meta", "MINI_MARKET_META", DEFAULT_META),
         verdicts: from(args, "verdicts", "MINI_APPS_VERDICTS", DEFAULT_VERDICTS),
@@ -606,6 +618,14 @@ fn install(mut args: Args, paths: &Paths, as_json: bool, dir: Option<std::ffi::O
                 if !delegation.exists() {
                     fs::copy(&selector, &delegation).map_err(|e| format!("cannot retain the delegation: {e}"))?;
                 }
+                // The manager issues share tickets, so it must hold a delegate-capable child of the owner's
+                // app capability; the member delegates it now and the worker issues under it.
+                let share = apps_dir.join("share-delegation.json");
+                if !share.exists() {
+                    let max = born_source.pointer("/applicationGrainBirth/applicationBirth/template/ownerBudget").and_then(Value::as_str).unwrap_or("100000").to_owned();
+                    let child = delegate_share(&root, &ws, &name, &config.management_subject, &max)?;
+                    crate::create_private(&share, &serde_json::to_vec_pretty(&child).map_err(|e| e.to_string())?)?;
+                }
             }
             // The worker cannot read a member's 0700 home: the three documents travel
             // in the request (bounded), and the worker re-checks them against the Store.
@@ -627,6 +647,7 @@ fn install(mut args: Args, paths: &Paths, as_json: bool, dir: Option<std::ffi::O
                 "protocol":WORKER_PROTOCOL,"verb":"install","requestId":id,
                 "appId":entry.app_id,"packageId":entry.package_id,"class":class,
                 "birthSource":document(&source)?,"birthReceipt":document(&receipt)?,"delegation":delegation_doc,
+                "shareDelegation":document(&delegation.with_file_name("share-delegation.json"))?,
                 "requestCell":cell,"indexName":entry.name,"indexVersion":entry.version
             });
             let file = requests.join(format!("{id}.json"));
@@ -636,7 +657,15 @@ fn install(mut args: Args, paths: &Paths, as_json: bool, dir: Option<std::ffi::O
     };
     let mut request = retained.clone();
     request["verb"] = json!(if is_retry { "retry" } else { "install" });
-    let reply = worker_call(&paths.socket, &request)?;
+    // The worker answers an install at once (`pending` while it runs); a reply lost after the
+    // request was sent leaves the request with the worker, so the member is shown its follow-up.
+    let reply = worker_call(&paths.socket, &request).map_err(|error| {
+        if error.starts_with("worker reply lost") || error.starts_with("worker closed without") {
+            format!("undecided: request {id} was sent and the worker may be running it; it continues without this command ({error}); exact retry: mini apps install --app {} --retry {id}", entry.app_id)
+        } else {
+            error
+        }
+    })?;
     let outcome = requests.join(format!("{id}.outcome.json"));
     crate::workspace::atomic_json(&outcome, &reply, None).or_else(|_| {
         // A second reply for the same id (the exact retry) replaces nothing:
@@ -658,13 +687,14 @@ fn catalogue(action: &str, mut args: Args, paths: &Paths, as_json: bool) -> Resu
     };
     args.finish()?;
     let entries = load_index(&paths.index)?;
+    let qualification = qualification::Qualification::load(paths.qualification.as_deref())?;
     match action {
         "search" => {
             let found = search(&entries, &term, category.as_deref());
             if as_json {
                 let list: Vec<Value> = found
                     .iter()
-                    .map(|e| entry_json(e, &verdict(&paths.verdicts, &paths.meta, &e.package_id)))
+                    .map(|e| qualified_entry_json(e, &verdict(&paths.verdicts, &paths.meta, &e.package_id), &qualification))
                     .collect();
                 println!("{}", serde_json::to_string_pretty(&json!({"apps":list,"total":entries.len()})).map_err(|e| e.to_string())?);
                 return Ok(());
@@ -685,7 +715,7 @@ fn catalogue(action: &str, mut args: Args, paths: &Paths, as_json: bool) -> Resu
                     truncate(&e.version, 22),
                     truncate(&e.author, 24),
                     e.app_id,
-                    verdict_line(&v),
+                    format!("{}; {}", verdict_line(&v), qualification::line(qualification.get(e))),
                     hook.map(|(_, h)| format!("\n      agent hook: {h}")).unwrap_or_default()
                 );
             }
@@ -695,7 +725,7 @@ fn catalogue(action: &str, mut args: Args, paths: &Paths, as_json: bool) -> Resu
             let selector = selector.unwrap_or_default();
             let entry = resolve(&entries, &selector)?;
             let v = verdict(&paths.verdicts, &paths.meta, &entry.package_id);
-            let value = entry_json(entry, &v);
+            let value = qualified_entry_json(entry, &v, &qualification);
             if as_json {
                 println!("{}", serde_json::to_string_pretty(&value).map_err(|e| e.to_string())?);
                 return Ok(());
@@ -708,6 +738,7 @@ fn catalogue(action: &str, mut args: Args, paths: &Paths, as_json: bool) -> Resu
             println!("  categories {}", entry.categories.join(", "));
             println!("  links      {}  {}", entry.web_link, entry.code_link);
             println!("  verdict    {}", verdict_line(&v));
+            println!("  sweep      {}", qualification::line(qualification.get(entry)));
             println!("  size       {}", v.raw_bytes.map_or("not fetched here".to_owned(), |b| format!("{b} bytes raw")));
             match &entry.pinned {
                 Some(pin) => println!("  class      {}  (operator-pinned; sha256 {})", pin.class.as_deref().unwrap_or(suggested_class(v.raw_bytes)), pin.sha256),
@@ -1139,6 +1170,33 @@ pub(crate) fn app_birth(root: &Path, ws: &Value, home: Option<&Path>, name: &str
     Ok((source, receipt))
 }
 
+/// The member delegates the manager a child of the app owner capability with the verbs a share ticket's
+/// issuer needs (observe, mutate, delegate, append, place), through the shell's own propose, submit and
+/// publish-delegation, and returns the recipient reference (which names the child capability).
+fn delegate_share(root: &Path, ws: &Value, app_ref: &str, manager: &str, max_cost: &str) -> Result<Value> {
+    use crate::workspace as w;
+    let id = format!("share-{app_ref}");
+    let proposal = root.join("sources").join(format!("{id}.request.json"));
+    let request = json!({"type":"minidregg-workspace-proposal-v1","action":"delegate","name":app_ref,"recipient":manager,
+        "verbs":["observe","mutate","delegate","append","place"],"maxCost":max_cost});
+    let _ = fs::remove_file(&proposal);
+    crate::create_private(&proposal, &serde_json::to_vec_pretty(&request).map_err(|e| e.to_string())?)?;
+    let mini = std::env::current_exe().map_err(|e| e.to_string())?;
+    let _ = ws;
+    let run = |args: &[&str]| -> Result<()> {
+        let out = std::process::Command::new(&mini).args(["workspace", "--action"]).args(args).output().map_err(|e| e.to_string())?;
+        if out.status.success() { Ok(()) } else { Err(format!("shareDelegationRefused: workspace {}: {}", args.first().unwrap_or(&""), String::from_utf8_lossy(&out.stderr).trim())) }
+    };
+    let dir = root.to_str().ok_or("workspace path is not UTF-8")?;
+    let attempt = root.join("attempts").join(&id);
+    let intent = root.join("proposals").join(&id).join("intent.json");
+    let (attempt_s, intent_s, proposal_s) = (attempt.to_string_lossy().into_owned(), intent.to_string_lossy().into_owned(), proposal.to_string_lossy().into_owned());
+    run(&["propose", "--dir", dir, "--request", &proposal_s, "--proposal-id", &id])?;
+    run(&["submit", "--dir", dir, "--intent", &intent_s, "--attempt", &attempt_s])?;
+    run(&["publish-delegation", "--dir", dir, "--proposal-id", &id, "--attempt", &attempt_s])?;
+    w::bounded_json(&root.join("proposals").join(&id).join("recipient-reference.json"))
+}
+
 /// The hosting delegation to the manager through the shell's own verb
 /// (`app delegate-lifecycle`, six ordinary proposals), run to completion;
 /// returns the management selector `spk-host grain install` consumes.
@@ -1273,8 +1331,30 @@ pub(crate) fn bootstrap(root: &Path, ws: &Value, budget: &str, tool_ref: &str, p
             if attempt.exists() {
                 crate::retry(&attempt, "lookup", false)?;
             } else {
+                // The Host authors the birth at the current height against a sponsor-signed read of
+                // the factory (`current-resource-intent`, as `workspace create` does): a birth-intent
+                // authored from the genesis is refused birthStale once the World is past genesis plus
+                // the 64-height window, which any world a few transactions old is.
+                let socket = crate::SOCKET.get().ok_or("apps bootstrap requires a pinned persistent Host socket")?;
+                let factory = member(&context["genesis"], "factoryId")?;
+                let observe_capability = context["grants"].as_array().into_iter().flatten()
+                    .find(|grant| grant["kind"] == "object" && grant["target"] == factory)
+                    .and_then(|grant| grant["capability"].as_str())
+                    .ok_or("birth context needs one factory resource observation grant")?;
+                let factory_ref = json!({"kind":"object","target":factory,"observeCapability":observe_capability});
+                let authoring = root.join("sources").join("apps-bootstrap.authoring");
+                let author_dir = w::author_generations(&authoring, &reservation,
+                    || Ok(w::signed_view(root, ws, &factory_ref, "resource")?.2),
+                    |generation, observation| crate::current_birth::author(&host, &host_config, socket, &source_path, observation, generation, crate::current_birth::Route::Resource),
+                    |generation| crate::observation_stale(&host, &host_config, generation))?;
+                let intent_path = crate::current_birth::retained_intent(&author_dir, crate::current_birth::Route::Resource)?;
+                let source_sha = {
+                    use sha2::Digest;
+                    hex(&sha2::Sha256::digest(fs::read(&intent_path).map_err(|e| format!("cannot hash the retained intent: {e}"))?))
+                };
+                participant_namespace::bind_attempt(&reservation, &attempt, &source_sha)?;
                 eprintln!("apps bootstrap attempt: {}", attempt.display());
-                crate::submit(&host, &host_config, &source_path, std::ffi::OsStr::new("birth-intent"), &member_path(ws, "key")?, &attempt, false)?;
+                crate::submit(&host, &host_config, &intent_path, std::ffi::OsStr::new("binary"), &member_path(ws, "key")?, &attempt, false)?;
             }
             w::accepted_outcome(&attempt)?.ok_or("apps bootstrap birth is not confirmed; retained for exact recovery")?
         }

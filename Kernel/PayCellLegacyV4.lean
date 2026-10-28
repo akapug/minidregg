@@ -15,7 +15,7 @@ domain (`physicalId`), with six namespaces on `Theory.Store`:
 | `sshIndex`   | ssh blob (51 B)  | Mini key                  | append-only |
 | `journal`    | nullifier bytes  | `Unattributed`            | append-only |
 
-The last three are PAY §11's self-enrollment state (layout v2).  An
+The last three are docs/PAY.md §11's self-enrollment state (layout v2).  An
 `enrolment` row is written once by an enrollment and rewritten only by a
 renewal of the same key (its lease grows, `PayEnrolDecision`); `sshIndex`
 makes an ssh key belong to at most one Mini key, and the law ties the two
@@ -32,7 +32,7 @@ same intent as the credits it reports; the pay cell keeps no clock.
 Both indexed namespaces are append-only, so an index is written once
 (`Store.Op.allocate_enabled_fresh`).  The index an observation names resolves
 to both its address (`bookAt`) and its account (`assignmentAt`); a payment
-nullifier covering signature ‖ address (PAY §10 erratum 1) reads the address
+nullifier covering signature ‖ address (docs/PAY.md §10 erratum 1) reads the address
 from `bookAt`.
 
 Wire: the store codec with layout name `DREGG/PAY/CELL/v4` (its frame commits
@@ -108,7 +108,7 @@ def chainTipStream : StreamCodec ChainTip :=
     (fun (slot, blockTime) => ⟨slot, blockTime⟩)
     (by intro tip; cases tip; rfl)
 
-/-- A self-enrolled Mini key's record (PAY §11.4), keyed by the 32-byte Mini
+/-- A self-enrolled Mini key's record (docs/PAY.md §11.4), keyed by the 32-byte Mini
 key.  `leaseUntil` is a chain hour (`blockTime / 3600`): the node membership
 the key has paid for runs while `clock hour < leaseUntil`. -/
 structure EnrolRecord where

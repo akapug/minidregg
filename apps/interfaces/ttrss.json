@@ -1,0 +1,629 @@
+{
+  "format": "mini-app-interface-v1",
+  "name": "ttrss",
+  "interfaceVersion": 1,
+  "appId": "zj20q6pwy456cmq0k57n1mtqqtky664dfqnhsmf3t36khch5geph",
+  "packageId": "ac6dfded255f6ea86172fb62064772fc",
+  "appVersion": "2021-12-31.2",
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 16384,
+    "replyBytes": 1048576,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "$defs": {},
+  "operations": {
+    "session.open": {
+      "description": "Authenticate the package single-user API session through current Mini grain authority. Manifest pins SINGLE_USER_MODE=true; not a guessed administrator password. Session identifier stays internal.",
+      "input": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "seq": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "integer",
+            "const": 0
+          },
+          "content": {
+            "type": "object",
+            "properties": {
+              "session_id": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "api_level": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "session_id",
+              "api_level"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "seq",
+          "status",
+          "content"
+        ],
+        "additionalProperties": false
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "POST",
+        "path": [
+          "api/"
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ],
+        "acceptedContentTypes": [
+          "text/json",
+          "application/json"
+        ],
+        "json": {
+          "op": "login",
+          "seq": 1,
+          "user": "admin",
+          "password": ""
+        }
+      },
+      "internal": true
+    },
+    "article.share": {
+      "description": "Create a shared published reading item from supplied text/URL without fetching a feed. Package strips HTML tags. The API does not return an article ID; reconcile the original URL/title through headline reads, never replay uncertain creation.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "url": {
+            "type": "string",
+            "pattern": "^https?://[^\\r\\n\\x00 ]+$",
+            "maxLength": 2048
+          },
+          "content": {
+            "type": "string",
+            "maxLength": 8192
+          }
+        },
+        "required": [
+          "title",
+          "url",
+          "content"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "seq": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "integer",
+            "const": 0
+          },
+          "content": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "const": "OK"
+              }
+            },
+            "required": [
+              "status"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "seq",
+          "status",
+          "content"
+        ],
+        "additionalProperties": false
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "POST",
+        "path": [
+          "api/"
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ],
+        "acceptedContentTypes": [
+          "text/json",
+          "application/json"
+        ],
+        "json": {
+          "op": "shareToPublished",
+          "seq": 1,
+          "sid": {
+            "result": [
+              "session",
+              "content",
+              "session_id"
+            ]
+          },
+          "title": {
+            "arg": "title"
+          },
+          "url": {
+            "arg": "url"
+          },
+          "content": {
+            "arg": "content"
+          }
+        }
+      },
+      "prepare": [
+        {
+          "id": "session",
+          "op": "session.open",
+          "args": {}
+        }
+      ]
+    },
+    "article.list": {
+      "description": "List one offset page of article headlines in a grain-scoped feed, including virtual feeds (published=-2). Search uses package query grammar. Offset is zero-based, limit1..200; empty result is []; no snapshot stability across concurrent feed changes. force_update is false so this operation never requests feed refresh.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "feed": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "search": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "view": {
+            "enum": [
+              "all_articles",
+              "unread",
+              "marked",
+              "updated"
+            ]
+          }
+        },
+        "required": [
+          "feed",
+          "limit",
+          "offset",
+          "search",
+          "view"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "seq": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "integer",
+            "const": 0
+          },
+          "content": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "title": {
+                  "type": "string",
+                  "maxLength": 8192
+                },
+                "link": {
+                  "type": "string",
+                  "maxLength": 8192
+                }
+              },
+              "required": [
+                "id",
+                "title",
+                "link"
+              ],
+              "additionalProperties": true
+            },
+            "maxItems": 200
+          }
+        },
+        "required": [
+          "seq",
+          "status",
+          "content"
+        ],
+        "additionalProperties": false
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "POST",
+        "path": [
+          "api/"
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ],
+        "acceptedContentTypes": [
+          "text/json",
+          "application/json"
+        ],
+        "json": {
+          "op": "getHeadlines",
+          "seq": 1,
+          "sid": {
+            "result": [
+              "session",
+              "content",
+              "session_id"
+            ]
+          },
+          "feed_id": {
+            "arg": "feed"
+          },
+          "limit": {
+            "arg": "limit"
+          },
+          "skip": {
+            "arg": "offset"
+          },
+          "search": {
+            "arg": "search"
+          },
+          "view_mode": {
+            "arg": "view"
+          },
+          "show_content": false,
+          "force_update": false,
+          "is_cat": false
+        }
+      },
+      "prepare": [
+        {
+          "id": "session",
+          "op": "session.open",
+          "args": {}
+        }
+      ]
+    },
+    "article.read": {
+      "description": "Read exactly one current member-visible article by grain-scoped article ID; absent/foreign IDs refuse via required single-row output instead of masquerading as a successful read.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "article": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "article"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "seq": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "integer",
+            "const": 0
+          },
+          "content": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": [
+                    "integer",
+                    "string"
+                  ]
+                },
+                "title": {
+                  "type": "string",
+                  "maxLength": 8192
+                },
+                "note": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "content": {
+                  "type": "string",
+                  "maxLength": 1048576
+                }
+              },
+              "required": [
+                "id",
+                "title",
+                "note",
+                "content"
+              ],
+              "additionalProperties": true
+            },
+            "maxItems": 1,
+            "minItems": 1
+          }
+        },
+        "required": [
+          "seq",
+          "status",
+          "content"
+        ],
+        "additionalProperties": false
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "POST",
+        "path": [
+          "api/"
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ],
+        "acceptedContentTypes": [
+          "text/json",
+          "application/json"
+        ],
+        "json": {
+          "op": "getArticle",
+          "seq": 1,
+          "sid": {
+            "result": [
+              "session",
+              "content",
+              "session_id"
+            ]
+          },
+          "article_id": {
+            "arg": "article"
+          },
+          "sanitize": true
+        }
+      },
+      "prepare": [
+        {
+          "id": "session",
+          "op": "session.open",
+          "args": {}
+        }
+      ]
+    },
+    "article.note.update": {
+      "description": "Replace or clear one article annotation. Package scopes SQL to the current API owner; no revision precondition. Returns actual changed-row count (zero can be a no-op); readback establishes content. Never replay uncertain completion.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "article": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 8192
+          }
+        },
+        "required": [
+          "article",
+          "note"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "seq": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "integer",
+            "const": 0
+          },
+          "content": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "const": "OK"
+              },
+              "updated": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1
+              }
+            },
+            "required": [
+              "status",
+              "updated"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "seq",
+          "status",
+          "content"
+        ],
+        "additionalProperties": false
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "POST",
+        "path": [
+          "api/"
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ],
+        "acceptedContentTypes": [
+          "text/json",
+          "application/json"
+        ],
+        "json": {
+          "op": "updateArticle",
+          "seq": 1,
+          "sid": {
+            "result": [
+              "session",
+              "content",
+              "session_id"
+            ]
+          },
+          "article_ids": {
+            "arg": "article"
+          },
+          "mode": 0,
+          "field": 3,
+          "data": {
+            "arg": "note"
+          }
+        }
+      },
+      "prepare": [
+        {
+          "id": "session",
+          "op": "session.open",
+          "args": {}
+        }
+      ],
+      "requires": [
+        {
+          "op": "article.read",
+          "args": {
+            "article": {
+              "arg": "article"
+            }
+          },
+          "assert": [
+            {
+              "path": [
+                "status"
+              ],
+              "equals": 0
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "qualification": [
+    {
+      "id": "share",
+      "op": "article.share",
+      "args": {
+        "title": {
+          "context": "runId"
+        },
+        "url": {
+          "concat": [
+            "https://example.invalid/",
+            {
+              "context": "runId"
+            }
+          ]
+        },
+        "content": "Typed reading item"
+      }
+    },
+    {
+      "id": "find",
+      "op": "article.list",
+      "args": {
+        "feed": -2,
+        "limit": 20,
+        "offset": 0,
+        "search": {
+          "context": "runId"
+        },
+        "view": "all_articles"
+      }
+    },
+    {
+      "id": "note",
+      "op": "article.note.update",
+      "args": {
+        "article": {
+          "result": [
+            "find",
+            "content",
+            0,
+            "id"
+          ]
+        },
+        "note": "Typed annotation"
+      }
+    },
+    {
+      "id": "read",
+      "op": "article.read",
+      "args": {
+        "article": {
+          "result": [
+            "find",
+            "content",
+            0,
+            "id"
+          ]
+        }
+      },
+      "assert": [
+        {
+          "path": [
+            "content",
+            0,
+            "note"
+          ],
+          "equals": "Typed annotation"
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "kind": "member-route"
+  },
+  "sources": [
+    "https://github.com/zenhack/ttrss-sandstorm",
+    "package:ac6dfded255f6ea86172fb62064772fc/sandstorm-manifest (TTRSS_SINGLE_USER_MODE=true)",
+    "package:ac6dfded255f6ea86172fb62064772fc/opt/app/classes/api.php",
+    "package:ac6dfded255f6ea86172fb62064772fc/opt/app/classes/userhelper.php"
+  ]
+}

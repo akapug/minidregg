@@ -461,12 +461,15 @@ theorem byteArray_beq_exact (left right : List UInt8) :
     rfl
 
 /-- Images compare by their canonical encoding (the ten-lane charge is a
-function, so there is no structural equality to derive). -/
+function, so there is no structural equality to derive), after object identity:
+a session comparing its image with the one a submit started from holds the
+same object, and the encoding of the whole history is never built for that. -/
 instance : DecidableEq Image := fun left right =>
-  decidable_of_iff ((DurableReceiverCodec.encode left).toByteArray ==
-      (DurableReceiverCodec.encode right).toByteArray)
-    ((byteArray_beq_exact _ _).trans
-      ⟨fun same => DurableReceiverCodec.encode_injective same, congrArg _⟩)
+  withPtrEqDecEq left right fun _ =>
+    decidable_of_iff ((DurableReceiverCodec.encode left).toByteArray ==
+        (DurableReceiverCodec.encode right).toByteArray)
+      ((byteArray_beq_exact _ _).trans
+        ⟨fun same => DurableReceiverCodec.encode_injective same, congrArg _⟩)
 
 /-! ## The world root, kept
 
@@ -1089,9 +1092,48 @@ structure Loaded (rootBytes : List UInt8 → Digest) where
   headTag : Option (List UInt8)
   /-- The World the snapshot represents (FD-1 4a). -/
   track : WorldTrack snapshot image.accepted.length
+  /-- The chain log: element `h` is the chain after the first `h` accepted records, the log
+  start first and `chain` last (`chainPrefixes`). The certify rule reads past heights from it
+  (`Kernel.ChainHistory`, the instance below); pushed at every append. -/
+  chainLog : Array Digest
+  chainLogExact : chainLog.toList = chainPrefixes logStart image.accepted
 
 def Loaded.height {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) : Nat :=
   loaded.image.accepted.length
+
+/-- **The durable chain history**: the loaded image's chain log behind the kernel's
+`ChainHistory` interface. Its head is the image's height, the same head the tail gate
+judges a record at (`Kernel.TailBound.recordHeight`). -/
+instance {rootBytes : List UInt8 → Digest} : Kernel.ChainHistory (Loaded rootBytes) where
+  head loaded := loaded.height
+  chainAt loaded height := loaded.chainLog[height]?
+  chainAt_le_head loaded height digest held := by
+    have listed : loaded.chainLog.toList[height]? = some digest := by
+      rw [Array.getElem?_toList]; exact held
+    rw [loaded.chainLogExact] at listed
+    have lt := (List.getElem?_eq_some_iff.mp listed).1
+    rw [DurableLogTags.chainPrefixes_length] at lt
+    show height ≤ loaded.image.accepted.length
+    exact Nat.lt_succ_iff.mp lt
+
+/-- **The chain log is faithful to the log**: every value it holds is the chain after
+that prefix of the accepted records (`chainAfter`), and it holds the head. -/
+theorem Loaded.faithful {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
+    Kernel.ChainHistory.Faithful loaded
+      (fun height => chainAfter loaded.logStart (loaded.image.accepted.take height)) := by
+  have at_ : ∀ height, height ≤ loaded.height →
+      Kernel.ChainHistory.chainAt loaded height =
+        some (chainAfter loaded.logStart (loaded.image.accepted.take height)) := by
+    intro height within
+    show loaded.chainLog[height]? = _
+    rw [← Array.getElem?_toList, loaded.chainLogExact]
+    exact DurableLogTags.chainPrefixes_getElem? _ _ _ within
+  refine ⟨?_, ?_⟩
+  · intro height digest held
+    have within := Kernel.ChainHistory.chainAt_le_head loaded height digest held
+    rw [at_ height within] at held
+    exact (Option.some.inj held).symm
+  · exact at_ _ (Nat.le_refl _)
 
 /-- The served world root: read off the cache, never recomputed. -/
 def Loaded.worldRoot {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) : Digest :=
@@ -1159,14 +1201,15 @@ def loadImage (rootBytes : List UInt8 → Digest) (logStart : Digest) (image : I
   match found : DurableEngine.resumeEngine rootBytes image 0 (State.ofSeed image.seed) with
   | none => .error "durable image journal does not replay through the canonical executor"
   | some engine =>
-      let chain := chainAfter logStart image.accepted
+      let chains := chainPrefixes logStart image.accepted
+      let chain := chains.getLast?.getD logStart
       let built := RootCache.build (entriesOf image (engine.view rootBytes) chain)
       match trackOf rootBytes image (DurableEngine.resume_of_resumeEngine found) with
       | .lost reason => .error s!"durable image is not a turn log: {reason}"
       | track@(.held _ _) =>
       .ok ⟨image, 0, State.ofSeed image.seed, engine, engine.view rootBytes, rfl, Nat.zero_le _,
         DurableEngine.resume_of_resumeEngine found, logStart, chain,
-        rfl, built.1, built.2,
+        DurableLogTags.chainPrefixes_getLast? logStart image.accepted, built.1, built.2,
         PresenceIndex.ofRecords image.accepted, rfl, LinkIndex.ofRecords image.accepted, rfl,
         SessionIndex.CellIds.ofImage image, SessionIndex.CellIds.ofImage_exact image,
         SessionIndex.TxIndex.ofRecords image.accepted,
@@ -1177,7 +1220,8 @@ def loadImage (rootBytes : List UInt8 → Digest) (logStart : Digest) (image : I
         SessionIndex.KeyIndex.ofRecords_exact (fun record => record.writes.map DataWrite.cellId)
           image.accepted,
         Array.replicate image.accepted.length none, Array.size_replicate,
-        if image.accepted.isEmpty then some [] else none, none, track⟩
+        if image.accepted.isEmpty then some [] else none, none, track,
+        chains.toArray, List.toList_toArray⟩
 
 theorem loadImage_image {rootBytes : List UInt8 → Digest} {logStart : Digest} {image : Image}
     {loaded : Loaded rootBytes} (built : loadImage rootBytes logStart image = .ok loaded) :
@@ -1408,7 +1452,8 @@ def openLoaded (key : MacKey) (rootBytes : List UInt8 → Digest) (logStart : Di
     SessionIndex.KeyIndex.ofRecords_exact (fun record => record.writes.map DataWrite.cellId)
       image.accepted,
     rootLog, sized, some opened.frontier,
-    entries.getLast?.map (·.tag), trackOfWorld rootBytes image resumed opened.world⟩
+    entries.getLast?.map (·.tag), trackOfWorld rootBytes image resumed opened.world,
+    chains.toArray, by rw [List.toList_toArray]; exact chainsEq⟩
   if let .lost reason := loaded.track then
     throw s!"durable log is not a turn log: {reason}"
   -- The head's stored root is the root this open just served: a rewritten head root refuses
@@ -1596,7 +1641,11 @@ def Loaded.extend {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes
     loaded.frontier.map fun frontier => DurableHistory.Frontier.push frontier
       (leafDigest (loaded.image.accepted.length + 1) (recordFrame.encode record) chain served),
     none,
-    loaded.track.advance (nextEq ▸ ready.executed) (by simp [Image.append])⟩
+    loaded.track.advance (nextEq ▸ ready.executed) (by simp [Image.append]),
+    loaded.chainLog.push chain,
+    by rw [Array.toList_push, loaded.chainLogExact]
+       show _ = chainPrefixes loaded.logStart (loaded.image.accepted ++ [record])
+       rw [DurableLogTags.chainPrefixes_snoc, ← loaded.chainExact]⟩
 
 /-- **The extended snapshot is the executor's next snapshot.** -/
 theorem Loaded.extend_snapshot {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
@@ -1643,7 +1692,8 @@ def Loaded.rebase {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes
     loaded.index, loaded.indexExact, loaded.links, loaded.linksExact,
     loaded.ids, loaded.idsExact, loaded.txs, loaded.txsExact,
     loaded.spentAt, loaded.spentAtExact, loaded.writesAt, loaded.writesAtExact,
-    loaded.rootLog, loaded.rootLogSize, loaded.frontier, loaded.headTag, loaded.track⟩
+    loaded.rootLog, loaded.rootLogSize, loaded.frontier, loaded.headTag, loaded.track,
+    loaded.chainLog, loaded.chainLogExact⟩
 
 /-- The rebased base is the head's state (`State.ofSnapshot`). -/
 theorem Loaded.rebase_base {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
@@ -1702,7 +1752,8 @@ the caller's; `chainExact` and `rootLogSize` carry what they established. -/
 def Loaded.build {rootBytes : List UInt8 → Digest} (image : Image) (baseHeight : Nat)
     (base : State) (withinLog : baseHeight ≤ image.accepted.length) (logStart chain : Digest)
     (chainExact : chain = chainAfter logStart image.accepted)
-    (rootLog : Array (Option Digest)) (rootLogSize : rootLog.size = image.accepted.length) :
+    (rootLog : Array (Option Digest)) (rootLogSize : rootLog.size = image.accepted.length)
+    (chainLog : Array Digest) (chainLogExact : chainLog.toList = chainPrefixes logStart image.accepted) :
     Except String {built : Loaded rootBytes // built.image = image ∧ built.logStart = logStart} :=
   match found : DurableEngine.resumeEngine rootBytes image baseHeight base with
   | none => .error "durable image journal does not replay through the canonical executor"
@@ -1722,7 +1773,8 @@ def Loaded.build {rootBytes : List UInt8 → Digest} (image : Image) (baseHeight
         SessionIndex.KeyIndex.ofRecords_exact (fun record => record.writes.map DataWrite.cellId)
           image.accepted,
         rootLog, rootLogSize, none, none,
-        trackOf rootBytes image (DurableEngine.resume_of_resumeEngine found)⟩, rfl, rfl⟩
+        trackOf rootBytes image (DurableEngine.resume_of_resumeEngine found),
+        chainLog, chainLogExact⟩, rfl, rfl⟩
 
 /-- **The loaded image cut at log height `height`**, from an open that kept its
 chain prefixes (`loadChained`): the chain after `height` records is read off
@@ -1744,14 +1796,20 @@ def Loaded.prefixAt {rootBytes : List UInt8 → Digest} (loaded : Loaded rootByt
         have sized : (loaded.rootLog.extract 0 height).size =
             (loaded.image.accepted.take height).length := by
           simp [Array.size_extract, loaded.rootLogSize, List.length_take, Nat.min_eq_left within]
+        have cutLog : (loaded.chainLog.toList.take (height + 1)).toArray.toList =
+            chainPrefixes loaded.logStart (loaded.image.accepted.take height) := by
+          rw [List.toList_toArray, loaded.chainLogExact,
+            DurableLogTags.chainPrefixes_take _ _ _ within]
         if based : loaded.baseHeight ≤ height then
           Loaded.build ⟨loaded.image.seed, loaded.image.accepted.take height⟩ loaded.baseHeight
             loaded.base (by simpa [List.length_take, Nat.min_eq_left within] using based)
             loaded.logStart chain chainExact (loaded.rootLog.extract 0 height) sized
+            (loaded.chainLog.toList.take (height + 1)).toArray cutLog
         else
           Loaded.build ⟨loaded.image.seed, loaded.image.accepted.take height⟩ 0
             (State.ofSeed loaded.image.seed) (Nat.zero_le _)
             loaded.logStart chain chainExact (loaded.rootLog.extract 0 height) sized
+            (loaded.chainLog.toList.take (height + 1)).toArray cutLog
   else .error "durable log is shorter than the requested height"
 
 /-- **A kept checkpoint below the open's base**, as the past-read path admits
@@ -2062,7 +2120,10 @@ def Loaded.prefixOwn {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBy
               SessionIndex.KeyIndex.ofRecords_exact (fun record => record.writes.map DataWrite.cellId)
                 image.accepted,
               Array.replicate image.accepted.length none, Array.size_replicate, none, none,
-              trackOf rootBytes image resumed⟩,
+              trackOf rootBytes image resumed,
+              (loaded.chainLog.toList.take (height + 1)).toArray,
+              by rw [List.toList_toArray, loaded.chainLogExact,
+                   DurableLogTags.chainPrefixes_take _ _ _ within]⟩,
               rfl, rfl, rfl, rfl, rfl⟩
   else .error "durable log is shorter than the requested height"
 

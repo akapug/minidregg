@@ -254,9 +254,15 @@ when the arm lands.
   hbox, candidate e89fe7b8b with that consent provider substituted
   (`/tank/dregg-build/claude-lanes/thin-birth/cand`, `run-jp2.sh`), main's scripts plus this
   branch's jpriv2/jthin-consent: JP2 PASS (71 rows: row 22, swapped plan 33-37), THIN PASS.
-* **Held by the integrator** (a34bdb948f1cf4796) under the module-conversion freeze (iter-speed
-  a0fd127abfb9aac75). When the integrator says the conversion is on main: merge origin/main into
-  lane/thin-birth; re-convert this branch's touched Lean files (`Kernel/NativeThinConsent.lean`,
-  `Host/ClientConsentCore.lean`, `Kernel.lean`'s comment line) with `scripts/lean-modularize.py`
-  as L1e does; per-file check on dregg-ref (lean-ask `--reload`); push; send the integrator the
-  merged sha. Its next build is the Host.Main closure, and JP2/THIN then go to the rows validator.
+* **JPAY6 rehearsal blocker (2026-10-28), on main as c286143e7.** The 230/232 birth refusal now
+  fires only on `NativeThinBirth.thinBirthIntent` (not grain-backed); `thinBirthIntent_of_checked`
+  shows it covers the arm. JPAY6 plants both sides (row "discriminator (plant)"). lane-check green on
+  dregg-ref. Owed: read JPAY6 (row 23 and the plant) on the integrator's first candidate containing
+  c286143e7; a consent binary from current main cannot be substituted into b26630168 (J0's full
+  consent dies), so no earlier local run exists.
+* **Commuting content appends (contention lane ed3f512f9):** they relax only computeTarget's
+  content arm; thin consent refuses every `.content` payload (`unsupportedPayload`), so the keystone
+  is unaffected. A future thin content arm owes a commuting variant (post = shown on the patch's
+  writes, post = pre elsewhere) in the same commit.
+* **dregg-ref closure-lock:** never wrap `lane-check` in `closure-lock`; it takes the lock itself for
+  its import build, and the outer lock deadlocks it (twice on 10-28).

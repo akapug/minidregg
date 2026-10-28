@@ -134,7 +134,7 @@ structure Command where
   subject : SubjectId
   nonce : Nat
   targets : List Target
-  /-- A Nock run whose product these writes claim to be (NOCK §2.4). Signed with
+  /-- A Nock run whose product these writes claim to be (docs/NOCK.md §2.4). Signed with
   the command: the claim's steps are the fee its signer consents to. When
   present, every write of every target must be a field write the re-executed
   program's product names (`Kernel.Run.checkRun`). -/
@@ -778,7 +778,10 @@ def scalarLeg (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Amb
 never a host supplied post. Every branch returns the post store the source
 operation computed at the loaded cell; a scalar or content write then advances
 the cell's blinding ratchet one link at the admission height
-(`StoreCodec.Blinding.patch`, K-HIDE-ROTATE).  A stream append has no blinding. -/
+(`StoreCodec.Blinding.patch`, K-HIDE-ROTATE).  A stream append has no blinding.
+Every payload is refused `staleTarget` when the loaded root is not the root its plan
+names, except a commuting content command (append-only `createAtom`s), which reads
+nothing a concurrent append moves. -/
 def computeTarget (snapshot : AuthoritySnapshot)
     (semantics : Digest) (ambient : Ambient) (command : Command) (target : Target)
     (pre : TargetCell target) : Except Reject target.Outcome := by
@@ -807,7 +810,9 @@ def computeTarget (snapshot : AuthoritySnapshot)
     | content content => exact do
         if kind != .object then throw .wrongRole
         if version != ContentResource.commandVersion then throw .unsupportedVersion
-        if root != pre.root then throw .staleTarget
+        -- An append-only command is computed at the cell it meets: it pins no root
+        -- (`ContentResource.Command.commutes`, `Kernel.ContentCommutingAppend`).
+        if root != pre.root && !content.commutes then throw .staleTarget
         match ContentResource.prepareCell ⟨command.subject, kind, capability⟩
             (contentOperation snapshot semantics command) (ContentResource.documentOf id)
             (contentContext snapshot ambient command) pre content with
@@ -1242,7 +1247,7 @@ def sourceStore (domain : Digest) (directory : Directory Nat Registry) :
     CanonicalPolicyRegistry.PayloadStore where
   fetch := CanonicalCellRegistry.fetchPolicySource domain directory
 
-/-! ## The run check (K-RAN, NOCK §2.4) -/
+/-! ## The run check (K-RAN, docs/NOCK.md §2.4) -/
 
 /-- The policy slots of one stream append: the entry's fields as request
 slots, so a stream law can name its author (`request/subject`), its topics
@@ -2062,7 +2067,7 @@ kernel accepted at one admission is accepted, with the same verdict, at any
 other — another height, another signer, another command — over the same
 targets, whenever the ABI's named slots hold the values they held. A job whose
 sample reads only its order's write-once fields therefore has one truth at
-every height (COMPUTE §2.2). -/
+every height (docs/COMPUTE.md §2.2). -/
 theorem pinned_claim_admissible_across_heights {E : Evaluator} {program : NockProgramCodec.Program}
     {validatedFundingIndex : Option Nat}
     {libraries : List NockProgramCodec.Program} {ambient ambient' : Ambient}

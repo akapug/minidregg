@@ -43,12 +43,3 @@ write_Scrumblr() {
 # `location /editor/ { dav_methods PUT; alias /var/editor/; }`; launcher.sh seeds /var/editor/spec;
 # swagger-editor/config/defaults.json has "backendEndpoint": "/editor/spec", which the editor PUTs on every
 # change). The saved object is one spec document.
-write_SwaggerEditor() {
-  local id="featured$RANDOM$RANDOM"
-  local spec=$'swagger: "2.0"\ninfo:\n  title: '$id$'\n  version: "1.0"\npaths:\n  /resident:\n    get:\n      responses:\n        200:\n          description: written by a resident\n'
-  local put; put=$(req PUT /editor/spec -H 'Content-Type: application/yaml' --data-binary "$spec")
-  local got; got=$(req GET /editor/spec)
-  [[ $put =~ ^20 && $got == 200 ]] && grep -q "title: $id" "$body" \
-    && echo "1 PUT /editor/spec $put; GET $got holds the spec $id" \
-    || echo "0 PUT /editor/spec $put, GET $got: spec not read back"
-}

@@ -548,9 +548,47 @@ def application_api_recovery(run, require):
             for directory in recovery_directories(run)]
 
 
+def operator_upgrade_evidence(directory, store, require):
+    operator_upgrades = {}
+    extra_phases = []
+    if (directory / 'consent-memory.json').exists():
+        memory = read(directory / 'consent-memory.json')
+        def properties(name):
+            return dict(line.split('=', 1) for line in (directory / name).read_text().splitlines() if '=' in line)
+        before = properties('consent-memory-before.properties')
+        after = properties('consent-memory-after.properties')
+        unit = 'mini-spk-controller-consent-' + store + '.service'
+        require('operator_consent_memory_revision', memory['store'] == store
+                and memory['nativeOperationSubmitted'] is False
+                and before['Id'] == after['Id'] == unit
+                and before['MainPID'] == after['MainPID'] == '0'
+                and before['ActiveState'] in ('inactive','failed') and after['ActiveState'] in ('inactive','failed')
+                and int(after['MemoryMax']) == memory['memoryMiB'] * 1024 * 1024
+                and before['MemorySwapMax'] == after['MemorySwapMax'])
+        operator_upgrades['consent_memory'] = {'receipt':memory, 'before':before, 'after':after}
+        extra_phases.append('consent-memory')
+    if (directory / 'mini-upgrade.json').exists():
+        client = read(directory / 'mini-upgrade.json')
+        previous = (directory / 'mini-before.sha256').read_text().split()[0]
+        require('operator_exact_controller_mini_revision', client['store'] == store
+                and client['miniSha256'] == sha(directory / 'bin/mini')
+                and (client.get('previousMiniSha256') == previous or
+                     (client.get('alreadyConfigured') is True and previous == client['miniSha256'])))
+        operator_upgrades['mini'] = client
+        extra_phases.append('mini-upgrade')
+    return operator_upgrades, extra_phases
+
+
 def application_api_recovery_attempt(run, directory, require):
     from recover_application_api import check_native, retained_paths, exported, startup_refusal, readiness_refusal
     retained = retained_paths(run, after=directory)
+    later_retained = dict(retained)
+    def resumed_original(path):
+        return Path(later_retained.get(str(path), {'path':str(path)})['path'])
+    resumption = directory / 'resumption'
+    resumptions = [resumption,*sorted((resumption/'retries').glob('*'))] if resumption.is_dir() else []
+    if resumption.is_dir():
+        retained.update(read(resumption/'prepared.json')['preserved'])
     def original(path):
         entry = retained.get(str(path))
         return Path(entry['path']) if entry else Path(path)
@@ -572,6 +610,7 @@ def application_api_recovery_attempt(run, directory, require):
             and prepared['automatic_retry'] is False and boundary['retransmit'] is False)
     for entry in [*prepared['preserved'].values(), *prepared['archived'].values()]:
         require('api_recovery_preserved_' + entry['path'], sha(Path(entry['path'])) == entry['sha256'])
+    operator_upgrades, extra_phases = operator_upgrade_evidence(directory, boundary['store'], require)
     upgrade = read(directory / 'runtime-upgrade.json')
     require('api_recovery_exact_runtime_upgrade', upgrade['previousRuntimeSha256'] == boundary['runtime_sha256']
             and upgrade['runtimeSha256'] == sha(directory / 'bin/grain-runtime'))
@@ -595,7 +634,35 @@ def application_api_recovery_attempt(run, directory, require):
             read(run / 'agent-lifetime/issued-grant.json')['grantReceipt'] == boundary['grant_receipt'])
     require('api_recovery_new_discovery_id_after_preserved_outcome',
             original(run / 'agent-lifetime/probe/discover-core-query.request-id').read_text().strip() != boundary['request_id'])
-    phases = ['runtime-upgrade','services']
+    if resumption.is_dir():
+        resumed=read(resumption/'prepared.json'); next_runtime=read(resumption/'runtime-upgrade.json')
+        require('api_resumption_exact_stopped_boundary', resumed['schema']=='mini-oracle-api-stopped-resumption-v1'
+                and resumed['retransmit'] is False and resumed['request_id']==boundary['request_id']
+                and resumed['original_prepared_sha256']==sha(directory/'prepared.json')
+                and resumed['stop_sha256']==sha(directory/'stop.json')
+                and read(resumption/'prior-exit.json')=={'execution_exit':143,'cleanup_exit':0,'namespace_preserved':True})
+        require('api_resumption_exact_runtime_successor', next_runtime['previousRuntimeSha256']==upgrade['runtimeSha256']
+                and next_runtime['runtimeSha256']==sha(resumption/'bin/grain-runtime'))
+        for attempt in resumptions:
+            preparation=read(attempt/'prepared.json')
+            require('api_resumption_boundary_'+str(attempt),preparation['original_prepared_sha256']==sha(directory/'prepared.json')
+                    and preparation['stop_sha256']==sha(directory/'stop.json') and preparation['retransmit'] is False)
+            if attempt!=resumption:
+                prior=read(attempt/'prior-exit.json')
+                require('api_resumption_clean_pre_migration_retry_'+str(attempt),prior['execution_exit']!=0
+                        and prior['cleanup_exit']==0 and prior['namespace_preserved'] is True
+                        and preparation['runtime_sha256']==next_runtime['runtimeSha256'])
+                extra_phases.append('resume-services-retry-'+attempt.name)
+            for entry in preparation['preserved'].values():
+                require('api_resumption_preserved_'+entry['path'],sha(Path(entry['path']))==entry['sha256'])
+            for line in (attempt/'source-input-sha256.txt').read_text().splitlines():
+                digest,name=line.split(None,1);require('api_resumption_source_'+name,sha(Path(name))==digest)
+        repair=run/'agent-lifetime/repair-payer-custody'
+        complete=read(repair/'complete.json')
+        require('api_resumption_native_payer_route_successor', complete['protocol']=='mini-application-payer-successor-complete-v1'
+                and complete['app']=='9101' and complete['grantChanged'] is False and complete['sessionChanged'] is False)
+        extra_phases += ['resume-runtime-upgrade','resume-services','payer-route-successor']
+    phases = [*extra_phases, 'runtime-upgrade','services']
     if not startup:
         phases += ['controller-start','native-recovery','native-reconciliation']
     phases += ['retire-incarnation','successor-start','enrollment']
@@ -604,11 +671,16 @@ def application_api_recovery_attempt(run, directory, require):
         require('api_recovery_phase_'+phase, value['phase']==phase and value['state']=='completed'
                 and value['started_sha256']==sha(directory / 'phases' / (phase+'.started.json')))
         for name,digest in value['evidence'].items():
-            require('api_recovery_evidence_'+name,sha(original(name))==digest)
+            candidates=[original(name),resumed_original(name)]
+            for attempt in resumptions:
+                entry=read(attempt/'prepared.json')['preserved'].get(name)
+                if entry and entry['sha256']==digest: candidates.append(Path(entry['path']))
+            require('api_recovery_evidence_'+name,any(p.is_file() and sha(p)==digest for p in candidates))
     for line in (directory / 'recovery-input-sha256.txt').read_text().splitlines():
         digest,name=line.split(None,1)
         require('api_recovery_source_'+name,sha(original(name))==digest)
     return {'kind':boundary.get('kind','unreserved-api'),'proof':proof,'original_request_id':boundary['request_id'],
+            'operator_upgrades':operator_upgrades,
             'terminal':('native readiness refusal; no tool request allocated' if boundary.get('kind') == 'readiness-refusal' else
                         'native pre-admission refusal; no tool operation allocated' if startup else
                         'audited, already reported; no definitive answer or separate ACK'),

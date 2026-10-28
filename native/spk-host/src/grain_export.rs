@@ -716,9 +716,13 @@ pub(crate) mod tests {
         ) -> std::thread::JoinHandle<Vec<(u8, Vec<u8>)>> {
             let listener = std::os::unix::net::UnixListener::bind(&self.operator.socket).unwrap();
             fs::set_permissions(&self.operator.socket, std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
+            let scratch = self.root.clone();
+            let inspector = self.operator.config.clone();
             std::thread::spawn(move || {
                 let mut seen = Vec::new();
-                for (marker, word) in replies {
+                let mut replies = replies.into_iter();
+                let mut tool_calls = 0u32;
+                while replies.len() > 0 {
                     let (mut stream, _) = listener.accept().unwrap();
                     let mut prefix = [0u8; 4];
                     stream.read_exact(&mut prefix).unwrap();
@@ -727,6 +731,37 @@ pub(crate) mod tests {
                     let config_len = u32::from_le_bytes(request[1..5].try_into().unwrap()) as usize;
                     let at = 5 + config_len + 32;
                     let opcode = request[at];
+                    if (crate::host_operations::TOOL_AUTHOR..=crate::host_operations::TOOL_SIGNATURES).contains(&opcode) {
+                        // The Host's in-session tool verbs: `inspect KIND` runs the inspector script
+                        // exactly as the detached verb does; anything else is "run the detached verb".
+                        let payload = &request[at + 1..];
+                        let mut answer = vec![opcode, 2];
+                        if opcode == crate::host_operations::TOOL_INSPECT {
+                            let width = u16::from_le_bytes([payload[0], payload[1]]) as usize;
+                            let kind = std::str::from_utf8(&payload[2..2 + width]).unwrap();
+                            tool_calls += 1;
+                            let input = scratch.join(format!("tool-in-{tool_calls}"));
+                            let output = scratch.join(format!("tool-out-{tool_calls}"));
+                            fs::write(&input, &payload[2 + width..]).unwrap();
+                            let status = std::process::Command::new("/bin/sh")
+                                .arg(&inspector).arg("inspect").arg(kind).arg(&input).arg(&output)
+                                .status().unwrap();
+                            answer = if status.success() {
+                                let mut ok = vec![opcode, 0];
+                                ok.extend_from_slice(&fs::read(&output).unwrap());
+                                ok
+                            } else {
+                                let mut refused = vec![opcode, 1];
+                                refused.extend_from_slice(b"inspector refused");
+                                refused
+                            };
+                        }
+                        let mut frame = (answer.len() as u32).to_le_bytes().to_vec();
+                        frame.extend_from_slice(&answer);
+                        stream.write_all(&frame).unwrap();
+                        continue;
+                    }
+                    let (marker, word) = replies.next().unwrap();
                     seen.push((opcode, request[at + 1..].to_vec()));
                     let mut body = vec![marker.unwrap_or(opcode)];
                     body.extend_from_slice(b"DREGG/NATIVE-HOST/OUTCOME/v8");

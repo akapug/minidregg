@@ -1,5 +1,5 @@
 /-
-# Kernel.PurseRefillReceiver — the signed refill turn (PAY §2.7, lane P6)
+# Kernel.PurseRefillReceiver — the signed refill turn (docs/PAY.md §2.7, lane P6)
 
 One signed command of the owner of Book account `A`
 (`Command`: account, purse task, burn, purse gain) is one turn over

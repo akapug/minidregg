@@ -9,12 +9,13 @@ Provision the Mini resources through the native author/bootstrap/birth/delegate 
 For each task, place the runtime JSON at `/opt/mini/grains/TASK.json`, owned by its dedicated task account and mode 0600. Its `stateDir` is an owned real directory at mode 0700; `controlSocket` is directly inside it. Store `custodyKey` and any tool/provider custody files outside all worker bind roots. The runtime's `admin.sock` remains inside this directory and is never an SSH forced-command target. The fixed `hermes-acp` command uses `systemdScope:true`, the `bwrap` launcher, a nonsecret immutable runtime root, and a task workspace as its only writable host mount. The launcher verifies the sibling gate protocol, blocks controller secrets in mounts, and starts one bounded transient user service per operation.
 
 A real provider-backed task includes a pinned `grain-provider-bridge` in that
-runtime root and selects `--network none`, as the `grain create` example input does
-(`deploy/hermes/grain-create.demo.json:19`). The controller bind-mounts only
-its private provider gateway Unix socket into the worker. A host-network command
-is reserved for an explicit local deterministic fixture: `offer-render-task:193`
-and `render-hosted-pair:98` emit `--network host` and are fixture renderers, not
-a provider-backed task.
+runtime root and selects `--network none`, as the demo's resident does
+(`worker.network` in `deploy/hermes/demo/install-hermes`; `check_values` in
+`native/grain-runtime/src/grain_create.rs` accepts only `none` or `host`). The
+controller bind-mounts only its private provider gateway Unix socket into the worker.
+A host-network command is reserved for an explicit local deterministic fixture:
+`render-hosted-pair` emits `--network host` and is a fixture renderer, not a
+provider-backed task.
 
 Run `mini-grain-controller@TASK.service` either under that task account's `systemd --user` manager (as that account, `install-controller` renders the unit with all three `MINI_GRAIN_*` manager variables) or as a system unit with `User=` the task account (as root, `install-controller --system --service-user ACCOUNT` also writes the root registration `/etc/mini/controllers/TASK.json`; the account needs linger because workers are user units). [`install-controller`](install-controller) renders and installs a direct instance unit for an already-provisioned runtime JSON and operator-selected executable SHA-256 pins. The installer checks file ownership, private state and keys, pinned executable bytes, the launcher/gate protocol, and unit name conflicts. Its pins identify the artifacts the operator selected; they are not a certificate that those artifacts came from a particular source revision. It does not bootstrap Mini resources, validate signed policy, or start the service. See the [installer example](README.md#controller-unit-installation) for its exact inputs. Enable linger if the controller must survive logout, then explicitly enable/start the unit. Verify the control socket exists, the journal has no unresolved hold, and the queried native task page matches the intended task and budget before issuing a friend's key. Restarting the service must use the same config and private state; replacing a journal-bound command in place is refused.
 

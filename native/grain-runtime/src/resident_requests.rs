@@ -468,12 +468,11 @@ pub(crate) fn reconcile(state:&Path,controller:&Path,completion:Option<&Value>)-
             return Err(format!("selected request's prompt {op} is undecided; resolve it with admin {:?} (operation {:?}) before another request starts",retry.admin,retry.operation));
         }
         prompt_outcome::Outcome::Refused{..}=>{
-            let file=prompt_outcome::path(controller,op);
-            let bytes=bounded_regular_file(&file,65_536)?;
-            // H13: a failed admitted prompt closes its request; no delivery
-            // receipt can exist for it, and the next request becomes selectable.
-            record(state,r,"failed-after-admission",json!({"basis":"typed-prompt-outcome","promptOutcome":file,
-                "sha256":sha256_bytes(&bytes)?,"outcome":outcome.outcome,"origin":frame["residentOrigin"]}))?;
+            let mut evidence=prompt_outcome::evidence(controller,op)?;
+            evidence["origin"]=frame["residentOrigin"].clone();
+            // H13: no deliverable result is claimed. Audited closure names
+            // both immutable original uncertainty and its validated resolution.
+            record(state,r,"failed-after-admission",evidence)?;
             q.last_author=r.entry["author"].as_str().map(str::to_owned);q.selected=None;
             return atomic_json(&path(state),&q);
         }
@@ -604,6 +603,33 @@ mod tests {
         assert_eq!(receipt["evidence"]["outcome"]["state"],"refused");assert!(receipt.get("modelRequests").is_none());
         assert_eq!(select(&p,&state,Limits::default()).unwrap().unwrap()["recentMemberEntries"][0]["author"],"21");
         fs::remove_dir_all(state).unwrap();
+    }
+    #[test]fn audited_prompt_closure_receipt_preserves_both_native_evidence_files() {
+        let (mut rt, controller_root, _) = prompt_outcome::tests::audited_fixture();
+        let state=fixture("audited-admitted"); let id="a".repeat(64);
+        let p=prepared(vec![entry("20",1),entry("21",2)]);
+        select(&p,&state,Limits::default()).unwrap(); started(&state,&id,"input").unwrap();
+        let frame=json!({"outcome":"failed","residentOrigin":{"residentPromptId":id,
+            "promptSha256":"b".repeat(64),"promptOperationId":67}});
+        assert!(reconcile(&state,&rt.config.state_dir,Some(&frame)).is_err());
+        assert!(open(&state).unwrap().selected.is_some());
+        rt.reconcile_prompt_audited("67").unwrap();
+        reconcile(&state,&rt.config.state_dir,Some(&frame)).unwrap();
+        assert!(open(&state).unwrap().selected.is_none());
+        let closed=fs::read_dir(&state).unwrap().flatten().find(|e|e.file_name().to_string_lossy().ends_with("-failed-after-admission.json")).unwrap().path();
+        let receipt:Value=serde_json::from_slice(&fs::read(closed).unwrap()).unwrap();
+        assert!(receipt.get("modelRequests").is_none(), "audited closure makes no zero-model claim");
+        let e=&receipt["evidence"];assert_eq!(e["outcome"]["state"],"refused");
+        let original=Path::new(e["promptOutcome"].as_str().unwrap());
+        let original_json:Value=serde_json::from_slice(&fs::read(original).unwrap()).unwrap();
+        assert_eq!(original_json["outcome"]["state"],"undecided");
+        assert_eq!(e["sha256"],sha256_file(original).unwrap());
+        let resolved=Path::new(e["resolution"]["path"].as_str().unwrap());
+        assert_eq!(e["resolution"]["sha256"],sha256_file(resolved).unwrap());
+        let resolution:Value=serde_json::from_slice(&fs::read(resolved).unwrap()).unwrap();
+        assert_eq!(resolution["originalSha256"],e["sha256"]);
+        assert_eq!(select(&p,&state,Limits::default()).unwrap().unwrap()["recentMemberEntries"][0]["author"],"21");
+        fs::remove_dir_all(state).unwrap();fs::remove_dir_all(controller_root).unwrap();
     }
     #[test]fn assignment_cutoff_reassignment_does_not_readmit_answered_old_requests() {
         let state=fixture("cutoff");let mut p=prepared(vec![entry("20",1),entry("21",9)]);p["acceptedHeight"]=json!("5");

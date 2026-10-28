@@ -152,7 +152,7 @@ receiver projects `request/*`, `target/policyId`, `command/bytes/*`,
 `resource/*` and `joint/target/*`). -/
 def refillSlot : String := "authority/operation/purse-refill"
 
-/-- The `refill` edge (PAY §2.7). Only the remaining allowance grows, by a
+/-- The `refill` edge (docs/PAY.md §2.7). Only the remaining allowance grows, by a
 positive amount; generation, status and the (zero) reservation are unchanged;
 the task is paused or attached without an outstanding reservation (0, 1, 2).
 It is a separate branch of `policy`, not of `transitionPolicy`: every
@@ -463,7 +463,7 @@ theorem hard_reserved_settlement_general (g r h charge : Int)
   simpa [interrupt] using
     interrupted_reserved_settlement_general g r h charge hg hr hh hc0 hch
 
-/-! ## The refill edge (PAY §2.7, lane P6) -/
+/-! ## The refill edge (docs/PAY.md §2.7, lane P6) -/
 
 /-- The refill branch as the purse-refill receiver evaluates it: the slot it
 alone projects, then the task's exact four-coordinate projection. -/

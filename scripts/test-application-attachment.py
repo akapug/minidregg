@@ -14,6 +14,16 @@ SPEC.loader.exec_module(M)
 
 
 class AttachmentTests(unittest.TestCase):
+    def test_inspection_mode_is_explicit_without_fallback(self):
+        op = M.Attachment.__new__(M.Attachment)
+        with tempfile.TemporaryDirectory() as directory:
+            op.mini = Path(directory) / "mini"; op.mini.write_bytes(b"qualified image")
+            op.operator = Path(directory) / "operator.sock"
+            op.contract = {}
+            self.assertEqual(op.inspection_args(), ["--served", op.mini, op.operator, M.sha(op.mini)])
+            op.contract = {"inspectionMode": "detached"}
+            self.assertEqual(op.inspection_args(), [])
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -315,6 +325,15 @@ class AttachmentTests(unittest.TestCase):
         argv = seen[0][1]
         offset = argv.index("--served")
         self.assertEqual(argv[offset + 1:offset + 4], [op.mini, op.operator, M.sha(op.mini)])
+        pins = M.read(op.calls / "operator-pins.json")
+        self.assertEqual([(p["role"], p["index"]) for p in pins["payerPins"]], [("4", "0"), ("1", "0")])
+        self.assertEqual([(p["role"], p["index"]) for p in pins["appSigners"]],
+                         [("4", "0"), ("4", "1"), ("8", "0"), ("8", "1"), ("1", "0"),
+                          ("9", "0"), ("9", "1"), ("9", "2"), ("9", "3")])
+        for pin in pins["payerPins"]:
+            self.assertEqual(pin["keyId"], self.a["dispatch"]["keyId"])
+            self.assertEqual(pin["keyEpoch"], "77")
+            self.assertNotIn("seedPath", pin)
 
     def test_layout_keeps_controller_and_dispatch_separate(self):
         op = M.Attachment(self.path, "prepare-config")

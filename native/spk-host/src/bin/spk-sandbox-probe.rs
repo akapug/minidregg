@@ -228,6 +228,79 @@ mod linux {
             json!({"fd4": describe(fd4), "fd5": describe(fd5), "walked": walked}),
         );
 
+        // --- the platform's getifaddrs shim: present only for the packages that declare it ---
+        let preload = std::env::var("LD_PRELOAD").ok();
+        let shim_file = std::fs::metadata("/tmp/libifaddrs-lo.so");
+        if std::env::var("SPK_PROBE_SHIM").as_deref() == Ok("expect") {
+            let mut seen: Vec<String> = Vec::new();
+            let mut list: *mut libc::ifaddrs = std::ptr::null_mut();
+            let rc = unsafe { libc::getifaddrs(&mut list) };
+            let mut at = list;
+            while rc == 0 && !at.is_null() {
+                let entry = unsafe { &*at };
+                let name = unsafe { std::ffi::CStr::from_ptr(entry.ifa_name) }.to_string_lossy().into_owned();
+                let (family, bits) = unsafe {
+                    match (*entry.ifa_addr).sa_family as i32 {
+                        libc::AF_INET => {
+                            let a = &*(entry.ifa_addr as *const libc::sockaddr_in);
+                            let m = &*(entry.ifa_netmask as *const libc::sockaddr_in);
+                            (std::net::IpAddr::from(a.sin_addr.s_addr.to_ne_bytes()).to_string(), m.sin_addr.s_addr.count_ones())
+                        }
+                        libc::AF_INET6 => {
+                            let a = &*(entry.ifa_addr as *const libc::sockaddr_in6);
+                            let m = &*(entry.ifa_netmask as *const libc::sockaddr_in6);
+                            (std::net::IpAddr::from(a.sin6_addr.s6_addr).to_string(), m.sin6_addr.s6_addr.iter().map(|b| b.count_ones()).sum())
+                        }
+                        other => (format!("family{other}"), 0),
+                    }
+                };
+                seen.push(format!("{name} {family}/{bits} flags={:#x}", entry.ifa_flags));
+                at = entry.ifa_next;
+            }
+            if rc == 0 {
+                unsafe { libc::freeifaddrs(list) };
+            }
+            let wanted = (libc::IFF_UP | libc::IFF_LOOPBACK | libc::IFF_RUNNING) as u32;
+            report.check(
+                "ifaddrs-shim-loopback-only",
+                rc == 0 && seen == [format!("lo 127.0.0.1/8 flags={wanted:#x}"), format!("lo ::1/128 flags={wanted:#x}")],
+                json!({"rc": rc, "interfaces": seen, "LD_PRELOAD": preload}),
+            );
+            // The app cannot change or replace the shim: a write fails EROFS, an unlink and a rename
+            // onto it fail (EBUSY or EPERM), and its bytes are the ones compiled into spk-host.
+            let errno = |r: std::io::Result<()>| r.err().and_then(|e| e.raw_os_error());
+            let write = errno(std::fs::OpenOptions::new().write(true).open("/tmp/libifaddrs-lo.so").map(|_| ()));
+            let unlink = errno(std::fs::remove_file("/tmp/libifaddrs-lo.so"));
+            std::fs::write("/tmp/replacement.so", b"x").ok();
+            let rename = errno(std::fs::rename("/tmp/replacement.so", "/tmp/libifaddrs-lo.so"));
+            let digest = {
+                use sha2::{Digest, Sha256};
+                std::fs::read("/tmp/libifaddrs-lo.so")
+                    .map(|bytes| Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect::<String>())
+                    .unwrap_or_default()
+            };
+            let expected = std::env::var("SPK_PROBE_SHIM_SHA256").unwrap_or_default();
+            report.check(
+                "ifaddrs-shim-read-only",
+                preload.as_deref() == Some("/tmp/libifaddrs-lo.so")
+                    && write == Some(libc::EROFS)
+                    && matches!(unlink, Some(e) if e == libc::EBUSY || e == libc::EPERM || e == libc::EROFS)
+                    && matches!(rename, Some(e) if e == libc::EBUSY || e == libc::EPERM || e == libc::EROFS),
+                json!({"write": write, "unlink": unlink, "rename": rename}),
+            );
+            report.check(
+                "ifaddrs-shim-bytes-pinned",
+                !expected.is_empty() && digest == expected,
+                json!({"sha256_in_grain": digest, "sha256_compiled_in": expected}),
+            );
+        } else {
+            report.check(
+                "ifaddrs-shim-absent",
+                preload.is_none() && shim_file.is_err(),
+                json!({"LD_PRELOAD": preload, "file": format!("{:?}", shim_file.map(|m| m.len()))}),
+            );
+        }
+
         // --- network ---
         let v4 = connect_refusal("1.1.1.1:80");
         let v6 = connect_refusal("[2606:4700:4700::1111]:80");
@@ -242,8 +315,15 @@ mod linux {
             loopback == Err(libc::ECONNREFUSED),
             json!({"127.0.0.1:1": format!("{loopback:?}")}),
         );
-        for (name, family) in [("netlink", libc::AF_NETLINK), ("packet", libc::AF_PACKET), ("vsock", libc::AF_VSOCK)] {
-            let result = outcome(unsafe { libc::socket(family, libc::SOCK_RAW | libc::SOCK_CLOEXEC, 0) } as i64);
+        // NETLINK_ROUTE is what getifaddrs opens; it is refused too (the platform answers getifaddrs
+        // with a preloaded shim for the packages that need it, never with this socket).
+        for (name, family, protocol) in [
+            ("netlink", libc::AF_NETLINK, 0),
+            ("netlink-route", libc::AF_NETLINK, libc::NETLINK_ROUTE),
+            ("packet", libc::AF_PACKET, 0),
+            ("vsock", libc::AF_VSOCK, 0),
+        ] {
+            let result = outcome(unsafe { libc::socket(family, libc::SOCK_RAW | libc::SOCK_CLOEXEC, protocol) } as i64);
             close(result);
             report.check(
                 &format!("socket-{name}-refused"),

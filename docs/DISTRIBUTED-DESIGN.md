@@ -1,6 +1,12 @@
-# DISTRIBUTED-DESIGN — the two missing step-logics, stated before they are built
+# DISTRIBUTED-DESIGN — the ordering and independence step-logics
 
-*Design pass 2026-09-04/05, overnight. Inputs: the constitution (`~/dev/breadstuffs/paper2/`,
+**Status.** §2 is built: `Theory/Confluence.lean`, `Theory/ViewMerge.lean`, `Theory/Finality.lean`,
+`Kernel/HyperedgeTier.lean`, `Kernel/FinalityGate.lean`, `Theory/EpistemicConsensus.lean` and
+`Kernel/HyperedgeKnowledge.lean`. Of §3, the coordination dial (§3.4) is built as
+`Pred/CoordinationDial.lean`; the lace (§3.1), liveness carrier (§3.2) and derived finalizer
+(§3.3) are not, and no `Distributed` library exists.
+
+*Inputs: the constitution (`~/dev/breadstuffs/paper2/`,
 §1.3 the frame rule read four ways, §2.4 the three logics over a step, §3.3 the coordination
 dial, §5 floor 8 PostGSTProgress, §8 "liveness is exactly as strong as its carrier"); a
 full survey of breadstuffs' distributed layer (`metatheory/Dregg2/Distributed/`, 36 files /
@@ -18,15 +24,14 @@ lattice over one causal DAG; a turn commits at the join of its written cells' ti
 never downgrades), and **independence** (the join-semilattice of invariant-preserving
 merges — the coordination-free fragment, priced by the confluence classifier). Minidregg
 today has the first logic end to end (`Kernel/Camera`, `Kernel/State`, `Kernel/Gate`,
-`Kernel/Turn`, N2a/N2b) and **none of the other two**: no `IConfluent`, no `Tier`, no
-join, no `Knows`, no colimit anywhere in 217K lines. What landed under the megaswarm is a
-replicated-settlement tower (`Kernel/ReplicatedSettlementFinality` — safety over
+`Kernel/Turn`, N2a/N2b). Before §2 it had neither of the other two: no `IConfluent`, no
+`Tier`, no join, no `Knows`, no colimit. Beside them sits a replicated-settlement tower (`Kernel/ReplicatedSettlementFinality` — safety over
 intersecting quorums as a theorem, liveness as bare `Prop` premises, no decider, no
 export, consumed only by closed `Fin 3` Assurance witnesses), a causal DAG with a poset
 and an LCA but no join (`Theory/CausalVersionDag`, `CausalVersionAncestry`), and a
 document merge that is deliberately anti-commutative (`Kernel/HyperdocumentMerge`,
-`raw_pair_order_observable`). That is "the distributed semantics of the OS never got
-completed", made exact: two of the three step-logics are absent.
+`raw_pair_order_observable`). §2 supplies the ordering and independence logics at the
+level of statements and deciders; §3.1–3.3 remain the missing distributed layer.
 
 ## 1. Where breadstuffs stopped, and why each stop is an implementation-modeling artifact
 
@@ -54,12 +59,11 @@ finality is prefix-monotone by type. Every distributed premise (collision resist
 the replica boundary, reliable dissemination, post-GST progress) is one typed carrier with
 a realizer slot and a refutation at a broken sibling (law 1). No twin of a Rust `tau`.
 
-## 2. The slate landing tonight — statement-first, keystone-fielded
+## 2. Built — statement-first, keystone-fielded
 
 Files are placed by the import boundary: candidate-independent shapes in `Theory/`
 (Mathlib + Theory only, CI-enforced), instantiations on the hyperedge and the kernel state
-in `Kernel/`. A `Distributed` lean_lib opens when the first lace file lands (§3.1); tonight
-nothing needs it.
+in `Kernel/`. A `Distributed` lean_lib opens when the first lace file lands (§3.1).
 
 ### 2.1 Independence logic — `Theory/Confluence.lean`
 
@@ -147,7 +151,7 @@ fallback behind an explicit labeled env var is Rust-side), `[FINALITY-GATE-recei
 
 ### 2.5 The epistemic seam — `Theory/EpistemicConsensus.lean` + `Kernel/HyperedgeKnowledge.lean`
 
-ATLAS §3 item 5, unrealized until tonight. `Frame Ω ι` (actual world, per-agent
+ATLAS §3 item 5. `Frame Ω ι` (actual world, per-agent
 indistinguishability, faulty set), `Knows`, `DistKnows`, and **the trick**: `verified X w₀`
 is a constant proposition over worlds, so a discharged claim is known by every agent in
 every frame regardless of `Indist` and regardless of who is faulty
@@ -167,7 +171,7 @@ lines, on `Kernel/Turn.lean` only). Residuals: `[EPISTEMIC-common]` common knowl
 the finality floor `C_G` (breadstuffs `Authority/Epistemic.FinalityFloor`, the weld to the
 light client); `[EPISTEMIC-threshold]`; `[EPISTEMIC-uc]`; `[HYPEREDGE-operational]`.
 
-## 3. The next slate — designed, not yet authored
+## 3. The next slate — designed (§3.4 built)
 
 ### 3.1 The lace, with the CrossCanonical gap closed by a realizer slot
 
@@ -238,7 +242,7 @@ per-replica state in the cell schema.
 
 ### 3.5 N4
 
-No Lean tonight on purpose; the statement-first pass is `docs/N4-DISTRIBUTIVE-LAW.md`.
+The statement-first pass is `docs/N4-DISTRIBUTIVE-LAW.md`.
 Its verdict: Σ is `Compiler/Signature` (mathlib `PFunctor`), and `EffectSpec.sig` is the
 unary `1 + Op × X` whose closed terms are lists — over it Turi–Plotkin says nothing, so N4's
 content lives at the ι-ary JOINT node (the hyperedge as a shape). There is no behavior
@@ -267,7 +271,7 @@ them, and `open_joint_commits` exhibits the half-committed joint turn by `rfl`.
 
 ## 4. What is NOT claimed
 
-Nothing tonight is a consensus protocol, a network model, a liveness proof, a Byzantine
+Nothing here is a consensus protocol, a network model, a liveness proof, a Byzantine
 tolerance result, a collision-resistance theorem, or a deployment. `Finalized` certificates
 are built from a TRUSTED vote book (authenticated votes remain
 `AuthenticatedSettlementFinality`'s). The N6 statements are the poset shadow; the

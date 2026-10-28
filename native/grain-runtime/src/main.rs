@@ -5,6 +5,8 @@ mod deadline;
 #[cfg(test)]
 mod startup_budget_tests;
 mod controller_digest;
+#[path = "../../file_identity.rs"]
+mod file_identity;
 mod public_status;
 mod application_api_tools;
 mod oracle_tools;
@@ -181,7 +183,7 @@ struct ToolTask {
     /// image. The family allowlists alone never enable op30/31 delivery.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     current_birth_host_sha256: Option<String>,
-    /// The room this grain's Hermes was summoned into (PLACE §2.7): the room
+    /// The room this grain's Hermes was summoned into (docs/PLACE.md §2.7): the room
     /// tools (`resource_tools::room_tool_specs`) run the pinned client's shell
     /// under this workspace; each write pays the room's `hermes/turn` first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -247,20 +249,22 @@ struct DispatchSignerPin {
     key_epoch: String,
 }
 
-/// A one-target observed `NativeHost.prepareLoaded (.invoke ...)` has the
-/// target, observation, and authority signing incidences in this order. They
-/// all use the controller's pinned payer identity; the resident never gets
-/// that key. V2's separate signing profile is unaffected.
+/// Lifetime reserve and payer authoring each invoke one mutating purse target.
+/// Native Command.requiresObservation is false for that shape: the ordered
+/// incidences are target (4) and authority (1), with no observation (8).
+/// Both use the pinned payer identity; the resident never gets its key.
+/// The exact source plan is independently rederived by native consent before
+/// signing. V2's separate signing profile is unaffected.
 fn lifetime_purse_signers(
     slots: &[Value],
     signer: &DispatchSignerPin,
     key_path: &Path,
 ) -> Result<Vec<Value>> {
-    if !matches!(signer.role.as_str(), "4" | "8" | "1") || signer.index != "0" || slots.len() != 3 {
-        return Err("lifetime purse requires exact target/observe/authority slots".into());
+    if !matches!(signer.role.as_str(), "4" | "1") || signer.index != "0" || slots.len() != 2 {
+        return Err("lifetime purse requires exact target/authority slots".into());
     }
-    let mut approved = Vec::with_capacity(3);
-    for (slot, role) in slots.iter().zip(["4", "8", "1"]) {
+    let mut approved = Vec::with_capacity(2);
+    for (slot, role) in slots.iter().zip(["4", "1"]) {
         let signing = slot
             .get("signing")
             .ok_or("lifetime purse signing header absent")?;
@@ -284,6 +288,20 @@ fn lifetime_purse_signers(
             "keyPath":key_path}));
     }
     Ok(approved)
+}
+
+/// The source-approved signer incidences determine the returned signature
+/// cardinality. Do not carry a separate legacy three-slot transport profile.
+fn validate_lifetime_payer_reply(result: &Value, plan_sha256: &str, approved: &[Value]) -> Result<()> {
+    if result.get("type").and_then(Value::as_str) != Some("minidregg-agent-lifetime-payer-signatures-v1")
+        || result.get("planSha256").and_then(Value::as_str) != Some(plan_sha256)
+        || result.get("signatures").and_then(Value::as_array).is_none_or(|list|
+            list.len() != approved.len() || list.iter().any(|entry|
+                entry.as_str().is_none_or(|signature| signature.len() != 128
+                    || !signature.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))))) {
+        return Err("lifetime detached payer signatures differ from approved plan".into());
+    }
+    Ok(())
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -997,12 +1015,56 @@ fn managed_worker_policy_source(owner: &str, workers: &[String], generation: &st
     }
 }
 
+#[derive(Clone, Copy)]
+enum ToolSurface {
+    Resident,
+    OperatorForeground,
+}
+
+fn operator_foreground_tool(name: &str) -> bool {
+    matches!(name,
+            "mini_grain_status"
+                | "mini_workspace_list"
+                | "mini_workspace_describe"
+                | "mini_workspace_read"
+                | "mini_workspace_propose"
+                | "mini_workspace_submit"
+                | "mini_workspace_create"
+                | "mini_workspace_recover"
+                | "mini_workspace_attempts"
+                | "mini_workspace_import_reference"
+                | "mini_workspace_export_reference"
+                | "mini_read_resource"
+                | "mini_create_resource"
+                | "mini_create_application"
+                | "mini_create_application_session"
+                | "mini_publish"
+                | "mini_application_api"
+                | "mini_oracle_discover"
+                | "mini_oracle_call"
+    )
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ConsentFullReadiness {
     #[serde(rename = "type")]
     kind: String,
     ready: bool,
+}
+
+impl ConsentFullReadiness {
+    fn parse(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() > 1024 {
+            return Err("full-consent readiness reply exceeds 1024 bytes".into());
+        }
+        let receipt: Self = serde_json::from_slice(bytes)
+            .map_err(|e| format!("full-consent readiness reply: {e}"))?;
+        if receipt.kind != "mini-consent-full-readiness-v1" || !receipt.ready {
+            return Err("full-consent provider did not confirm readiness".into());
+        }
+        Ok(receipt)
+    }
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -2499,6 +2561,24 @@ fn bounded_policy_bytes(path: &Path) -> Result<Vec<u8>> {
     fs::read(path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// The digest of a pinned executable: hashed once per file identity (dev, ino, size, mode, owner,
+/// mtime, ctime), so a per-call pin check costs an open and an fstat, not a read of the image.
+fn sha256_pinned_file(path: &Path) -> Result<String> {
+    file_identity::cached_file_sha256(path).map_err(|e| format!("file digest: {e}"))
+}
+
+/// `sha256_bytes(&bounded_regular_file(path, maximum)?)` without reading an unchanged file again:
+/// the same symlink/type/length refusal, then the digest kept per file identity.
+fn sha256_bounded_regular_file(path: &Path, maximum: usize) -> Result<String> {
+    let metadata =
+        fs::symlink_metadata(path).map_err(|e| format!("bounded {}: {e}", path.display()))?;
+    if !metadata.file_type().is_file() || metadata.len() > maximum as u64 {
+        return Err(format!("bounded {} has the wrong type or length", path.display()));
+    }
+    file_identity::cached_regular_file_sha256(path, maximum as u64)
+        .map_err(|e| format!("bounded {}: {e}", path.display()))
+}
+
 fn sha256_file(path: &Path) -> Result<String> {
     controller_digest::file(path).map_err(|e| format!("file digest: {e}"))
 }
@@ -3254,7 +3334,7 @@ fn validate_with_workspace(c: &Config, prospective_workspace: Option<&[u8]>) -> 
                 .agent_api_host_sha256
                 .as_deref()
                 .ok_or("application API routes require a source-qualified event21 Mini Host pin")?;
-            if c.host_socket.is_none() || sha256_file(&c.host)? != expected {
+            if c.host_socket.is_none() || sha256_pinned_file(&c.host)? != expected {
                 return Err(
                     "application API Mini Host or persistent socket differs from pin".into(),
                 );
@@ -3282,7 +3362,7 @@ fn validate_with_workspace(c: &Config, prospective_workspace: Option<&[u8]>) -> 
                 .lifetime_api_host_sha256
                 .as_deref()
                 .ok_or("lifetime API routes require an event26 Mini Host pin")?;
-            if c.host_socket.is_none() || sha256_file(&c.host)? != expected {
+            if c.host_socket.is_none() || sha256_pinned_file(&c.host)? != expected {
                 return Err("lifetime API Mini Host or persistent socket differs from pin".into());
             }
         } else if t.lifetime_api_host_sha256.is_some() {
@@ -3370,7 +3450,7 @@ fn validate_with_workspace(c: &Config, prospective_workspace: Option<&[u8]>) -> 
             let expected = t.current_birth_host_sha256.as_deref().ok_or(
                 "current application birth requires an operator-pinned qualified Host image",
             )?;
-            if c.host_socket.is_none() || expected != sha256_file(&c.host)? {
+            if c.host_socket.is_none() || expected != sha256_pinned_file(&c.host)? {
                 return Err(
                     "current application birth Host image or socket differs from operator pin"
                         .into(),
@@ -5570,27 +5650,7 @@ impl Runtime {
             ]);
             command
         })?;
-        if result.get("type").and_then(Value::as_str)
-            != Some("minidregg-agent-lifetime-payer-signatures-v1")
-            || result.get("planSha256").and_then(Value::as_str)
-                != Some(sha256_file(&directory.join("plan.bin"))?.as_str())
-            || result
-                .get("signatures")
-                .and_then(Value::as_array)
-                .is_none_or(|list| {
-                    list.len() != 3
-                        || list.iter().any(|entry| {
-                            entry.as_str().is_none_or(|signature| {
-                                signature.len() != 128
-                                    || !signature.bytes().all(|byte| {
-                                        byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)
-                                    })
-                            })
-                        })
-                })
-        {
-            return Err("lifetime detached payer signatures differ from approved plan".into());
-        }
+        validate_lifetime_payer_reply(&result, &sha256_file(&directory.join("plan.bin"))?, &payer_signers)?;
         Ok(json!({"type":"payer-signatures-v3",
             "attemptId":attempt_id,
             "bindingSha256":confirmed.get("bindingSha256"),
@@ -7036,9 +7096,9 @@ impl Runtime {
         Ok(Some(BornResourceRecord {
             pending: origin.clone(),
             attempt: pending.attempt.clone(),
-            call_sha256: sha256_bytes(&bounded_regular_file(&call, 4_194_304)?)?,
+            call_sha256: sha256_bounded_regular_file(&call, 4_194_304)?,
             outcome_path: outcome_path.to_owned(),
-            outcome_sha256: sha256_bytes(&bounded_regular_file(&binary, 4_194_304)?)?,
+            outcome_sha256: sha256_bounded_regular_file(&binary, 4_194_304)?,
             transaction_id: field("transactionId")?,
             event_id: field("eventId")?,
             accepted_count: field("acceptedCount")?,
@@ -8490,7 +8550,7 @@ impl Runtime {
             .agent_api_host_sha256
             .as_deref()
             .ok_or("application API event21 Host pin is absent; agent delivery is unavailable")?;
-        if self.config.host_socket.is_none() || sha256_file(&self.config.host)? != expected_host {
+        if self.config.host_socket.is_none() || sha256_pinned_file(&self.config.host)? != expected_host {
             return Err("application API event21 Host image or socket differs from pin".into());
         }
         let routes = &tool.allowed_application_api_routes;
@@ -8604,7 +8664,7 @@ impl Runtime {
             .lifetime_api_host_sha256
             .as_deref()
             .ok_or("lifetime application Host pin absent")?;
-        if self.config.host_socket.is_none() || sha256_file(&self.config.host)? != expected_host {
+        if self.config.host_socket.is_none() || sha256_pinned_file(&self.config.host)? != expected_host {
             return Err("lifetime application Host image or socket differs from pin".into());
         }
         let registered = tool
@@ -10829,7 +10889,7 @@ impl Runtime {
                 .current_birth_host_sha256
                 .as_deref()
                 .ok_or("current application birth is not enabled by operator Host pin")?;
-            if self.config.host_socket.is_none() || sha256_file(&self.config.host)? != expected {
+            if self.config.host_socket.is_none() || sha256_pinned_file(&self.config.host)? != expected {
                 return Err(
                     "current application birth Host image or socket differs from operator pin"
                         .into(),
@@ -12403,12 +12463,63 @@ impl Runtime {
         )
     }
 
-    fn tool_call(&mut self, name: &str, arguments: &Value) -> Result<Value> {
-        if self.room_tools_restricted()
-            && !resource_tools::is_room_tool(name)
-            && name != "mini_room_attempts"
+    fn require_tool_surface(&self, surface: ToolSurface, name: &str) -> Result<()> {
+        match surface {
+            ToolSurface::Resident => {
+                if self.room_tools_restricted()
+                    && !resource_tools::is_room_tool(name)
+                    && name != "mini_room_attempts"
+                {
+                    return Err("this resident accepts only room tools".into());
+                }
+            }
+            ToolSurface::OperatorForeground => {
+                if self.config.foreground_tool.is_none() {
+                    return Err("foregroundTool is not configured".into());
+                }
+                if !operator_foreground_tool(name) {
+                    return Err("foreground tool is not delegated".into());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn require_foreground_execution(&self, name: &str, arguments: &Value) -> Result<()> {
+        let attempt = self.journal.foreground_attempt.as_ref()
+            .ok_or("operator tool lacks a durable foreground request")?;
+        if self.foreground_operation != Some(attempt.operation_id)
+            || attempt.phase != ForegroundPhase::Executing
+            || attempt.reported || attempt.name != name
+            || attempt.result_path.is_some() || attempt.result_sha256.is_some()
+            || self.child.is_some() || self.journal.child.is_some() || self.prompt_active
         {
-            return Err("this resident accepts only room tools".into());
+            return Err("operator tool is not the exclusive executing foreground request".into());
+        }
+        self.journal.validate_foreground(&self.config.state_dir)?;
+        let request: ForegroundRequest = serde_json::from_slice(
+            &bounded_regular_file(&attempt.request_path, 262_144)?)
+            .map_err(|e| format!("operator retained request: {e}"))?;
+        if request.request_id != attempt.request_id || request.name != name
+            || request.arguments != *arguments
+        {
+            return Err("operator execution differs from its retained foreground request".into());
+        }
+        Ok(())
+    }
+
+    fn tool_call(&mut self, name: &str, arguments: &Value) -> Result<Value> {
+        self.tool_call_from(ToolSurface::Resident, name, arguments)
+    }
+
+    fn tool_call_from(&mut self, surface: ToolSurface, name: &str, arguments: &Value) -> Result<Value> {
+        self.require_tool_surface(surface, name)?;
+        match surface {
+            ToolSurface::OperatorForeground => self.require_foreground_execution(name, arguments)?,
+            ToolSurface::Resident if self.foreground_operation.is_some() => {
+                return Err("resident request cannot borrow an operator foreground invocation".into());
+            }
+            ToolSurface::Resident => {}
         }
         if self.cancelled.load(Ordering::SeqCst)
             || self.journal.connection == Connection::Fenced
@@ -12705,6 +12816,7 @@ impl Runtime {
     /// This is only a syntax/operator-profile preflight; the normal tool path
     /// still verifies every native grant and current source state.
     fn preflight_foreground_arguments(&self, request: &ForegroundRequest) -> Result<()> {
+        self.require_tool_surface(ToolSurface::OperatorForeground, &request.name)?;
         let arguments = &request.arguments;
         let tool = self
             .config
@@ -12965,7 +13077,7 @@ impl Runtime {
                     .current_birth_host_sha256
                     .as_deref()
                     .ok_or("current application birth is not enabled by operator Host pin")?;
-                if self.config.host_socket.is_none() || sha256_file(&self.config.host)? != pin {
+                if self.config.host_socket.is_none() || sha256_pinned_file(&self.config.host)? != pin {
                     return Err(
                         "current application birth Host image or socket differs from operator pin"
                             .into(),
@@ -13052,7 +13164,7 @@ impl Runtime {
                         "application API event21 Host pin is absent; agent delivery is unavailable",
                     )?
                 };
-                if self.config.host_socket.is_none() || sha256_file(&self.config.host)? != pin {
+                if self.config.host_socket.is_none() || sha256_pinned_file(&self.config.host)? != pin {
                     return Err(
                         "application API event21 Host image or socket differs from pin".into(),
                     );
@@ -13123,15 +13235,7 @@ impl Runtime {
             "--host", self.config.host.to_str().ok_or("host path UTF-8")?,
             "--config", self.config.host_config.to_str().ok_or("config path UTF-8")?,
         ])?;
-        if output.stdout.len() > 1024 {
-            return Err("full-consent readiness reply exceeds 1024 bytes".into());
-        }
-        let receipt: ConsentFullReadiness = serde_json::from_slice(&output.stdout)
-            .map_err(|e| format!("full-consent readiness reply: {e}"))?;
-        if receipt.kind != "mini-consent-full-readiness-v1" || !receipt.ready {
-            return Err("full-consent provider did not confirm readiness".into());
-        }
-        Ok(Some(receipt))
+        ConsentFullReadiness::parse(&output.stdout).map(Some)
     }
 
     /// Explicit operator readiness, before any tool request is submitted.
@@ -13214,30 +13318,7 @@ impl Runtime {
         {
             return Err("foreground tool name is invalid".into());
         }
-        if !matches!(
-            request.name.as_str(),
-            "mini_grain_status"
-                | "mini_workspace_list"
-                | "mini_workspace_describe"
-                | "mini_workspace_read"
-                | "mini_workspace_propose"
-                | "mini_workspace_submit"
-                | "mini_workspace_create"
-                | "mini_workspace_recover"
-                | "mini_workspace_attempts"
-                | "mini_workspace_import_reference"
-                | "mini_workspace_export_reference"
-                | "mini_read_resource"
-                | "mini_create_resource"
-                | "mini_create_application"
-                | "mini_create_application_session"
-                | "mini_publish"
-                | "mini_application_api"
-                | "mini_oracle_discover"
-                | "mini_oracle_call"
-        ) {
-            return Err("foreground tool is not delegated".into());
-        }
+        self.require_tool_surface(ToolSurface::OperatorForeground, &request.name)?;
         let profile = self
             .config
             .foreground_tool
@@ -13304,7 +13385,7 @@ impl Runtime {
                 let arguments = self.application_tool_arguments(&request.name, &request.arguments)?;
                 self.foreground_application_api(&arguments, input)?
             } else {
-                self.tool_call(&request.name, &request.arguments)
+                self.tool_call_from(ToolSurface::OperatorForeground, &request.name, &request.arguments)
                     .map(|value| json!({"isError":false,"text":value.to_string()}))?
             };
             self.check_not_cancelled()?;
@@ -14582,7 +14663,7 @@ impl Runtime {
                 .current_birth_host_sha256
                 .as_deref()
                 .ok_or("current application birth Host pin absent")?;
-            if self.config.host_socket.is_none() || sha256_file(&self.config.host)? != expected {
+            if self.config.host_socket.is_none() || sha256_pinned_file(&self.config.host)? != expected {
                 return Err(
                     "current application birth Host image or socket differs from operator pin"
                         .into(),
@@ -18330,6 +18411,12 @@ fn serve(mut rt: Runtime) -> Result<()> {
                     });
                     continue;
                 }
+                if let Some(id)=request.command.strip_prefix("reconcile prompt audited ") {
+                    let result=rt.reconcile_prompt_audited(id);
+                    request.phase.store(2, Ordering::SeqCst);
+                    let _=request.reply.send(match result {Ok(value)=>value.to_string(),Err(error)=>format!("error: {error}")});
+                    continue;
+                }
                 if let Some(id)=request.command.strip_prefix("recover foreground api-unreserved ") {
                     let result=rt.recover_foreground_api_unreserved(id);
                     request.phase.store(2, Ordering::SeqCst);
@@ -18756,6 +18843,12 @@ fn main() -> ExitCode {
                 if ready { println!("{response}"); ExitCode::SUCCESS }
                 else { eprintln!("grain-runtime admin: {response}"); ExitCode::from(1) }
             }
+            Ok(response) if command.starts_with("reconcile prompt audited ") => {
+                let id = command.strip_prefix("reconcile prompt audited ").unwrap();
+                if prompt_outcome::successful_admin_reply(id, &response) {
+                    println!("{response}"); ExitCode::SUCCESS
+                } else { eprintln!("grain-runtime admin: {response}"); ExitCode::from(1) }
+            }
             Ok(response) if command.starts_with("recover foreground api-unreserved ") => {
                 let request_id = command.strip_prefix("recover foreground api-unreserved ").unwrap();
                 let ready = serde_json::from_str::<Value>(&response).ok().is_some_and(|value|
@@ -18954,7 +19047,7 @@ mod tests {
     }
 
     #[test]
-    fn lifetime_purse_signs_all_source_target_observe_authority_slots() {
+    fn lifetime_purse_signs_exact_single_target_source_slots() {
         let signer = DispatchSignerPin {
             role: "1".into(),
             index: "0".into(),
@@ -18967,29 +19060,48 @@ mod tests {
             "signing":{"decoded":true,"keyId":"7007","keyEpoch":"1",
                 "algorithm":"1"}})
         };
-        let slots = vec![slot("4"), slot("8"), slot("1")];
+        let slots = vec![slot("4"), slot("1")];
         let approved =
             lifetime_purse_signers(&slots, &signer, Path::new("/private/payer.key")).unwrap();
-        assert_eq!(approved.len(), 3);
+        assert_eq!(approved.len(), 2);
+        let reply = json!({"type":"minidregg-agent-lifetime-payer-signatures-v1", "planSha256":"plan",
+            "signatures":["a".repeat(128),"b".repeat(128)]});
+        validate_lifetime_payer_reply(&reply, "plan", &approved).unwrap();
+        for signatures in [json!(["a".repeat(128)]), json!(["a".repeat(128),"b".repeat(128),"c".repeat(128)]),
+            json!(["a".repeat(128),"G".repeat(128)])] {
+            let mut bad=reply.clone(); bad["signatures"]=signatures;
+            assert!(validate_lifetime_payer_reply(&bad,"plan",&approved).is_err());
+        }
+        assert!(validate_lifetime_payer_reply(&reply,"foreign-plan",&approved).is_err());
         assert_eq!(
             approved
                 .iter()
                 .map(|v| v["role"].as_str().unwrap())
                 .collect::<Vec<_>>(),
-            vec!["4", "8", "1"]
+            vec!["4", "1"]
         );
         let mut reordered = slots.clone();
-        reordered.swap(1, 2);
+        reordered.swap(0, 1);
         assert!(
             lifetime_purse_signers(&reordered, &signer, Path::new("/private/payer.key")).is_err()
         );
+        let extra_observation = vec![slot("4"), slot("8"), slot("1")];
+        assert!(lifetime_purse_signers(&extra_observation, &signer, Path::new("/private/payer.key")).is_err());
+        for field in ["keyEpoch", "algorithm", "decoded"] {
+            let mut changed = slots.clone();
+            changed[1]["signing"][field] = if field == "decoded" { json!(false) } else { json!("9") };
+            assert!(lifetime_purse_signers(&changed, &signer, Path::new("/private/payer.key")).is_err(), "{field}");
+        }
+        let mut changed = slots.clone();
+        changed[1]["index"] = json!("1");
+        assert!(lifetime_purse_signers(&changed, &signer, Path::new("/private/payer.key")).is_err());
         let mut wrong_key = slots.clone();
         wrong_key[1]["signing"]["keyId"] = json!("8008");
         assert!(
             lifetime_purse_signers(&wrong_key, &signer, Path::new("/private/payer.key")).is_err()
         );
         assert!(
-            lifetime_purse_signers(&slots[..2], &signer, Path::new("/private/payer.key")).is_err()
+            lifetime_purse_signers(&slots[..1], &signer, Path::new("/private/payer.key")).is_err()
         );
     }
 

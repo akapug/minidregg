@@ -1,4 +1,4 @@
-//! Stories (PLACE §2.8, item 8): a friend writes a transition table, seals it,
+//! Stories (docs/PLACE.md §2.8, §5 item 8): a friend writes a transition table, seals it,
 //! and from then on the table is the LAW on every player's cell.
 //!
 //! THE TABLE is a document in the story's room (`NAME/table`), one row per
@@ -841,6 +841,13 @@ fn story_seal(session: &Session, name: &str) -> Result<(), Done> {
     let target = field(&story, "table")?;
     let rows = table_rows(&read(session, &story, "table", target, "resource")?)?;
     let table = table_of(&rows).map_err(|e| usage(format!("the table refuses: {e}")))?;
+    // Sealing is idempotent: a table that already carries the sealed law is left alone, so a seal that
+    // died after installing (or a seed that re-runs `story seal` to finish a failed one) writes nothing.
+    let policy = read(session, &story, "table-law", target, "policy")?;
+    if carries_unconditional_local_law(&policy, &table_sealed_law()) {
+        println!("story {name} is already sealed; nothing was written");
+        return Ok(());
+    }
     install(session, &format!("{name}/table"), &table_sealed_law())?;
     let clauses = player_clauses(&table, "{S}");
     println!("story {name} sealed: the table cannot be edited or re-lawed by anyone. Each player's cell will carry:");
@@ -867,6 +874,31 @@ fn grant(session: &Session, room: &str, recipient: &str, verbs: &[&str]) -> Resu
         .ok_or_else(|| error("the published delegation left no recipient-reference.json"))
 }
 
+/// What `story invite` does for a player whose cell the author may already have.
+#[derive(Debug, PartialEq)]
+enum InvitePlan {
+    /// The cell stands at the start under the player's law and the invitation was saved: print it, write nothing.
+    Reprint,
+    /// A named refusal; nothing is written.
+    Refuse(String),
+    /// Birth what is missing, write what is not at the start, install what is not installed, grant.
+    Proceed,
+}
+
+fn invite_plan(cell_exists: bool, turn: i64, start_complete: bool, law_carried: bool, saved: bool) -> InvitePlan {
+    if cell_exists && turn != 0 {
+        return InvitePlan::Refuse(format!("the player's cell is already in play (turn {turn}); an invitation never rewinds it"));
+    }
+    if cell_exists && start_complete && law_carried {
+        return if saved {
+            InvitePlan::Reprint
+        } else {
+            InvitePlan::Proceed
+        };
+    }
+    InvitePlan::Proceed
+}
+
 fn story_invite(session: &Session, name: &str, subject: &str, as_gm: bool) -> Result<(), Done> {
     let story = load(session, name)?;
     if story["role"] != "author" {
@@ -884,11 +916,17 @@ fn story_invite(session: &Session, name: &str, subject: &str, as_gm: bool) -> Re
     } else {
         let cell = format!("{name}/p-{subject}");
         let author = field(&story, "author")?.to_owned();
+        let saved_path = story_dir(session).join("invites").join(format!("{name}-{subject}.json"));
         // THE field list: born, then written, in `player_fields` order.
         let fields = player_fields(&table);
         let declared = format!("0-{}", fields.len() - 1);
-        let born = crate::chat::create_cell_with_fields(session, &cell, "declared",
-            &staging_law(&author), Some(name), None, Some(&declared))?;
+        // A cell this author already births for SUBJECT is resumed, never born twice.
+        let existing = reference(session, &cell).ok();
+        let born = match &existing {
+            Some(b) => b.clone(),
+            None => crate::chat::create_cell_with_fields(session, &cell, "declared",
+                &staging_law(&author), Some(name), None, Some(&declared))?,
+        };
         let target = member(&born, "target").map_err(error)?.to_owned();
         // A declared cell is born holding some fields (field 1, today): each
         // start value is a create where the field is absent and a write from
@@ -905,13 +943,32 @@ fn story_invite(session: &Session, name: &str, subject: &str, as_gm: bool) -> Re
                 }
             })
             .collect();
-        propose_submit(
-            session,
-            "start",
-            &json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
-                "targets":[{"name":cell,"payload":{"type":"scalar","actions":actions}}]}),
-        )?;
-        install(session, &cell, &player_law(&table, subject))?;
+        let law_carried = existing.is_some() && {
+            let policy = read(session, &story, "cell-law", &target, "policy")?;
+            carries_unconditional_local_law(&policy, &player_law(&table, subject))
+        };
+        let saved = get_json(&saved_path);
+        match invite_plan(existing.is_some(), held.get(&1).copied().unwrap_or(0), actions.is_empty(), law_carried, saved.is_some()) {
+            InvitePlan::Refuse(why) => return Err(usage(format!("{cell}: {why}; nothing was written"))),
+            InvitePlan::Reprint => {
+                let invitation = saved.expect("Reprint needs the saved invitation");
+                println!("{subject} is already invited to {name} (nothing was written); give them this line again:");
+                println!("story join {name} {}", serde_json::to_string(&invitation).expect("JSON"));
+                return Ok(());
+            }
+            InvitePlan::Proceed => {}
+        }
+        if !actions.is_empty() {
+            propose_submit(
+                session,
+                "start",
+                &json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
+                    "targets":[{"name":cell,"payload":{"type":"scalar","actions":actions}}]}),
+            )?;
+        }
+        if !law_carried {
+            install(session, &cell, &player_law(&table, subject))?;
+        }
         invitation["role"] = json!("player");
         invitation["cell"] = json!(target);
         invitation["grant"] = grant(session, name, subject, &["observe", "mutate", "append"])?;
@@ -1226,6 +1283,21 @@ mod tests {
         let said = "refused: law-denied: any [ not (all [ field 0 before == 1, field 0 == 3 ]), field 2 before == 1 ] (Host refused prepare, reply byte 255)";
         assert_eq!(clause_named(&clauses, said).map(|(i, _)| i), Some(4));
         assert_eq!(render(&explained(&guard(vec![any(vec![])]))), "sealed");
+    }
+
+    #[test]
+    fn invite_is_idempotent_when_done_and_refuses_a_cell_in_play() {
+        assert_eq!(invite_plan(true, 0, true, true, true), InvitePlan::Reprint);
+        // done but the invitation line was never saved: grant again (a write), not a reprint
+        assert_eq!(invite_plan(true, 0, true, true, false), InvitePlan::Proceed);
+        // born but the start or the law is missing: resume
+        assert_eq!(invite_plan(true, 0, false, true, true), InvitePlan::Proceed);
+        assert_eq!(invite_plan(true, 0, true, false, true), InvitePlan::Proceed);
+        // nothing yet
+        assert_eq!(invite_plan(false, 0, false, false, false), InvitePlan::Proceed);
+        // a cell in play is never re-started, whatever else holds
+        assert!(matches!(invite_plan(true, 3, false, true, true), InvitePlan::Refuse(w) if w.contains("turn 3")));
+        assert!(matches!(invite_plan(true, 1, true, true, true), InvitePlan::Refuse(_)));
     }
 
     #[test]

@@ -1,9 +1,9 @@
 # Developing Mini
 
-Read [the system map](README.md) and [Objective Bend](OBJECTIVE-BEND.md) first.
-[AGENTS.md](../AGENTS.md) owns repository work/build rules. This guide follows the
-actual source boundary: checking an authored program, preparing a native method
-proposal, and qualifying a new runtime are different operations.
+Read [the documentation index](README.md) and [Objective Bend](OBJECTIVE-BEND.md) first.
+[AGENTS.md](../AGENTS.md) has the repository's working and build rules. Checking an authored
+program, preparing a native method proposal and qualifying a new runtime are three different
+operations, and this guide takes them in turn.
 
 ## Find the implementation you are changing
 
@@ -12,7 +12,7 @@ proposal, and qualifying a new runtime are different operations.
 | What does an Objective Bend program mean? | [OpenRecursion](../Theory/ObjectiveBendOpenRecursion.lean): `Term`, `Step`, `Evaluates` (the lazy reference semantics) |
 | How does it execute? | [DemandMachine](../Theory/ObjectiveBendDemandMachine.lean): `stepRaw`, `runBounded`; [DemandData](../Theory/ObjectiveBendDemandData.lean) and [DemandCapacity](../Theory/ObjectiveBendDemandCapacity.lean): deep result extraction under a capacity policy |
 | How is it typed? | [Types](../Theory/ObjectiveBendTypes.lean), [Typing](../Theory/ObjectiveBendTyping.lean): `check` returns an actual derivation |
-| What does a program identity commit? | [Evaluator](../Compiler/Evaluator.lean), [Program codec](../Compiler/NockProgramCodec.lean); the codec's historical name does not mean the record can identify only Nock |
+| What does a program identity commit? | [Evaluator](../Compiler/Evaluator.lean), [Program codec](../Compiler/NockProgramCodec.lean) (the name is historical; the record identifies more than Nock programs) |
 | How does a real method become checked effects? | [WorldKindMethods](../Kernel/WorldKindMethods.lean) → [ResourceTransaction](../Kernel/ResourceTransaction.lean) → [Run](../Kernel/Run.lean) → [WorldMethodTrace](../Kernel/WorldMethodTrace.lean) |
 | Where do native fields and signed views come from? | [WorldKindDescriptor](../Compiler/WorldKindDescriptor.lean), [WorldKindProjection](../Kernel/WorldKindProjection.lean), [Host JSON](../Host/Json.lean) |
 | Where is the client method/proposal path? | [world_kind.rs](../native/resource-client/src/world_kind.rs), [workspace.rs](../native/resource-client/src/workspace.rs), [shell.rs](../native/resource-client/src/shell.rs) |
@@ -27,12 +27,12 @@ preview commands; [front end](OBJECTIVE-BEND-FRONTEND.md)). `Host/ObjectiveBendP
 checks and runs a decoded core term; `Kernel/ObjectiveBendPreparedOutput.lean` and the adapters
 `Compiler/ObjectiveBendPlanAdapter.lean`, `Compiler/ObjectiveBendResultAdapter.lean`,
 `Compiler/ObjectiveBendCombinedResult.lean` and `Compiler/ObjectiveBendGenericResult.lean` turn a result into a
-Plan (`Output`, `Kernel/ObjectiveBendNativeAdmission.lean:191`). The
+Plan (`Output`, `Kernel/ObjectiveBendNativeAdmission.lean:247`). The
 [language guide](OBJECTIVE-BEND.md) states what each of these proves and where
 the trusted boundary sits. The `Theory/ObjectiveBend*` proofs
 are the separate `ObjectiveProofs` library, gated by `scripts/check-objective-proofs.sh
-proofs`, so a green default build alone re-checks none of them. A native registry/profile must actually consume a module; an
-importable theorem alone does not install it.
+proofs`; a green default build re-checks none of them. A theorem that can be imported is not
+installed until a native registry or profile consumes its module.
 
 ## Run an Objective Bend example
 
@@ -70,22 +70,21 @@ emits a world effect or verifies a private backend.
 
 ## Use existing native methods
 
-These commands belong to the current native world object interface. They do not
-publish arbitrary Objective Bend source. Start with an already enrolled workspace
-and a matched Host/configuration. Enrollment and reference import are described
-in the [client README](../native/resource-client/README.md); a local reference
-never creates a grant.
+These commands use the native world-object interface; they do not publish arbitrary
+Objective Bend source. You need an enrolled workspace and a matching Host and
+configuration. Enrolment and reference import are in the
+[client README](../native/resource-client/README.md); importing a reference never creates a
+grant.
 
-For example, the real shell help can be inspected with:
+To see the shell's help for one verb:
 
 ```sh
 mini shell --socket "$SOCKET" --host "$HOST" --config "$CONFIG" \
   --workspace "$WORKSPACE" --home "$SESSION_HOME" --line 'help instance'
 ```
 
-The environment variables stand for the selected deployment's absolute paths;
-this guide does not supply credentials or invent a running world. Inside that
-shell, use the actual names in your authorized workspace:
+The variables are your deployment's absolute paths. Inside the shell, with names from your
+own workspace:
 
 ```text
 kind show KIND
@@ -107,9 +106,9 @@ For explicit compute funding the supported form is:
 instance call PROPOSAL INSTANCE METHOD --fund ACCOUNT --max-compute-credits N
 ```
 
-Both funding options are required together. The compute ceiling is distinct from
-command-byte cost. Current account/capability/law and the actual quote still apply;
-an unfunded request does not consent to arbitrary payment. The
+The two funding options go together. The compute ceiling is separate from the command's
+byte cost, and the account, capability, law and quote still apply; an unfunded request
+never consents to an arbitrary payment. The
 [world programmer guide](../native/resource-client/WORLD-PROGRAMMER.md) gives
 native definition and program authoring details, including a real poll method.
 
@@ -139,7 +138,7 @@ execution route. Use the arithmetic and privacy requirements in
 
 ## Build and verify without disturbing another run
 
-Read the build script's current options rather than copying a stale command list:
+The build script's help is the current list of options:
 
 ```sh
 scripts/build-native-host.sh --help
@@ -158,9 +157,9 @@ scripts/build-native-host.sh --umbrella \
   --output "$FRESH_BUILD_DIR" --binary "$FRESH_BUILD_DIR/minidregg-host"
 ```
 
-Use a narrow source check or the script's checked prefix/suffix reuse when that
-answers the actual question. Do not rebuild the entire system for documentation
-or a disconnected leaf. See [NATIVE-HOST.md](NATIVE-HOST.md) for the build contract.
+When a narrow source check or the script's prefix and suffix reuse answers the question, use
+that; a documentation change or a disconnected leaf never needs a full rebuild.
+[NATIVE-HOST.md](NATIVE-HOST.md) has the build contract.
 
 The native acceptance entrypoint is:
 
@@ -168,25 +167,20 @@ The native acceptance entrypoint is:
 native/resource-client/journey.sh MANIFEST.json NEW_RUN_ROOT
 ```
 
-It creates a fresh private Store; it is not a read-only probe of an existing
-service. The manifest names absolute `host`, `mini`, `store` and `verifier`
-executables with optional exact hashes. The run root must be fresh. Read the
-script header for its current steps and inputs: it has no normal `--help` mode.
-Read `journey-result.json` and the first non-passing frontier, not just a shell
-pipeline's exit code.
+It starts a fresh private Store, so the run root must be new. The manifest names absolute
+`host`, `mini`, `store` and `verifier` executables, optionally with their hashes. The script
+has no `--help`; its header lists the steps and inputs ([JOURNEY.md](JOURNEY.md) explains
+them). The verdict is `journey-result.json` and its first step that did not pass, not the
+exit status of a pipeline.
 
-The world-method hooks are not registered as `JWORLD-METHOD` in the main journey
-step list. Follow the explicit fixture instructions in the world programmer
-guide; do not invent `JOURNEY_STEPS=JWORLD-METHOD`. Dedicated fixtures have profile,
-activation and funding prerequisites. Existing historical journeys and dated
-setup runbooks remain evidence for their exact candidate, not qualification of
-whatever executable happens to be on your PATH.
+The world-method hooks are not journey steps; the
+[world programmer guide](../native/resource-client/WORLD-PROGRAMMER.md) has their fixtures,
+which need a profile, activation and funding. A dated journey or runbook is evidence for the
+candidate it ran on, not for whatever executable is on your PATH.
 
-## Record one result, in the right place
+## Recording a result
 
-A useful evidence entry names source and artifact identity, the exact command,
-inputs, outcome, actual receiver and the claim it establishes. Preserve the
-failure when it reveals a real boundary. Keep operational keys, local private
-URLs and recipient-specific coordination out of the public repository.
-Update the owning contract and its one example when behavior changes. New status
-prose in several manuals is harder to maintain than one dated evidence record.
+An evidence entry names the source and artifact identity, the exact command, the inputs, the
+outcome, the receiver and the claim it supports. Keep a failure when it shows a real boundary.
+Keep keys, private URLs and messages to particular people out of the repository. When
+behaviour changes, update the contract document that owns it and its example.

@@ -36,7 +36,7 @@ pub(crate) fn observe(
         .ok_or_else(|| credentials::refused("owner-status-needs-socket"))?;
     let pins = || -> Result<Value> {
         Ok(json!({
-            "miniSha256":sha256_file(&config.mini)?, "hostSha256":sha256_file(&config.host)?,
+            "miniSha256":sha256_pinned_file(&config.mini)?, "hostSha256":sha256_pinned_file(&config.host)?,
             "configSha256":sha256_file(&config.host_config)?, "socket":socket,
         }))
     };

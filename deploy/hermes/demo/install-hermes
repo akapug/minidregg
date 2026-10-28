@@ -10,6 +10,13 @@
 #
 #   preflight  the Store pins Hermes's purse tariff; the provider table has the
 #              pool row for the model; broker client; operator socket; launcher
+#   consent    the resident's delegated full consent: a socket-activated `mini
+#              serve-controller-consent` runs as the operator (it replays the Store,
+#              whose checkpoint key the resident must never read) and answers only the
+#              resident uid; its listener is the resident's RUN/consent.sock. The
+#              selection the resident's processes need is V/consent.env (root 0644),
+#              which every as-resident command here exports and the controller and
+#              resident units take as EnvironmentFile=
 #   subjects   enroll hermes (room key and tool worker), hhost (parent owner),
 #              hprov (provider worker) and the founder; provision + init the
 #              founder and Hermes
@@ -22,6 +29,19 @@
 #   controller controller.json names the summoned account; register; start
 #              mini-grain-controller@TASK
 #   dispatch   the sealed hand-off into Hermes's registered inbox
+#   dismiss    (repeatable, after resident) the founder's `dismiss ROOM`, its sealed
+#              dismissal dispatched into Hermes's inbox, and the wait (up to 10 min) for
+#              the running resident to return the budget's remainder to the founder
+#   resummon   (repeatable, after dismiss) summon, controller, dispatch and resident
+#              again for the founder's new assignment: its budget account has a new
+#              name, which the controller config must carry, and a fresh resident state
+#   refill     (repeatable, any time after create) the sponsor's Book account burns
+#              AMOUNT (50000) credit into a purse: PURSE provider (default: what each
+#              model call reserves and settles from; it starts at 50000 and a call on
+#              the pool route reserves up to perOp plus the token caps' metered price),
+#              parent or tool (PAY P6, `mini pay refill`). A refused reserve is the
+#              room's `no-credit` reply until then. An uncertain submit is resolved
+#              by the printed lookup, never by a second refill.
 #   resident   resident.json names the delivered assignment inbox; with both
 #              units stopped, register the resident too; start
 #              mini-grain-controller@TASK and mini-grain-resident@TASK
@@ -43,9 +63,23 @@
 #                    for each paying subject) and timer; MEMBER_HOMES: the hosted homes
 #                    directory (DIR/SUBJECT) that receives each window's join reference
 #
+#   FOUNDER_MEMBER   a hosted member (e.g. house) founds ROOM instead of the operator's own
+#                    founder subject: Hermes is installed for that member's room (created
+#                    by `room` when it does not exist yet), the member's own shell does the
+#                    room, summon and tariff lines (as mini-s-MEMBER on MEMBER_SOCKET), and
+#                    the registry lands in the member's HOME/hermes/registry.json.
+#                    MEMBER_ROOT: the hosted homes directory (MEMBER_ROOT/MEMBER, its
+#                    workspace/ beneath); TENANT_GROUP (mini-sessions); MEMBER_SOCKET
+#                    (NODE/public/mini.sock). Not with TIER.
+#
+#   The house's shared room (the lobby every member joins at the door; the seed's posts
+#   and the tour's Hermes step), installed before deploy/demo-seed/seed.sh runs:
+#     INSTANCE=lobby BASE=9872000 ROOM=lobby BUDGET=100 FOUNDER_MEMBER=house MEMBER_ROOT=/var/lib/mini/sessions \
+#       HERMES_ROOT=OUT install-hermes preflight route consent subjects room runtime create handoff summon controller dispatch resident
+#
 #   The subscriber tier (deploy/hermes/README.md "The subscriber tier"):
 #     INSTANCE=glm BASE=9871000 MODEL=glm-5.3-flash ROOM=subscribers TIER=1 POOL_ROW=zai-glm \
-#       HERMES_ROOT=OUT install-hermes preflight route subjects room concierge runtime create handoff summon controller dispatch resident
+#       HERMES_ROOT=OUT install-hermes preflight route consent subjects room concierge runtime create handoff summon controller dispatch resident
 set -euo pipefail
 # Custody files are owner-private whatever the calling shell's umask; explicit
 # modes come from install -m.
@@ -63,6 +97,12 @@ case $INSTANCE in glm) MODEL=${MODEL:-glm-5.3-flash} ;; *) MODEL=${MODEL:-meta-l
 case $INSTANCE in *[!a-z0-9]*|'') echo "install-hermes: INSTANCE must be lowercase letters and digits" >&2; exit 64 ;; esac
 case $BASE in *[!0-9]*|'') echo "install-hermes: BASE must be a decimal" >&2; exit 64 ;; esac
 TIER=${TIER:-} WEEK=${WEEK:-4000} PERIOD=${PERIOD:-43200}
+FOUNDER_MEMBER=${FOUNDER_MEMBER:-} TENANT_GROUP=${TENANT_GROUP:-mini-sessions}
+case $FOUNDER_MEMBER in *[!a-z0-9-]*) echo "install-hermes: FOUNDER_MEMBER must be a hosted member name" >&2; exit 64 ;; esac
+if [ -n "$FOUNDER_MEMBER" ]; then
+  [ -z "$TIER" ] || { echo "install-hermes: FOUNDER_MEMBER is not for a TIER room" >&2; exit 64; }
+  [ -n "${MEMBER_ROOT:-}" ] || { echo "install-hermes: FOUNDER_MEMBER needs MEMBER_ROOT (the hosted homes directory)" >&2; exit 64; }
+fi
 PARENT_T=$((BASE + 1)) TOOL_T=$((BASE + 2)) PURSE_T=$((BASE + 3))
 GATEWAY_PORT=$((18761 + (BASE - 9870000) / 1000))
 RESIDENT=${RESIDENT:-mini-h-$INSTANCE}
@@ -78,6 +118,8 @@ RUN=$V/run                        # RESIDENT 0700: the resident's operator route
 RSOCKET=$RUN/mini.sock
 SPEC=$V/grain-spec.json           # root 0644: read by both accounts (paths only, no secrets)
 ROUTE_UNIT=mini-resident-operator-$INSTANCE
+CONSENT_UNIT=mini-resident-consent-$INSTANCE
+CONSENT_ENV=$V/consent.env
 MINI=$CAND/bin/mini HOST=$CAND/bin/minidregg-host GRAIN=$CAND/bin/grain-runtime
 BRIDGE=$CAND/bin/grain-provider-bridge LAUNCH_GATE=$CAND/bin/launch-gate
 CONFIG=$NODE/deployment/pinned-config.json
@@ -97,13 +139,23 @@ ANCHORS=$V/anchors
 as_op() { runuser -u "$OPERATOR" -- env MINI_CONSENT_ANCHOR_DIR="$NODE/consent-anchors" "$@"; }
 # The resident pins its route's listener creator (systemd, uid 0); every
 # child `mini` of its commands inherits the pin.
-as_res() { runuser -u "$RESIDENT" -- env MINI_OPERATOR_PEER_UID=0 MINI_CONSENT_ANCHOR_DIR="$ANCHORS" "$@"; }
+# Once step consent ran, every resident command selects its delegated consent.
+as_res() {
+  local sel=()
+  [ -f "$CONSENT_ENV" ] && mapfile -t sel <"$CONSENT_ENV"
+  runuser -u "$RESIDENT" -- env MINI_OPERATOR_PEER_UID=0 MINI_CONSENT_ANCHOR_DIR="$ANCHORS" "${sel[@]}" "$@"
+}
 resident_subject() { case $1 in hermes|hhost|hprov) return 0 ;; *) return 1 ;; esac; }
-as_owner() { local who=$1; shift; if resident_subject "$who"; then as_res "$@"; else as_op "$@"; fi; }
-home_of() { if resident_subject "$1"; then echo "$H/$1"; else echo "$HO/$1"; fi; }
-ws_of() { if [ "$1" = sponsor ]; then echo "$SPONSOR_WS"; elif resident_subject "$1"; then echo "$WS/$1"; else echo "$WO/$1"; fi; }
-socket_of() { if resident_subject "$1"; then echo "$RSOCKET"; else echo "$SOCKET"; fi; }
-owner_of() { if resident_subject "$1"; then echo "$RESIDENT"; else echo "$OPERATOR"; fi; }
+# A hosted founder (FOUNDER_MEMBER) acts as its own tenant account, as its shell does.
+hosted_founder() { [ "$1" = founder ] && [ -n "$FOUNDER_MEMBER" ]; }
+as_member() { setpriv --reuid="mini-s-$FOUNDER_MEMBER" --regid="$TENANT_GROUP" --init-groups --reset-env -- \
+  env -i PATH=/usr/bin:/bin LANG=C.UTF-8 "$@"; }
+as_owner() { local who=$1; shift; if hosted_founder "$who"; then as_member "$@"; elif resident_subject "$who"; then as_res "$@"; else as_op "$@"; fi; }
+home_of() { if hosted_founder "$1"; then echo "$MEMBER_ROOT/$FOUNDER_MEMBER"; elif resident_subject "$1"; then echo "$H/$1"; else echo "$HO/$1"; fi; }
+ws_of() { if [ "$1" = sponsor ]; then echo "$SPONSOR_WS"; elif hosted_founder "$1"; then echo "$MEMBER_ROOT/$FOUNDER_MEMBER/workspace"; elif resident_subject "$1"; then echo "$WS/$1"; else echo "$WO/$1"; fi; }
+socket_of() { if hosted_founder "$1"; then echo "${MEMBER_SOCKET:-$NODE/public/mini.sock}"; elif resident_subject "$1"; then echo "$RSOCKET"; else echo "$SOCKET"; fi; }
+owner_of() { if hosted_founder "$1"; then echo "mini-s-$FOUNDER_MEMBER"; elif resident_subject "$1"; then echo "$RESIDENT"; else echo "$OPERATOR"; fi; }
+group_of() { if hosted_founder "$1"; then echo "$TENANT_GROUP"; else owner_of "$1"; fi; }
 sh_line() { # WHO LINE: one shell line in WHO's workspace and home, as WHO's account
   local who=$1; shift
   as_owner "$who" "$MINI" shell --socket "$(socket_of "$who")" --host "$HOST" --config "$CONFIG" \
@@ -211,6 +263,53 @@ EOF
   mark route
 }
 
+step_consent() {
+  done_step route || die "consent follows route"
+  local ruid consent=$CAND/bin/minidregg-client-consent csock=$RUN/consent.sock image settings
+  ruid=$(id -u "$RESIDENT")
+  [ -x "$consent" ] || die "missing $consent"
+  install -d -o "$OPERATOR" -g "$OPERATOR" -m 0700 "$OPV/consent-anchors"
+  image=$(sha256sum "$consent" | cut -d' ' -f1); settings=$(sha256sum "$CONFIG" | cut -d' ' -f1)
+  cat >"/etc/systemd/system/$CONSENT_UNIT.socket" <<EOF
+[Unit]
+Description=Mini delegated consent for the $INSTANCE resident ($RESIDENT)
+[Socket]
+ListenStream=$csock
+SocketUser=$RESIDENT
+SocketGroup=$RESIDENT
+SocketMode=0600
+DirectoryMode=0700
+RemoveOnStop=yes
+Accept=no
+Service=$CONSENT_UNIT.service
+[Install]
+WantedBy=sockets.target
+EOF
+  cat >"/etc/systemd/system/$CONSENT_UNIT.service" <<EOF
+[Unit]
+Description=Mini full consent for the $INSTANCE resident ($RESIDENT): answers only uid $ruid
+Requires=$CONSENT_UNIT.socket
+After=$CONSENT_UNIT.socket
+[Service]
+User=$OPERATOR
+Group=$OPERATOR
+ExecStart=$MINI serve-controller-consent --socket $csock --consent $consent --config $CONFIG --consent-sha256 $image --config-sha256 $settings --controller-uid $ruid --anchors $OPV/consent-anchors
+Environment=HOME=$OPV
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+LockPersonality=yes
+EOF
+  systemctl daemon-reload
+  systemctl enable --now "$CONSENT_UNIT.socket"
+  # The selection (deploy/shell/README.md: the hosted member's variables).
+  printf '%s\n' "MINI_CONSENT_SOCKET=$csock" "MINI_CONSENT_PEER_UID=0" "MINI_CONSENT_SHA256=$image" \
+    "MINI_CONSENT_CONFIG_SHA256=$settings" "MINI_LOCAL_HOST=$HOST" "MINI_CONSENT_HOST=$consent" \
+    "MINI_CONSENT_CONFIG=$CONFIG" >"$CONSENT_ENV.new"
+  install -o root -g root -m 0644 "$CONSENT_ENV.new" "$CONSENT_ENV"; rm -f "$CONSENT_ENV.new"
+  mark consent
+}
+
 enroll() { # NAME: keygen in its home (its owner's account); the sponsor plans, seals and submits its enrollment
   local f=$1 home; home=$(home_of "$1")
   install -d -o "$(owner_of "$f")" -g "$(owner_of "$f")" -m 0700 "$home"
@@ -235,8 +334,14 @@ provision() { # NAME FUNDING: an account owned by NAME, its birth context, its w
 step_subjects() {
   local names="hermes hhost hprov founder"
   [ -n "$TIER" ] && names="$names con"
+  if [ -n "$FOUNDER_MEMBER" ]; then
+    # The member is already enrolled, provisioned and funded (the door or the frame).
+    names=${names% founder}
+    sh_line founder whoami | as_op tee "$RECORD/subject-founder.json" >/dev/null
+    [ -n "$(subject founder)" ] && [ "$(subject founder)" != null ] || die "$FOUNDER_MEMBER's whoami names no subject"
+  fi
   for f in $names; do [ -s "$RECORD/subject-$f.json" ] || enroll "$f"; done
-  provision founder "$FOUNDER_FUNDING"
+  [ -n "$FOUNDER_MEMBER" ] || provision founder "$FOUNDER_FUNDING"
   provision hermes 0
   # The concierge's runner pays its own turn fees (J17 funds it 10).
   [ -n "$TIER" ] && provision con "${CONCIERGE_FUNDING:-100}"
@@ -251,6 +356,8 @@ step_room() {
     sh_line founder "room new $ROOM --template workroom --concierge $(subject con) --period $PERIOD" >/dev/null
     sh_line founder "tariff $ROOM set week $WEEK" >/dev/null
     sh_line founder "tariff $ROOM set open 1" >/dev/null
+  elif [ -n "$FOUNDER_MEMBER" ] && grep -qw -- "$ROOM" <<<"$(sh_line founder "chat rooms")"; then
+    echo "install-hermes: $FOUNDER_MEMBER's room $ROOM exists; Hermes is installed for it"
   else
     sh_line founder "chat new $ROOM" >/dev/null
   fi
@@ -327,6 +434,7 @@ step_runtime() {
 }
 
 step_create() {
+  done_step consent || die "create needs the resident's delegated consent (step consent): its own consent cannot read the Store"
   local genesis=$NODE/genesis.json reserve
   # The pool hold covers the fee and the metered charge at the token caps.
   reserve=$(jq -r --argjson p "$PURSE_T" '.providerServices[] | select(.providerResourceId == $p) | .tariff.routes.pool
@@ -367,19 +475,20 @@ step_create() {
   as_op "$GRAIN" create "$SPEC" --birth-socket "$SOCKET" | as_op tee "$RECORD/grain-birth.json"
   chown -R "$RESIDENT:$RESIDENT" "$G"
   as_res "$GRAIN" create "$SPEC" | as_op tee "$RECORD/grain-created.json"
-  install -d -o "$RESIDENT" -g "$RESIDENT" -m 0700 "$S/room-home" "$S/resident"
+  install -d -o "$RESIDENT" -g "$RESIDENT" -m 0700 "$S/room-home"
   mark create
 }
 
 step_handoff() {
-  local lab; lab=$(jq -r .target "$WO/founder/refs/$ROOM.json")
+  local lab reg; lab=$(jq -r .target "$(ws_of founder)/refs/$ROOM.json")
   install -d -o "$RESIDENT" -g "$RESIDENT" -m 0700 "$V/registrations" "$V/inbox"
-  install -d -o "$OPERATOR" -g "$OPERATOR" -m 0700 "$HO/founder/hermes"
+  reg=$(home_of founder)/hermes
+  install -d -o "$(owner_of founder)" -g "$(group_of founder)" -m 0700 "$reg"
   as_res "$MINI" hermes-handoff --action registration --dir "$S/resource-workspace" --task "$PARENT_T" --room-cell "$lab" \
     --inbox "$V/inbox" --socket "$RSOCKET" | as_res tee "$V/registrations/$PARENT_T.json" >/dev/null
   # The registry the founder's summon reads: made by the resident, handed to the founder by root.
   as_res "$MINI" hermes-handoff --action registry --registrations "$V/registrations" --socket "$RSOCKET" \
-    | as_op tee "$HO/founder/hermes/registry.json" >/dev/null
+    | as_owner founder tee "$reg/registry.json" >/dev/null
   mark handoff
 }
 
@@ -418,7 +527,11 @@ step_resident() {
   current=$(find "$V/inbox" -name current.json | head -1)
   inbox=$(jq -r '.inbox // empty' "$current" 2>/dev/null)
   [ -n "$inbox" ] && [ -d "$inbox" ] || die "no delivered assignment inbox under $V/inbox (run dispatch)"
-  jq -n --arg c "$G/controller.json" --arg i "$inbox" --arg s "$S/resident" \
+  # One resident state per assignment: a later summon (after a dismissal) starts
+  # its own count and its own return, never the dismissed assignment's.
+  local assignment; assignment=$(jq -r '.assignment // empty' "$current")
+  case $assignment in ''|*[!0-9]*) die "the assignment pointer $current names no assignment" ;; esac
+  jq -n --arg c "$G/controller.json" --arg i "$inbox" --arg s "$S/resident-a$assignment" \
     '{type:"mini-hermes-room-resident-v1",controller:$c,inbox:$i,state:$s,maxPrompts:null,intervalSeconds:60}' \
     | as_res tee "$G/resident.json" >/dev/null
   as_res chmod 600 "$G/resident.json"
@@ -429,10 +542,63 @@ step_resident() {
   mark resident
 }
 
-[ $# -gt 0 ] || { sed -n '2,50p' "$0"; exit 64; }
+resident_state() { jq -r '.state // empty' "$G/resident.json" 2>/dev/null; }
+
+step_dismiss() {
+  done_step resident || die "dismiss follows a running resident (step resident)"
+  local state staged=$V/dismissal-staged
+  state=$(resident_state)
+  [ -n "$state" ] || die "no resident.json under $G"
+  sh_line founder "dismiss $ROOM" | as_op tee "$RECORD/dismiss-$(date -u +%Y%m%dT%H%M%SZ).out"
+  [ -s "$(cat "$RECORD/outbox")/dismissal.json" ] || die "the dismissal left no sealed bundle in $(cat "$RECORD/outbox")"
+  rm -rf "$staged"; install -d -o "$RESIDENT" -g "$RESIDENT" -m 0700 "$staged"
+  install -o "$RESIDENT" -g "$RESIDENT" -m 0600 "$(cat "$RECORD/outbox")/dismissal.json" "$staged/dismissal.json"
+  as_res "$MINI" hermes-handoff --action dispatch --registration "$V/registrations/$PARENT_T.json" \
+    --bundle "$staged/dismissal.json" --socket "$RSOCKET"
+  for _ in $(seq 1 120); do
+    [ "$(jq -r '.returned // empty | tostring' "$state/resident.json" 2>/dev/null)" != "" ] && break
+    sleep 5
+  done
+  [ -n "$(jq -r '.returned // empty | tostring' "$state/resident.json" 2>/dev/null)" ] \
+    || die "the resident has not returned the budget yet (journalctl -u mini-grain-resident@$PARENT_T); rerun dismiss's wait with: install-hermes resummon (it refuses until the return is journaled)"
+  echo "install-hermes: $ROOM dismissed; returned $(jq -c .returned "$state/resident.json")"
+}
+
+step_resummon() {
+  done_step resident || die "resummon follows a finished install"
+  local state; state=$(resident_state)
+  [ -n "$(jq -r '.returned // empty | tostring' "$state/resident.json" 2>/dev/null)" ] \
+    || die "the current assignment is not dismissed and returned ($state/resident.json): run dismiss first"
+  systemctl stop "mini-grain-resident@$PARENT_T.service" "mini-grain-controller@$PARENT_T.service"
+  as_op rm -f "$RECORD/summon.done" "$RECORD/controller.done" "$RECORD/dispatch.done" "$RECORD/resident.done"
+  step_summon; step_controller; step_dispatch; step_resident
+}
+
+step_refill() {
+  done_step create || die "refill needs the purses: run create first"
+  local amount=${AMOUNT:-50000} task attempt
+  case $amount in *[!0-9]*|''|0) die "AMOUNT must be a positive decimal" ;; esac
+  case ${PURSE:-provider} in
+    provider) task=$PURSE_T ;; parent) task=$PARENT_T ;; tool) task=$TOOL_T ;;
+    *) die "PURSE is provider, parent or tool" ;;
+  esac
+  attempt=$RECORD/refill-${PURSE:-provider}-$(date -u +%Y%m%dT%H%M%SZ)
+  # The payer is the sponsor's account (it signs with its own key; the
+  # credit asset is the PAY tariff's, so the Store's tariff must be set).
+  as_op "$MINI" pay refill --mode submit --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
+    --key "$NODE/keys/sponsor.key" --dir "$attempt" \
+    --subject "$(jq -r '.sponsor.subject' "$PARAMS")" --capability "$(jq -r '.sponsor.spendCapabilityId' "$PARAMS")" \
+    --account "$(jq -r '.sponsor.accountId' "$PARAMS")" --task "$task" --amount "$amount" \
+    | as_op tee "$attempt.out" \
+    || die "refill of $task by $amount not confirmed; resolve it with: runuser -u $OPERATOR -- $MINI pay refill --mode lookup --host $HOST --config $CONFIG --socket $SOCKET --dir $attempt"
+  echo "install-hermes: purse $task refilled by $amount (record $attempt)"
+}
+
+[ $# -gt 0 ] || { sed -n '2,70p' "$0"; exit 64; }
 for step in "$@"; do
   case $step in
-    preflight|route|subjects|room|concierge|runtime|create|handoff|summon|controller|dispatch|resident) ;;
+    preflight|route|consent|subjects|room|concierge|runtime|create|handoff|summon|controller|dispatch|resident) ;;
+    refill|dismiss|resummon) done_step preflight || die "run preflight first"; POOL_ROW=$(cat "$RECORD/pool-row"); "step_$step"; continue ;;
     *) die "unknown step $step" ;;
   esac
   [ "$step" = preflight ] || done_step preflight || die "run preflight first"

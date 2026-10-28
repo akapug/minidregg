@@ -238,6 +238,15 @@ def prepare (deployment : Deployment) (semantics : Digest) (durable : Durable) (
 
 variable {deployment : Deployment} {semantics : Digest} {durable : Durable} {command : Command}
 
+/-- The prepared refill's guarantee: the sponsor is the controller the loaded platform cell
+names, the command names the loaded authority's root, and its marker is unspent there. -/
+theorem Prepared.sound (prepared : Prepared deployment semantics durable command) :
+    controllerOf prepared.platform.cell.logical = some command.sponsor ∧
+      command.expectedAuthorityRoot = prepared.authority.snapshot.cell.root ∧
+      prepared.authority.snapshot.spent
+        (MeterRefillReceiver.marker prepared.authority.snapshot.domain semantics command) = false :=
+  ⟨prepared.controller, prepared.authorityCurrent, prepared.fresh⟩
+
 def Prepared.request (prepared : Prepared deployment semantics durable command) (ambient : Ambient) :
     Request .program :=
   MeterRefillReceiver.request deployment prepared.authority.snapshot semantics ambient command
@@ -314,6 +323,14 @@ def admitDecodedNative (deployment : Deployment) (semantics : Digest) (ambient :
       | .ok accepted => return .ok ⟨prepared, accepted⟩
 
 variable {ambient : Ambient} {ingress : DecodedIngress}
+
+/-- The admitted refill's guarantee: the checked signature's envelope is the ingress's sponsor
+envelope, and the control capability evidence names a stored capability. -/
+theorem Accepted.sound {prepared : Prepared deployment semantics durable command}
+    (accepted : Accepted prepared ambient ingress) :
+    accepted.receipt.envelopeBytes = ingress.ingress.sponsorEnvelope ∧
+      NamesStored prepared.authority.snapshot command.control accepted.evidence.1 :=
+  ⟨accepted.envelopeExact, accepted.evidence.2⟩
 
 /-- The refill's intent (`PlatformCell.Refill.intent` on the protocol): no write, the
 authority cell as its guard, one tagged nullifier, no charge, the amount as credit. -/

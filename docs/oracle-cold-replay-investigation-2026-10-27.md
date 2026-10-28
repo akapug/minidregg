@@ -26,7 +26,8 @@ and a 6 GiB `swarm-build` scope.
 
 This is not an attributable speedup over 425 seconds: binary, hardware, and
 command differ. The candidate already includes native hash kernels absent
-from the frozen build. Its audit is the baseline for the isolated change below.
+from the frozen build. This audit remains a historical measurement of that
+candidate and Store epoch.
 
 A one-second stack sampler collected 215 samples, starting partway through
 the audit. `Charge.fundedCheck` appeared in 138 samples, the `Engine.install`
@@ -68,13 +69,42 @@ proof depends only on standard `propext`, `Classical.choice`, and `Quot.sound`.
 The generated C calls `Charge.materialize` inside `Engine.install` and captures
 its returned Values in the subsequent `Values.toCharge` closure (lines
 1074–1076 of the retained `proof/Kernel/DurableEngine.c`). This verifies that
-the intended eager boundary survives compilation. The candidate Host audit
-is pending; no speedup from this change is claimed yet.
+the intended eager boundary survives compilation. The change landed in main
+as `31213c9e`. No measured speedup from this change is claimed.
 
-The source is isolated on `codex/oracle-cold-replay`. World compaction is
-already being developed on the hot-path lanes and is outside this change.
-After the focused proof check, the supported native build must recompile the
-import-order suffix beginning at `Kernel.DurableEngine`; a manual replacement
-of generated C would miss downstream specialization. The next comparison is
-one audit against the same private fixture and exact configuration, requiring
-identical receipt bytes and unchanged input hashes.
+## Current epoch and qualification decision
+
+The retained 58-record fixture cannot serve as an exact comparison against
+current main. A read-only SQLite inspection of its `durable_seed` found seed
+wire version 3 and this epoch label:
+
+```text
+state-key/tagged-v4;schema-refs/111519553825413319940612377076634953386699810081595807359599079805241551192594;DREGG/NATIVE-HOST/LOG-TAG/v4;history/mmr-v1;index/trie-v1;checkpoint/v4;commands/v2
+```
+
+At main `fbd5e21b0` (also in the building candidate `a75d89d69`),
+`Compiler/PersistedCodecTags.lean` sets `seedWireVersion` to 4 and
+`Compiler/DurableCheckpointCodec.lean` sets the history accumulator's checkpoint
+format to `checkpoint/v5`. Its theorem `seedEpoch_v3_refusedFor` states that
+every version-3 seed frame is refused, for any host epoch, label, and remaining
+bytes. `SeedEpoch.refusalFor` names the retired frame and requires re-genesis.
+This is a deliberate format boundary, not a replay performance failure.
+
+The ordinary open can use the latest checkpoint, but
+`Kernel/NativeHost.lean`'s `auditWithTiming` still loads the Store and calls
+`NativeHostReplay.verifyLoaded`. That unchanged verifier starts from genesis
+and re-admits the complete accepted history. The checkpoint optimization does
+not make the retired fixture an admissible current Store.
+
+Earlier candidate sources `f1ce1626` and `a0c0d4a0` retain the checkpoint/v4
+label, but change the persisted genesis-source tag from v6 to v7.
+`persistedSchemaRefs` hashes the complete persisted-codec corpus, so the old
+checkpoint label alone is insufficient evidence of compatibility. No paired
+audit was run against these candidates.
+
+The investigation stops at this format boundary. The historical Store, anchor,
+receipts, and 279.215-second measurement remain preserved. No special historical
+Host build or additional audit is scheduled. The fresh current-epoch grant
+journey will report startup, reopen, and replay as absolute timings; those
+numbers must not be presented as a speedup over this old fixture. A controlled
+comparison can be designed later if it answers a concrete question.

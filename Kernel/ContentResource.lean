@@ -2,7 +2,7 @@
 # Source-owned mutations of the canonical hyperdocument content cell
 
 A content cell is one `Store` over `Hyperdocument.layout` at the declared
-`HyperdocumentCell.contentWire` (DATAMODEL B1); the cell's identifier is the
+`HyperdocumentCell.contentWire` (docs/DATAMODEL.md §5 B1); the cell's identifier is the
 document's identity (`documentOf`).  The transaction receiver supplies
 authenticated author and operation identity.  The command contains edits,
 never proposed stores or authority decisions: each action lowers to guarded
@@ -442,6 +442,19 @@ def actionStream : StreamCodec Action :=
 structure Command where
   actions : List Action
   deriving DecidableEq
+
+/-- An append-only action: a new atom, and in a document its leaf at the end of the root's
+children (`appendLeaf`).  Its atom id is the author's fresh draw, never read from the cell. -/
+def Action.appendOnly : Action → Bool
+  | .createAtom .. => true
+  | _ => false
+
+/-- **A commuting command**: nonempty and append-only.  Two of them on one document are both
+admitted in either order, each computed at the cell it meets, so the controller does not pin
+its plan to the observed whole root (`computeTarget`, `Kernel.ContentCommutingAppend`).
+Every other command still names, and is refused away from, the root it was planned over. -/
+def Command.commutes (command : Command) : Bool :=
+  !command.actions.isEmpty && command.actions.all Action.appendOnly
 
 def commandStream : StreamCodec Command :=
   StreamCodec.xmap (StreamCodec.list actionStream) Command.actions

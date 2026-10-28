@@ -11,6 +11,7 @@
 #   OUT_DIR/documents-binding.json mini-protected-same-store-v1 (owner, member, reader, reviewer)
 #   OUT_DIR/resident-binding.json  mini-same-world-resident-binding-v1
 #   OUT_DIR/composed-args.txt      the exact `composed-scenario.py spec ...` arguments to add
+#   OUT_DIR/broker-setup/recovery.json  the teardown locator: run `world-down.sh OUT_DIR` before the world goes down
 #
 # The SPK platform on the scenario's own Store: ROOT SETUP (deploy/spk-host/install-user-world under
 # sudo -n), the operator broker unit, `same-store-profile.py` (grain init-store against the existing
@@ -19,6 +20,12 @@
 # are pinned at genesis by the workroom provisioner's WORKROOM_OPERATOR_POLICY and are absent from the
 # demo's genesis-params.json today; the refusal names the fields. Reads MINI_TEST_SPK (the pinned
 # sntfy) or fetches it with fetch-test-spk.sh.
+#
+# The connector and residents phases need what a world may lack (an https route front, the EtherCalc
+# package, root-held resident custody). Each missing piece is named on stderr and in OUT_DIR/result.log
+# as `CONNECTOR UNAVAILABLE: <reason>` / `RESIDENTS UNAVAILABLE: <reason>` (owner area in the reason),
+# the selection then carries no "connector", and the script still writes every input and exits 0, so
+# the phases that can run do; the scenario's own preflight fails the connector phase by name.
 set -euo pipefail
 umask 077
 [[ $# == 3 ]] || { echo "usage: $0 WORLD-IDENTITY.json CANDIDATE_DIR OUT_DIR" >&2; exit 2; }
@@ -109,6 +116,14 @@ hostid=$(sha256sum /etc/machine-id | cut -d ' ' -f1)
 printf 'ROOT SETUP BEGIN store=%s\n' "$store" | tee -a "$out/root-setup.log"
 sudo -n -- "$repo/deploy/spk-host/install-user-world" install "$out/bin/mini-spk-volume-helper" "$helper" "$store" "$deployment" "$hostid" "$op_uid" "$start" 16 >>"$out/root-setup.log" 2>&1
 printf 'ROOT SETUP store=%s helper=%s\n' "$store" "$helper" | tee -a "$out/root-setup.log"
+# The teardown locator world-down.sh reads: `world-down.sh OUT_DIR` stops this Store's grain units and
+# broker, destroys its volumes through the helper and removes the root registry, sudoers rule, helper
+# and /var/lib/mini-spk-worlds/STORE (install-user-world remove). Whoever takes the world down runs it
+# first; without it every composed run left its grain world behind (123 GB on dregg-build, 2026-10-28).
+mkdir -m 700 "$out/broker-setup"
+jq -n --arg store "$store" --arg grains "$grains" --arg helper "$helper" \
+  '{protocol:"mini-spk-world-recovery-v1",store:$store,grainsRoot:$grains,brokerSocket:($grains+"/runtime-"+$store+"/broker.sock"),helper:$helper}' \
+  >"$out/broker-setup/recovery.json"
 registry=/etc/mini-spk-volumes/$store.json
 jq -n --slurpfile registry "$registry" --arg binary "$spk_host" --arg sha "$spk_host_sha" --arg ingest "$out/bin/spk-ingest" --arg op "$op_name" \
   --arg bwrap "$bwrap" --arg bwrapSha "$(sha256sum "$bwrap" | cut -d ' ' -f1)" '
@@ -154,33 +169,111 @@ jq -n --arg config "$config" --arg genesis "$genesis" --arg manifest "$out/manif
    authority:$authority}' >"$out/platform-inputs.json"
 # ── the metered workroom: parent reserved, tool attached (workroom-ready.sh) ──────
 bash "$here/workroom-ready.sh" "$world" "$out/evidence/workroom" || refuse "the metered workroom is not ready"
-# The rooms phase creates "<op>-room" (composed-scenario.py generate; the gate passes op "jd3"); every member
-# holds it under that name, so the app and the resident adopt that room.
-op=${COMPOSED_OP:-jd3}
-# ── the selection: owner, members, package, unused ids ───────────────────────────
-spk=${MINI_TEST_SPK:-$("$here/fetch-test-spk.sh")}
-names=$(jq -r '.members | keys[]' "$world")
+# The rooms phase creates "<op>-room" over the first N inventory members (composed-scenario.py generate;
+# the gate passes N 5 and op "jd3"); it churns the last of them. The app owner owns that room
+# (`--room-owner`, below): the resident's founder must control it (`chat adopt`), and the owner's own
+# `<op>-room/notes` reference is the document the connector exports into and the resident reads.
+op=${COMPOSED_OP:-jd3} n=${COMPOSED_N:-5}
+# ── the participants, in inventory order (generate's population order) ───────────
+names=$(jq -r '.members | keys_unsorted[]' "$world")
 owner=$(sed -n 2p <<<"$names"); member=$(sed -n 3p <<<"$names"); reader=$(sed -n 4p <<<"$names"); reviewer=$(sed -n 1p <<<"$names")
-jq -n --arg evidence "$out/evidence" --arg grains "$grains" --arg broker "$broker" --arg spk "$spk" --arg sha "$(sha256sum "$spk" | cut -d ' ' -f1)" \
-  --arg owner "$owner" --arg member "$member" --arg op "$op" '
-  {protocol:"mini-spk-same-store-selection-v1",evidence:$evidence,grainsRoot:$grains,brokerSocket:$broker,
-   package:{path:$spk,sha256:$sha},sizeClass:"S",
-   app:{owner:$owner,room:($op+"-room"),members:{owner:{subject:$owner,expectedHost:"grain-owner.test"},member:{subject:$member,expectedHost:"grain-member.test"}},
-        resources:"930001",capabilities:"960001"}}' >"$out/app-selection.json"
+churned=$(sed -n "${n}p" <<<"$names")
+[[ -n $churned ]] || refuse "the inventory has fewer than COMPOSED_N=$n members"
+subject_of() { jq -r --arg n "$1" '.members[$n].subject' "$world"; }
+custody_owner=$(jq -r .custody.owner.subject "$out/platform-inputs.json")
+# Each unavailable phase input is named (stderr and result.log) and the phase's input is left out or
+# left to its consumer's own refusal; every other input is still written, so the phases that can run do.
+unavailable() { local phase=$1; shift; printf '%s UNAVAILABLE: %s\n' "$phase" "$*" | tee -a "$out/result.log" >&2; }
+# ── the connector: an independent participant, the EtherCalc package, an https route front ───
+connector_reasons=()
+# Independent of the app's owner, its session members, the operator custody (owner/management) and the
+# member the churn phase kicks from the room.
+connector_name=
+while IFS= read -r name; do
+  case $name in "$owner"|"$member"|"$churned") continue ;; esac
+  s=$(subject_of "$name")
+  [[ $s != "$management_subject" && $s != "$custody_owner" ]] || continue
+  connector_name=$name; break
+done <<<"$names"
+[[ -n $connector_name ]] || connector_reasons+=("connectorParticipantRequired: no inventory member is independent of the app owner $owner, session member $member, the operator custody ($management_subject) and the churned member $churned; a world with at least $((n > 4 ? n : 4)) hosted members is needed (jworld-scratch MEMBERS)")
+# The app is the qualified EtherCalc: its csv export is what the connector phase captures, so the apps
+# and connector phases share one app (deputy's ruling, 2026-10-28). MINI_TEST_SPK overrides the path.
+spk=${MINI_TEST_SPK:-$(TEST_SPK=ethercalc "$here/fetch-test-spk.sh")}
+spk_sha=$(sha256sum "$spk" | cut -d ' ' -f1)
+# The connector's capture is EtherCalc's `_/SHEET/csv` export under its signed read-only role 1
+# (app-document.md; native/resource-client/src/app_document.rs). The qualified EtherCalc package is
+# docs/evidence/2026-09-27-spk-app-selection's (SHA-256 93bd2c29..., 11,983,992 B).
+ethercalc_sha=93bd2c296692368252ea7b5610a7930db60e5b283340a60b6be8a812c7e309ee
+# The size class the 2026-10-01 SPK survey measured: EtherCalc M, the others S.
+size_class=S; [[ $spk_sha != "$ethercalc_sha" ]] || size_class=M
+[[ $spk_sha == "$ethercalc_sha" ]] || connector_reasons+=("connectorPackageRequired: the app is $(basename "$spk") ($spk_sha), the connector captures EtherCalc's _/SHEET/csv export and needs the qualified EtherCalc SPK ($ethercalc_sha, market package 9b3b76152e7d8db9f54dba7455ea9239) as the app (MINI_TEST_SPK); the apps and connector phases share one app: harness (composed-inputs package choice, with the apps-phase owner)")
+# The capture fetches https://HOST/_/SHEET/csv with verified TLS through ordinary DNS (no --resolve), so
+# the world must front its grain routes over https and declare it: WORLD-IDENTITY.json
+# "routeFront": {"domain": D, "port": P|null, "ca": "/abs/ca.pem"|null}; the connector route is served at
+# connector.D[:P]. A scratch world (plain processes, no root) serves no route front today.
+front=$(jq -c '.routeFront // empty' "$world")
+connector_host= connector_ca=null
+if [[ -z $front ]]; then
+  connector_reasons+=("routeFrontRequired: the world serves no https front for its grain routes (WORLD-IDENTITY.json has no routeFront {domain, port, ca}); jworld-scratch.sh brings up only the private Host, the public relay and sshd: an https grain-route front (spk-browser-proxy with a test CA, its names resolvable on the box) is edge/infra's")
+elif ! jq -e '(.domain | type == "string" and test("^[a-z0-9]([a-z0-9.-]{0,200}[a-z0-9])?$"))
+      and (.port == null or (.port | type == "number" and . >= 1 and . <= 65535 and floor == .))
+      and (.ca == null or (.ca | type == "string" and startswith("/")))' <<<"$front" >/dev/null; then
+  connector_reasons+=("routeFrontMalformed: WORLD-IDENTITY.json routeFront is not {domain: lowercase DNS name, port: 1..65535|null, ca: absolute path|null}: $front")
+else
+  connector_host=connector.$(jq -r '.domain + (if .port == null then "" else ":" + (.port | tostring) end)' <<<"$front")
+  connector_ca=$(jq -c .ca <<<"$front")
+  [[ $connector_ca == null || -f $(jq -r . <<<"$connector_ca") ]] || connector_reasons+=("routeFrontCaAbsent: routeFront names CA $connector_ca, which is not a file")
+fi
+connector=null
+if [[ ${#connector_reasons[@]} -eq 0 ]]; then
+  connector=$(jq -nc --arg subject "$connector_name" --arg host "$connector_host" --argjson ca "$connector_ca" '{subject: $subject, host: $host, ca: $ca}')
+else
+  for reason in "${connector_reasons[@]}"; do unavailable CONNECTOR "$reason"; done
+fi
+# ── the selection: owner, members, package, unused ids, and the connector when the world has one ───
+jq -n -f "$here/composed-selection.jq" --arg evidence "$out/evidence" --arg grains "$grains" --arg broker "$broker" --arg spk "$spk" --arg sha "$spk_sha" --arg sizeClass "$size_class" \
+  --arg owner "$owner" --arg member "$member" --arg op "$op" --argjson connector "$connector" >"$out/app-selection.json"
+python3 -I -c 'import importlib.util,json,sys; s=importlib.util.spec_from_file_location("i",sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); m.selection_shape(json.load(open(sys.argv[2])))' \
+  "$here/same-store-inputs.py" "$out/app-selection.json" || refuse "the written selection does not satisfy same-store-inputs.py selection_shape"
 # ── the documents binding: four distinct members, their own workspaces ───────────
 jq -n --arg manifest "$out/manifest.json" --arg msha "$(sha256sum "$out/manifest.json" | cut -d ' ' -f1)" --arg config "$config" --arg socket "$socket" \
   --arg store "$node" --slurpfile w "$world" --arg owner "$owner" --arg member "$member" --arg reader "$reader" --arg reviewer "$reviewer" '
   $w[0].members as $m | {protocol:"mini-protected-same-store-v1",manifestPath:$manifest,manifestSha256:$msha,configPath:$config,socketPath:$socket,storePath:$store,
    owner:{workspace:$m[$owner].workspace,home:$m[$owner].home},member:{workspace:$m[$member].workspace,home:$m[$member].home},
    reader:{workspace:$m[$reader].workspace,home:$m[$reader].home},reviewer:{workspace:$m[$reviewer].workspace,home:$m[$reviewer].home}}' >"$out/documents-binding.json"
-# ── the resident binding: the typed resident's fixtures and the room the rooms phase makes ───
-jq -n --arg inputs "$out/platform-inputs.json" --arg base "$(dirname "$node")" --arg a0 "$owner" --arg a1 "$member" --arg witness "$reader" \
-  --arg reference "$(jq -r --arg o "$owner" '.members[$o].workspace' "$world")/refs/${op}-room.notes.json" --arg registration "$out/resident-registration-receipt.json" \
-  --arg op "$op" --arg acp "$repo/testing/journeys/shared-resident-fixture-acp" --arg acpsha "$(sha256sum "$repo/testing/journeys/shared-resident-fixture-acp" | cut -d ' ' -f1)" \
-  --arg prov "$repo/testing/journeys/shared-resident-fixture-provider.py" --arg provsha "$(sha256sum "$repo/testing/journeys/shared-resident-fixture-provider.py" | cut -d ' ' -f1)" '
-  {protocol:"mini-same-world-resident-binding-v1",platformInputs:$inputs,base:$base,authors:[$a0,$a1],providerWitness:$witness,
-   room:{alias:($op+"-room"),mode:"adopt"},sharedDocumentReference:$reference,registration:$registration,task:8802,
-   fixtureAcp:{path:$acp,sha256:$acpsha},fixtureProvider:{path:$prov,sha256:$provsha},requestCounts:[1,1],preserveOnSuccess:true}' >"$out/resident-binding.json"
-printf -- '--app-world-inputs %s %s --documents-binding %s --residents-binding %s\n' "$out/platform-inputs.json" "$out/app-selection.json" "$out/documents-binding.json" "$out/resident-binding.json" >"$out/composed-args.txt"
-printf 'COMPOSED INPUTS store=%s grains=%s broker=%s\n' "$store" "$grains" "$broker" | tee -a "$out/result.log"
+# ── the resident binding: authors owner + member, the reader as provider witness ─────────────
+# The resident's frame root is the one whose var/lib/mini/store/node is this node (it requires
+# BASE/var/lib/mini/store/node/deployment/pinned-config.json to be the config).
+resident_reasons=()
+base=${node%/var/lib/mini/store/node}
+[[ $base != "$node" ]] || resident_reasons+=("residentsCanonicalNodeRequired: the node $node is not BASE/var/lib/mini/store/node")
+task=8802
+# The operator-owned private controllers/TASK directory the resident requires (the frame's root
+# pre-provisions it; a scratch world's frame belongs to the operator).
+controller_dir=$base/var/lib/mini/controllers/$task
+if [[ ! -e $controller_dir ]]; then
+  mkdir -p -m 700 "$controller_dir"
+elif [[ ! -d $controller_dir || -L $controller_dir || $(stat -c %u "$controller_dir") != "$op_uid" || -e $controller_dir/receiving ]]; then
+  resident_reasons+=("residentsControllerDirectoryTaken: $controller_dir exists and is not a fresh private directory of the operator")
+fi
+[[ $custody_owner != "$management_subject" ]] || resident_reasons+=("residentsDistinctManagementRequired: the world's genesis enrolls one operator principal ($management_subject), so platform-inputs custody names it as both owner and lifecycle management; the resident needs an owner and a separate management (tool) principal, each enrolled with its own account and key beside the node (the constructor's 7/controller.key and 8/tool.key): genesis params, L9/infra (jworld-scratch, deploy/candidate/params.sh)")
+broker_client=$base/etc/mini/keys-client.json
+[[ -f $broker_client && $(stat -c %u "$broker_client") == 0 && $(( 8#$(stat -c %a "$broker_client") & 8#022 )) == 0 ]] \
+  || resident_reasons+=("residentsKeyBrokerRequired: $broker_client is not a root-owned key broker client config (the resident's credential custody); a rootless scratch world has none: edge/infra")
+launch_gate=$(jq -r .launchGate "$out/manifest.json")
+[[ -x $(dirname "$launch_gate")/bwrap ]] || resident_reasons+=("residentsWorkerLauncherRequired: no executable bwrap beside the manifest's launch-gate ($(dirname "$launch_gate")); the resident's worker launcher is installed there by the frame: candidate packaging / edge/infra")
+resident_reasons+=("residentsRootHandoffsRequired: the typed resident waits (exit 75) for two root acts mid-run, the provider custody copy (controller-entry provider-custody-copy v2: BASE/etc/mini/providers.json and receiving/provider-copy-ready.json) and the controller registration receipt ($out/resident-registration-receipt.json, controller-entry.py register); the composed scenario has no step that performs them: harness (composed-scenario residents phase) with edge/infra (controller-entry under sudo -n)")
+[[ $connector != null ]] || resident_reasons+=("residentsConnectorRequired: the resident consumes the connector's saved export, and the connector is unavailable (above)")
+for reason in "${resident_reasons[@]}"; do unavailable RESIDENTS "$reason"; done
+document=$(jq -r '.connector.document // empty' "$out/app-selection.json")
+[[ -n $document ]] || document=$op-notes
+owner_workspace=$(jq -r --arg o "$owner" '.members[$o].workspace' "$world")
+jq -n -f "$here/composed-resident.jq" --arg inputs "$out/platform-inputs.json" --arg base "$base" --arg a0 "$owner" --arg a1 "$member" --arg witness "$reader" \
+  --arg ownerWorkspace "$owner_workspace" --arg document "$document" \
+  --arg registration "$out/resident-registration-receipt.json" --arg op "$op" \
+  --arg acp "$repo/testing/journeys/shared-resident-fixture-acp" --arg acpsha "$(sha256sum "$repo/testing/journeys/shared-resident-fixture-acp" | cut -d ' ' -f1)" \
+  --arg prov "$repo/testing/journeys/shared-resident-fixture-provider.py" --arg provsha "$(sha256sum "$repo/testing/journeys/shared-resident-fixture-provider.py" | cut -d ' ' -f1)" \
+  >"$out/resident-binding.json"
+printf -- '--app-world-inputs %s %s --documents-binding %s --residents-binding %s --room-owner %s\n' "$out/platform-inputs.json" "$out/app-selection.json" "$out/documents-binding.json" "$out/resident-binding.json" "$owner" >"$out/composed-args.txt"
+printf 'COMPOSED INPUTS store=%s grains=%s broker=%s connector=%s\n' "$store" "$grains" "$broker" "$([[ $connector == null ]] && echo unavailable || echo "$connector_name@$connector_host")" | tee -a "$out/result.log"
 cat "$out/composed-args.txt"

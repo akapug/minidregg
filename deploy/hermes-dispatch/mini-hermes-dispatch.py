@@ -47,6 +47,16 @@ def member_files(home):
     # admission limit. A pathological member cannot stop the other inventories.
     return (p for p in pathlib.Path(home).glob('outbox/*/room-*/assignment-*/*.json') if p.name in ('handoff.json','dismissal.json'))
 
+# A hint the pump passes over is said once on the operator's log (stderr), keyed by file and reason:
+# a summon whose bundle is unreadable or names no registered resident is otherwise silent.
+SKIPPED=collections.OrderedDict()
+def skip(path,why):
+    key=(str(path),why)
+    if key in SKIPPED:return
+    SKIPPED[key]=True
+    while len(SKIPPED)>65536:SKIPPED.popitem(last=False)
+    print(f'hermes dispatcher skipped {path}: {why}',file=sys.stderr,flush=True)
+
 def jobs(c,index,cursors,offset):
     homes=c['memberHomes'];selected=homes[offset:]+homes[:offset];visits=0;exhausted=set()
     # One hint per member per round, bounded BEFORE success-cache filtering.
@@ -64,7 +74,8 @@ def jobs(c,index,cursors,offset):
                 identity=(payload['recipient'],payload['roomCell'],payload['task'])
                 registration=index.get(identity)
                 if registration:yield path,registration,digest
-            except (OSError,ValueError,KeyError,TypeError):pass
+                else:skip(path,'no registered resident for recipient %s room %s task %s'%identity)
+            except (OSError,ValueError,KeyError,TypeError) as error:skip(path,f'unreadable hint: {type(error).__name__}: {error}')
 
 def dispatch(c,job):
     path,registration,digest=job

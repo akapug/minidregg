@@ -57,6 +57,15 @@ pub(crate) fn hex(bytes: &[u8]) -> String {
     text
 }
 
+/// Whether `text` is exactly the canonical lowercase hex of `bytes`, without building that hex.
+pub(crate) fn hex_matches(text: &str, bytes: &[u8]) -> bool {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    text.len() == bytes.len() * 2
+        && text.as_bytes().chunks_exact(2).zip(bytes).all(|(pair, byte)| {
+            pair[0] == DIGITS[usize::from(byte >> 4)] && pair[1] == DIGITS[usize::from(byte & 15)]
+        })
+}
+
 fn nibble(digit: u8) -> u8 {
     if digit.is_ascii_digit() { digit - b'0' } else { digit - b'a' + 10 }
 }
@@ -102,6 +111,10 @@ mod tests {
         assert_eq!(text.len(), 512);
         assert!(lower_hex(&text) && !hex64(&text));
         assert_eq!(unhex(&text).unwrap(), bytes);
+        assert!(hex_matches(&text, &bytes));
+        assert!(!hex_matches(&text.to_uppercase(), &bytes));
+        assert!(!hex_matches(&text[..510], &bytes));
+        assert!(!hex_matches(&text, &bytes[..255]));
         assert_eq!(hex(&[0x0f, 0xa0]), "0fa0");
         for bad in ["0", "0A", "0g", "zz", " 00", "00\n"] {
             assert_eq!(unhex(bad), None, "{bad:?}");

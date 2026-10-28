@@ -5,10 +5,22 @@
 # rule removed by the installer, removal asserted). Every process it stops is one it can name
 # by unit; nothing is killed by pattern.
 set -uo pipefail
-[[ $# == 1 && -f $1/WORLD.env && -f $1/root-setup.log ]] || { echo "usage: $0 RUN_ROOT (with WORLD.env)" >&2; exit 2; }
+[[ $# == 1 ]] || { echo "usage: $0 RUN_ROOT (with WORLD.env or broker recovery locator)" >&2; exit 2; }
 run=$1
-# shellcheck disable=SC1091
-. "$run/WORLD.env"
+if [[ -f $run/WORLD.env && -f $run/root-setup.log ]]; then
+  # shellcheck disable=SC1091
+  . "$run/WORLD.env"
+else
+  recovery=$run/broker-setup/recovery.json
+  jq -e '.protocol == "mini-spk-world-recovery-v1" and
+    (.store | test("^[0-9a-f]{16}$")) and
+    .grainsRoot == ("/var/lib/mini-spk-worlds/"+.store) and
+    .brokerSocket == (.grainsRoot+"/runtime-"+.store+"/broker.sock") and
+    (.helper | test("^/usr/local/libexec/mini-spk-volume-helper-[0-9a-f]{16}$"))' "$recovery" >/dev/null || exit 2
+  STORE=$(jq -er .store "$recovery") GRAINS_ROOT=$(jq -er .grainsRoot "$recovery")
+  BROKER_SOCKET=$(jq -er .brokerSocket "$recovery") HELPER=$(jq -er .helper "$recovery")
+  BIN=$run/bin RUN=$run/w CONFIG=$run/w/store/base/workroom/deployment/pinned-config.json
+fi
 op_uid=$(id -u)
 export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$op_uid}
 units=/run/user/$op_uid/systemd/user
@@ -19,7 +31,9 @@ rc=0
 if [[ -f $CONFIG ]]; then
   BIN="$BIN" GRAINS_ROOT="$GRAINS_ROOT" BROKER_SOCKET="$BROKER_SOCKET" "$here/grain-journey.sh" stop-services "$RUN" >>"$run/cleanup-services.log" 2>&1 || rc=1
 fi
-"$here/stop-residents.sh" "$RUN" >>"$run/cleanup-services.log" 2>&1 || rc=1
+# A composed-inputs root (recovery locator only) has no world of its own: the world's residents are
+# its builder's to stop (jworld-scratch down).
+if [[ -d $RUN ]]; then "$here/stop-residents.sh" "$RUN" >>"$run/cleanup-services.log" 2>&1 || rc=1; fi
 : >"$run/residents-$STORE.log"
 while read -r unit; do
   [[ -n $unit ]] || continue

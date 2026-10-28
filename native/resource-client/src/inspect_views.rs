@@ -1,4 +1,4 @@
-//! K-INSPECT-VIEWS (DEOS #13): `inspect caps|law|receipt|turn`, `why`.
+//! K-INSPECT-VIEWS (docs/DEOS.md §9 row 13): `inspect caps|law|receipt|turn`, `why`.
 //!
 //! Each view gathers bytes this workspace already holds, or reads with its
 //! own signed views (the same reads `read` and `can` make), writes them into

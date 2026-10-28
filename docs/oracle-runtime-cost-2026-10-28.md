@@ -67,7 +67,6 @@ including the shared compiler-seat wait, with 2,747 MiB scope peak; it rebuilt
 no consent source module. Build evidence is `consent-out-r2/manifest.txt` under
 the same lane directory.
 
-
 Both the old `aae3e2e37` and newer `349e59ef1` candidates already materialize
 `DurableEngine.Engine.install`'s ten budget allowances. The seven-minute q3
 cold replay cannot be explained by an absent budget-materialization fix.

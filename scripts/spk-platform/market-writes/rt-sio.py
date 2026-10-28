@@ -3,12 +3,10 @@
 
 ROUTE_DIR holds http.sock and browser.token (the custodian-minted participant session).
   wbo      ROUTE_DIR BOARD     a Rectangle item as a socket.io `broadcast` on WBO's /socket.io/
-  hedgedoc ROUTE_DIR NOTE_ID   a text insert as a socket.io `operation` (OT, base revision from `doc`)
-  wekan    ROUTE_DIR TITLE     DDP over /websocket: sandstorm login, then board, list and card inserts
-Prints one JSON line; exit 0 only when the server acknowledged the write. The read-back is the
-caller's (HTTP GET) except for wekan, which reads the card back from its own subscription.
+Prints one JSON line after independent getboard memory readback. The caller also checks
+the saved HTTP download; send delivery alone is not an application acknowledgement.
 """
-import base64, importlib.util, json, os, socket, struct, sys, time
+import base64, json, os, socket, struct, sys, time
 
 COOKIE = "__Host-mini_spk_session"
 
@@ -125,95 +123,9 @@ def wbo(route, board):
     return 1
 
 
-def hedgedoc(route, note):
-    s = SIO(route, f"noteId={note}")
-    doc = None
-    for ev in s.events(60):
-        if ev[0] == "doc":
-            doc = ev[1]; break
-    if doc is None:
-        print(json.dumps({"ok": False, "refused": "noDocEvent"})); return 1
-    text = "# featured\nwritten by a resident over socket.io\n"
-    ops = [text] + ([len(doc.get("str", ""))] if doc.get("str") else [])
-    s.emit("operation", doc.get("revision", 0), ops, None)
-    for ev in s.events(30):
-        if ev[0] == "ack":
-            print(json.dumps({"ok": True, "revision": doc.get("revision", 0)})); return 0
-    print(json.dumps({"ok": False, "refused": "noAck"})); return 1
-
-
-def wekan(route, title):
-    ws = WS(route, "/websocket")
-    n = [0]
-
-    def call(method, params, seconds=60):
-        n[0] += 1; mid = str(n[0])
-        ws.send(json.dumps({"msg": "method", "method": method, "id": mid, "params": params}))
-        end = time.time() + seconds
-        while time.time() < end:
-            m = json.loads(ws.recv())
-            if m.get("msg") == "ping":
-                ws.send(json.dumps({"msg": "pong"}))
-            elif m.get("msg") == "result" and m.get("id") == mid:
-                return m
-        return None
-
-    ws.send(json.dumps({"msg": "connect", "version": "1", "support": ["1", "pre2", "pre1"]}))
-    while json.loads(ws.recv()).get("msg") != "connected":
-        pass
-    # Wekan 12.65 logs in as TextEditor does (wekan-accounts-sandstorm): loginWithSandstorm plus the
-    # POST /.sandstorm-login rendezvous, one shared path (sandstorm-login.py). The old {sandstorm: true}
-    # `login` method has no handler in this version ("Unrecognized options for login request").
-    here = os.path.dirname(os.path.abspath(__file__))
-    spec = importlib.util.spec_from_file_location("sandstormlogin", os.path.join(here, "sandstorm-login.py"))
-    sl = importlib.util.module_from_spec(spec); spec.loader.exec_module(sl)
-
-    def send(msg):
-        ws.send(json.dumps(msg))
-
-    def wait(pred, seconds):
-        end = time.time() + seconds
-        while time.time() < end:
-            m = json.loads(ws.recv())
-            if m.get("msg") == "ping":
-                ws.send(json.dumps({"msg": "pong"}))
-            elif pred(m):
-                return m
-        return None
-
-    login, posted = sl.login(send, wait, route)
-    if not login or "error" in login:
-        print(json.dumps({"ok": False, "refused": "loginRefused", "result": login, "post": posted[:100]})); return 1
-    uid = login["result"]["userId"]
-    now = {"$date": int(time.time() * 1000)}
-    rid = lambda: os.urandom(8).hex()  # noqa: E731
-    board, lst, swim, card = rid(), rid(), rid(), rid()
-    steps = [
-        ("/boards/insert", {"_id": board, "title": "featured board", "permission": "private", "color": "belize",
-                            "members": [{"userId": uid, "isAdmin": True, "isActive": True}], "createdAt": now}),
-        ("/swimlanes/insert", {"_id": swim, "title": "Default", "boardId": board, "sort": 0, "createdAt": now}),
-        ("/lists/insert", {"_id": lst, "title": "To do", "boardId": board, "sort": 0, "createdAt": now}),
-        ("/cards/insert", {"_id": card, "title": title, "listId": lst, "boardId": board, "swimlaneId": swim,
-                           "sort": 0, "userId": uid, "createdAt": now}),
-    ]
-    for method, doc in steps:
-        r = call(method, [doc])
-        if not r or "error" in r:
-            print(json.dumps({"ok": False, "refused": method, "result": r})); return 1
-    ws.send(json.dumps({"msg": "sub", "id": "b", "name": "board", "params": [board, False]}))
-    end = time.time() + 60
-    while time.time() < end:
-        m = json.loads(ws.recv())
-        if m.get("msg") == "ping":
-            ws.send(json.dumps({"msg": "pong"}))
-        elif m.get("msg") == "added" and m.get("collection") == "cards" and m.get("fields", {}).get("title") == title:
-            print(json.dumps({"ok": True, "board": board, "card": m.get("id")})); return 0
-    print(json.dumps({"ok": False, "refused": "cardNotReadBack", "board": board})); return 1
-
-
 if __name__ == "__main__":
     mode, route, arg = sys.argv[1:4]
     try:
-        sys.exit({"wbo": wbo, "hedgedoc": hedgedoc, "wekan": wekan}[mode](route, arg))
+        sys.exit({"wbo": wbo}[mode](route, arg))
     except Exception as e:  # noqa: BLE001
         print(json.dumps({"ok": False, "refused": str(e)[:300]})); sys.exit(1)

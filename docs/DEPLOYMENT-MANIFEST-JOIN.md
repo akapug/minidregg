@@ -27,12 +27,15 @@ combined manifest, work ID, ABI codec ID, and controller-key uniqueness proofs
 reject collisions. Security-gated and reserved candidates are catalog data
 only and have no projection into the deployed manifest.
 
-## Current maturity
+## Maturity by component
+
+Every identifier in this table exists on this tree. The status column restates what each
+module's own statements establish; it is not a run.
 
 | Clause/component | Status | Exact evidence | What remains |
 |---|---|---|---|
 | Base Minidregg V1 | vocabulary only | `MinidreggV1Artifact.manifest_wellFormed`; its dialect list is empty | Add only clauses with actual controller entries and exact semantic/history adapters |
-| `406` BabyBear arithmetic work | implemented deterministic controller | `arithmeticController` issues the fixed Lean-selected instruction and returns either rejection or a `CertifiedResponse`; `arithmeticRegistry_wellFormed` joins it to the exact extended artifact | This is the descriptor relation for one arithmetic work item, not a general proof system, semantic-turn receipt, hash/transform kernel, or native refinement theorem. The current authenticated native catalog has no 406 byte-transport work profile, so the controller remains typed Lean control rather than emitted Rust glue |
+| `406` BabyBear arithmetic work | implemented deterministic controller | `arithmeticController` issues the fixed Lean-selected instruction and returns either rejection or a `CertifiedResponse`; `arithmeticRegistry_wellFormed` joins it to the exact extended artifact | This is the descriptor relation for one arithmetic work item, not a general proof system, semantic-turn receipt, hash/transform kernel, or native refinement theorem. Its byte transport is `Compiler/ArithmeticNativeDeployment`: authenticated work `9102` whose generated Rust (`prover/src/semantic_artifact_arithmetic.rs`) returns an error or 144 candidate bytes that Lean decodes and rechecks |
 | `404` Tower256 indexed LogUp | security-premise-gated; not admitted | canonical Tower256 codec; byte decode/recheck boundary; exact controller schedule and verified-run reduction; one shared `Tower256ConcreteBackend` with stable hash/codec/suite pins and concrete Lean cSHAKE; `Tower256LogupControllerAdmission` retains the common-game security premises | Exact dispatch entry and input/reply codecs using that backend; native byte admission throughout the plan; table and checkpoint position binding; PCS opening plus sampled decider; commitment binding/CR; cSHAKE ROM transport; common-game budget; history root-evidence adapter |
 | `901` BFV | reserved | Lean checks every returned arithmetic row and the local buffer admission binds a nonzero controller identifier | The portable clause still has an unclosed carrier/statement reservation and zero proof-codec, proof-suite, and controller sentinels. The local admission variant still has an unassigned proof suite and does not establish privacy, knowledge soundness, or a deployed proof system |
 | cSHAKE256 | implemented deterministic computation, not a dialect | `Sp800185Cshake256` computes Keccak-f[1600]/SP 800-185 framing and checks exact 32-byte replies; `Tower256ConcreteBackend` fixes algorithm `8400`, codec pins `8401`--`8404`, suite `8600`, and readable separated domains | `Manifest` still has no generic hash-service registry. Clause 404 must bind the shared backend through its exact controller entry. Collision resistance and ROM transport remain security premises |

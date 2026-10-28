@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# J13: a refusal that names the clause (PLACE §2.6, K-LAW-LEAF §4.6).
+# J13: a refusal that names the clause (docs/PLACE.md §2.6, and §4.6 K-LAW-LEAF).
 #
 # On a fresh private Store, A (the sponsor) creates a board cell, grants B
 # observe+mutate, and B creates field 2 = 1. A then installs, in the shell's

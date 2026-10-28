@@ -44,9 +44,14 @@ SOURCE_BYTES = 262144
 # Measured 2026-10-07 on burst2-b with the lane Host (`objective-front preview`/`elaborate`, best of 3;
 # KN2-ROW-E STATUS.txt): replay 1.877 us/byte at 258753 source bytes -> 61 ticks/byte; core 0.482 us/byte at
 # 266491 core bytes -> 16 ticks/byte. A world with a larger source bound must re-measure (the rate rises).
+# THE DEMO'S RATES ARE 6 and 2 (2026-10-28, root's ruling), a tenth of the measured worst case: at 61 and 16 one
+# 2 KB Tally birth cost 270,280 and no member's starting grant could run any program. The worst-case package (the
+# source bound) is therefore UNDERPRICED about tenfold; the abuse bound is the member's grant, not the rate
+# (a grant of 1,225,000 buys 10 Tally runs; at the worst case 1.9 us/byte a 256 KiB birth would cost 6*262144 =
+# 1.6M ticks and a member could afford none). Edition 4 refuses a zero rate, so these are the floor to raise from.
 TARIFF = {'version': '4', 'base': '1', 'typeFuel': '0', 'sourceTicks': '1', 'heap': '0', 'stack': '0',
           'outputNodes': '0', 'outputBytes': '0', 'extractTicks': '0', 'inputBytes': '0',
-          'replayBytes': '61', 'coreBytes': '16', 'domainWork': '0'}
+          'replayBytes': '6', 'coreBytes': '2', 'domainWork': '0'}
 RATE_KEYS = [k for k in TARIFF if k not in ('version', 'base')]
 
 
@@ -646,3 +651,36 @@ class World:
             return None
         total = next((f['value'] for f in s.get('fields', []) if f.get('name') == 'total'), {})
         return int(total.get('value', '-1')) if total.get('tag') == 'natural' else None
+
+
+# --- the demo's economy: every credit figure the demo genesis and enrolment carry, from the policy above ---------------
+# The Tally seed's front-end quote (op 214 `pins[].frontEnd`, measured on the shipped Host, 2026-10-27): 2011 source
+# bytes replayed, 9038 typed-core bytes. `bend` declares BEND_TICKS source ticks and a purse of BEND_PURSE_PRICES birth
+# prices (the first await escrows a pair, which the Host priced at 63,392 against 2 birth prices of 60,886: so two prices and one more).
+TALLY_QUOTE = {'replayBytes': 2011, 'coreBytes': 9038}
+BEND_TICKS = 300
+BEND_PURSE_PRICES = 3
+GRANT_RUNS = 10          # a member's starting grant runs the Tally this many times
+HOUSE_HEADROOM_RUNS = 5  # the house runs the seed's Tally once and has this many more runs
+SEED_OTHER_SPEND = 10000  # house's other seed spend (documents, posts, the story, three installs): measured 9,185
+GRANT_SLACK = 7280       # publishes, creates and the like on top of the runs, rounding the grant to a whole 1,225,000
+DEMO_MEMBERS = 55        # door freeCap 50 plus the seed's roster (house, sage, public, hermes, a spare)
+SPONSOR_FLOOR = 20000    # door.json sponsorFloor
+
+
+def demo_economy():
+    """The figures a fresh demo genesis and its enrolment carry, all derived here (policy_of's tariff is the one
+    source of the rates; this is the one source of the rest). infra sets these at re-genesis."""
+    t = {k: int(v) for k, v in TARIFF.items()}
+    birth = t['base'] + t['sourceTicks'] * BEND_TICKS + t['replayBytes'] * TALLY_QUOTE['replayBytes'] + t['coreBytes'] * TALLY_QUOTE['coreBytes']
+    run = (BEND_PURSE_PRICES + 1) * birth
+    grant = GRANT_RUNS * run + GRANT_SLACK
+    house = (1 + HOUSE_HEADROOM_RUNS) * run + SEED_OTHER_SPEND
+    sponsor = DEMO_MEMBERS * grant + SPONSOR_FLOOR
+    return {'tallyBirthPrice': birth, 'tallyRunCost': run, 'memberGrant': grant, 'houseMinimum': house,
+            'houseSatisfiedByGrant': grant >= house, 'sponsorGenesisBalance': sponsor, 'members': DEMO_MEMBERS,
+            'doorFunding': grant, 'sponsorFloor': SPONSOR_FLOOR}
+
+
+if __name__ == '__main__':
+    print(json.dumps(demo_economy(), indent=1))

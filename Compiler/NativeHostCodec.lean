@@ -43,7 +43,7 @@ open Minidregg.Kernel
 
 set_option autoImplicit false
 
-/-! ## The world root (DATAMODEL §3.2/§3.4, step C1)
+/-! ## The world root (docs/DATAMODEL.md §3.2/§3.4, step C1)
 
 Receipts, signing plans and observation challenges bind `(worldRoot, height)`.
 The world root is `Kernel.WorldRoot`'s authenticated map over the world's

@@ -1,5 +1,5 @@
 /-
-# Kernel.PresenceIndex — who acted where, and when (PLACE §2.5, K-INDEX)
+# Kernel.PresenceIndex — who acted where, and when (docs/PLACE.md §2.5, K-INDEX)
 
 Two maps the world keeps, both functions of the accepted log:
 
@@ -311,7 +311,7 @@ theorem touched_snoc (log : List IntentRecord) (record : IntentRecord) (cell : C
   · rw [if_pos member, if_pos (show Wrote cell record from member)]
   · rw [if_neg member, if_neg (show ¬ Wrote cell record from member)]
 
-/-- **`lastSeen` is exact** (PLACE §2.5; DATAMODEL 4.9's shape): the index
+/-- **`lastSeen` is exact** (docs/PLACE.md §2.5; docs/DATAMODEL.md §4.9's shape): the index
 names `h` for `(cell, subject)` iff a record signed by `subject` wrote `cell`
 at height `h` and at no greater height. A tampered index disagrees with the
 fold, which is what makes `who` refutable. -/

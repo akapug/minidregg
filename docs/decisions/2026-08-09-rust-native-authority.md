@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-08-09
-- Updated through: integrated source `3f74f63`, benchmark evidence `4d1f290`
+- Scope: the native compute crates `prover/` (`minidregg-prover`) and `native/mini-kernels`
 
 ## Decision
 
@@ -32,7 +32,7 @@ evidence or an acceptance token.
 
 ## Authenticated generated surface
 
-The canonical `ArtifactBundle` encoding, content address, JSON, and generated Rust now authenticate
+The canonical `ArtifactBundle` encoding, content address, JSON, and generated Rust authenticate
 separate `nativeAbiCodecs` and `nativeWorkCatalog` fields. V1 proves:
 
 - native work IDs and ABI codec IDs are unique;
@@ -53,7 +53,7 @@ catalog argument.
 
 ## Handwritten opaque compute surface
 
-Current native source is limited to:
+Native compute source is limited to `prover/src/`:
 
 - `babybear` and `field6` arithmetic;
 - `binary_tower` and `binary_tower_256` arithmetic/encoding;
@@ -62,7 +62,15 @@ Current native source is limited to:
 - `tower256_kernels` generic vector/equality/MLE/rational-pair operations;
 - `hash_kernels` raw caller-customized cSHAKE XOF; and
 - generated `semantic_artifact_v1` DTO/dispatch data plus `semantic_artifact_arithmetic.rs` for the
-  narrow clause-406 candidate computation.
+  narrow clause-406 candidate computation;
+- generated `evm_stage0_add_aux` data and dispatch for work `9103`;
+- `sumcheck` and `rank1`, unverified mirrors of `Selvage/MultilinearExtension.lean` and
+  `Selvage/Rank1GradientCheck.lean`, bound to them by conformance vectors the Lean side writes
+  (`prover/testdata/sumcheck_conformance.json`) or decides (rank-1 over F₅); acceptance stays with
+  the Lean verifier;
+
+and `native/mini-kernels`, cSHAKE256/KMAC256 called by the compiled Host through `@[extern]`, with
+Lean reference definitions and Lean-authored conformance vectors.
 
 The Lean Tower codec, cSHAKE framing, and controller plans are exact formal objects. That does not
 prove Rust four-limb, polynomial, transform-order, or raw-XOF correspondence. Those conventions
@@ -92,7 +100,7 @@ These are admission/control results, not Rust correctness theorems.
 
 ## Performance evidence boundary
 
-At source `54295c6` with evidence `4d1f290`, generated dispatch for work `9101` produced bytes
+In August 2026, at source `54295c6` with evidence `4d1f290`, generated dispatch for work `9101` produced bytes
 identical to direct execution. Dispatch/direct timing ratios for vector lengths 1–16384 were
 `0.985–1.040` on hbox and `0.985–1.025` on persvati. This is a narrow empirical dispatch result:
 no threshold, semantics, security, or full-prover performance claim follows.

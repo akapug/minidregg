@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# J-JOB-MONEY (COMPUTE §2.6, lane C3 K-JOB-MONEY; rebound by J-JOB): a job's money -- the
+# J-JOB-MONEY (docs/COMPUTE.md §2.6, lane C3 K-JOB-MONEY; rebound by J-JOB): a job's money -- the
 # caller's escrow, the provider's bond, and the payout or slash -- as conservation-checked Book
 # turns on a fresh private Store. The Book holds a job's credit in the account whose id is the job
 # cell's id (`pay-job`'s bookHeld); the job cell's escrow + bond is the law's view of it, and every

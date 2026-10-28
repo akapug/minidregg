@@ -45,7 +45,7 @@ enum Mode {
     ContentStale8901,
     ContentBirth9301,
     /// `--room-librarian`: the librarian program, deterministically, over
-    /// the room tools (PLACE §2.7, J14). `--room-librarian-metered`: the
+    /// the room tools (docs/PLACE.md §2.7, J14). `--room-librarian-metered`: the
     /// same program as a pool upstream, whose stream ends with a usage event
     /// (the record the Host quotes a metered call from) and whose log names
     /// the bearer it was paid with. `--room-librarian-zai`: metered in the
@@ -1322,27 +1322,28 @@ fn room_reply_for(request: &Value) -> Result<(Value, &'static str, String), Stri
                 "text":format!("I could not make that edit: the Host refused it ({}). I write only the index and the digest.", clip(&first, 300))})));
         }
     }
-    // The planted calls' outcomes, said back to the member who planted them (one report).
-    let planted: Vec<&String> = issued.iter().filter(|id| id.starts_with("rt-")).collect();
-    if let Some(first) = planted.first() {
-        let n = first.split('-').nth(1).unwrap_or("").to_owned();
-        if !issued.iter().any(|id| *id == format!("rtreport-{n}")) {
-            let asker = entries.iter().find(|e| e["n"].as_u64().map(|v| v.to_string()) == Some(n.clone()))
-                .and_then(|e| e["author"].as_str()).unwrap_or("").to_owned();
-            let outcomes: Vec<String> = planted.iter().map(|id| {
-                let outcome = match room_result(current, id) {
-                    Some(r) if r.get("error").is_some() => format!("refused: {}", clip(r["error"].as_str().unwrap_or("").lines().next().unwrap_or(""), 160)),
-                    Some(_) => "performed".to_owned(),
-                    None => "no result".to_owned(),
-                };
-                format!("{id} {outcome}")
-            }).collect();
-            reports.push(call(tool("mini_say")?, &format!("rtreport-{n}"), json!({"to":asker,"re":n,
-                "text":clip(&format!("REDTEAM {}", outcomes.join(" | ")), 2900)})));
-        }
-    }
     if !reports.is_empty() {
         return calls(reports, "report".into());
+    }
+    // The planted calls' outcomes, as this prompt's reply to the member who planted them (the
+    // resident delivers the final text to the selected request). Not a separate `mini_say`:
+    // upstream Hermes pauses an MCP server after three refused calls in a row, so a report
+    // written as one more call after the planted batch is dropped by that pause.
+    let planted: Vec<&String> = issued.iter().filter(|id| id.starts_with("rt-")).collect();
+    if !planted.is_empty() {
+        let outcomes: Vec<String> = planted.iter().map(|id| {
+            let outcome = match room_result(current, id) {
+                Some(r) if r["error"].is_string() => format!("refused: {}", clip(r["error"].as_str().unwrap_or("").lines().next().unwrap_or(""), 160)),
+                // A sandbox tool's result (`{"output", "exit_code"}`): performed inside the
+                // sandbox, and what it saw there.
+                Some(r) if r["output"].is_string() => format!("performed in the sandbox: {}",
+                    clip(r["output"].as_str().unwrap_or("").lines().next().unwrap_or(""), 160)),
+                Some(_) => "performed".to_owned(),
+                None => "no result".to_owned(),
+            };
+            format!("{id} {outcome}")
+        }).collect();
+        return done(clip(&format!("REDTEAM {}", outcomes.join(" | ")), 2900), "report");
     }
     let writes = issued.iter().filter(|id| !["ls", "index", "digest", "tail"].contains(&id.as_str()) && !id.starts_with("hist-")).count();
     done(format!("Attach done: {writes} writes."), "done")
@@ -1780,21 +1781,13 @@ mod tests {
             // rt-8-5 (the batch's last call) is lost outright: no result message.
         ]);
 
-        // Round 3: one report, said back to the member who planted the calls.
-        let (message, finish, _) = room_reply_for(&request).unwrap();
-        assert_eq!(finish, "tool_calls");
-        assert_eq!(ids_of(&message), ["rtreport-8"]);
-        let said: Value = serde_json::from_str(message["tool_calls"][0]["function"]["arguments"].as_str().unwrap()).unwrap();
-        assert_eq!(said["to"], "b");
-        assert_eq!(said["re"], "8");
-        let expected = "REDTEAM rt-8-0 no result | rt-8-1 no result | rt-8-2 refused: mini_say: unknown argument grant | rt-8-3 refused: the Host refused: no append on cell 9 | rt-8-4 refused: law denies writing the program | rt-8-5 no result";
-        assert_eq!(said["text"].as_str().unwrap(), expected);
-        turn(&mut request, message, vec![("rtreport-8", wrap("mini_say", r#"{"ok":{"n":10}}"#))]);
-
-        // Round 4: the attach is done — the report said, nothing re-issued.
+        // Round 3: the prompt's reply is the report, delivered to the member who planted the
+        // calls (no further call: Hermes pauses a server after three refused calls in a row).
         let (message, finish, _) = room_reply_for(&request).unwrap();
         assert_eq!(finish, "stop");
-        assert!(message["content"].as_str().unwrap().starts_with("Attach done: 8 writes."));
+        let expected = "REDTEAM rt-8-0 no result | rt-8-1 no result | rt-8-2 refused: mini_say: unknown argument grant | rt-8-3 refused: the Host refused: no append on cell 9 | rt-8-4 refused: law denies writing the program | rt-8-5 no result";
+        assert_eq!(message["content"].as_str().unwrap(), expected);
+
     }
 
     use super::*;

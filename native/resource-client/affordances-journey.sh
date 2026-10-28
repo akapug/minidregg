@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# J12A: affordances — `can NAME` (P-AFFORDANCES, DEOS §1.3; deos's project_for(held)).
+# J12A: affordances — `can NAME` (P-AFFORDANCES, docs/DEOS.md §1.3; deos's project_for(held)).
 #
 # On a fresh private Store, A (the sponsor) and B (a newcomer) ask the kernel
 # what they can do, verb by verb, without doing it. `can NAME` reads the

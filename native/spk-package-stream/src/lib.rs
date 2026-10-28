@@ -10,7 +10,7 @@ use capnp::{
     message::{Reader, ReaderOptions},
     serialize::{BufferSegments, SegmentLengthsBuilder},
 };
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, VerifyingKey};
 use sha2::{Digest, Sha256, Sha512};
 use std::{
     collections::BTreeSet,
@@ -326,10 +326,15 @@ pub fn verify(path: &Path, scratch: &Path, limits: Limits) -> io::Result<Verifie
         return Err(invalid("archive hash mismatch"));
     }
     let sig = Signature::from_slice(&combined[..64]).map_err(invalid)?;
-    VerifyingKey::from_bytes(&public_key)
-        .map_err(invalid)?
-        .verify(&hash, &sig)
-        .map_err(invalid)?;
+    // A small-order public key makes the verification equation hold for forgeries that never used a
+    // secret (identity key, R = identity, S = 0 verifies for every message), and plain `verify` accepts
+    // them. `verify_strict` also refuses a small-order R and a non-canonical S. Sandstorm's own signer
+    // never produces either, so no real package is refused.
+    let key = VerifyingKey::from_bytes(&public_key).map_err(invalid)?;
+    if key.is_weak() {
+        return Err(invalid("weak SPK signing key"));
+    }
+    key.verify_strict(&hash, &sig).map_err(invalid)?;
     let archive_bytes = &mapping[sig_length..];
     if frame_length(archive_bytes, limits.decoded_bytes, segments)? != archive_bytes.len() {
         return Err(invalid("trailing bytes after archive message"));
@@ -943,6 +948,67 @@ mod tests {
         .unwrap()
         .data_config_bytes
         .is_none());
+    }
+
+    fn minimal_archive() -> Vec<u8> {
+        use capnp::message::Builder;
+        let mut message = Builder::new_default();
+        {
+            let archive = message.init_root::<archive_capnp::archive::Builder>();
+            let mut files = archive.init_files(1);
+            let mut manifest = files.reborrow().get(0);
+            manifest.set_name("sandstorm-manifest");
+            manifest.set_regular(MANIFEST.as_bytes());
+        }
+        capnp::serialize::write_message_to_words(&message)
+    }
+
+    /// An SPK whose signature member is `(public_key, sig64 || SHA-512(archive))` as given.
+    fn forged(archive: &[u8], public_key: &[u8; 32], sig64: &[u8; 64]) -> Vec<u8> {
+        let hash = Sha512::digest(archive);
+        let mut combined = sig64.to_vec();
+        combined.extend_from_slice(&hash);
+        let mut plain = sandstorm_package::capnp_wire::write_signature(public_key, &combined);
+        plain.extend_from_slice(archive);
+        compress(&plain)
+    }
+
+    /// The identity point is a small-order public key. With R = identity and S = 0 the verification
+    /// equation holds for every message, so a signature made without any secret passes plain
+    /// `verify`; the refusal is by name.
+    #[test]
+    fn weak_public_key_forgery_is_refused_by_name() {
+        let mut identity = [0u8; 32];
+        identity[0] = 1;
+        let mut sig = [0u8; 64];
+        sig[0] = 1; // R = identity, S = 0
+        let error = unpack(&forged(&minimal_archive(), &identity, &sig), Limits::DEFAULT)
+            .err()
+            .expect("a forgery under a weak key must not verify");
+        assert!(error.to_string().contains("weak SPK signing key"), "{error}");
+    }
+
+    /// A valid signature whose S is replaced by S + L is the same signature mod L, non-canonical.
+    #[test]
+    fn non_canonical_signature_scalar_is_refused() {
+        // L = 2^252 + 27742317777372353535851937790883648493, little-endian.
+        const L: [u8; 32] = [
+            0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58, 0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde,
+            0x14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10,
+        ];
+        let archive = minimal_archive();
+        let hash = Sha512::digest(&archive);
+        let good = key().sign(&hash).to_bytes();
+        assert!(unpack(&forged(&archive, key().verifying_key().as_bytes(), &good), Limits::DEFAULT).is_ok());
+        let mut sig = good;
+        let mut carry = 0u16;
+        for i in 0..32 {
+            let sum = sig[32 + i] as u16 + L[i] as u16 + carry;
+            sig[32 + i] = sum as u8;
+            carry = sum >> 8;
+        }
+        assert_eq!(carry, 0);
+        assert!(unpack(&forged(&archive, key().verifying_key().as_bytes(), &sig), Limits::DEFAULT).is_err());
     }
 
     #[test]

@@ -270,15 +270,21 @@ pub(crate) fn agent_operator_envelope(envelope: &[u8], config: &[u8]) -> Result<
     Ok(())
 }
 
-/// The Host operations a room resident's controller reaches through its own
-/// systemd-activated operator proxy (deploy/hermes/README.md "One uid per
-/// resident"): the request/submit/lookup/query/observation family, provider
-/// continuity and usage quotes, current births, fleet turns and heads, key
-/// rotation status, receipt continuity and carried lookups. Measured from the
-/// controller's and resident's retained custody on J14 and confirmed by
-/// J14's `host-ops.txt` (MINI_TRACE).
+/// The Host operations a room resident's controller, its `bend` verbs and its
+/// hand-off reach through its own systemd-activated operator proxy
+/// (deploy/hermes/README.md "One uid per resident"): request/submit/lookup/
+/// observation/query (1-5), provider continuity and usage quotes (17, 19),
+/// fleet turns with their exact lookup and receipt recovery (96-99, 102), key
+/// rotation status (144), receipt continuity and carried lookups (151, 153),
+/// and the kernel activity a resident answers and delivers through (210-214:
+/// plan, assembly, submit, lookup, view). J14's `host-ops.txt` (MINI_TRACE of
+/// the controller and the resident) used 1-5, 17, 19, 96-98, 144 and 210-214;
+/// 99, 102, 151 and 153 are the recovery reads of those same paths. Codec ops
+/// (7-11) run in the local Host image, never on this route; describe and
+/// profile (0, 6), application current births (30, 31) and the fleet reads the
+/// concierge and fleet CLI use (100, 101, 180) are not a resident's.
 pub(crate) const RESIDENT_OPERATIONS: &[u8] =
-    &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 17, 19, 30, 31, 96, 97, 98, 99, 100, 101, 102, 144, 151, 153, 180];
+    &[1, 2, 3, 4, 5, 17, 19, 96, 97, 98, 99, 102, 144, 151, 153, 210, 211, 212, 213, 214];
 
 /// A resident's operator route admits a request only when the public relay
 /// would (the same framing, body bounds and route refusals) AND its operation
@@ -576,6 +582,10 @@ fn allowed_operator_operation(request: &[u8]) -> bool {
         [151, payload @ ..] => continuity_request(payload),
         [153, payload @ ..] => carried_lookup_request(payload),
         [156, ingress @ ..] => !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME,
+        // The detached author/inspect/signatures verbs as in-session calls: bytes in, bytes out,
+        // no service-side path, no Store effect. Framing only; the verb itself refuses what it
+        // cannot decode.
+        [195..=197, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
         // STOP inspection only joins retained bytes to current verified history.
         [155, pair @ ..] => pair.len() < HOST_MAX_FRAME && exact_pair(pair).is_some(),
         // Read-only signed stream authority checks remain operator-private.
@@ -1689,6 +1699,8 @@ fn queue_job(
     job: HostJob,
 ) -> Result<(), TrySendError<HostJob>> {
     if let Some(displaced) = jobs.try_send(peer, job)? {
+        eprintln!("mini: socket refused queued op {} (its share displaced by uid {peer}): {DISPLACED_REFUSAL}",
+            displaced.request.first().copied().unwrap_or(0));
         let _ = displaced.reply.send(refusal_frame(DISPLACED_REFUSAL));
     }
     Ok(())
@@ -1711,7 +1723,19 @@ struct EnvelopeRules<'a> {
     read_deadline: Duration,
 }
 
+/// The client receives the 254 frame (its bytes unchanged); the operator's log, this
+/// service's stderr, receives the same reason with the peer and, once the envelope is
+/// open, the operation that was refused.
 fn refuse(stream: &mut UnixStream, reason: &str) {
+    refuse_operation(stream, None, reason)
+}
+
+fn refuse_operation(stream: &mut UnixStream, operation: Option<u8>, reason: &str) {
+    let peer = peer_uid(stream).map_or_else(|_| "unknown".to_owned(), |uid| uid.to_string());
+    match operation {
+        Some(operation) => eprintln!("mini: socket refused op {operation} from uid {peer}: {reason}"),
+        None => eprintln!("mini: socket refused uid {peer}: {reason}"),
+    }
     let _ = write_frame(stream, &refusal_frame(reason));
 }
 
@@ -1953,10 +1977,7 @@ fn serve_connection(
     }) {
         Ok(Some(frame)) => frame,
         Ok(None) => return,
-        Err(e) => {
-            eprintln!("mini: refused invalid socket frame: {e}");
-            return refuse(&mut stream, &format!("invalid socket frame: {e}"));
-        }
+        Err(e) => return refuse(&mut stream, &format!("invalid socket frame: {e}")),
     };
     let request_start = match request_from_envelope(&envelope, rules.config_bytes, rules.host_sha256) {
         Ok(request) => envelope.len() - request.len(),
@@ -1964,11 +1985,12 @@ fn serve_connection(
     };
     envelope.drain(..request_start);
     let request = envelope;
+    let operation = request.first().copied();
     if !request_within_bound(&request) {
-        return refuse(&mut stream, "host frame exceeds bound");
+        return refuse_operation(&mut stream, operation, "host frame exceeds bound");
     }
     if let Some(reason) = operation_body_refusal(&request) {
-        return refuse(&mut stream, reason);
+        return refuse_operation(&mut stream, operation, reason);
     }
     if !(if rules.operator.is_some() {
         // The owner-private listener is the single Host endpoint for both
@@ -1976,11 +1998,11 @@ fn serve_connection(
         allowed_operator_operation(&request) || allowed_operation(&request, rules.catalog_enabled)
     } else {
         if let Some(reason) = public_route_refusal(&request) {
-            return refuse(&mut stream, reason);
+            return refuse_operation(&mut stream, operation, reason);
         }
         allowed_operation(&request, rules.catalog_enabled)
     }) {
-        return refuse(&mut stream, "operation unavailable on selected socket");
+        return refuse_operation(&mut stream, operation, "operation unavailable on selected socket");
     }
     let (reply, answer) = mpsc::sync_channel(1);
     // Without a duplicate the job cannot be observed for hangup; it is still
@@ -1994,7 +2016,7 @@ fn serve_connection(
         caller,
     }) {
         Ok(()) => {}
-        Err(TrySendError::Full(_)) => return refuse(&mut stream, "busy: host queue full"),
+        Err(TrySendError::Full(_)) => return refuse_operation(&mut stream, operation, "busy: host queue full"),
         Err(TrySendError::Disconnected(_)) => return,
     }
     // No reply means the Host stopped during this request (or the service is
@@ -2027,6 +2049,21 @@ mod tests {
             assert!(super::allowed_operator_operation(&valid));
             assert!(!super::allowed_operation(&valid, false));
             assert!(!super::allowed_operator_operation(&[operation]));
+            let mut oversized = vec![0; super::HOST_MAX_FRAME + 1];
+            oversized[0] = operation;
+            assert!(!super::allowed_operator_operation(&oversized));
+        }
+    }
+
+    #[test]
+    fn in_session_tools_are_the_operators_alone_and_need_a_payload() {
+        use mini_sdk::host_operations::{TOOL_AUTHOR, TOOL_INSPECT, TOOL_SIGNATURES};
+        for operation in [TOOL_AUTHOR, TOOL_INSPECT, TOOL_SIGNATURES] {
+            let valid = [operation, 4, 0, b'k', b'i', b'n', b'd', b'x'];
+            assert!(super::allowed_operator_operation(&valid), "operator route refused {operation}");
+            assert!(!super::allowed_operation(&valid, false) && !super::allowed_operation(&valid, true),
+                "a member's socket admitted {operation}");
+            assert!(!super::allowed_operator_operation(&[operation]), "{operation} with no payload");
             let mut oversized = vec![0; super::HOST_MAX_FRAME + 1];
             oversized[0] = operation;
             assert!(!super::allowed_operator_operation(&oversized));

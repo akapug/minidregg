@@ -1,0 +1,210 @@
+{
+  "format": "mini-app-interface-v1",
+  "name": "expenseowl",
+  "interfaceVersion": 1,
+  "appId": "vfdve0w8ms2fh5te77evwh9nk1w1jj4thfsuspszzx9kaakrz5ch",
+  "packageId": "07a8207b2d04738817b842953a84790e",
+  "appVersion": "3.15",
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 1048576,
+    "replyBytes": 4194304,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "operations": {
+    "expense.create": {
+      "description": "Record a positive expense in the member\u2019s ledger.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1
+          },
+          "category": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1
+          },
+          "amount": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "date": {
+            "type": "string",
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "name",
+          "category",
+          "amount",
+          "date"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "category": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "amount": {
+            "type": "number"
+          },
+          "date": {
+            "type": "string",
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "category",
+          "amount",
+          "date"
+        ],
+        "additionalProperties": true
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "PUT",
+        "path": [
+          "expense"
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ],
+        "json": {
+          "name": {
+            "arg": "name"
+          },
+          "category": {
+            "arg": "category"
+          },
+          "amount": {
+            "arg": "amount"
+          },
+          "date": {
+            "arg": "date"
+          }
+        }
+      }
+    },
+    "expenses.list": {
+      "description": "Read structured expense records.",
+      "input": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "name": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "category": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "amount": {
+              "type": "number"
+            },
+            "date": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "category",
+            "amount",
+            "date"
+          ],
+          "additionalProperties": true
+        },
+        "maxItems": 10000
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "expenses"
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ]
+      }
+    }
+  },
+  "qualification": [
+    {
+      "id": "create",
+      "op": "expense.create",
+      "args": {
+        "name": {
+          "context": "runId"
+        },
+        "category": "Other",
+        "amount": 3.5,
+        "date": "2026-10-28T12:00:00Z"
+      }
+    },
+    {
+      "id": "read",
+      "op": "expenses.list",
+      "args": {},
+      "assert": [
+        {
+          "contains": {
+            "name": {
+              "context": "runId"
+            },
+            "amount": 3.5,
+            "id": {
+              "result": [
+                "create",
+                "id"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "kind": "member-session"
+  },
+  "sources": [
+    "https://github.com/ocdtrekkie/ExpenseOwl",
+    "scripts/spk-platform/market-writes/b2.sh",
+    "https://github.com/ocdtrekkie/ExpenseOwl/blob/main/internal/api/handlers.go",
+    "https://github.com/ocdtrekkie/ExpenseOwl/blob/main/internal/config/config.go"
+  ],
+  "$defs": {}
+}

@@ -2164,6 +2164,42 @@
       "effect": "none"
     },
     {
+      "code": 195,
+      "symbol": "TOOL_AUTHOR",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "host-tools",
+      "purpose": "Operator-only: the detached `author KIND IN OUT` verb as one in-session call; input and output cross the socket as bytes, never as paths; an output past the frame bound is answered too-large and the caller runs the detached verb",
+      "receiver": "fnDispatch",
+      "effect": "none"
+    },
+    {
+      "code": 196,
+      "symbol": "TOOL_INSPECT",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "host-tools",
+      "purpose": "Operator-only: the detached `inspect KIND IN OUT` verb as one in-session call; bytes in and out, never paths; an output past the frame bound is answered too-large and the caller runs the detached verb",
+      "receiver": "fnDispatch",
+      "effect": "none"
+    },
+    {
+      "code": 197,
+      "symbol": "TOOL_SIGNATURES",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "host-tools",
+      "purpose": "Operator-only: the detached `signatures IN OUT` verb as one in-session call; bytes in and out, never paths",
+      "receiver": "fnDispatch",
+      "effect": "none"
+    },
+    {
       "code": 201,
       "symbol": "RESERVE_RESOURCE_BIRTH_PLAN",
       "status": "active",
@@ -2739,5 +2775,49 @@
     "destination",
     "overwrite",
     "lock-token"
+  ],
+  "dav_header_rules": [
+    {
+      "name": "depth",
+      "methods": [
+        "PROPFIND",
+        "COPY",
+        "LOCK",
+        "REPORT"
+      ],
+      "values": [
+        "0",
+        "1",
+        "infinity"
+      ]
+    },
+    {
+      "name": "destination",
+      "methods": [
+        "COPY",
+        "MOVE"
+      ],
+      "values": []
+    },
+    {
+      "name": "overwrite",
+      "methods": [
+        "COPY",
+        "MOVE"
+      ],
+      "values": [
+        "T",
+        "F",
+        "t",
+        "f"
+      ]
+    },
+    {
+      "name": "lock-token",
+      "methods": [
+        "UNLOCK"
+      ],
+      "values": []
+    }
   ]
 }

@@ -953,21 +953,50 @@ class Journey:
         finally:
             p.terminate();p.wait(timeout=30)
 
-    def probe(self):
+    def stop_qualified_application(self):
+        """Retire the test application only after all paid answer rows settled."""
+        self.fixed('controller-stop')
+        journal=read(self.fixed('controller-journal'))
+        fields=('applicationApiAttempt','dispatchAttempt','dispatchHold','dispatchPending',
+                'foregroundAttempt','parentHold','toolHold','toolPending','pending','settlementDue',
+                'providerAttempt','providerHold','providerPending','child','roomAttempt','workspaceAttempt')
+        if any(journal.get(name) is not None for name in fields):
+            raise ValueError('application teardown retains unsettled controller custody')
+        receipt=self.run('app-stop',[self.bins/'spk-host','grain','stop',self.profile,'9890001'],timeout=2400)
+        value=read(receipt)
+        if (value.get('protocol')!='mini-spk-grain-stop-v1' or value.get('app')!='9890001'
+                or value.get('unit')!=self.application_unit or value.get('activeState') not in ('inactive','failed')):
+            raise ValueError('native application STOP did not identify the stopped test unit')
+        return receipt
+
+    @staticmethod
+    def validate_refusal_resume(value,provider_lines):
+        if (not isinstance(value,dict) or set(value)!={'askNumber','paidBefore'}
+                or not isinstance(value['askNumber'],str) or not re.fullmatch('[1-9][0-9]*',value['askNumber'])
+                or type(value['paidBefore']) is not int or value['paidBefore']<0 or provider_lines):
+            raise ValueError('retained refusal continuation requires exact ask and no provider dispatch')
+
+    def probe(self,resume_refusal=None):
         question='Who wrote Leaves of Grass?';oraclelog=self.root/'provider.oracle.jsonl'
         prior_operation=None;asks=set()
         def transcript():
             path=self.shell('alice','tail --in lab --json -n 200')
             return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
-        def turn(label,answer):
+        def turn(label,answer,resumed=None):
             nonlocal prior_operation
             old_lines=oraclelog.read_text().splitlines() if oraclelog.exists() else []
-            before=self.paid();self.shell('bob','ask lab oracle: '+question)
+            if resumed is None:
+                before=self.paid();self.shell('bob','ask lab oracle: '+question)
+            else:
+                self.validate_refusal_resume(resumed,old_lines)
+                before=resumed['paidBefore']
             rows=transcript()
             selected=[r for r in rows if r.get('author')==self.subjects['bob'] and r.get('to')==self.subjects['hermes']
                       and question in r.get('text','')]
             if not selected:raise ValueError('selected room ask absent from signed history')
             number=str(selected[-1]['n'])
+            if resumed is not None and number!=resumed['askNumber']:
+                raise ValueError('retained refusal ask differs from signed room history')
             if number in asks:raise ValueError('room ask did not create a fresh entry')
             asks.add(number)
             self.resident(label)
@@ -992,17 +1021,18 @@ class Journey:
             if operation==prior_operation:raise ValueError('fresh turn reused an earlier native operation')
             prior_operation=operation
             return path
-        turn('refused',False);self.web('refused',False)
+        turn('refused-resumed' if resume_refusal is not None else 'refused',False,resume_refusal);self.web('refused',False)
         self.shell('alice','tariff lab set hermes/tools 8');self.web('granted',True)
         evidence=turn('answered',True)
         self.fixed('controller-stop');self.start_controller()
         turn('controller-restarted',True)
+        stopped=self.stop_qualified_application()
         write(self.root/'result.json',{'protocol':'mini-j14-oracle-result-v1','passed':True,
             'store':self.broker['store'],'controllerUid':self.layout['controllerUid'],'operatorUid':os.getuid(),
             'rows':['same-store-provision','native-grain-create-dispatch','room-refusal','resident-page-grant-state',
                     'native-answer-and-settlement','paid-room-reply','controller-restart-answer'],
             'residentPageEvidence':'HTTP/HTML; rendered browser is covered separately',
-            'answerEvidence':str(evidence),'applicationUnit':self.application_unit,
+            'answerEvidence':str(evidence),'applicationUnit':self.application_unit,'applicationStop':str(stopped),
             'applicationRestart':'covered by the separate shared-data lifetime recovery journey'})
         table=self.root/'j14.tsv';table.write_text('step\tverdict\n'+''.join(row+'\tok\n' for row in read(self.root/'result.json')['rows']))
         print(table)

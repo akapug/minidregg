@@ -3312,8 +3312,7 @@ def advance {config : Config} (opened : Opened config) (derived : Derived config
 and `audit` judge exactly what the receiving loop judged. -/
 theorem advance_judged {config : Config} {opened : Opened config} {derived : Derived config opened}
     {next : Durable} (advanced : advance opened derived = .ok next) :
-    Kernel.TailBound.gate config.systemCell (opened.durable.height + 1) opened.durable.chain
-      opened.durable.snapshot derived.intent = .ok () := by
+    Kernel.TailBound.gate config.systemCell opened.durable opened.durable.snapshot derived.intent = .ok () := by
   revert advanced
   unfold advance
   simp only
@@ -4027,11 +4026,16 @@ def ExactReadback.ofAppended {config : Config} {oldTarget : Durable}
     (appended : DurableReceiverIO.Appended ResourceBirthCodec.rootBytes old.opened.durable
       derived.intent) :
     Except String {readback : ExactReadback config old // readback.derived = derived} :=
-  match prepared : DurableCheckpoint.prepare old.opened.durable.image old.opened.durable.baseHeight
-      old.opened.durable.base old.opened.durable.snapshot old.opened.durable.withinLog
-      old.opened.durable.resumed derived.intent with
+  -- The engine's prepare (`Loaded.prepare`, the one the receiver ran before the append) is the
+  -- protocol's prepare at the loaded snapshot (`Loaded.prepare_eq`); the snapshot-level executor is
+  -- not re-run here.
+  match enginePrepared : old.opened.durable.prepare derived.intent with
   | .inr _ => .error "appended intent no longer prepares at the verified image"
   | .inl ready =>
+      have prepared : DurableCheckpoint.prepare old.opened.durable.image old.opened.durable.baseHeight
+          old.opened.durable.base old.opened.durable.snapshot old.opened.durable.withinLog
+          old.opened.durable.resumed derived.intent = .inl ready :=
+        (DurableReceiverIO.Loaded.prepare_eq old.opened.durable derived.intent).symm.trans enginePrepared
       match judged : derived.judge with
       | .error reason => .error s!"appended intent fails the tail law: {repr reason}"
       | .ok certificate =>

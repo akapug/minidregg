@@ -18,7 +18,7 @@ domain (`physicalId`), holding one value:
   no receiver changes it.
 
 **The system law** (`law`) is Mina's backpressure moved off the market onto the
-node's own checkpoint chain (COMPUTE.md §5.2, §6):
+node's own checkpoint chain (docs/COMPUTE.md §5.2, §6):
 
     leSlotsOff head/height certified/height L
 

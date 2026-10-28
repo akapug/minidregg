@@ -1,14 +1,22 @@
 # Objective Bend Core4: proof-engineering target structure
 
-Lane PROOF-ENG, 2026-10-04. Scope: `Theory/ObjectiveBend*` (definition modules in the
-default build; proof modules in the `ObjectiveProofs` target). Evidence tags: READ = read
-at source, MEASURED = counted in this clone, DESIGN = this note's decision.
+Scope: `Theory/ObjectiveBend*` (definition modules in the default build; proof modules in the
+`ObjectiveProofs` target). Evidence tags: READ = read at source, MEASURED = counted, DESIGN =
+this note's decision.
+
+**Built from §1(a):** the shared step split `Theory/ObjectiveBendStepCases.lean` (used by
+`ObjectiveBendDemandPreservation`, `ObjectiveBendDemandAdequacy` and `ObjectiveBendLedgerPoles`)
+and the per-constructor Preservation modules `Theory/ObjectiveBendDemandPreservation/Base.lean`
+and `Cases/{Activities,Arithmetic,Functions,Pairs,Records,Sums}.lean`. §0 describes the
+structure these replace.
 
 ## 0. What makes a new constructor expensive (READ/MEASURED)
 
-* **Positional recursors.** `Theory/ObjectiveBendDemandPreservation.lean` runs
+* **Positional recursors.** Before the split, `Theory/ObjectiveBendDemandPreservation.lean` ran
   `refine PartialTyping.rec (motive_1 := …) (motive_2 := …) (motive_3 := …) ?_ … ?_ source`
-  fourteen times, each with 29 positional `?_` and 29 positional bullets. Most are
+  fourteen times, each with 29 positional `?_` and 29 positional bullets. On this tree the
+  recursor is applied 16 times, spread over `Base.lean`, the `Cases/` modules and
+  `ObjectiveBendDemandTyping.lean`. Most are
   inversion lemmas where one or two constructors matter and the rest are
   `intros; trivial`. A new typing rule means inserting a bullet at the right
   *position* in all fourteen, including the ~twelve where it is irrelevant.

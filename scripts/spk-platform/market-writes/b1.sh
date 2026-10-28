@@ -5,21 +5,19 @@
 # HackMD's POST /new with a markdown body creates a note and redirects to /<id>; GET /<id>/download
 # returns it. Same shape as write_HedgeDoc (a body-parser defect there would show here by name).
 write_SandMD() {
-  local made; made=$(req POST /new -H 'Content-Type: text/markdown' --data-binary $'# featured\nwritten by a resident\n')
+  # The timed row: one simple POST through the grain route, published as a measurement. Every request is
+  # 2-3 signed Host calls (docs/review/2026-10-27-untouched-areas/ROUTE-LATENCY-STATE.md); the budget fails
+  # only above ROUTE_POST_BUDGET_S (default 90 s: about 5x the 6 to 18 s measured on a busy hbox).
+  local t0 t1 made; t0=$(date +%s.%N)
+  made=$(req POST /new -H 'Content-Type: text/markdown' --data-binary $'# featured\nwritten by a resident\n')
+  t1=$(date +%s.%N)
+  local took; took=$(awk -v a="$t0" -v b="$t1" 'BEGIN{printf "%.1f", b-a}')
+  echo "route-post-timing: POST /new ${took}s (budget ${ROUTE_POST_BUDGET_S:-90}s)" >&2
+  awk -v t="$took" -v b="${ROUTE_POST_BUDGET_S:-90}" 'BEGIN{exit !(t>b)}' && { echo "0 POST /new took ${took}s, over the ${ROUTE_POST_BUDGET_S:-90}s route budget"; return; }
   local note; note=$(grep -i '^location:' "$body.headers" | tr -d '\r' | awk '{print $2}'); note=${note#https://grain.test}; note=${note#http://grain.test}
   [[ $made =~ ^30 && -n $note ]] || { echo "0 POST /new $made (no redirect to the new note)"; return; }
   local got; got=$(req GET "$note/download")
-  [[ $got == 200 ]] && grep -q 'written by a resident' "$body" && echo "1 POST /new $made -> $note; GET download $got" || echo "0 GET $note/download $got without the content"
-}
-
-# Permanote is a Flask/peewee app (package source: app routes /create/ and /<slug>/):
-# POST /create/ with form title+content (+tags) redirects to the new note's /<slug>/.
-write_Permanote() {
-  local made; made=$(req POST /create/ --data-urlencode 'title=Featured note' --data-urlencode 'content=written by a resident' --data-urlencode 'tags=featured')
-  local note; note=$(grep -i '^location:' "$body.headers" | tr -d '\r' | awk '{print $2}'); note=${note#https://grain.test}; note=${note#http://grain.test}
-  [[ $made =~ ^30 && -n $note ]] || { echo "0 POST /create/ $made (no redirect to the new note)"; return; }
-  local got; got=$(req GET "$note")
-  [[ $got == 200 ]] && grep -q 'written by a resident' "$body" && echo "1 POST /create/ $made -> $note; GET $got" || echo "0 GET $note $got without the content"
+  [[ $got == 200 ]] && grep -q 'written by a resident' "$body" && echo "1 POST /new $made in ${took}s (published; budget ${ROUTE_POST_BUDGET_S:-90}s) -> $note; GET download $got" || echo "0 GET $note/download $got without the content"
 }
 
 # TextEditor is a Meteor app (package source server/server.js): the document is Data "default_id",

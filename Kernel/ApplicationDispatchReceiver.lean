@@ -202,11 +202,12 @@ def refusalAtTip? {config : Config} {target : Durable}
   match selected : ApplicationDispatchAdmission.selectCommand ingress with
   | none => none
   | some selection =>
-      if absent : old.opened.durable.image.accepted.findIdx? (fun record =>
-          record.transactionId == DeclaredResourceController.transactionId ingress.dispatch.domain
-            ingress.dispatch.semantics
-            (ApplicationDispatchCommand.command ingress.dispatch selection ingress.parent)) = none then
-        some ⟨selection, selected, absent⟩
+      -- The call's transaction id once, then the Store's cached first-index
+      -- table (`Loaded.firstIndex_eq`), never a re-derivation per accepted record.
+      let transactionId := DeclaredResourceController.transactionId ingress.dispatch.domain
+        ingress.dispatch.semantics (ApplicationDispatchCommand.command ingress.dispatch selection ingress.parent)
+      if absent : old.opened.durable.firstIndex transactionId = none then
+        some ⟨selection, selected, by rw [← DurableReceiverIO.Loaded.firstIndex_eq]; exact absent⟩
       else none
 
 def RefusalAtTip.withFreshTip {config : Config} {target : Durable}

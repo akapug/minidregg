@@ -122,6 +122,8 @@ class Attachment:
         if self.contract.get("protocol") != "mini-application-attachment-v1":
             raise ValueError("application attachment protocol absent")
         c, paths = self.contract, self.contract["paths"]
+        if c.get("inspectionMode", "served") not in ("served", "detached"):
+            raise ValueError("inspectionMode must select served or detached explicitly")
         required = ("mini", "host", "spkHost", "hostConfig", "participantSocket", "operatorSocket", "profile",
                     "repo", "controllerConfig", "controllerHome", "outputDir")
         for field in required:
@@ -196,6 +198,9 @@ class Attachment:
             files["publicKey/" + signer["keyId"]] = signer["publicKeyPath"]
         pinned = {"contract": c, "files": files, "sha256": {key: sha(path) for key, path in files.items()}}
         if self.root.exists():
+            payer_repair = self.root / "repair-payer-custody"
+            if payer_repair.exists() and not (payer_repair / "complete.json").is_file():
+                raise ValueError("payer custody successor is incomplete; resume that exact repair first")
             repair = self.root / "repair-prepared-bootstrap"
             if repair.exists() and not (repair / "complete.json").is_file():
                 raise ValueError("prepared bootstrap repair is incomplete; resume that exact repair first")
@@ -618,7 +623,7 @@ class Attachment:
         # then authority; ApplicationDispatchAuthoring adds four observations.
         app_signers = [pin(role, index, "controller") for role, index in
                        [(4, 0), (4, 1), (8, 0), (8, 1), (1, 0), (9, 0), (9, 1), (9, 2), (9, 3)]]
-        payer = [pin(role, 0, "dispatch") for role in (4, 8, 1)]
+        payer = [pin(role, 0, "dispatch") for role in (4, 1)]
         for signer in payer:
             del signer["seedPath"]
         pins = {"controllerRouteName": self.names["application"], "socketPath": layout["listenerSocket"],
@@ -633,8 +638,7 @@ class Attachment:
         pins_file = self.calls / "operator-pins.json"
         write(pins_file, pins)
         route_dir = self.calls / "source-route"
-        self.call("render-custody", ["sh", repo / "scripts/spk-platform/prepare-lifetime-route.sh",
-            "--served", self.mini, self.operator, sha(self.mini), "--custody-only",
+        self.call("render-custody", ["sh", repo / "scripts/spk-platform/prepare-lifetime-route.sh", *self.inspection_args(), "--custody-only",
             self.host, self.config, grant, lookups[-1], pins_file, route_dir, sha(self.host),
             self.allocation_path, a["route"]])
         request = {"protocol": "mini-spk-grain-agent-route-v1", "name": self.names["route"], "signedApiPath": "/",
@@ -651,6 +655,14 @@ class Attachment:
             "grantAttempt": str(grant), "lookup": str(lookups[-1]), "request": str(request_file),
             "registration": read(self.calls / "route-register.stdout")})
         return self.root / "registered-agent-route.json"
+
+    def inspection_args(self):
+        # New deployments use their already running pinned Host. Retained old
+        # cohorts explicitly select detached inspection in their pinned contract;
+        # unsupported served inspection never silently falls back to replay.
+        if getattr(self, "contract", {}).get("inspectionMode", "served") == "detached":
+            return []
+        return ["--served", self.mini, self.operator, sha(self.mini)]
 
     def activate(self, repo, start_result):
         start = read(start_result)
@@ -719,7 +731,7 @@ class Attachment:
         write(pins_file, pins)
         routes = self.calls / "source-route"
         self.call("render-controller-route", ["sh", repo / "scripts/spk-platform/prepare-lifetime-route.sh",
-            "--served", self.mini, self.operator, sha(self.mini), self.host, self.config, registration["grantAttempt"], registration["lookup"], pins_file,
+            *self.inspection_args(), self.host, self.config, registration["grantAttempt"], registration["lookup"], pins_file,
             routes, sha(self.host), self.allocation_path, a["route"]])
         if (routes / "resident-custody-v3.json").read_bytes() != (Path(registration["sourceRoute"]) / "resident-custody-v3.json").read_bytes():
             raise ValueError("controller route reinspection changed registered resident custody")

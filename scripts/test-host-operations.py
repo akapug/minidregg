@@ -47,6 +47,14 @@ class GateTests(unittest.TestCase):
         result = ops.check(self.root)
         self.assertGreater(result["active"], 100)
 
+    def test_dav_header_rules_refuse_unknown_methods(self):
+        self.registry(lambda data: data["dav_header_rules"][0]["methods"].append("ACL"))
+        self.rejects("invalid DAV method/header rule")
+
+    def test_dav_generated_vocabulary_cannot_drift(self):
+        self.edit("Effects/Revival/HostedDav.lean", '"PROPFIND", "COPY"', '"PROPFIND", "MOVE"')
+        self.rejects("generated hosted DAV vocabulary drift")
+
     def test_duplicate_reservation_cannot_take_job_money_161(self):
         def mutate(data):
             entry = copy.deepcopy(next(e for e in data["operations"] if e["code"] == 164))

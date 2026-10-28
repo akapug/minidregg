@@ -156,13 +156,14 @@ impl Record {
         if self.phase != Phase::Running {
             return Err(invalid("app journal is not Running"));
         }
-        let current = UnitInstance::current(self.unit())?;
+        // One manager inspection answers both the instance identity and the liveness checks.
+        let manager = systemd_show(self.unit())?;
+        let current = UnitInstance::current_in(self.unit(), &manager)?;
         if self.invocation_id.as_deref() != Some(current.invocation_id.as_str())
             || self.control_group.as_deref() != Some(current.control_group.as_str())
         {
             return Err(invalid("resident app unit invocation drift"));
         }
-        let manager = systemd_show(self.unit())?;
         if property(&manager, "ActiveState")? != "active"
             || !matches!(property(&manager, "Job")?, "0" | "")
             || property(&manager, "MainPID")?
@@ -391,7 +392,7 @@ fn bounded_systemctl(args: &[&str], deadline: Duration) -> io::Result<Output> {
                 "systemd manager response uncertain",
             ));
         }
-        std::thread::sleep(Duration::from_millis(10));
+        crate::dispatch_native::wait_for_exit(&child, end);
     }
 }
 
@@ -409,6 +410,11 @@ fn property<'a>(output: &'a str, name: &str) -> io::Result<&'a str> {
 
 impl UnitInstance {
     fn current(unit: &str) -> io::Result<Self> {
+        Self::current_in(unit, &systemd_show(unit)?)
+    }
+
+    /// As `current`, against an inspection (`systemd_show`) the caller already holds.
+    fn current_in(unit: &str, manager: &str) -> io::Result<Self> {
         let invocation_id =
             std::env::var("INVOCATION_ID").map_err(|_| invalid("missing systemd InvocationID"))?;
         let cgroup = crate::os::self_cgroup()?;
@@ -422,12 +428,11 @@ impl UnitInstance {
             control_group,
         };
         instance.validate(unit)?;
-        let manager = systemd_show(unit)?;
-        if property(&manager, "Id")? != unit
-            || property(&manager, "LoadState")? != "loaded"
-            || property(&manager, "InvocationID")? != instance.invocation_id
-            || property(&manager, "ControlGroup")? != instance.control_group
-            || property(&manager, "MainPID")?
+        if property(manager, "Id")? != unit
+            || property(manager, "LoadState")? != "loaded"
+            || property(manager, "InvocationID")? != instance.invocation_id
+            || property(manager, "ControlGroup")? != instance.control_group
+            || property(manager, "MainPID")?
                 .parse::<u32>()
                 .map_err(|_| invalid("invalid systemd MainPID"))?
                 != std::process::id()

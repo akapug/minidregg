@@ -1,4 +1,4 @@
-//! `mini join --solana | --wait | --renew`: enrol yourself by paying (PAY.md §11.6).
+//! `mini join --solana | --wait | --renew`: enrol yourself by paying (docs/PAY.md §11.6).
 //!
 //!   mini join --solana --host HOST --config PINNED-CONFIG.json (--socket SOCKET | --view PAY-VIEW.bin)
 //!                      --enrol ENROL.json --dir NEW-JOIN-DIR [--key MINI.key] [--ssh-key KEY] [--name N]
@@ -27,7 +27,7 @@
 //! memo carries no next-key commitment; this enrollment has no prerotation promise.
 
 use super::*;
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, VerifyingKey};
 use sha2::{Sha256, Sha512};
 
 const POSSESSION_TAG: &[u8] = b"DREGG/PAY/ENROL/POSSESSION/v1";
@@ -110,6 +110,33 @@ pub(crate) fn encode_memo(memo: &Memo) -> String {
 }
 
 /// `miniFrame`: what the Mini key signs.
+/// Both possessions of a join memo, strictly. A small-order key verifies a signature made without any
+/// secret (identity key, R = identity, S = 0 approves every message), and plain `verify` accepts it, so a
+/// weak key is refused by name and the check is `verify_strict`.
+fn verify_possessions(
+    ssh_key: &[u8; 32],
+    ssh_signed: &[u8],
+    ssh_sig: &[u8; 64],
+    mini_key: &[u8; 32],
+    frame: &[u8],
+    mini_sig: &[u8; 64],
+) -> Result<()> {
+    let ssh = VerifyingKey::from_bytes(ssh_key)
+        .map_err(|_| "sshSigInvalid: the ssh public key is not a curve point".to_string())?;
+    if ssh.is_weak() {
+        return Err("sshSigInvalid: weak ssh public key".into());
+    }
+    ssh.verify_strict(ssh_signed, &Signature::from_bytes(ssh_sig))
+        .map_err(|_| "sshSigInvalid: the ssh signature does not verify over the enrollment statement".to_string())?;
+    let mini = VerifyingKey::from_bytes(mini_key)
+        .map_err(|_| "miniSigInvalid: the Mini public key is not a curve point".to_string())?;
+    if mini.is_weak() {
+        return Err("miniSigInvalid: weak Mini public key".into());
+    }
+    mini.verify_strict(frame, &Signature::from_bytes(mini_sig))
+        .map_err(|_| "miniSigInvalid: the Mini signature does not verify".to_string())
+}
+
 pub(crate) fn possession_frame(mint: &[u8; 32], address: &[u8; 32], ssh_key: &[u8; 32]) -> Vec<u8> {
     [POSSESSION_TAG, mint.as_slice(), address.as_slice(), &ssh_blob(ssh_key)].concat()
 }
@@ -615,21 +642,14 @@ fn solana(common: &Common, pin: &Pin, key: Option<PathBuf>, ssh_key: Option<Path
 
     // Both possessions verify here before anything is printed: a broken memo would cost the
     // friend a payment that lands in the journal.
-    VerifyingKey::from_bytes(&ssh_key)
-        .and_then(|ssh| {
-            ssh.verify(
-                &sshsig_signed_data(&sshsig_message(&terms.mint, &terms.address, &mini_key)),
-                &Signature::from_bytes(&ssh_sig),
-            )
-        })
-        .map_err(|_| "sshSigInvalid: the ssh signature does not verify over the enrollment statement")?;
-    signing
-        .verifying_key()
-        .verify(
-            &possession_frame(&terms.mint, &terms.address, &ssh_key),
-            &Signature::from_bytes(&mini_sig),
-        )
-        .map_err(|_| "miniSigInvalid: the Mini signature does not verify")?;
+    verify_possessions(
+        &ssh_key,
+        &sshsig_signed_data(&sshsig_message(&terms.mint, &terms.address, &mini_key)),
+        &ssh_sig,
+        &mini_key,
+        &possession_frame(&terms.mint, &terms.address, &ssh_key),
+        &mini_sig,
+    )?;
     let text = encode_memo(&memo);
     host_reads_back(common, &memo, &text, &scratch)?;
 
@@ -1089,7 +1109,27 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn weak_keys_cannot_forge_either_possession() {
+        let mut identity = [0u8; 32];
+        identity[0] = 1;
+        let mut forged = [0u8; 64];
+        forged[0] = 1; // R = identity, S = 0
+        let real = SigningKey::from_bytes(&[3u8; 32]);
+        let real_key = real.verifying_key().to_bytes();
+        let frame = b"some frame";
+        let signed = b"some signed data";
+        let good = real.sign(frame).to_bytes();
+        let good_ssh = real.sign(signed).to_bytes();
+        assert!(verify_possessions(&real_key, signed, &good_ssh, &real_key, frame, &good).is_ok());
+        let weak_ssh = verify_possessions(&identity, signed, &forged, &real_key, frame, &good).unwrap_err();
+        assert!(weak_ssh.contains("weak ssh public key"), "{weak_ssh}");
+        let weak_mini = verify_possessions(&real_key, signed, &good_ssh, &identity, frame, &forged).unwrap_err();
+        assert!(weak_mini.contains("weak Mini public key"), "{weak_mini}");
+    }
     use super::*;
+    use ed25519_dalek::{Signer, SigningKey, Verifier};
 
     #[test]
     fn enrollment_identity_is_not_ready_after_lease_expiry() {

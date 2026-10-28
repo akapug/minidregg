@@ -6,6 +6,8 @@
 #[cfg(target_os = "linux")]
 mod agent_api_custody;
 #[cfg(target_os = "linux")]
+mod hosted_conversation;
+#[cfg(target_os = "linux")]
 mod agent_api_lifetime_v3;
 #[cfg(target_os = "linux")]
 mod agent_api_lifetime_reverse_v3;
@@ -108,6 +110,10 @@ mod operation_ledger;
 /// Host's reply marker by these names only.
 #[path = "../../host-operations.rs"]
 pub mod host_operations;
+/// One inode's identity and the once-per-identity file digest, shared with grain-runtime.
+#[cfg(target_os = "linux")]
+#[path = "../../file_identity.rs"]
+mod file_identity;
 mod resident_launch;
 #[cfg(target_os = "linux")]
 pub mod resident_service;

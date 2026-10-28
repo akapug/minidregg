@@ -1,0 +1,62 @@
+{
+  "format": "mini-app-interface-v1",
+  "name": "hedgedoc",
+  "interfaceVersion": 1,
+  "appId": "4uda6a9yfxk4v3x2mpxjdn2md9y54tj104091480qjr8h758u4dh",
+  "packageId": "ff642cdb65178a6a2dff96ca15dd7028",
+  "appVersion": "1.9.8",
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 16384,
+    "replyBytes": 1048576,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "$defs": {},
+  "operations": {
+    "note.read": {
+      "description": "Read persisted markdown by grain-scoped note ID. HTTP body writes are defective in this pinned package; socket OT mutation remains unqualified, not advertised by this declaration.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "note": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          }
+        },
+        "required": [
+          "note"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string",
+        "maxLength": 1048576
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          {
+            "arg": "note",
+            "encoding": "segment"
+          },
+          "/download"
+        ],
+        "decode": "text",
+        "status": [
+          200
+        ]
+      }
+    }
+  },
+  "qualification": [],
+  "auth": {
+    "kind": "member-route"
+  },
+  "sources": [
+    "http://github.com/zenhack/sandstorm-hedgedoc",
+    "scripts/spk-platform/market-writes/rt.sh:26"
+  ]
+}

@@ -1,7 +1,7 @@
 /-
 # Kernel.WorldRoot -- the world root: the compressed trie over the world's slot roots
 
-DATAMODEL §3.2/§3.4, step C1.  The world root is `Theory.AuthTrie`'s compressed
+docs/DATAMODEL.md §3.2/§3.4, step C1.  The world root is `Theory.AuthTrie`'s compressed
 trie over the world's slots (`Key.system` and `Key.cell c`), each slot holding
 its root.  A key alone under a prefix is a leaf at the highest level where it is
 alone; a branch is hashed only over two or more keys.  `Kernel.World` left the

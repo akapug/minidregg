@@ -90,15 +90,24 @@ pub(crate) fn poll_once(
     };
     let frame = match agent_api_wire::read_frame(&mut stream) {
         Ok(frame) => frame,
-        Err(_) => return Ok(true),
+        Err(error) => {
+            eprintln!("spk-host: agent v3 connection closed unread: {error}");
+            return Ok(true);
+        }
     };
     let request = match Request::parse(&frame) {
         Ok(request) => request,
-        Err(_) => return Ok(true),
+        Err(error) => {
+            eprintln!("spk-host: agent v3 request refused unparsed: {error}");
+            return Ok(true);
+        }
     };
     let watch = match CallerWatch::start(&stream) {
         Ok(watch) => watch,
-        Err(_) => return Ok(true),
+        Err(error) => {
+            eprintln!("spk-host: agent v3 operation not started: caller watch: {error}");
+            return Ok(true);
+        }
     };
     // On a failed dispatch, close the socket. Before a source reserve, no
     // operation fingerprint exists; after it, an error may mean native or
@@ -109,6 +118,11 @@ pub(crate) fn poll_once(
     };
     match resident.handle_once(&stream, request, &watch.cancelled) {
         Ok(reply) => {
+            match &reply {
+                Reply::RefusedV3 { code, .. } => eprintln!("spk-host: lifetime agent operation {operation} refused: {code}"),
+                Reply::UncertainV3 { phase, .. } => eprintln!("spk-host: lifetime agent operation {operation} uncertain at {phase}"),
+                _ => {}
+            }
             if let Ok(bytes) = serde_json::to_vec(&reply) {
                 if bytes.len() <= wire::MAX_REPLY_FRAME {
                     let _ = agent_api_wire::write_frame(&mut stream, &bytes);
@@ -216,8 +230,10 @@ impl ResidentLifetimeAgent<'_> {
             path_and_query: &path_and_query,
             ordered_headers: &ordered_headers,
             body: &body,
-            route: Route::Api {
-                signed_path: self.signed_api_path,
+            route: match &binding.route {
+                Some(crate::agent_api_lifetime_v3::HostedRoute::Web { .. }) => Route::Browser,
+                Some(crate::agent_api_lifetime_v3::HostedRoute::Api { signed_prefix }) => Route::Api { signed_path: signed_prefix },
+                None => Route::Api { signed_path: self.signed_api_path },
             },
         };
         let (app_path, _) = app_route_path(&http)?;
@@ -289,8 +305,12 @@ impl ResidentLifetimeAgent<'_> {
         )?;
         write_new(&client_dir, "op76-fresh-v3.json", b"fresh-installed-op76")?;
         let matched = matched_v3(&permit, &reserve, method, &app_path, query)?;
+        let web_origin = match &binding.route {
+            Some(crate::agent_api_lifetime_v3::HostedRoute::Web { origin }) => origin.as_str(),
+            _ => "",
+        };
         let physical =
-            physical_web_input(&matched, &http, self.display_name, self.preferred_handle, "")?;
+            physical_web_input(&matched, &http, self.display_name, self.preferred_handle, web_origin)?;
         caller_still_present(stream, cancelled)?;
         let record = self
             .journal
@@ -349,13 +369,21 @@ impl ResidentLifetimeAgent<'_> {
                 .finish_dispatch_uncertain_released(&identity, fence);
             return Err(error);
         }
-        let (web_reply, success_fence) = match prequeue.dispatch(
-            physical.binding,
-            physical.request,
-            MAX_APP_RESPONSE,
-            Duration::from_secs(30),
-            Arc::clone(cancelled),
-        ) {
+        let delivery = if method == crate::hosted_conversation::METHOD {
+            let api_prefix = match &binding.route {
+                Some(crate::agent_api_lifetime_v3::HostedRoute::Web { .. }) => None,
+                Some(crate::agent_api_lifetime_v3::HostedRoute::Api { signed_prefix }) => Some(signed_prefix.clone()),
+                None => Some(self.signed_api_path.to_owned()),
+            };
+            prequeue.dispatch_hosted(physical.binding,physical.request,MAX_APP_RESPONSE,
+                Duration::from_secs(30),Arc::clone(cancelled),crate::hosted_conversation::Custody {
+                    directory:client_dir.clone(),api_prefix,
+                })
+        } else {
+            prequeue.dispatch(physical.binding,physical.request,MAX_APP_RESPONSE,
+                Duration::from_secs(30),Arc::clone(cancelled))
+        };
+        let (web_reply, success_fence) = match delivery {
             Ok(reply) => reply,
             Err(failure) => {
                 let (error, fence) = failure.into_parts();
@@ -490,7 +518,7 @@ impl ResidentLifetimeAgent<'_> {
             || u32::from_le_bytes(outer[..4].try_into().unwrap()) as usize + 4 != outer.len()
             || outer[4] != 76
             || &outer[5..] != committed_bytes.as_slice()
-            || field(&committed, "frameHex")? != hex(&committed_bytes)
+            || !crate::canonical::hex_matches(field(&committed, "frameHex")?, &committed_bytes)
         {
             return Err(refused("lifetime recovered fresh op76 frame drift"));
         }

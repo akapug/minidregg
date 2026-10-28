@@ -19,9 +19,18 @@ controller-tool STORE HELPER REQUEST_ID TOOL ARGUMENTS_JSON
 controller-tool-result STORE HELPER REQUEST_ID
 controller-tool-ack STORE HELPER REQUEST_ID
 controller-journal STORE HELPER
+controller-status STORE HELPER
 controller-service-logs STORE HELPER
 controller-consent-storage STORE HELPER
 controller-runtime-upgrade STORE HELPER OPERATOR_BINARY
+controller-mini-upgrade STORE HELPER OPERATOR_BINARY
+controller-consent-memory STORE HELPER MIB
+controller-status-proxy-upgrade STORE HELPER OPERATOR_MINI
+controller-worker-runtime-access STORE HELPER
+controller-worker-observe STORE HELPER
+controller-reconcile STORE HELPER worker-audited
+controller-reconcile STORE HELPER parent-audited
+controller-reconcile-prompt STORE HELPER PROMPT_OPERATION_ID
 controller-enroll STORE HELPER REQUEST_FILE
 controller-export STORE HELPER
 controller-reserve-export STORE HELPER DISPATCH_ATTEMPT_ID
@@ -201,6 +210,36 @@ remain preserved and refuse. It preserves
 identity, configuration, journal, keys, other binaries and unit definitions.
 This installs explicitly selected operator code; a matching source/qualified
 native build remains a separate deployment obligation.
+
+`controller-status` produces a stopped-state proof: all controller units and
+the registered public listener must be stopped. Capture it before restarting
+the world's public services. It refuses a running listener even when the
+controller itself is stopped; use `controller-service-logs` for service
+diagnostics instead of treating this proof command as a live health check.
+
+`controller-mini-upgrade` applies the same stopped, archived replacement to
+the controller's Mini executable and private home copy. The separate
+`controller-status-proxy-upgrade` selects an auxiliary pinned Mini for the
+worker status proxy: its second activated socket accepts status reads while
+the ordinary public socket keeps its existing role. `controller-consent-memory`
+sets only the stopped consent service's memory ceiling, in 256 MiB increments
+from 256 to 16384 MiB. These operations retain exact old/new stage and unit
+or executable bytes; they preserve native history and do not restart services.
+
+Worker controllers need their own user manager to launch sandboxed workers.
+`controller-worker-runtime-access` exposes only `/run/user/UID` in the service's
+private home/runtime view. `controller-worker-observe` derives the exact worker
+unit from the retained journal and reports the manager's observed state and
+the unchanged journal hash. Observation alone does not settle a reservation.
+
+After the native worker, parent settlement and external-effects audits have
+closed every retained obligation, `controller-reconcile-prompt` can close the
+exact failed resident prompt without replaying it. It preserves the original
+undecided record and writes a separate resolution binding that record, the
+native audit chain and the original reserve evidence. The result means there
+is no deliverable answer; it does not assert that no effects occurred. A missing
+or unrelated audit refuses. The resident then consumes that terminal result
+through its normal recovery path before selecting another request.
 
 After `controller-config` installs and retains a target configuration,
 `controller-enroll` runs only the native

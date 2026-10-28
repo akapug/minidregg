@@ -1,39 +1,55 @@
-# Start here (2026-10-26)
+# Start here
 
-**What the demo is: [`docs/DEMO-EXPERIENCE-2026-10-27.md`](docs/DEMO-EXPERIENCE-2026-10-27.md)**
-(the stranger's fifteen-minute tour, the web-parity law, the box as a member, the ranked ambitions).
-**How we get there is [`docs/DEMO-PREFIX-2026-10-26.md`](docs/DEMO-PREFIX-2026-10-26.md):** the finite
-prefix from main to a public Mini on Hetzner with every surface on, then the coherence work that
-follows. It is a present-state document and is rewritten whole when the state changes.
+For contributors and agents. The [README](README.md) says what Mini is and maps the tree.
 
-**The evidence behind it is the review corpus under [`docs/review/`](docs/review/):**
+## What to read, in order
 
-| directory | what it answers |
+1. [`docs/DEMO-EXPERIENCE-2026-10-27.md`](docs/DEMO-EXPERIENCE-2026-10-27.md): what the demo is
+   for. The stranger's fifteen-minute tour, the rule that every shell verb has a web face, the
+   box as a member, and the ranked ambitions.
+2. [`docs/DEMO-PREFIX-2026-10-26.md`](docs/DEMO-PREFIX-2026-10-26.md): the plan. The work from
+   main to a public demo with every surface on, and the conditions for opening it.
+3. [`docs/COORDINATION-2026-10-27.md`](docs/COORDINATION-2026-10-27.md): how the project is
+   developed. What we optimise, the gates, how a lane and the orchestrator work, the boxes,
+   the cadence. [`AGENTS.md`](AGENTS.md) and [`CLAUDE.md`](CLAUDE.md) summarise its rules.
+4. [`ATLAS.md`](ATLAS.md) §6: the sixteen design laws.
+
+The plan and the experience document are present-state: they are rewritten whole when the
+state changes. Nothing dated before the plan is current authority.
+
+## Where the current state lives
+
+- [`docs/STATUS.md`](docs/STATUS.md): what the next build carries, row by row, with evidence.
+- [`docs/INTEGRATOR-STATE.md`](docs/INTEGRATOR-STATE.md): what is merged, building and gated.
+- `docs/*-STATE.md`: each lane's own state file.
+
+## The evidence behind the plan
+
+The review corpus is under [`docs/review/`](docs/review/). The ones most often cited:
+
+| File | What it answers |
 |---|---|
-| `2026-10-26-history/HISTORY.md` | what the Aug–Oct sessions did, decided and abandoned; why "rip and tear" never started; the one public node |
-| `2026-10-26-deploy/HCLOUD-GAP.md` | the gap from main to a URL a stranger can use (22 items, three shapes) |
-| `2026-10-26-deploy/AFFORDANCES.md` | what Mini exposes today: CLI, shell verbs, SDKs, protocol, Hermes, datamodel, performance vs the bar |
-| `2026-10-26-deploy/WEB-SPK-PUBLIC.md` | the public web docuverse and SPK grain path; identity in the browser; the week-1 list |
-| `2026-10-26-native-crates/SYNTHESIS.md` | every Rust crate read whole: where Rust decides semantics, the triage, the literature, the Rust prefix |
-| `2026-10-26-triage/RUST-TRIAGE.md`, `LEAN-TRIAGE.md` | the unanchored second opinions: what to delete now, what to rescue, what to move to the research repos |
+| `2026-10-26-history/HISTORY.md` | what the August to October sessions did, decided and abandoned |
+| `2026-10-26-deploy/HCLOUD-GAP.md` | the gap from main to a URL a stranger can use |
+| `2026-10-26-deploy/AFFORDANCES.md` | what Mini exposes: CLI, shell verbs, SDKs, protocol, Hermes, data model, performance |
+| `2026-10-26-deploy/WEB-SPK-PUBLIC.md` | the public web, the SPK application path, identity in the browser |
+| `2026-10-26-native-crates/SYNTHESIS.md` | every Rust crate read whole: where Rust decides semantics, and the triage |
+| `2026-10-26-triage/RUST-TRIAGE.md`, `LEAN-TRIAGE.md` | independent second opinions on what to delete, rescue or move out |
 
-**The live system:** `dregg-demo` (Hetzner ccx23, fsn1, `demo.dregg.online`) serving rehearsal ship #1,
-closed to every login until the opening contract holds (plan §1, §2); `dregg-build` is the lanes'
-Linux box; both die 2026-11-11. Box truth is `~/dev/dregg-infra` branch `demo-vm`
-(`edge/demo/CONFINEMENT.md`, `CHECKLIST.md`). The old `dregg-workhorse` Mini slice goes at the opening.
-How the project is developed: `docs/COORDINATION-2026-10-27.md` (on `lane/coordination` until round 2 merges). The deploy frame, runbook and gate live in `~/dev/dregg-infra/edge/mini`.
+## The boxes
 
-**How we work** is [`docs/COORDINATION-2026-10-27.md`](docs/COORDINATION-2026-10-27.md): what we optimise, the gates and
-their verdicts, how a lane and the orchestrator work, the boxes (`dregg-build` is where Linux
-checks and Lean builds run), the cadence. [`CLAUDE.md`](CLAUDE.md) / [`AGENTS.md`](AGENTS.md)
-point there; the founding laws are in [`ATLAS.md`](ATLAS.md) §6.
+- `dregg-demo` (Hetzner, `demo.dregg.online`) serves the demo. Logins stay closed until the
+  opening conditions hold.
+- `dregg-build` is where Linux checks, Lean builds and the integration build run.
+- Both are deleted on 2026-11-11. Their configuration lives in `~/dev/dregg-infra`, branch
+  `demo-vm` (`edge/demo/CONFINEMENT.md`, `edge/demo/CHECKLIST.md`); the deploy frame, runbook
+  and gate are in `edge/mini` there.
 
-**Sibling repositories:** `~/dev/nanodregg` (the object of study; its laws are the target
-shape of the consolidation), `~/dev/breadstuffs` (the whole first system, resumed or composted
-later), `~/dev/zkml-research` and `~/dev/degg-research` (where the proof-system and MPC research
-in this tree moves), `~/dev/o7vn` (veri7vn, arriving here as an SPK appliance), `~/dev/fn`
-(the NNTP transport; its own sessions).
+## Sibling repositories
 
-Older orientation is history: `GOAL.md`, `REORIENTATION.md` and `FORCODEX.md` were deleted on
-2026-10-27 (git keeps them); `PROJECT.md`'s design sections remain, its process sections point at
-the coordination document; nothing dated before the plan is current authority.
+- `~/dev/nanodregg`: the single-writer rebuild; its laws are the target shape for this tree.
+- `~/dev/breadstuffs`: the whole first system.
+- `~/dev/zkml-research`, `~/dev/degg-research`: where this tree's proof-system and MPC research
+  moves.
+- `~/dev/o7vn`: veri7vn, arriving here as the Oracle appliance.
+- `~/dev/fn`: the NNTP transport; it has its own sessions and is not part of this demo.

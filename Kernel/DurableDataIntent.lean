@@ -332,8 +332,9 @@ inductive RejectReason
   /-- The deployment's system cell is absent or undecodable: the tail law
   cannot be judged, so nothing is admitted (`Kernel.TailBound.gate`). -/
   | systemUnavailable
-  /-- A write to the system cell that is not exactly the certification of the
-  current head (`Kernel.TailBound.certified_written_only_by_checkpoint`). -/
+  /-- A write to the system cell that is not exactly the certification of a
+  prefix the log's history holds, past the certified height
+  (`Kernel.TailBound.certified_written_only_by_checkpoint`). -/
   | systemWriteRefused
   /-- **`tailBound`**: a record at height `head` is more than `bound` heights
   past the last certified head `certified` (`Kernel.TailBound.tail_bounded`). -/

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# JDISCLOSE (lane FIX-DISCLOSE, AUDIT-ROOMS findings 3, 6, 8, 10) on the journey's live Store.
+# JDISCLOSE (lane FIX-DISCLOSE): refusal disclosure, the install guard and eight client defects, on the journey's live Store.
 #
 # A. A law refusal is narrowed to the requester's field grant: a guest whose grant
 #    names field 1 is told no clause over field 2 and never its value; its refusal
@@ -10,7 +10,7 @@
 # C. The install guard asks the installer's own question: a law no request by the
 #    installer passes is not proposed without --i-lock-myself-out; sealed keeps
 #    --allow-unsatisfiable; a law its installer can never change warns.
-# D. The eight client defects of AUDIT-ROOMS finding 10, one row each.
+# D. Eight client defects in the room and document verbs, one row each (d1 … d8).
 #
 # Hook contract: journey.sh exports MINI HOST CONFIG SOCKET SPONSOR_WS SHELL_BIN
 # JOURNEY_WORLD JOURNEY_STEP_DIR. Last stdout line = artifact; last stderr line = detail.
@@ -181,7 +181,7 @@ row d5-inspect-law "inspect law: a field outside the grant is not 'absent now'" 
   "$([[ $L == *"outside your grant"* && $L != *"absent now"* ]] && echo 1 || echo 0)"
 q alice "help forget"; row d6-help-forget "help forget names the caveat" "$(grep -c 'until the room is rotated' "$LAST")" \
   "$([ "$(grep -c 'until the room is rotated' "$LAST")" -ge 1 ] && echo 1 || echo 0)"
-# A pending delegation and its staleness (AUDIT-ROOMS defect 8). Since 8b35fd17c a delegation
+# A pending delegation and its staleness (rows d8). Since 8b35fd17c a delegation
 # signs its parent by id, not the whole authority root: an unrelated authority write no longer
 # stales a pending one (the M8 contention), so st-carl, authored before st-eve landed, is
 # admitted. What still moves under a pending delegation is its parent: carl authors a

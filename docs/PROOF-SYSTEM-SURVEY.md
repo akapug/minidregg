@@ -1,8 +1,12 @@
-# PROOF-SYSTEM-SURVEY — the backend decision (ATLAS §8, decision 2)
+# PROOF-SYSTEM-SURVEY — the literature behind the backend decision (ATLAS §8, decision 2)
 
 *Synthesized 2026-08-07 from a three-lane literature survey (hash-based systems ·
 folding/accumulation · formalization landscape), all sources live-fetched Aug 2026,
 formalization repos cloned and sorry-counted. Eprint numbers throughout.*
+
+The decision this survey informed is recorded in
+[D-0004: Selvage as heterogeneous proof-assurance fabric](decisions/D-0004-why-selvage.md).
+This file is the survey; its recommendations are inputs to that decision, not the decision.
 
 ## 0. Executive recommendation
 

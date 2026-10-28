@@ -200,6 +200,21 @@ theorem readGuards_readonly {config : Config} {opened : Opened config}
   · subst guard; exact checked.current.grantRead.readonly
   · subst guard; exact checked.purseReadonly
 
+/-- The lifetime tariff over the already-derived ordinary intent. `ordinary` is a parameter, never a
+`let` under the lane binder: the compiler eta-expands a charge-returning definition, and a `let` in its
+body would re-derive the whole ordinary intent on every lane query
+(see `ApplicationDispatchPending.chargeOf`). -/
+def chargeOf {config : Config} {opened : Opened config} {ingress : Ingress}
+    (ordinary : DataIntent rootBytes) : Charge :=
+  fun dimension => match dimension with
+    | .incidences => ordinary.exactCharge .incidences + 6
+    | .turnBytes => ingress.canonicalBytes.length
+    | .witnessBytes => ingress.canonicalBytes.length
+    | .proofWork => ordinary.exactCharge .proofWork + 6
+    | .memoryTouches => ordinary.exactCharge .memoryTouches + 6
+    | .storageBytes => DeployedCharge.storageCharge opened.ground.view ordinary.writes (ApplicationAgentLifetimeDispatchIngress.event ingress)
+    | other => ordinary.exactCharge other
+
 def charge {config : Config} {opened : Opened config}
     {ingress : Ingress} {spec : ApplicationShareIssueSource.Spec}
     {descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry}
@@ -210,15 +225,8 @@ def charge {config : Config} {opened : Opened config}
     {reserved : ApplicationAgentLifetimeDispatchReserveCore.ReservedEvidence config}
     (checked : Checked config opened ingress spec descriptor grant ticketIssueIndex
       ticketIssueReceipt issuedIngressBytes certifiedGrantIssueIndex certifiedGrantRoot reserved) : Charge :=
-  let ordinary := checked.current.invocation.dataIntent checked.current.shape
-  fun dimension => match dimension with
-    | .incidences => ordinary.exactCharge .incidences + 6
-    | .turnBytes => ingress.canonicalBytes.length
-    | .witnessBytes => ingress.canonicalBytes.length
-    | .proofWork => ordinary.exactCharge .proofWork + 6
-    | .memoryTouches => ordinary.exactCharge .memoryTouches + 6
-    | .storageBytes => DeployedCharge.storageCharge opened.ground.view ordinary.writes (ApplicationAgentLifetimeDispatchIngress.event ingress)
-    | other => ordinary.exactCharge other
+  chargeOf (config := config) (opened := opened) (ingress := ingress)
+    (checked.current.invocation.dataIntent checked.current.shape)
 
 /-- The one CAS includes the unchanged app/session DRC writes, six current
 physical read guards, the same one-use operation key as event21, and the
@@ -248,11 +256,26 @@ def candidateIntent {config : Config} {opened : Opened config}
       nullifiers := ordinary.nullifiers ++
         [ApplicationDispatchAdmissionIngress.nullifier ingress.dispatch,
           ApplicationAgentLifetimeDispatchReserveCore.claimNullifier reserved]
-      exactCharge := charge checked
+      exactCharge := (Charge.materialize
+        (chargeOf (config := config) (opened := opened) (ingress := ingress) ordinary)).toCharge
       event := ApplicationAgentLifetimeDispatchIngress.event ingress
       subject := ordinary.subject
       postRootsBound := ordinary.postRootsBound
       guardsReadOnly := guarded }
+
+/-- The held charge is the specified charge. -/
+theorem candidateIntent_exactCharge {config : Config} {opened : Opened config}
+    {ingress : Ingress} {spec : ApplicationShareIssueSource.Spec}
+    {descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry}
+    {grant : ApplicationAgentLifetimeGrant.Grant}
+    {ticketIssueIndex : Nat} {ticketIssueReceipt : NativeHostCodec.Receipt}
+    {issuedIngressBytes : List UInt8} {certifiedGrantIssueIndex : Nat}
+    {certifiedGrantRoot : Digest}
+    {reserved : ApplicationAgentLifetimeDispatchReserveCore.ReservedEvidence config}
+    (checked : Checked config opened ingress spec descriptor grant ticketIssueIndex
+      ticketIssueReceipt issuedIngressBytes certifiedGrantIssueIndex certifiedGrantRoot reserved) :
+    (candidateIntent checked).exactCharge = charge checked :=
+  Charge.materialize_eq _
 
 theorem candidate_event_version {config : Config} {opened : Opened config}
     {ingress : Ingress} {spec : ApplicationShareIssueSource.Spec}

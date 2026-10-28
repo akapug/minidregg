@@ -30,7 +30,8 @@ use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::{valid_app_id, valid_grain, valid_package_id, WORKER_PROTOCOL};
@@ -131,10 +132,30 @@ pub(crate) trait World {
 
 // --------------------------------------------------------------- the state
 
+/// Open member connections one member may hold at once, and in all: a member cannot exhaust the box.
+const MEMBER_CONNECTIONS: usize = 4;
+const ALL_CONNECTIONS: usize = 64;
+/// Install runs in flight per member and in all (each is an spk-ingest and a grain birth).
+const MEMBER_INSTALLS: usize = 2;
+const ALL_INSTALLS: usize = 4;
+/// How long an install's handler waits for its run before answering `pending`: fast outcomes
+/// (a refusal, `fetching`, an already-complete grain) are answered inline, a real install is not.
+const INSTALL_GRACE: Duration = Duration::from_secs(5);
+
 pub(crate) struct Worker {
     state: PathBuf,
     world: Box<dyn World + Send + Sync>,
-    lock: Mutex<()>,
+    /// The management subject's nonce allocator and the world's one tool task, whose AgentGrain
+    /// law admits one reserve at a time (Kernel/AgentGrain.lean): held around `World::route` and
+    /// `World::enroll`, the only calls that allocate nonces or reserve, and nothing else.
+    submit: Mutex<()>,
+    /// One lock per grain record (`grains/<g>.json` and its origin table): a member verb that
+    /// rewrites the record takes it without waiting; an install's start/route phases wait for it.
+    grains: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    /// Install runs in flight: request id -> member. Admission and run start happen under it,
+    /// so one request id never has two runs.
+    installs: Mutex<HashMap<String, String>>,
+    install_grace: Duration,
 }
 
 fn request_file(state: &Path, id: &str) -> PathBuf {
@@ -157,6 +178,31 @@ fn performed(state: &str, detail: impl Into<String>, receipt: Value) -> Value {
     json!({"protocol":WORKER_PROTOCOL,"decided":true,"state":state,"detail":detail.into(),"receipt":receipt})
 }
 
+/// The exact retry of an install: the CLI's `--retry` takes the request id and the app it named.
+fn install_retry(retained: &Value, id: &str) -> String {
+    match retained.get("appId").and_then(Value::as_str) {
+        Some(app) => format!("mini apps install --app {app} --retry {id}"),
+        None => format!("mini apps retry --request-id {id}"),
+    }
+}
+
+/// An install accepted and running in the worker: its retry answers the outcome once decided.
+fn pending(id: &str, retained: &Value) -> Value {
+    let since = retained.pointer("/run/since").and_then(Value::as_str).unwrap_or("");
+    undecided("pending", format!("install {id} was accepted and runs in the worker (since {since}; the package ingest and the grain birth can take about half an hour); it continues if this command ends. Its exact retry answers pending until the outcome is decided, and never starts a second install"), &install_retry(retained, id))
+}
+
+/// The exact retry of a grain verb: the same verb with the same arguments.
+fn verb_retry(request: &Value) -> String {
+    let mut line = format!("mini apps {}", request.get("verb").and_then(Value::as_str).unwrap_or("status"));
+    for key in ["grain", "to", "token"] {
+        if let Some(value) = request.get(key).and_then(Value::as_str) {
+            line.push_str(&format!(" --{key} {value}"));
+        }
+    }
+    line
+}
+
 fn valid_member(name: &str) -> bool {
     !name.is_empty() && name.len() <= 32 && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
@@ -170,7 +216,21 @@ impl Worker {
         for sub in ["requests", "grains", "work", "exports"] {
             private_dir(&state.join(sub))?;
         }
-        Ok(Self { state, world, lock: Mutex::new(()) })
+        Ok(Self {
+            state, world, submit: Mutex::new(()), grains: Mutex::new(HashMap::new()),
+            installs: Mutex::new(HashMap::new()), install_grace: INSTALL_GRACE,
+        })
+    }
+
+    fn grain_lock(&self, grain: &str) -> Arc<Mutex<()>> {
+        let mut grains = self.grains.lock().unwrap_or_else(|p| p.into_inner());
+        grains.entry(grain.to_owned()).or_default().clone()
+    }
+
+    /// `World::route` under the submit lock: a session birth and a ticket issue each reserve on the tool task.
+    fn bind_route(&self, work: &Path, app: &str, member: &str, host: &str) -> Result<RouteBound> {
+        let _submit = self.submit.lock().unwrap_or_else(|p| p.into_inner());
+        self.world.route(work, app, member, host)
     }
 
     fn grain_record(&self, grain: &str) -> Result<Option<Value>> {
@@ -197,7 +257,7 @@ impl Worker {
     }
 
     /// One request: dispatch by verb, the member named by the peer.
-    pub(crate) fn handle(&self, member: &str, request: &Value) -> Value {
+    pub(crate) fn handle(self: &Arc<Self>, member: &str, request: &Value) -> Value {
         if request.get("protocol").and_then(Value::as_str) != Some(WORKER_PROTOCOL) {
             return refused("protocolRefused", "the request carries another protocol");
         }
@@ -205,7 +265,6 @@ impl Worker {
             return refused("memberRefused", "the peer is not a member account");
         }
         let verb = request.get("verb").and_then(Value::as_str).unwrap_or("");
-        let _serial = self.lock.lock().unwrap_or_else(|p| p.into_inner());
         match verb {
             "install" | "retry" => self.install(member, request),
             "list" => self.list(member),
@@ -223,8 +282,22 @@ impl Worker {
         }
     }
 
+    /// A grain verb. The owner-only verbs rewrite the grain's record, so they hold its lock; one
+    /// that finds another operation on the grain running answers `grainBusy` with its exact retry
+    /// rather than waiting. The read verbs (shared too) take no lock: records are renamed whole.
     fn with_grain(&self, member: &str, request: &Value, allow_shared: bool, f: impl FnOnce(&Self, &str, Value) -> Value) -> Value {
         let grain = request.get("grain").and_then(Value::as_str).unwrap_or("");
+        let lock = (!allow_shared && valid_grain(grain)).then(|| self.grain_lock(grain));
+        let _held = match &lock {
+            Some(lock) => match lock.try_lock() {
+                Ok(guard) => Some(guard),
+                Err(std::sync::TryLockError::Poisoned(p)) => Some(p.into_inner()),
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    return undecided("grainBusy", format!("another operation on {grain} is running (a lifecycle step, a share, or its install's start and route); nothing was done"), &verb_retry(request));
+                }
+            },
+            None => None,
+        };
         match self.owned_grain(member, grain, allow_shared) {
             Ok(record) => f(self, grain, record),
             Err(refusal) => refusal,
@@ -297,7 +370,11 @@ impl Worker {
             if only.is_some_and(|m| m != member) { continue; }
             let work = self.state.join("work").join(grain).join(format!("enroll-{member}"));
             private_dir(&work)?;
-            match self.world.enroll(&work, app, member, &route["enrollment"])? {
+            let enrolled = {
+                let _submit = self.submit.lock().unwrap_or_else(|p| p.into_inner());
+                self.world.enroll(&work, app, member, &route["enrollment"])?
+            };
+            match enrolled {
                 Enrolled::Current(_) => current += 1,
                 Enrolled::Renewed(generation) => renewed.push((member.clone(), generation)),
             }
@@ -361,7 +438,7 @@ impl Worker {
             return undecided("stateUnavailable", e, &format!("mini apps share --grain {grain} --to {to}"));
         }
         let host = format!("{grain}.{}", self.world.domain());
-        match self.world.route(&work, &app, to, &host) {
+        match self.bind_route(&work, &app, to, &host) {
             Ok(bound) => {
                 record["routes"][to] = route_json(&bound, to);
                 if let Err(e) = write_json(&grain_file(&self.state, grain), &record).and_then(|_| self.publish_origin(grain, &record)) {
@@ -431,7 +508,11 @@ impl Worker {
 
     // ------------------------------------------------------------- install
 
-    fn install(&self, member: &str, request: &Value) -> Value {
+    /// `install` and `retry`: the request is retained (`requests/<id>.json`) and run on its own
+    /// thread; the handler answers the run's outcome if it comes within the grace, else
+    /// `pending` with the exact retry. A run in flight is never started twice, and a decided
+    /// outcome is answered as retained, never run again.
+    fn install(self: &Arc<Self>, member: &str, request: &Value) -> Value {
         let Some(id) = request.get("requestId").and_then(Value::as_str) else {
             return refused("requestRefused", "install needs a 32-hex requestId");
         };
@@ -439,32 +520,109 @@ impl Worker {
             return refused("requestRefused", "requestId is not 32 hex digits");
         }
         let file = request_file(&self.state, id);
-        let mut retained = match read_json(&file) {
-            Ok(retained) => {
-                if retained["member"] != member {
-                    return refused("notOwner", "this request id belongs to another member");
-                }
-                retained
+        let (notify, outcome) = mpsc::channel();
+        let app_id = {
+            let mut installs = self.installs.lock().unwrap_or_else(|p| p.into_inner());
+            let existing = read_json(&file).ok();
+            if existing.as_ref().is_some_and(|r| r["member"] != member) {
+                return refused("notOwner", "this request id belongs to another member");
             }
-            Err(_) => {
-                if request["verb"] == "retry" {
-                    return refused("unknownRequest", format!("no request {id} is retained for {member}; the first install was never received"));
-                }
-                match self.admit(member, request) {
-                    Ok(retained) => {
-                        if let Err(e) = write_json(&file, &retained) {
-                            return undecided("stateUnavailable", e, &format!("mini apps install --retry {id}"));
-                        }
-                        retained
-                    }
+            if installs.contains_key(id) {
+                return pending(id, existing.as_ref().unwrap_or(request));
+            }
+            if let Some(decided) = existing.as_ref().map(|r| &r["lastOutcome"]).filter(|o| o["decided"] == true) {
+                return decided.clone();
+            }
+            if existing.is_none() && request["verb"] == "retry" {
+                return refused("unknownRequest", format!("no request {id} is retained for {member}; the first install was never received"));
+            }
+            let mine = installs.values().filter(|m| m.as_str() == member).count();
+            if mine >= MEMBER_INSTALLS || installs.len() >= ALL_INSTALLS {
+                let detail = format!("{mine} of your installs are running (at most {MEMBER_INSTALLS}), {} in all (at most {ALL_INSTALLS}); nothing was started", installs.len());
+                return match &existing {
+                    Some(retained) => undecided("installsBusy", detail, &install_retry(retained, id)),
+                    None => refused("installsBusy", format!("{detail}; install again once one has finished")),
+                };
+            }
+            let mut retained = match existing {
+                Some(retained) => retained,
+                None => match self.admit(member, request) {
+                    Ok(retained) => retained,
                     Err(refusal) => return refusal,
-                }
+                },
+            };
+            retained["run"] = json!({"state":"running","since":now()});
+            if let Err(e) = write_json(&file, &retained) {
+                return undecided("stateUnavailable", e, &install_retry(&retained, id));
             }
+            let app_id = retained["appId"].clone();
+            installs.insert(id.to_owned(), member.to_owned());
+            if let Err(e) = self.spawn_run(id.to_owned(), retained, Some(notify)) {
+                installs.remove(id);
+                return undecided("workerBusy", format!("the install could not start: {e}"), &install_retry(request, id));
+            }
+            app_id
         };
-        let outcome = self.advance(&mut retained);
-        retained["lastOutcome"] = outcome.clone();
-        let _ = write_json(&file, &retained);
-        outcome
+        match outcome.recv_timeout(self.install_grace) {
+            Ok(outcome) => outcome,
+            Err(_) => pending(id, &json!({"appId":app_id,"run":{"since":now()}})),
+        }
+    }
+
+    /// One install run on its own thread: `advance`, then the outcome retained beside the
+    /// request and the run marked done. The in-flight entry is removed however the run ends.
+    fn spawn_run(self: &Arc<Self>, id: String, mut retained: Value, notify: Option<mpsc::Sender<Value>>) -> std::io::Result<()> {
+        struct InFlight(Arc<Worker>, String);
+        impl Drop for InFlight {
+            fn drop(&mut self) {
+                self.0.installs.lock().unwrap_or_else(|p| p.into_inner()).remove(&self.1);
+            }
+        }
+        let flight = InFlight(self.clone(), id.clone());
+        std::thread::Builder::new().name(format!("mini-apps-install-{}", &id[..8])).spawn(move || {
+            let worker = flight.0.clone();
+            let outcome = worker.advance(&mut retained);
+            retained["lastOutcome"] = outcome.clone();
+            retained["run"] = json!({"state":"done","at":now()});
+            let _ = write_json(&request_file(&worker.state, &id), &retained);
+            drop(flight);
+            if let Some(notify) = notify {
+                let _ = notify.send(outcome);
+            }
+        }).map(|_| ())
+    }
+
+    /// After a restart: every request whose run the previous process did not finish
+    /// (`run.state` still `running`) is resumed by the same `advance` an exact retry runs.
+    pub(crate) fn resume(self: &Arc<Self>) -> Vec<String> {
+        let mut resumed = Vec::new();
+        let Ok(entries) = fs::read_dir(self.state.join("requests")) else { return resumed };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let Ok(retained) = read_json(&path) else { continue };
+            if retained.pointer("/run/state").and_then(Value::as_str) != Some("running") {
+                continue;
+            }
+            let (Some(id), Some(member)) = (retained["requestId"].as_str().map(str::to_owned), retained["member"].as_str().map(str::to_owned)) else { continue };
+            if !mini_sdk::hex::is_canonical_len(&id, 16) || path != request_file(&self.state, &id) {
+                continue;
+            }
+            let mut installs = self.installs.lock().unwrap_or_else(|p| p.into_inner());
+            if installs.contains_key(&id) {
+                continue;
+            }
+            installs.insert(id.clone(), member);
+            if self.spawn_run(id.clone(), retained, None).is_ok() {
+                resumed.push(id);
+            } else {
+                installs.remove(&id);
+            }
+        }
+        resumed.sort();
+        resumed
     }
 
     /// The request as retained: the member's choice and the three documents.
@@ -479,7 +637,7 @@ impl Worker {
             return Err(refused("classRefused", "class is S, M, L or auto"));
         }
         let mut docs = Map::new();
-        for key in ["birthSource", "birthReceipt", "delegation"] {
+        for key in ["birthSource", "birthReceipt", "delegation", "shareDelegation"] {
             let Some(doc) = request.get(key).filter(|d| d.is_object()) else {
                 return Err(refused("birthRequired", format!("the request carries no {key} document; the install is a member turn (docs/APP-MARKET-2026-10-27.md §3)")));
             };
@@ -509,7 +667,7 @@ impl Worker {
         let id = retained["requestId"].as_str().unwrap_or("").to_owned();
         let member = retained["member"].as_str().unwrap_or("").to_owned();
         let package_id = retained["packageId"].as_str().unwrap_or("").to_owned();
-        let retry = format!("mini apps install --retry {id}");
+        let retry = install_retry(retained, &id);
         let work = self.state.join("work").join(&id);
         if let Err(e) = private_dir(&work) {
             return undecided("stateUnavailable", e, &retry);
@@ -545,7 +703,8 @@ impl Worker {
                 let source = work.join("birth-source.json");
                 let receipt = work.join("birth-outcome.json");
                 let delegation = work.join("delegation.json");
-                for (path, doc) in [(&source, &docs["birthSource"]), (&receipt, &docs["birthReceipt"]), (&delegation, &docs["delegation"])] {
+                let share = work.join("share-delegation.json");
+                for (path, doc) in [(&source, &docs["birthSource"]), (&receipt, &docs["birthReceipt"]), (&delegation, &docs["delegation"]), (&share, &docs["shareDelegation"])] {
                     if !path.exists() {
                         if let Err(e) = write_json(path, doc) {
                             return undecided("stateUnavailable", e, &retry);
@@ -581,6 +740,9 @@ impl Worker {
         };
         let grain = format!("a{}", installed.app);
         let origin = format!("https://{grain}.{}", self.world.domain());
+        // The grain's record is the grain lock's: phases 3 and 4 wait for a member verb on it to end.
+        let grain_lock = self.grain_lock(&grain);
+        let _grain = grain_lock.lock().unwrap_or_else(|p| p.into_inner());
         // Phase 3: START.
         if retained["phases"]["start"].get("state") != Some(&json!("running")) {
             match self.world.start(&installed.app) {
@@ -601,7 +763,7 @@ impl Worker {
         }));
         if record.pointer(&format!("/routes/{member}")).is_none() {
             let host = format!("{grain}.{}", self.world.domain());
-            match self.world.route(&work, &installed.app, &member, &host) {
+            match self.bind_route(&work, &installed.app, &member, &host) {
                 Ok(bound) => {
                     record["routes"][member.as_str()] = route_json(&bound, &member);
                 }
@@ -840,6 +1002,19 @@ fn bind(path: &Path, mode: u32, group: Option<&str>) -> Result<UnixListener> {
     Ok(listener)
 }
 
+/// The peer receives the reply unchanged; the worker's journal (the operator's log) keeps every
+/// refusal by name and every undecided outcome, with who asked and for what.
+fn log_unsettled(socket: &str, member: &str, request: Option<&Value>, reply: &Value) {
+    let decided = reply.get("decided").and_then(Value::as_bool).unwrap_or(true);
+    let Some(name) = reply.get("refused").and_then(Value::as_str).or(if decided { None } else { Some("undecided") }) else {
+        return;
+    };
+    let field = |key: &str| request.and_then(|r| r.get(key)).and_then(Value::as_str).unwrap_or("-");
+    let (verb, grain) = (field("verb"), field("grain"));
+    let detail = reply.get("detail").and_then(Value::as_str).unwrap_or("");
+    eprintln!("mini apps-worker: {socket} {member} {verb} {grain}: {name}: {detail}");
+}
+
 /// Serve both sockets until the process ends.
 pub(crate) fn serve(worker: Arc<Worker>, members: UnixListener, edge: UnixListener, dev_member: Option<String>) -> Result<()> {
     let edge_worker = worker.clone();
@@ -848,7 +1023,12 @@ pub(crate) fn serve(worker: Arc<Worker>, members: UnixListener, edge: UnixListen
             let Ok(mut stream) = stream else { continue };
             let request = match read_line(&mut stream) {
                 Ok(request) => request,
-                Err(e) => { write_line(&mut stream, &refused("requestRefused", e)); continue; }
+                Err(e) => {
+                    let reply = refused("requestRefused", e);
+                    log_unsettled("edge", "-", None, &reply);
+                    write_line(&mut stream, &reply);
+                    continue;
+                }
             };
             let grain = request.get("grain").and_then(Value::as_str).unwrap_or("");
             let member = request.get("route").and_then(Value::as_str).unwrap_or("");
@@ -856,7 +1036,9 @@ pub(crate) fn serve(worker: Arc<Worker>, members: UnixListener, edge: UnixListen
                 Some("connect") => edge_worker.connect_route(grain, member),
                 Some("www") => edge_worker.connect_www(grain),
                 _ => {
-                    write_line(&mut stream, &refused("unknownVerb", "the edge socket serves connect and www only"));
+                    let reply = refused("unknownVerb", "the edge socket serves connect and www only");
+                    log_unsettled("edge", "-", Some(&request), &reply);
+                    write_line(&mut stream, &reply);
                     continue;
                 }
             };
@@ -867,28 +1049,82 @@ pub(crate) fn serve(worker: Arc<Worker>, members: UnixListener, edge: UnixListen
                     let _ = send_with_fd(&stream, &reply, fd);
                     unsafe { libc::close(fd) };
                 }
-                Err(refusal) => write_line(&mut stream, &refusal),
+                Err(refusal) => {
+                    log_unsettled("edge", if member.is_empty() { "-" } else { member }, Some(&request), &refusal);
+                    write_line(&mut stream, &refusal)
+                }
             }
         }
     }).map_err(|e| e.to_string())?;
+    // A thread per member connection, bounded per member and in all; over a bound the
+    // connection is answered at once, never queued behind another member's request.
+    let open: Arc<Mutex<HashMap<String, usize>>> = Arc::default();
+    struct Slot(Arc<Mutex<HashMap<String, usize>>>, String);
+    impl Drop for Slot {
+        fn drop(&mut self) {
+            let mut open = self.0.lock().unwrap_or_else(|p| p.into_inner());
+            if let Some(count) = open.get_mut(&self.1) {
+                *count -= 1;
+                if *count == 0 {
+                    open.remove(&self.1);
+                }
+            }
+        }
+    }
     for stream in members.incoming() {
         let Ok(mut stream) = stream else { continue };
         let member = match &dev_member {
             Some(name) => Some(name.clone()),
             None => match peer(&stream) {
-                Ok((uid, _)) => member_of_uid(uid),
-                Err(_) => None,
+                Ok((uid, _)) => {
+                    let member = member_of_uid(uid);
+                    if member.is_none() {
+                        eprintln!("mini apps-worker: member socket peer uid {uid} is not a member account");
+                    }
+                    member
+                }
+                Err(e) => {
+                    eprintln!("mini apps-worker: member socket peer credential unavailable: {e}");
+                    None
+                }
             },
         };
         let Some(member) = member else {
-            write_line(&mut stream, &refused("memberRefused", "the peer is not a member account (mini-s-NAME)"));
+            let reply = refused("memberRefused", "the peer is not a member account (mini-s-NAME)");
+            log_unsettled("member", "-", None, &reply);
+            write_line(&mut stream, &reply);
             continue;
         };
-        let reply = match read_line(&mut stream) {
-            Ok(request) => worker.handle(&member, &request),
-            Err(e) => refused("requestRefused", e),
+        let slot = {
+            let mut counts = open.lock().unwrap_or_else(|p| p.into_inner());
+            let (mine, all) = (counts.get(&member).copied().unwrap_or(0), counts.values().sum::<usize>());
+            if mine >= MEMBER_CONNECTIONS || all >= ALL_CONNECTIONS {
+                None
+            } else {
+                *counts.entry(member.clone()).or_default() += 1;
+                Some(Slot(open.clone(), member.clone()))
+            }
         };
-        write_line(&mut stream, &reply);
+        let Some(slot) = slot else {
+            let reply = undecided("workerBusy", format!("{member} has {MEMBER_CONNECTIONS} requests open at the worker, or the worker holds {ALL_CONNECTIONS}; nothing was done"), "the same command, once an earlier one has answered");
+            log_unsettled("member", &member, None, &reply);
+            write_line(&mut stream, &reply);
+            continue;
+        };
+        let worker = worker.clone();
+        // A failed spawn drops the closure, its slot and its stream: the member sees the connection close.
+        let _ = std::thread::Builder::new().name("mini-apps-member".into()).spawn(move || {
+            let _slot = slot;
+            let (request, reply) = match read_line(&mut stream) {
+                Ok(request) => {
+                    let reply = worker.handle(&member, &request);
+                    (Some(request), reply)
+                }
+                Err(e) => (None, refused("requestRefused", e)),
+            };
+            log_unsettled("member", &member, request.as_ref(), &reply);
+            write_line(&mut stream, &reply);
+        });
     }
     Ok(())
 }
@@ -985,6 +1221,12 @@ impl ProcessWorld {
         fs::rename(&temp, &path).map_err(|e| e.to_string())
     }
 
+    /// What the worker's own session births need from the world, read from its genesis (never constants):
+    /// the factory and the management enrollment's grants, the platform template and the grain birth tariff.
+    fn world_shape(&self, genesis: &Value) -> Result<WorldShape> {
+        shape_of(genesis, &self.management_key_id, &self.management_subject)
+    }
+
     fn nonce(&self) -> Result<u64> {
         let current = fs::read_to_string(&self.nonce_file).ok().and_then(|t| t.trim().parse::<u64>().ok()).unwrap_or(70_000_000);
         let next = current + 1000;
@@ -1060,17 +1302,35 @@ impl ProcessWorld {
         if attempt.exists() {
             return Err(format!("birth {name} attempt is uncertain; exact recovery first"));
         }
-        self.grain_op(work, &format!("{name}-reserve"), &self.tool_task, &self.tool_capability, nonce, json!({"type":"reserve","amount":"5"}))?;
+        self.with_reserve(work, name, "5", nonce, || self.birth_session_reserved(work, name, app, session, kind, cap, nonce))
+    }
+
+    /// A reserve on the metered tool task that a refused turn gives back. The reserve law refuses a second
+    /// reserve while one is outstanding on the world's only tool task, so a decided refusal after the reserve
+    /// settles it for 0 and retires the reserve and turn attempts, and the retry plans the turn afresh.
+    fn with_reserve<T>(&self, work: &Path, name: &str, amount: &str, nonce: u64, turn: impl FnOnce() -> Result<T>) -> Result<T> {
+        let (reserve, settle) = (format!("{name}-reserve"), format!("{name}-release"));
+        guarded_reserve(
+            || self.grain_op(work, &reserve, &self.tool_task, &self.tool_capability, nonce, json!({"type":"reserve","amount":amount})),
+            turn,
+            || self.grain_op(work, &settle, &self.tool_task, &self.tool_capability, nonce + 700, json!({"type":"settle","charge":"0"})),
+            || for dir in [&reserve, &settle, &format!("{name}-submit"), &name.to_owned()] { let _ = fs::remove_dir_all(work.join(format!("{dir}-attempt"))); },
+        )
+    }
+
+    fn birth_session_reserved(&self, work: &Path, name: &str, app: &str, session: u64, kind: &str, cap: u64, nonce: u64) -> Result<Value> {
+        let attempt = work.join(format!("{name}-attempt"));
         let (tool, _) = self.query(work, &format!("{name}-tool"), &self.tool_task, &self.tool_capability, nonce + 101, "resource")?;
         let (parent, _) = self.query(work, &format!("{name}-parent"), &self.parent_task, &self.parent_capability, nonce + 102, "resource")?;
         let genesis = read_json(&self.genesis)?;
+        let shape = self.world_shape(&genesis)?;
         let m = &self.management_subject;
         let source = json!({"subject":m,"nonce":(nonce + 100).to_string(),
-            "grants":[{"kind":"object","target":"10","capability":"55"},{"kind":"account","target":m,"capability":"42"},
+            "grants":[{"kind":"object","target":shape.factory,"capability":shape.factory_observe},{"kind":"account","target":m,"capability":shape.spend},
                 {"kind":"object","target":self.tool_task,"capability":self.tool_capability},{"kind":"object","target":self.parent_task,"capability":self.parent_capability}],
-            "applicationSessionGrainBirth":{"tariff":{"base":"2","perBirth":"1"},
-                "applicationSessionBirth":{"genesis":genesis,"template":{"issuer":"5","ownerBudget":"100000","lifetime":"10000"},
-                    "creator":m,"nonce":(nonce + 100).to_string(),"sourceCapabilities":["42"],"funding":[],"feePayer":m,
+            "applicationSessionGrainBirth":{"tariff":shape.tariff,
+                "applicationSessionBirth":{"genesis":genesis,"template":shape.template,
+                    "creator":m,"nonce":(nonce + 100).to_string(),"sourceCapabilities":[shape.spend],"funding":[],"feePayer":m,
                     "session":{"app":app,"session":session.to_string(),"descriptor":(session + 1).to_string(),"participant":m,"kind":kind,
                         "sessionOwnerCapability":cap.to_string(),"sessionControlCapability":(cap + 1).to_string(),
                         "descriptorOwnerCapability":(cap + 2).to_string(),"descriptorControlCapability":(cap + 3).to_string()}},
@@ -1111,6 +1371,63 @@ impl ProcessWorld {
         use sha2::Digest;
         Ok(hex(&sha2::Sha256::digest(fs::read(path).map_err(|e| e.to_string())?)))
     }
+}
+
+/// The capability a share ticket is issued under. The issuer is the management subject (the dispatch
+/// admission requires it), so the capability must be HELD by the manager: the child of the member's
+/// app owner capability that the member delegated to the manager at install, not the owner capability
+/// itself (the member holds that one).
+pub(crate) fn share_delegate_capability(delegated: &Value, app: &str, manager: &str) -> Result<String> {
+    let field = |k: &str| delegated.get(k).and_then(Value::as_str).unwrap_or("");
+    if field("type") != "minidregg-delegated-reference-v1" || field("target") != app || field("recipient") != manager || field("capability").is_empty() {
+        return Err(format!("shareDelegationRefused: the retained delegation must be a minidregg-delegated-reference-v1 of app {app} to the manager {manager}"));
+    }
+    Ok(field("capability").to_owned())
+}
+
+/// Reserve, run the turn, and on a refusal give the reserve back (settle for 0) and retire the attempts so a
+/// retry plans afresh. A failed release is reported by name and nothing is retired.
+pub(crate) fn guarded_reserve<T>(reserve: impl FnOnce() -> Result<()>, turn: impl FnOnce() -> Result<T>, release: impl FnOnce() -> Result<()>, retire: impl FnOnce()) -> Result<T> {
+    reserve()?;
+    match turn() {
+        Ok(done) => Ok(done),
+        Err(error) => match release() {
+            Ok(()) => { retire(); Err(format!("{error}; the tool reservation was released")) }
+            Err(failed) => Err(format!("{error}; toolReservationReleaseUndecided: {failed}")),
+        },
+    }
+}
+
+/// The genesis facts a worker session birth cites.
+#[derive(Debug, PartialEq)]
+pub(crate) struct WorldShape { pub factory: String, pub factory_observe: String, pub spend: String, pub template: Value, pub tariff: Value }
+
+pub(crate) fn shape_of(genesis: &Value, management_key_id: &str, management_subject: &str) -> Result<WorldShape> {
+    let text = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).map(str::to_owned).ok_or_else(|| format!("worldShapeUnreadable: genesis lacks {k}"));
+    let enrollment = genesis.get("enrollments").and_then(Value::as_array)
+        .and_then(|list| list.iter().find(|e| e.pointer("/key/keyId").and_then(Value::as_str) == Some(management_key_id)))
+        .ok_or_else(|| format!("worldShapeUnreadable: genesis enrolls no key {management_key_id}"))?;
+    if text(enrollment, "accountId")? != management_subject {
+        return Err(format!("worldShapeUnreadable: key {management_key_id} is not the account of management subject {management_subject}"));
+    }
+    let platform = genesis.get("platform").ok_or("worldShapeUnreadable: genesis lacks platform")?;
+    Ok(WorldShape {
+        factory: text(genesis, "factoryId")?, factory_observe: text(enrollment, "factoryObserveCapabilityId")?, spend: text(enrollment, "spendCapabilityId")?,
+        template: json!({"issuer":"5","ownerBudget":text(platform, "ownerBudget")?,"lifetime":text(platform, "lifetime")?}),
+        tariff: platform.get("grainBirthTariff").cloned().ok_or("worldShapeUnreadable: genesis lacks platform.grainBirthTariff")?,
+    })
+}
+
+/// The session, descriptor and ticket resource ids of one share, derived from the world's nonce counter
+/// (unique per call, never repeated). They live above 2^62 and below 2^63: clear of the workroom's small
+/// fixture ids and of every participant-namespace id (at least 2^63), so a share can never collide with
+/// either, and the block of 16 consecutive ids per call (session, session + 1 the descriptor, ticket) is
+/// injective in the counter. The old `app * 100 + 10` overflowed for a namespace app id.
+pub(crate) fn share_ids(base: u64) -> Result<(u64, u64)> {
+    const SHARE_ID_FLOOR: u64 = 1 << 62;
+    let block = base.checked_mul(16).and_then(|b| SHARE_ID_FLOOR.checked_add(b)).filter(|b| *b < 1 << 63 && b.checked_add(15).is_some())
+        .ok_or_else(|| format!("shareIdsExhausted: nonce {base} leaves no share id block below 2^63"))?;
+    Ok((block, block + 2))
 }
 
 impl World for ProcessWorld {
@@ -1156,11 +1473,8 @@ impl World for ProcessWorld {
     }
     fn route(&self, work: &Path, app: &str, member: &str, expected_host: &str) -> Result<RouteBound> {
         // The journey's share(): session birth, ticket issue, observe delegation, route; then enroll.
-        let app_n: u64 = app.parse().map_err(|_| "app is not decimal")?;
         let base = self.nonce()?;
-        let n = (base % 1_000_000) as u64;
-        let session = app_n * 100 + 10 + (n % 7);
-        let ticket = app_n * 100 + 20 + (n % 7);
+        let (session, ticket) = share_ids(base)?;
         let cap = 300_000 + (base % 100_000) * 10;
         let label = format!("route-{member}");
         self.birth_session(work, &format!("{label}-session"), app, session, "web", cap, base)?;
@@ -1170,13 +1484,14 @@ impl World for ProcessWorld {
         let launch = read_json(&state_app.join("install").join("launch-descriptor").join("launch-inspection.json"))?;
         let birth_source = read_json(&work.join("birth-source.json"))?;
         let appcap = birth_source.pointer("/applicationGrainBirth/applicationBirth/application/appOwnerCapability").and_then(Value::as_str).ok_or("birth source lacks appOwnerCapability")?.to_owned();
+        let app_delegate = share_delegate_capability(&read_json(&work.join("share-delegation.json")).map_err(|e| format!("shareDelegationRequired: the install retained no share delegation ({e}); reinstall"))?, app, &self.management_subject)?;
         let pkgcap = birth_source.pointer("/applicationGrainBirth/applicationBirth/application/packageOwnerCapability").and_then(Value::as_str).ok_or("birth source lacks packageOwnerCapability")?.to_owned();
         let (app_state, _) = self.query(work, &format!("{label}-app-state"), app, &appcap, base + 300, "resource")?;
         let pversion = app_state["cell"]["entries"].as_array().and_then(|e| e.iter().find(|x| x["key"]["field"] == "2")).and_then(|x| x["value"].as_str()).unwrap_or("0").to_owned();
         let t = work.join(format!("{label}-ticket"));
         private_dir(&t)?;
         if !t.join("issue").join("receipt-anchor.json").exists() {
-            self.grain_op(work, &format!("{label}-ticket-reserve"), &self.tool_task, &self.tool_capability, base + 400, json!({"type":"reserve","amount":"3"}))?;
+            self.with_reserve(work, &format!("{label}-ticket"), "3", base + 400, || -> Result<()> {
             let descriptor = read_json(&pkgdir.join("descriptor-inspection.json"))?;
             let interface = descriptor["interfaces"].as_array().and_then(|i| i.iter().find(|x| x["kind"] == "web")).cloned().ok_or("package descriptor has no web interface")?;
             let m = &self.management_subject;
@@ -1188,8 +1503,8 @@ impl World for ProcessWorld {
                     "sessionCapability":cap.to_string(),"appObserveCapability":appcap,"ticketObserveCapability":(tcap + 2).to_string()},
                 "ceiling":{"basis":role_basis(&self.role_basis, &schema),"added":[],"removed":[],"roleSchemaRoot":schema["root"],"roleVersion":schema["version"]},
                 "issueNonce":(base + 500).to_string(),"notAfter":"1000000000"},
-                "issuer":m,"appDelegateCapability":appcap,"ticketOwnerCapability":tcap.to_string(),"ticketControlCapability":(tcap + 1).to_string()},
-                "payer":m,"funding":[],"sourceCapabilities":["42"],
+                "issuer":m,"appDelegateCapability":app_delegate,"ticketOwnerCapability":tcap.to_string(),"ticketControlCapability":(tcap + 1).to_string()},
+                "payer":m,"funding":[],"sourceCapabilities":[self.world_shape(&read_json(&self.genesis)?)?.spend],
                 "tool":{"task":self.tool_task,"capability":self.tool_capability,"observeCapability":self.tool_capability},
                 "parent":{"task":self.parent_task,"capability":self.parent_capability,"observeCapability":self.parent_capability}});
             write_json(&t.join("request.json"), &request)?;
@@ -1210,6 +1525,8 @@ impl World for ProcessWorld {
                 let _ = self.mini(work, &format!("{label}-ticket-submit"), &["grain-share-issue-submit", "--socket", o, "--attempt", t.join("issue").to_str().unwrap_or("")]);
             }
             self.mini(work, &format!("{label}-ticket-lookup"), &["grain-share-issue-lookup", "--socket", o, "--attempt", t.join("issue").to_str().unwrap_or("")])?;
+            Ok(())
+            }).map_err(|e| { if !t.join("issue").join("submit-marker.json").exists() { let _ = fs::remove_dir_all(t.join("issue")); } e })?;
         }
         // The route request: the management key signs for the grain's guest subject (v1).
         let session_source = work.join(format!("{label}-session-author")).join("source.json");
@@ -1231,19 +1548,19 @@ impl World for ProcessWorld {
             api_token_sha256: text(&custodian, "apiTokenSha256")?.to_owned(),
             enrollment: json!({"session":session.to_string(),"cap":cap.to_string(),"ticket":ticket.to_string(),
                 "appObserveCapability":appcap,"packageObserveCapability":pkgcap,
+                "packageManifest":birth_source.pointer("/applicationGrainBirth/applicationBirth/application/packageManifest").and_then(Value::as_str).ok_or("birth source lacks packageManifest")?,
                 "ticketIssue":t.join("issue")}),
             directory,
         })
     }
     fn enroll(&self, work: &Path, app: &str, member: &str, enrollment: &Value) -> Result<Enrolled> {
-        let [session, cap, ticket, appcap, pkgcap] = ["session", "cap", "ticket", "appObserveCapability", "packageObserveCapability"]
+        let [session, cap, ticket, appcap, pkgcap, manifest] = ["session", "cap", "ticket", "appObserveCapability", "packageObserveCapability", "packageManifest"]
             .map(|k| enrollment.get(k).and_then(Value::as_str).unwrap_or("").to_owned());
-        if [&session, &cap, &ticket, &appcap, &pkgcap].iter().any(|v| v.is_empty()) {
+        if [&session, &cap, &ticket, &appcap, &pkgcap, &manifest].iter().any(|v| v.is_empty()) {
             return Err(format!("routeUnenrollable: the route for {member} was bound before enrollment facts were retained; it needs a new share"));
         }
         let issue = PathBuf::from(enrollment.get("ticketIssue").and_then(Value::as_str).unwrap_or(""));
         let (session_n, cap_n): (u64, u64) = (session.parse().map_err(|_| "session is not decimal")?, cap.parse().map_err(|_| "cap is not decimal")?);
-        let app_n: u64 = app.parse().map_err(|_| "app is not decimal")?;
         let label = format!("enroll-{member}");
         let base = self.nonce()?;
         // The serving generation: the app cell's field 0.
@@ -1283,7 +1600,7 @@ impl World for ProcessWorld {
         let count: i64 = anchor.pointer("/receipt/acceptedCount").and_then(Value::as_str).and_then(|v| v.parse().ok()).ok_or("the issue anchor has no acceptedCount")?;
         let pkgdir = self.identities_root.join(app).join("install").join("launch-descriptor").join("package-v1");
         let schema = read_json(&pkgdir.join("schema-inspection.json"))?;
-        let request = json!({"issueIndex":(count - 1).to_string(),"ticketResource":ticket,"packageManifest":(app_n + 1).to_string(),
+        let request = json!({"issueIndex":(count - 1).to_string(),"ticketResource":ticket,"packageManifest":manifest,
             "role":{"basis":role_basis(&self.role_basis, &schema),"added":[],"removed":[],"roleSchemaRoot":schema["root"],"roleVersion":schema["version"]},
             "descriptorCapability":(cap_n + 2).to_string(),"sessionObserveCapability":cap,"descriptorObserveCapability":(cap_n + 2).to_string(),
             "manifestObserveCapability":pkgcap,"nonce":(base + 3).to_string()});
@@ -1379,32 +1696,85 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     let worker = Arc::new(Worker::open(state, Box::new(world))?);
     let members = bind(&socket, 0o660, member_group.as_deref())?;
     let edge_listener = bind(&edge, 0o660, edge_group.as_deref())?;
-    println!("mini apps-worker: members at {}, edge connector at {}", socket.display(), edge.display());
+    let resumed = worker.resume();
+    println!("mini apps-worker: members at {}, edge connector at {}; {} unfinished install(s) resumed{}", socket.display(), edge.display(), resumed.len(),
+        if resumed.is_empty() { String::new() } else { format!(": {}", resumed.join(" ")) });
     std::io::stdout().flush().map_err(|e| e.to_string())?;
     serve(worker, members, edge_listener, dev_member)
 }
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_refused_turn_gives_its_reservation_back_and_a_failed_release_is_named() {
+        use std::cell::Cell;
+        let (released, retired) = (Cell::new(0), Cell::new(0));
+        let refused: super::Result<()> = super::guarded_reserve(|| Ok(()), || Err("law-denied".into()), || { released.set(released.get() + 1); Ok(()) }, || retired.set(retired.get() + 1));
+        assert!(refused.unwrap_err().contains("law-denied; the tool reservation was released"));
+        assert_eq!((released.get(), retired.get()), (1, 1));
+        let ok = super::guarded_reserve(|| Ok(()), || Ok(7), || panic!("no release on success"), || panic!("no retire on success"));
+        assert_eq!(ok, Ok(7));
+        let stuck: super::Result<()> = super::guarded_reserve(|| Ok(()), || Err("refused".into()), || Err("undecided".into()), || panic!("nothing retired when the release failed"));
+        assert!(stuck.unwrap_err().contains("toolReservationReleaseUndecided: undecided"));
+        let not_reserved: super::Result<()> = super::guarded_reserve(|| Err("reserve refused".into()), || panic!("no turn"), || panic!("no release"), || {});
+        assert_eq!(not_reserved.unwrap_err(), "reserve refused");
+    }
+
+    #[test]
+    fn a_share_is_issued_under_the_capability_the_manager_holds() {
+        let delegated = json!({"type":"minidregg-delegated-reference-v1","recipient":"8","kind":"object","target":"13827490942341725565","capability":"777"});
+        assert_eq!(super::share_delegate_capability(&delegated, "13827490942341725565", "8").unwrap(), "777");
+        for (wrong_app, wrong_manager) in [("1", "8"), ("13827490942341725565", "9")] {
+            assert!(super::share_delegate_capability(&delegated, wrong_app, wrong_manager).unwrap_err().starts_with("shareDelegationRefused"));
+        }
+        assert!(super::share_delegate_capability(&json!({"type":"minidregg-delegated-reference-v1","recipient":"8","target":"1"}), "1", "8").is_err());
+    }
+
+    #[test]
+    fn world_shape_is_read_from_the_genesis_not_the_workroom_constants() {
+        let genesis = |factory: &str, fobs: &str, spend: &str, life: &str| json!({"factoryId":factory,"platform":{"ownerBudget":"100000","lifetime":life,"grainBirthTariff":{"base":"2","perBirth":"1"}},
+            "enrollments":[{"accountId":"7","spendCapabilityId":"41","factoryObserveCapabilityId":"54","key":{"keyId":"7007"}},{"accountId":"8","spendCapabilityId":spend,"factoryObserveCapabilityId":fobs,"key":{"keyId":"8008"}}]});
+        let workroom = super::shape_of(&genesis("10", "55", "42", "10000"), "8008", "8").unwrap();
+        assert_eq!((workroom.factory.as_str(), workroom.factory_observe.as_str(), workroom.spend.as_str()), ("10", "55", "42"));
+        let demo = super::shape_of(&genesis("900", "7777", "6006", "200000"), "8008", "8").unwrap();
+        assert_eq!((demo.factory.as_str(), demo.factory_observe.as_str(), demo.spend.as_str(), demo.template["lifetime"].as_str()), ("900", "7777", "6006", Some("200000")));
+        assert!(super::shape_of(&genesis("10", "55", "42", "10000"), "9999", "8").unwrap_err().starts_with("worldShapeUnreadable"));
+    }
+
+    #[test]
+    fn share_ids_are_injective_clear_of_namespace_ids_and_never_overflow() {
+        use super::share_ids;
+        let (s0, t0) = share_ids(70_001_000).unwrap();
+        let (s1, t1) = share_ids(70_002_000).unwrap();
+        assert_eq!((t0 - s0, t1 - s1), (2, 2));
+        assert!(s1 > t0, "consecutive shares never overlap");
+        for base in [1u64, 70_001_000, (1 << 58) - 1] {
+            let (session, ticket) = share_ids(base).unwrap();
+            assert!(session >= 1 << 62 && ticket + 13 < 1 << 63, "above the fixtures, below every namespace id (2^63)");
+        }
+        assert!(share_ids(1 << 58).unwrap_err().starts_with("shareIdsExhausted"), "past 2^63 refuses by name");
+        assert!(share_ids(u64::MAX).unwrap_err().starts_with("shareIdsExhausted"), "no wrap at u64::MAX");
+    }
     use super::*;
-    use std::cell::RefCell;
     use std::sync::Mutex as StdMutex;
 
     struct FakeWorld {
         quarantine: PathBuf,
-        wanted: RefCell<Vec<String>>,
-        installs: RefCell<u32>,
-        stops: RefCell<u32>,
-        routes: RefCell<Vec<String>>,
-        stop_undecided: RefCell<bool>,
-        identities: RefCell<Vec<Value>>,
-        verdicts: RefCell<Vec<(String, Value)>>,
+        wanted: StdMutex<Vec<String>>,
+        installs: StdMutex<u32>,
+        stops: StdMutex<u32>,
+        routes: StdMutex<Vec<String>>,
+        stop_undecided: StdMutex<bool>,
+        identities: StdMutex<Vec<Value>>,
+        verdicts: StdMutex<Vec<(String, Value)>>,
         route_dir: PathBuf,
-        enrolled: RefCell<Vec<(String, String)>>,
-        generation: RefCell<u32>,
+        enrolled: StdMutex<Vec<(String, String)>>,
+        generation: StdMutex<u32>,
+        /// How long `install` takes, and whether one is running now.
+        install_delay: StdMutex<Duration>,
+        installing: std::sync::atomic::AtomicBool,
     }
-    unsafe impl Send for FakeWorld {}
-    unsafe impl Sync for FakeWorld {}
 
     impl World for FakeWorld {
         fn package(&self, package_id: &str) -> Result<Option<(PathBuf, String, u64)>> {
@@ -1412,43 +1782,46 @@ mod tests {
             if !path.exists() { return Ok(None); }
             Ok(Some((path, format!("{package_id}{}", "0".repeat(32)), 1000)))
         }
-        fn want(&self, package_id: &str) -> Result<()> { self.wanted.borrow_mut().push(package_id.into()); Ok(()) }
+        fn want(&self, package_id: &str) -> Result<()> { self.wanted.lock().unwrap().push(package_id.into()); Ok(()) }
         fn install(&self, _: &Path, source: &Path, receipt: &Path, _: &Path, class: &str, delegation: &Path) -> Result<Installed> {
-            *self.installs.borrow_mut() += 1;
+            *self.installs.lock().unwrap() += 1;
+            self.installing.store(true, std::sync::atomic::Ordering::SeqCst);
+            std::thread::sleep(*self.install_delay.lock().unwrap());
+            self.installing.store(false, std::sync::atomic::Ordering::SeqCst);
             assert!(source.exists() && receipt.exists() && delegation.exists());
             assert_eq!(class, "S");
             Ok(Installed { app: "4501".into(), raw_sha256: "ab".repeat(32), signed_app_id: "7qvcjh7gk0rzdx1s3c8gufd288sesf6vvdt297756xcv4q8xxvhh".into(), app_version: "5".into() })
         }
         fn start(&self, _: &str) -> Result<Lifecycle> { Ok(Lifecycle::Done) }
         fn stop(&self, _: &str) -> Result<Lifecycle> {
-            *self.stops.borrow_mut() += 1;
-            if *self.stop_undecided.borrow() { Ok(Lifecycle::Undecided("STOP in progress".into())) } else { Ok(Lifecycle::Done) }
+            *self.stops.lock().unwrap() += 1;
+            if *self.stop_undecided.lock().unwrap() { Ok(Lifecycle::Undecided("STOP in progress".into())) } else { Ok(Lifecycle::Done) }
         }
         fn status(&self, _: &str) -> Result<Value> { Ok(json!({"runs":[{"generation":"2","state":"running"}]})) }
         fn route(&self, _: &Path, _: &str, member: &str, host: &str) -> Result<RouteBound> {
-            self.routes.borrow_mut().push(format!("{member}@{host}"));
+            self.routes.lock().unwrap().push(format!("{member}@{host}"));
             let dir = self.route_dir.join(member);
             fs::create_dir_all(&dir).unwrap();
             fs::write(dir.join("bootstrap.token"), "b0".repeat(32)).unwrap();
             Ok(RouteBound { directory: dir.clone(), socket: dir.join("http.sock"), browser_token_sha256: "1".repeat(64), bootstrap_token_sha256: "2".repeat(64), api_token_sha256: "3".repeat(64), enrollment: json!({"session":"450110"}) })
         }
         fn enroll(&self, _: &Path, app: &str, member: &str, _: &Value) -> Result<Enrolled> {
-            let mut done = self.enrolled.borrow_mut();
-            let generation = self.generation.borrow().to_string();
+            let mut done = self.enrolled.lock().unwrap();
+            let generation = self.generation.lock().unwrap().to_string();
             if done.iter().any(|(m, g)| m == member && *g == generation) { return Ok(Enrolled::Current(generation)); }
             let _ = app;
             done.push((member.to_owned(), generation.clone()));
             Ok(Enrolled::Renewed(generation))
         }
         fn export(&self, _: &str, out: &Path) -> Result<()> { fs::create_dir_all(out).unwrap(); fs::write(out.join("manifest.sig"), b"sig").unwrap(); Ok(()) }
-        fn identities(&self, _: &str) -> Result<Vec<Value>> { Ok(self.identities.borrow().clone()) }
+        fn identities(&self, _: &str) -> Result<Vec<Value>> { Ok(self.identities.lock().unwrap().clone()) }
         fn revoke_identity(&self, _: &str, token: &str) -> Result<()> {
-            let mut list = self.identities.borrow_mut();
+            let mut list = self.identities.lock().unwrap();
             let Some(record) = list.iter_mut().find(|r| r["token"] == token) else { return Err("unknownToken".into()) };
             record["revoked"] = json!(true);
             Ok(())
         }
-        fn verdict(&self, package_id: &str, verdict: &Value) -> Result<()> { self.verdicts.borrow_mut().push((package_id.into(), verdict.clone())); Ok(()) }
+        fn verdict(&self, package_id: &str, verdict: &Value) -> Result<()> { self.verdicts.lock().unwrap().push((package_id.into(), verdict.clone())); Ok(()) }
         fn domain(&self) -> &str { "demo.test" }
     }
 
@@ -1468,15 +1841,22 @@ mod tests {
         json!({"protocol":WORKER_PROTOCOL,"verb":"install","requestId":id,"appId":APP,"packageId":PKG,"class":"auto","indexName":"Hacker Slides",
             "birthSource":{"applicationGrainBirth":{"applicationBirth":{"application":{"appOwnerCapability":"976001"}}}},
             "birthReceipt":{"type":"confirmed","confirmation":"installed","acceptedCount":"40"},
-            "delegation":{"protocol":"mini-spk-grain-lifecycle-delegation-v1","appOwner":"12","managementSubject":"8","selector":{"app":"4501"}}})
+            "delegation":{"protocol":"mini-spk-grain-lifecycle-delegation-v1","appOwner":"12","managementSubject":"8","selector":{"app":"4501"}},
+            "shareDelegation":{"type":"minidregg-delegated-reference-v1","recipient":"8","kind":"object","target":"4501","capability":"777"}})
     }
 
-    fn worker(name: &str) -> (Worker, PathBuf) {
+    fn worker(name: &str) -> (Arc<Worker>, PathBuf) {
+        worker_with(name, Duration::from_secs(30), Duration::ZERO)
+    }
+
+    fn worker_with(name: &str, grace: Duration, install_delay: Duration) -> (Arc<Worker>, PathBuf) {
         let root = scratch(name);
         let quarantine = root.join("quarantine");
         fs::create_dir_all(&quarantine).unwrap();
-        let world = FakeWorld { quarantine: quarantine.clone(), wanted: RefCell::new(vec![]), installs: RefCell::new(0), stops: RefCell::new(0), routes: RefCell::new(vec![]), stop_undecided: RefCell::new(false), identities: RefCell::new(vec![json!({"token":"c".repeat(64),"displayName":"alice","revoked":false})]), verdicts: RefCell::new(vec![]), route_dir: root.join("routes"), enrolled: RefCell::new(vec![]), generation: RefCell::new(2) };
-        (Worker::open(root.join("state"), Box::new(world)).unwrap(), root)
+        let world = FakeWorld { quarantine: quarantine.clone(), wanted: StdMutex::new(vec![]), installs: StdMutex::new(0), stops: StdMutex::new(0), routes: StdMutex::new(vec![]), stop_undecided: StdMutex::new(false), identities: StdMutex::new(vec![json!({"token":"c".repeat(64),"displayName":"alice","revoked":false})]), verdicts: StdMutex::new(vec![]), route_dir: root.join("routes"), enrolled: StdMutex::new(vec![]), generation: StdMutex::new(2), install_delay: StdMutex::new(install_delay), installing: Default::default() };
+        let mut w = Worker::open(root.join("state"), Box::new(world)).unwrap();
+        w.install_grace = grace;
+        (Arc::new(w), root)
     }
 
     fn fake(w: &Worker) -> &FakeWorld {
@@ -1494,19 +1874,19 @@ mod tests {
         let retry = w.handle("alice", &json!({"protocol":WORKER_PROTOCOL,"verb":"retry","requestId":id}));
         assert_eq!(retry["state"], "running", "{retry}");
         // The install enrolled the owner's route against generation 2.
-        assert_eq!(fake(&w).enrolled.borrow().as_slice(), [("alice".to_owned(), "2".to_owned())]);
+        assert_eq!(fake(&w).enrolled.lock().unwrap().as_slice(), [("alice".to_owned(), "2".to_owned())]);
         // Nothing is stale: renew says so and submits nothing.
-        let renew = |w: &Worker| w.handle("alice", &json!({"protocol":WORKER_PROTOCOL,"verb":"renew","grain":"a4501"}));
+        let renew = |w: &Arc<Worker>| w.handle("alice", &json!({"protocol":WORKER_PROTOCOL,"verb":"renew","grain":"a4501"}));
         let same = renew(&w);
         assert_eq!(same["state"], "current", "{same}");
-        assert_eq!(fake(&w).enrolled.borrow().len(), 1);
+        assert_eq!(fake(&w).enrolled.lock().unwrap().len(), 1);
         // A restart moved the serving generation: START renews on its own.
-        *fake(&w).generation.borrow_mut() = 4;
+        *fake(&w).generation.lock().unwrap() = 4;
         let started = w.handle("alice", &json!({"protocol":WORKER_PROTOCOL,"verb":"start","grain":"a4501"}));
         assert_eq!(started["state"], "running", "{started}");
-        assert_eq!(fake(&w).enrolled.borrow().last().unwrap(), &("alice".to_owned(), "4".to_owned()));
+        assert_eq!(fake(&w).enrolled.lock().unwrap().last().unwrap(), &("alice".to_owned(), "4".to_owned()));
         // And the explicit verb renews a generation START did not (a later move).
-        *fake(&w).generation.borrow_mut() = 6;
+        *fake(&w).generation.lock().unwrap() = 6;
         let renewed = renew(&w);
         assert_eq!(renewed["state"], "renewed", "{renewed}");
         assert_eq!(renewed["receipt"]["renewed"][0]["generation"], "6");
@@ -1526,7 +1906,7 @@ mod tests {
         let first = w.handle("alice", &install_request(&id));
         assert_eq!(first["decided"], false);
         assert_eq!(first["state"], "fetching");
-        assert_eq!(fake(&w).wanted.borrow().as_slice(), [PKG]);
+        assert_eq!(fake(&w).wanted.lock().unwrap().as_slice(), [PKG]);
         assert!(request_file(&w.state, &id).exists());
         // The package arrives; the exact retry completes: install once, start, the owner's route, the origin table.
         fs::write(root.join("quarantine").join(format!("{PKG}.spk")), b"spk").unwrap();
@@ -1536,17 +1916,17 @@ mod tests {
         assert_eq!(retry["receipt"]["grain"], "a4501");
         assert_eq!(retry["receipt"]["origin"], "https://a4501.demo.test");
         assert_eq!(retry["receipt"]["identityNotice"], IDENTITY_NOTICE);
-        assert_eq!(*fake(&w).installs.borrow(), 1);
-        assert_eq!(fake(&w).routes.borrow().as_slice(), ["alice@a4501.demo.test"]);
+        assert_eq!(*fake(&w).installs.lock().unwrap(), 1);
+        assert_eq!(fake(&w).routes.lock().unwrap().as_slice(), ["alice@a4501.demo.test"]);
         let origin = read_json(&w.state.join("origins").join("a4501.json")).unwrap();
         assert_eq!(origin["routes"][0]["member"], "alice");
         assert_eq!(origin["routes"][0]["bootstrapTokenSha256"], "2".repeat(64));
-        assert_eq!(fake(&w).verdicts.borrow()[0].1["verdict"], "verified");
+        assert_eq!(fake(&w).verdicts.lock().unwrap()[0].1["verdict"], "verified");
         // A second retry of the same id repeats nothing.
         let again = w.handle("alice", &json!({"protocol":WORKER_PROTOCOL,"verb":"retry","requestId":id}));
         assert_eq!(again["state"], "running");
-        assert_eq!(*fake(&w).installs.borrow(), 1);
-        assert_eq!(fake(&w).routes.borrow().len(), 1);
+        assert_eq!(*fake(&w).installs.lock().unwrap(), 1);
+        assert_eq!(fake(&w).routes.lock().unwrap().len(), 1);
         // Another member cannot retry alice's request or act on her grain.
         let bob = w.handle("bob", &json!({"protocol":WORKER_PROTOCOL,"verb":"retry","requestId":id}));
         assert_eq!(bob["refused"], "notOwner");
@@ -1564,7 +1944,7 @@ mod tests {
         // share gives bob his own route; then bob may open and read status but not stop.
         let share = w.handle("alice", &json!({"protocol":WORKER_PROTOCOL,"verb":"share","grain":"a4501","to":"bob"}));
         assert_eq!(share["state"], "shared", "{share}");
-        assert_eq!(fake(&w).routes.borrow().len(), 2);
+        assert_eq!(fake(&w).routes.lock().unwrap().len(), 2);
         assert_eq!(w.handle("bob", &json!({"protocol":WORKER_PROTOCOL,"verb":"open","grain":"a4501"}))["state"], "open");
         assert_eq!(w.handle("bob", &json!({"protocol":WORKER_PROTOCOL,"verb":"stop","grain":"a4501"}))["refused"], "notOwner");
         assert_eq!(read_json(&w.state.join("origins").join("a4501.json")).unwrap()["routes"].as_array().unwrap().len(), 2);
@@ -1574,11 +1954,11 @@ mod tests {
         assert_eq!(revoked["state"], "revoked");
         assert_eq!(w.handle("alice", &json!({"protocol":WORKER_PROTOCOL,"verb":"identities","grain":"a4501"}))["receipt"]["identities"][0]["revoked"], true);
         // STOP is honest: undecided with its exact retry while the lifecycle runs; decided afterwards.
-        *fake(&w).stop_undecided.borrow_mut() = true;
+        *fake(&w).stop_undecided.lock().unwrap() = true;
         let stopping = w.handle("alice", &json!({"protocol":WORKER_PROTOCOL,"verb":"stop","grain":"a4501"}));
         assert_eq!(stopping["decided"], false);
         assert_eq!(stopping["exactRetry"], "mini apps status --grain a4501");
-        *fake(&w).stop_undecided.borrow_mut() = false;
+        *fake(&w).stop_undecided.lock().unwrap() = false;
         assert_eq!(w.handle("alice", &json!({"protocol":WORKER_PROTOCOL,"verb":"stop","grain":"a4501"}))["state"], "stopped");
         let export = w.handle("alice", &json!({"protocol":WORKER_PROTOCOL,"verb":"export","grain":"a4501"}));
         assert_eq!(export["state"], "exported");
@@ -1613,8 +1993,8 @@ mod tests {
         assert_eq!(w.handle("alice", &json!({"protocol":WORKER_PROTOCOL,"verb":"status","grain":"4501"}))["refused"], "grainRefused");
         assert_eq!(w.handle("alice", &json!({"protocol":WORKER_PROTOCOL,"verb":"status","grain":"a9"}))["refused"], "unknownGrain");
         assert_eq!(w.handle("Bad Name", &json!({"protocol":WORKER_PROTOCOL,"verb":"list"}))["refused"], "memberRefused");
-        assert_eq!(*fake(&w).installs.borrow(), 0);
-        assert!(fake(&w).wanted.borrow().is_empty());
+        assert_eq!(*fake(&w).installs.lock().unwrap(), 0);
+        assert!(fake(&w).wanted.lock().unwrap().is_empty());
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -1628,7 +2008,7 @@ mod tests {
         // A fake custodian listens where the route record says.
         let socket = root.join("routes").join("alice").join("http.sock");
         let custodian = UnixListener::bind(&socket).unwrap();
-        let worker = Arc::new(w);
+        let worker = w;
         let edge_path = root.join("edge.sock");
         let members_path = root.join("worker.sock");
         let edge = bind(&edge_path, 0o600, None).unwrap();
@@ -1681,6 +2061,101 @@ mod tests {
         reader.read_line(&mut line).unwrap();
         let listed: Value = serde_json::from_str(&line).unwrap();
         assert_eq!(listed["receipt"]["grains"][0]["grain"], "a4501");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The member socket's client side: one request line, one reply line, and how long it took.
+    fn call(socket: &Path, request: &Value) -> (Value, Duration) {
+        let started = std::time::Instant::now();
+        let mut stream = UnixStream::connect(socket).unwrap();
+        stream.write_all(format!("{request}\n").as_bytes()).unwrap();
+        let mut line = String::new();
+        BufReader::new(stream).read_line(&mut line).unwrap();
+        (serde_json::from_str(&line).unwrap(), started.elapsed())
+    }
+
+    fn wait_for(what: &str, mut done: impl FnMut() -> bool) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(15);
+        while !done() {
+            assert!(std::time::Instant::now() < deadline, "timed out waiting for {what}");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    #[test]
+    fn apps_worker_concurrency_list_answers_while_an_install_runs() {
+        let _serial = SERIAL.lock().unwrap();
+        let (w, root) = worker_with("overlap", Duration::from_secs(2), Duration::from_secs(4));
+        fs::write(root.join("quarantine").join(format!("{PKG}.spk")), b"spk").unwrap();
+        let (members_path, edge_path) = (root.join("worker.sock"), root.join("edge.sock"));
+        let (members, edge) = (bind(&members_path, 0o600, None).unwrap(), bind(&edge_path, 0o600, None).unwrap());
+        let served = w.clone();
+        std::thread::spawn(move || { let _ = serve(served, members, edge, Some("alice".into())); });
+        let id = "3".repeat(32);
+        let socket = members_path.clone();
+        let request = install_request(&id);
+        let installer = std::thread::spawn(move || call(&socket, &request));
+        wait_for("the install to start", || fake(&w).installing.load(std::sync::atomic::Ordering::SeqCst));
+        // Another connection's read answers at once while the install runs.
+        let (listed, took) = call(&members_path, &json!({"protocol":WORKER_PROTOCOL,"verb":"list"}));
+        assert_eq!(listed["state"], "listed", "{listed}");
+        assert!(took < Duration::from_secs(1), "list took {took:?} behind a running install");
+        // The install's own connection is answered `pending` with its exact retry, the install still running.
+        let (reply, took) = installer.join().unwrap();
+        assert!(fake(&w).installing.load(std::sync::atomic::Ordering::SeqCst), "the install finished before its reply ({took:?})");
+        assert_eq!((reply["decided"].clone(), reply["state"].clone()), (json!(false), json!("pending")), "{reply}");
+        assert_eq!(reply["exactRetry"], format!("mini apps install --app {APP} --retry {id}"));
+        // The exact retry answers the outcome once decided; the install ran once.
+        let retry = json!({"protocol":WORKER_PROTOCOL,"verb":"retry","requestId":id});
+        wait_for("the install to be decided", || call(&members_path, &retry).0["state"] == "running");
+        assert_eq!(*fake(&w).installs.lock().unwrap(), 1);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn apps_worker_concurrency_second_install_of_a_pending_request_starts_no_second_run() {
+        let _serial = SERIAL.lock().unwrap();
+        let (w, root) = worker_with("pending", Duration::from_millis(100), Duration::from_millis(1500));
+        fs::write(root.join("quarantine").join(format!("{PKG}.spk")), b"spk").unwrap();
+        let id = "4".repeat(32);
+        let retry = json!({"protocol":WORKER_PROTOCOL,"verb":"retry","requestId":id});
+        assert_eq!(w.handle("alice", &install_request(&id))["state"], "pending");
+        // The same install again, and its exact retry, while the run is in flight: pending, no second run.
+        let again = w.handle("alice", &install_request(&id));
+        assert_eq!((again["decided"].clone(), again["state"].clone()), (json!(false), json!("pending")), "{again}");
+        assert_eq!(w.handle("alice", &retry)["state"], "pending");
+        assert_eq!(w.handle("bob", &retry)["refused"], "notOwner");
+        assert_eq!(request_file(&w.state, &id).exists(), true);
+        wait_for("the install to be decided", || w.handle("alice", &retry)["state"] == "running");
+        assert_eq!(*fake(&w).installs.lock().unwrap(), 1);
+        // Decided is retained: another install of the id answers it and runs nothing.
+        assert_eq!(w.handle("alice", &install_request(&id))["state"], "running");
+        assert_eq!(*fake(&w).installs.lock().unwrap(), 1);
+        let retained = read_json(&request_file(&w.state, &id)).unwrap();
+        assert_eq!(retained["run"]["state"], "done");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn apps_worker_concurrency_restart_resumes_an_unfinished_install() {
+        let _serial = SERIAL.lock().unwrap();
+        let (w, root) = worker_with("restart", Duration::from_millis(100), Duration::ZERO);
+        fs::write(root.join("quarantine").join(format!("{PKG}.spk")), b"spk").unwrap();
+        let id = "5".repeat(32);
+        // What a worker that died mid-run leaves: an admitted request whose run never finished.
+        let mut retained = w.admit("alice", &install_request(&id)).unwrap();
+        retained["run"] = json!({"state":"running","since":"1"});
+        write_json(&request_file(&w.state, &id), &retained).unwrap();
+        // The restarted worker resumes it by name, with no member call.
+        assert_eq!(w.resume(), vec![id.clone()]);
+        wait_for("the resumed run to be decided", || read_json(&request_file(&w.state, &id)).is_ok_and(|r| r["lastOutcome"]["state"] == "running"));
+        assert_eq!(*fake(&w).installs.lock().unwrap(), 1);
+        assert_eq!(read_json(&request_file(&w.state, &id)).unwrap()["run"]["state"], "done");
+        // Nothing is left to resume, and the member's exact retry answers the retained outcome.
+        assert!(w.resume().is_empty());
+        let retry = w.handle("alice", &json!({"protocol":WORKER_PROTOCOL,"verb":"retry","requestId":id}));
+        assert_eq!(retry["state"], "running", "{retry}");
+        assert_eq!(*fake(&w).installs.lock().unwrap(), 1);
         let _ = fs::remove_dir_all(&root);
     }
 }

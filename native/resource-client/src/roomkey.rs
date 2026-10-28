@@ -1,4 +1,4 @@
-//! The room-key protocol of a private room (PRIVACY §3.1, row 7 / B4).
+//! The room-key protocol of a private room (docs/PRIVATE-CELL.md; docs/PRIVATE-ROOMS-DESIGN.txt).
 //!
 //! A private room `R` is a room (K-ROOM 3c) whose content the members' clients
 //! seal under a ROOM KEY `k_R^e` before it reaches the socket. The founder's
@@ -108,7 +108,7 @@
 //! as forgotten so `sync` does not unwrap them again. The wrap stays in the
 //! append-only keys cell and this subject's X25519 secret still opens it:
 //! forgetting is a promise this client keeps, not a cryptographic erasure, until
-//! the subject's key itself is rotated (PRIVACY row 13).
+//! the subject's key itself is rotated (`rotate-key`).
 
 use super::private::{
     self, derive_enc_key, enc_public, open, seal, unwrap_room_key, wrap_room_key, Keyring,
@@ -1397,7 +1397,7 @@ fn text_or_hex(bytes: &[u8]) -> Value {
 
 // ---------------------------------------------------------------- hosted subjects (B6)
 
-/// PRIVACY B6. A subject whose signing key is a file on this box (a hosted
+/// A subject whose signing key is a file on this box (a hosted
 /// friend, hosted Hermes, a bot) invited into a private room puts the room key
 /// where root can read it. Refused unless the inviter said `--i-know`.
 pub(crate) fn hosted_private_invite(

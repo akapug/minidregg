@@ -40,14 +40,21 @@ pub const ASSETS: &[(&str, &str, &[u8])] = &[
 /// The first twelve hex digits of an asset's SHA-256: its cache tag. A link carrying `?v=TAG` is
 /// served `immutable` for a year (the bytes behind a tag never change); the bare URL keeps the
 /// short cache. A changed asset changes its tag, so no page ever pairs new markup with old CSS.
-pub fn asset_tag(name: &str) -> Option<String> {
+pub fn asset_tag(name: &str) -> Option<&'static str> {
     use sha2::Digest;
-    let (_, _, bytes) = ASSETS.iter().find(|(n, _, _)| *n == name)?;
-    Some(sha2::Sha256::digest(bytes).iter().take(6).map(|b| format!("{b:02x}")).collect())
+    // The assets are `include_bytes!`, so a tag is constant for the process: hash each once.
+    static TAGS: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| {
+        ASSETS
+            .iter()
+            .map(|(_, _, bytes)| sha2::Sha256::digest(bytes).iter().take(6).map(|b| format!("{b:02x}")).collect())
+            .collect()
+    });
+    let index = ASSETS.iter().position(|(n, _, _)| *n == name)?;
+    Some(TAGS[index].as_str())
 }
 
 fn asset_href(name: &str) -> String {
-    format!("/assets/{name}?v={}", asset_tag(name).unwrap_or_default())
+    format!("/assets/{name}?v={}", asset_tag(name).unwrap_or(""))
 }
 
 /// The one inline script in the document head. It runs before the body is parsed and marks the
@@ -251,7 +258,44 @@ pub fn sessions_page(sessions: &[(String, u64, u64, bool)]) -> String {
 /// place L1, L2 and L8 meet), rendered as data: every operation byte, its symbol, status, routes,
 /// owner, receiver and effect; the response markers; the consent plans. Public: it is the law of
 /// the box, not a member's state.
+/// A rendered page fragment kept until its source changes: `key` names the source files' identity
+/// (path, length, mtime), so an edited registry or law file re-renders and an untouched one does not.
+struct Rendered(std::sync::Mutex<Option<(String, String)>>);
+
+impl Rendered {
+    const fn new() -> Self {
+        Self(std::sync::Mutex::new(None))
+    }
+    fn get(&self, key: String, render: impl FnOnce() -> String) -> String {
+        let mut slot = self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some((have, html)) = slot.as_ref() {
+            if *have == key {
+                return html.clone();
+            }
+        }
+        let html = render();
+        *slot = Some((key, html.clone()));
+        html
+    }
+}
+
+fn file_identity(path: &std::path::Path) -> String {
+    use std::os::unix::fs::MetadataExt;
+    match std::fs::metadata(path) {
+        Ok(m) => format!("{}:{}:{}:{}:{}", path.display(), m.ino(), m.len(), m.mtime(), m.mtime_nsec()),
+        Err(error) => format!("{}:{:?}", path.display(), error.kind()),
+    }
+}
+
 pub fn registry(path: Option<&std::path::Path>) -> String {
+    static RENDERED: Rendered = Rendered::new();
+    match path {
+        Some(path) => RENDERED.get(file_identity(path), || registry_uncached(Some(path))),
+        None => registry_uncached(None),
+    }
+}
+
+fn registry_uncached(path: Option<&std::path::Path>) -> String {
     let Some(path) = path else {
         return "<p>The operation registry is the law of this box: every Host operation byte, who receives it and what it may change. This gateway was started without <code>--registry PATH</code>, so it cannot show it here; the file is <code>protocol/host-operations.json</code> in the candidate.</p>".to_owned();
     };
@@ -319,6 +363,17 @@ pub fn registry_html(value: &serde_json::Value) -> String {
 /// files say them: the predicate, with its `@OWNER`/`@FOUNDER` placeholder named. The clause text
 /// as the Host prints it is `law show REF` on a reference that carries the law (`/verb/law`).
 pub fn default_laws(dir: Option<&std::path::Path>) -> String {
+    static RENDERED: Rendered = Rendered::new();
+    let Some(dir) = dir else { return default_laws_uncached(None) };
+    let mut names: Vec<_> = std::fs::read_dir(dir)
+        .map(|d| d.flatten().map(|e| e.path()).filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("law.") && n.ends_with(".json"))).collect())
+        .unwrap_or_default();
+    names.sort();
+    let key = format!("{}|{}", file_identity(dir), names.iter().map(|p| file_identity(p)).collect::<Vec<_>>().join("|"));
+    RENDERED.get(key, || default_laws_uncached(Some(dir)))
+}
+
+fn default_laws_uncached(dir: Option<&std::path::Path>) -> String {
     let Some(dir) = dir else {
         return "<section><h2>Default laws</h2><p class=note>The laws every member account and room is installed under are emitted from Lean (<code>Kernel/DefaultLaw.lean</code>); this gateway was started without <code>--defaults DIR</code>, so they are not shown here.</p></section>".to_owned();
     };
