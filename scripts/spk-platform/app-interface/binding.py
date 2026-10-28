@@ -245,11 +245,23 @@ def encode_http(d, op, args, context, results=None):
     return request
 
 
-def dav_decode(body, calendar=False):
-    if b'<!DOCTYPE' in body.upper() or b'<!ENTITY' in body.upper():
-        raise Refusal('dav-xml-unsafe')
+def safe_xml_text(body, codec):
+    # Decode before scanning so an alternate XML encoding cannot hide a DTD.
     try:
-        root = ET.fromstring(body)
+        text = body.decode('utf-8')
+    except UnicodeError:
+        raise Refusal(codec + '-response-invalid') from None
+    if '\x00' in text:
+        raise Refusal(codec + '-response-invalid')
+    if '<!DOCTYPE' in text.upper() or '<!ENTITY' in text.upper():
+        raise Refusal(codec + '-xml-unsafe')
+    return text
+
+
+def dav_decode(body, calendar=False):
+    text = safe_xml_text(body, 'dav')
+    try:
+        root = ET.fromstring(text)
         if root.tag != '{DAV:}multistatus':
             raise ValueError()
         result = []
@@ -284,16 +296,7 @@ def dav_decode(body, calendar=False):
 
 
 def rss_decode(body, limit):
-    # The declared feed codec is UTF-8. Reject alternate XML encodings before
-    # the parser can autodetect them and bypass the entity/DTD scan.
-    try:
-        xml = body.decode('utf-8')
-    except UnicodeError:
-        raise Refusal('rss-response-invalid') from None
-    if '\x00' in xml:
-        raise Refusal('rss-response-invalid')
-    if '<!DOCTYPE' in xml.upper() or '<!ENTITY' in xml.upper():
-        raise Refusal('rss-xml-unsafe')
+    xml = safe_xml_text(body, 'rss')
     try:
         root = ET.fromstring(xml)
         if root.tag != 'rss' or root.get('version') != '2.0':
