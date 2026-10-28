@@ -247,20 +247,22 @@ struct DispatchSignerPin {
     key_epoch: String,
 }
 
-/// A one-target observed `NativeHost.prepareLoaded (.invoke ...)` has the
-/// target, observation, and authority signing incidences in this order. They
-/// all use the controller's pinned payer identity; the resident never gets
-/// that key. V2's separate signing profile is unaffected.
+/// Lifetime reserve and payer authoring each invoke one mutating purse target.
+/// Native Command.requiresObservation is false for that shape: the ordered
+/// incidences are target (4) and authority (1), with no observation (8).
+/// Both use the pinned payer identity; the resident never gets its key.
+/// The exact source plan is independently rederived by native consent before
+/// signing. V2's separate signing profile is unaffected.
 fn lifetime_purse_signers(
     slots: &[Value],
     signer: &DispatchSignerPin,
     key_path: &Path,
 ) -> Result<Vec<Value>> {
-    if !matches!(signer.role.as_str(), "4" | "8" | "1") || signer.index != "0" || slots.len() != 3 {
-        return Err("lifetime purse requires exact target/observe/authority slots".into());
+    if !matches!(signer.role.as_str(), "4" | "1") || signer.index != "0" || slots.len() != 2 {
+        return Err("lifetime purse requires exact target/authority slots".into());
     }
-    let mut approved = Vec::with_capacity(3);
-    for (slot, role) in slots.iter().zip(["4", "8", "1"]) {
+    let mut approved = Vec::with_capacity(2);
+    for (slot, role) in slots.iter().zip(["4", "1"]) {
         let signing = slot
             .get("signing")
             .ok_or("lifetime purse signing header absent")?;
@@ -19019,7 +19021,7 @@ mod tests {
     }
 
     #[test]
-    fn lifetime_purse_signs_all_source_target_observe_authority_slots() {
+    fn lifetime_purse_signs_exact_single_target_source_slots() {
         let signer = DispatchSignerPin {
             role: "1".into(),
             index: "0".into(),
@@ -19032,29 +19034,39 @@ mod tests {
             "signing":{"decoded":true,"keyId":"7007","keyEpoch":"1",
                 "algorithm":"1"}})
         };
-        let slots = vec![slot("4"), slot("8"), slot("1")];
+        let slots = vec![slot("4"), slot("1")];
         let approved =
             lifetime_purse_signers(&slots, &signer, Path::new("/private/payer.key")).unwrap();
-        assert_eq!(approved.len(), 3);
+        assert_eq!(approved.len(), 2);
         assert_eq!(
             approved
                 .iter()
                 .map(|v| v["role"].as_str().unwrap())
                 .collect::<Vec<_>>(),
-            vec!["4", "8", "1"]
+            vec!["4", "1"]
         );
         let mut reordered = slots.clone();
-        reordered.swap(1, 2);
+        reordered.swap(0, 1);
         assert!(
             lifetime_purse_signers(&reordered, &signer, Path::new("/private/payer.key")).is_err()
         );
+        let extra_observation = vec![slot("4"), slot("8"), slot("1")];
+        assert!(lifetime_purse_signers(&extra_observation, &signer, Path::new("/private/payer.key")).is_err());
+        for field in ["keyEpoch", "algorithm", "decoded"] {
+            let mut changed = slots.clone();
+            changed[1]["signing"][field] = if field == "decoded" { json!(false) } else { json!("9") };
+            assert!(lifetime_purse_signers(&changed, &signer, Path::new("/private/payer.key")).is_err(), "{field}");
+        }
+        let mut changed = slots.clone();
+        changed[1]["index"] = json!("1");
+        assert!(lifetime_purse_signers(&changed, &signer, Path::new("/private/payer.key")).is_err());
         let mut wrong_key = slots.clone();
         wrong_key[1]["signing"]["keyId"] = json!("8008");
         assert!(
             lifetime_purse_signers(&wrong_key, &signer, Path::new("/private/payer.key")).is_err()
         );
         assert!(
-            lifetime_purse_signers(&slots[..2], &signer, Path::new("/private/payer.key")).is_err()
+            lifetime_purse_signers(&slots[..1], &signer, Path::new("/private/payer.key")).is_err()
         );
     }
 

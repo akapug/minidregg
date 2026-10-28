@@ -70,12 +70,21 @@ class AttachmentContinuationTests(unittest.TestCase):
                     with self.assertRaises(ValueError):j.finish_session_attachment(root/'input.json',session,'selected')
                     fixed.assert_not_called();phase.assert_not_called()
 
+class RefusalContinuationTests(unittest.TestCase):
+    def test_refusal_continuation_needs_exact_existing_ask_and_no_provider_dispatch(self):
+        good={'askNumber':'1','paidBefore':0}
+        driver.Journey.validate_refusal_resume(good,[])
+        for value in [None,{},dict(good,askNumber='01'),dict(good,paidBefore=True),dict(good,paidBefore=-1),dict(good,extra=True)]:
+            with self.assertRaisesRegex(ValueError,'exact ask'):driver.Journey.validate_refusal_resume(value,[])
+        with self.assertRaisesRegex(ValueError,'no provider dispatch'):
+            driver.Journey.validate_refusal_resume(good,['{"id":"or-call"}'])
+
 class ApplicationClosureTests(unittest.TestCase):
     def test_uncertain_custody_preserves_app_and_settled_stop_requires_exact_unit(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);journal=root/'journal.json';receipt=root/'stop.json'
             j=driver.Journey.__new__(driver.Journey);j.bins=root;j.profile=root/'profile.json';j.application_unit='owned.service'
-            for field in ('applicationApiAttempt','dispatchHold','foregroundAttempt','parentHold','pending'):
+            for field in ('applicationApiAttempt','dispatchHold','foregroundAttempt','parentHold','pending','providerHold','child'):
                 journal.write_text(driver.json.dumps({field:{'uncertain':True}}))
                 with patch.object(j,'fixed',return_value=journal),patch.object(j,'run') as run:
                     with self.assertRaisesRegex(ValueError,'unsettled'):j.stop_qualified_application()
