@@ -251,6 +251,38 @@ def checkBirthIntentThin (author : BirthCoordinates → Option NativeObservation
       else .error .birthMalformed
   | _ => .error (.birthRoute "not a birth intent")
 
+/-- The births the thin birth arm consents to: a birth intent whose draft is not a grain-backed
+source. The thin intent and plan frames (230/232) refuse exactly these by name, so an ordinary
+birth is consented only with the member's source (234/235). A grain-backed birth has no thin birth
+path (`checkBirthIntentThin` refuses it `birthRoute`), and its intent consent is the provider-route
+check alone (a provider purse's law against the pinned tariff, `Kernel.ProviderRouteConsent`). -/
+def thinBirthIntent (wanted : NativeObservationCodec.Intent) : Bool :=
+  match wanted.purpose with
+  | .prepare (.birth draftBytes _) => (GrainResourceBirthHostCodec.sourceCodec.decode draftBytes).isNone
+  | _ => false
+
+/-- **The discriminator covers the arm.** Every intent the thin birth arm accepts is one the thin
+intent and plan frames refuse by name, so no birth the arm checks against the member's source can
+be consented without it. -/
+theorem thinBirthIntent_of_checked {author : BirthCoordinates → Option NativeObservationCodec.Intent}
+    {wanted : NativeObservationCodec.Intent}
+    {result : List UInt8 × List CapabilityId × Descriptor Registry}
+    (checked : checkBirthIntentThin author wanted = .ok result) : thinBirthIntent wanted = true := by
+  unfold checkBirthIntentThin at checked
+  unfold thinBirthIntent
+  revert checked
+  split
+  · split
+    · intro checked
+      cases checked
+    · rename_i grain
+      intro _
+      simpa using grain
+  · intro checked
+    cases checked
+
+#assert_axioms thinBirthIntent_of_checked
+
 /-- **Thin birth consent.** `author` is the deployed authoring of the member's own source at
 given coordinates (instantiated once, in `Host`): the whole intent (subject, nonce, observe
 grants, the draft's descriptor bytes and source capabilities) must be the authored one. Returns
