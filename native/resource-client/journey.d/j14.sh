@@ -317,7 +317,17 @@ RCFG=$SD/resident.json
 paid_turns() { "$MINI" credit --action ledger --dir "$WS/alice" --account lab-till --topic hermes 2>/dev/null |
   jq --arg h "${HS:-}" --arg p "$PRICE" '[.entries[] | select(.subject == $h and .amount == $p)] | length'; }
 resident_completed() { jq -r '.completed // 0' "$RSTATE/resident.json" 2>/dev/null || echo 0; }
+# The box certifies the World's head on a timer (mini-certify.timer); a node
+# runs at most the tail bound (256) heights past its last certified head, and a
+# J14 run with tools and awaits passes it. The operator certifies before each
+# resident pass, as the timer would.
+certify_world() { # STEP
+  operator "$1" "CERTIFY: the operator certifies the World's head (the box's mini-certify timer)" \
+    "$MINI" checkpoint --action certify --workspace "$SPONSOR_WS" \
+      --control "$(jq -r .factoryControllerCapability "$JOURNEY_WORLD/genesis.json")"
+}
 hermes() { # STEP WHAT: one resident pass that runs exactly one more prompt (or the dismissal)
+  certify_world "$1"
   local next=$(( $(resident_completed) + 1 ))
   jq -n --arg c "$G/controller.json" --arg i "$RINBOX" --arg s "$RSTATE" --argjson m "$next" \
     '{type:"mini-hermes-room-resident-v1",controller:$c,inbox:$i,state:$s,maxPrompts:$m,intervalSeconds:5}' >"$RCFG"
