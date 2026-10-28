@@ -633,7 +633,8 @@ class Attachment:
         pins_file = self.calls / "operator-pins.json"
         write(pins_file, pins)
         route_dir = self.calls / "source-route"
-        self.call("render-custody", ["sh", repo / "scripts/spk-platform/prepare-lifetime-route.sh", "--custody-only",
+        self.call("render-custody", ["sh", repo / "scripts/spk-platform/prepare-lifetime-route.sh",
+            "--served", self.mini, self.operator, sha(self.mini), "--custody-only",
             self.host, self.config, grant, lookups[-1], pins_file, route_dir, sha(self.host),
             self.allocation_path, a["route"]])
         request = {"protocol": "mini-spk-grain-agent-route-v1", "name": self.names["route"], "signedApiPath": "/",
@@ -718,7 +719,7 @@ class Attachment:
         write(pins_file, pins)
         routes = self.calls / "source-route"
         self.call("render-controller-route", ["sh", repo / "scripts/spk-platform/prepare-lifetime-route.sh",
-            self.host, self.config, registration["grantAttempt"], registration["lookup"], pins_file,
+            "--served", self.mini, self.operator, sha(self.mini), self.host, self.config, registration["grantAttempt"], registration["lookup"], pins_file,
             routes, sha(self.host), self.allocation_path, a["route"]])
         if (routes / "resident-custody-v3.json").read_bytes() != (Path(registration["sourceRoute"]) / "resident-custody-v3.json").read_bytes():
             raise ValueError("controller route reinspection changed registered resident custody")

@@ -2449,6 +2449,16 @@ def dispatchSession (config : NativeHost.Config)
       -- law-sat (C-SAT-2): a pure function of the request bytes; reads no Store.
       LawSatWire.lawSatSession payload
   | 151 => fnDispatch operation payload
+  | 156 =>
+      -- Same verifier-selected projection as the detached command. Refresh the
+      -- session's admitted suffix instead of auditing genesis in a new process.
+      let session ← sessionWalked config state
+      let view ← IO.ofExcept <|
+        ApplicationAgentLifetimeGrantInspection.inspectAcceptedVerified session.verified payload
+      let bytes := view.compress.toUTF8.toList
+      unless bytes.length ≤ 2 * 1024 * 1024 do
+        throw (IO.userError "accepted grant inspection exceeds native JSON budget")
+      return (156, bytes)
   | 155 =>
       -- The operator socket pins this Host image and complete configuration.
       -- Refresh the verifier-minted chronology held by op26 rather than

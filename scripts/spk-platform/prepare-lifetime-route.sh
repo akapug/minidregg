@@ -33,10 +33,18 @@ private_file() {
 }
 sha() { sha256sum "$1" | cut -d ' ' -f 1; }
 
+# --served uses the already running owner-private Host; the socket still pins
+# the exact qualified image and complete config. No new authority cache exists.
+SERVED_MINI= SERVED_SOCKET= SERVED_MINI_SHA=
+if [ "${1:-}" = --served ]; then
+  [ "$#" -ge 4 ] || fail "--served needs MINI OPERATOR_SOCKET MINI_SHA256"
+  SERVED_MINI=$2 SERVED_SOCKET=$3 SERVED_MINI_SHA=$4
+  shift 4
+fi
 CUSTODY_ONLY=false
 if [ "${1:-}" = --custody-only ]; then CUSTODY_ONLY=true; shift; fi
 { [ "$#" -eq 7 ] || [ "$#" -eq 9 ]; } || {
-  echo "usage: $0 [--custody-only] QUALIFIED_HOST CONFIG.json GRANT_ATTEMPT LOOKUP_OUTCOME.json OPERATOR_PINS.json NEW_OUTPUT_DIR EXPECTED_HOST_SHA256 [ALLOCATION.json ROUTE]" >&2
+  echo "usage: $0 [--served MINI OPERATOR_SOCKET MINI_SHA256] [--custody-only] QUALIFIED_HOST CONFIG.json GRANT_ATTEMPT LOOKUP_OUTCOME.json OPERATOR_PINS.json NEW_OUTPUT_DIR EXPECTED_HOST_SHA256 [ALLOCATION.json ROUTE]" >&2
   exit 2
 }
 HOST=$1 CONFIG=$2 GRANT=$3 LOOKUP=$4 PINS=$5 OUTPUT=$6 HOST_SHA=$7
@@ -78,6 +86,13 @@ private_file "$GRANT/seal.json" 4096
 private_file "$GRANT/submit-marker.json" 4096
 printf '%s' "$HOST_SHA" | grep -Eq '^[0-9a-f]{64}$' || fail "Host SHA pin refused"
 [ "$(sha "$HOST")" = "$HOST_SHA" ] || fail "qualified Host image differs"
+if [ -n "$SERVED_MINI" ]; then
+  absolute "$SERVED_MINI"; absolute "$SERVED_SOCKET"
+  protected_chain "${SERVED_MINI%/*}"
+  [ -f "$SERVED_MINI" ] && [ -x "$SERVED_MINI" ] && [ ! -L "$SERVED_MINI" ] || fail "served client unavailable"
+  printf '%s' "$SERVED_MINI_SHA" | grep -Eq '^[0-9a-f]{64}$' || fail "served client SHA pin refused"
+  [ "$(sha "$SERVED_MINI")" = "$SERVED_MINI_SHA" ] || fail "served client image differs"
+fi
 CONFIG_SHA=$(sha "$CONFIG")
 CALL_SHA=$(sha "$GRANT/call.bin")
 jq -e --arg configSha "$CONFIG_SHA" \
@@ -144,11 +159,18 @@ mkdir -m 700 "$OUTPUT"
   >"$OUTPUT/lookup.stdout" 2>"$OUTPUT/lookup.stderr" || fail "retained lookup outcome refused"
 jq -e --slurpfile original "$LOOKUP" '. == $original[0]' \
   "$OUTPUT/reinspected-lookup.json" >/dev/null || fail "retained lookup outcome changed"
-# This new source route performs lookupCurrent against the pinned CONFIG Store
+# Both source routes inspect the same verifier-selected original in the pinned CONFIG Store
 # and returns only verifier-selected event27, never a caller-authored plan.
-"$HOST" "$CONFIG" inspect-accepted-agent-lifetime-grant \
-  "$GRANT/call.bin" "$OUTPUT/accepted-grant.json" \
-  >"$OUTPUT/host.stdout" 2>"$OUTPUT/host.stderr" || fail "source grant inspection refused; output retained"
+if [ -n "$SERVED_MINI" ]; then
+  "$SERVED_MINI" agent-lifetime-grant-inspect --host "$HOST" --config "$CONFIG" \
+    --operator-socket "$SERVED_SOCKET" --ingress "$GRANT/call.bin" \
+    --output "$OUTPUT/accepted-grant.json" \
+    >"$OUTPUT/host.stdout" 2>"$OUTPUT/host.stderr" || fail "served source grant inspection refused; output retained"
+else
+  "$HOST" "$CONFIG" inspect-accepted-agent-lifetime-grant \
+    "$GRANT/call.bin" "$OUTPUT/accepted-grant.json" \
+    >"$OUTPUT/host.stdout" 2>"$OUTPUT/host.stderr" || fail "source grant inspection refused; output retained"
+fi
 chmod 600 "$OUTPUT"/*
 jq -e --argjson expected "$EXPECTED" --slurpfile receipt "$GRANT/receipt.json" '
   def decimal: type == "string" and test("^(0|[1-9][0-9]*)$");

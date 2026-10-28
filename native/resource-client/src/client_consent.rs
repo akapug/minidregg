@@ -130,6 +130,24 @@ pub(crate) fn codec_resident(executable:PathBuf,settings:PathBuf)->Result<()> {
 
 fn read(path:&Path)->Result<Vec<u8>> { crate::fsio::read_bounded_or_empty(path, CAP) }
 
+/// Negotiate with the selected local executable before sending the new frame.
+/// Old providers refuse the storeless feature command; this never treats their
+/// ordinary anchored readiness as full verification.
+pub(crate) fn full_ready(host: &Path, config: &Path) -> Result<()> {
+    let executable = PINS.get().map(|pins|pins.consent.clone())
+        .or_else(||std::env::var_os("MINI_CONSENT_HOST").map(PathBuf::from))
+        .unwrap_or_else(||host.with_file_name("minidregg-client-consent"));
+    let settings = PINS.get().map(|pins|pins.config.clone())
+        .or_else(||std::env::var_os("MINI_CONSENT_CONFIG").map(PathBuf::from))
+        .unwrap_or_else(||config.to_path_buf());
+    let features = Command::new(&executable).arg(&settings).arg("features").output()
+        .map_err(|e|format!("consent readiness feature probe: {e}"))?;
+    if !features.status.success() || features.stdout != b"mini-consent-full-ready-v1\n" {
+        return Err("selected consent provider does not support explicit full readiness".into());
+    }
+    with_consent(host, config, |consent| consent.full_ready())
+}
+
 /// Consent 220 (thin: 230; a thin birth: 234, with the member's retained source) for the retained intent at `intent` and the signer's public `key`;
 /// the retained bytes the provider confirmed.
 pub(crate) fn intent(host:&Path,config:&Path,intent:&Path,key:&[u8])->Result<Vec<u8>> {

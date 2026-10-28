@@ -293,6 +293,29 @@ class AttachmentTests(unittest.TestCase):
                 op.prepare_config()
             delegated.assert_not_called()
 
+    def test_route_render_uses_pinned_served_operator_and_propagates_refusal(self):
+        op = M.Attachment(self.path, "prepare-config")
+        op.controller_stage.parent.mkdir(parents=True)
+        M.write(op.controller_stage, {})
+        grant = self.root / "grant"
+        grant.mkdir()
+        M.write(grant / "lookup-0001.outcome.json", {})
+        M.write(op.root / "issued-grant.json", {"grantAttempt": str(grant)})
+        layout = self.file("route-layout.json", {"controllerHome": "/home/controller",
+            "listenerSocket": "/listener.sock", "reverseSocket": "/reverse.sock",
+            "operatorSocket": "/operator.sock", "controllerUid": M.os.getuid() + 10000})
+        seen = []
+        def refused(label, argv):
+            seen.append((label, argv))
+            raise ValueError("served inspection refused")
+        with patch.object(op, "validate_layout"), patch.object(op, "call", side_effect=refused):
+            with self.assertRaisesRegex(ValueError, "served inspection refused"):
+                op.prepare_route(ROOT, layout)
+        self.assertEqual(len(seen), 1)  # no detached replay after refusal
+        argv = seen[0][1]
+        offset = argv.index("--served")
+        self.assertEqual(argv[offset + 1:offset + 4], [op.mini, op.operator, M.sha(op.mini)])
+
     def test_layout_keeps_controller_and_dispatch_separate(self):
         op = M.Attachment(self.path, "prepare-config")
         config = M.read(self.contract["paths"]["controllerConfig"])

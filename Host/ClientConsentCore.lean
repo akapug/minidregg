@@ -690,12 +690,15 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
       | none => verifyInitial config retained
       | some session => refresh config session own
     let own := retainOwn admitted own
-    let (full, updated) ← if operation == 224 && specializedNeedsFull payload then do
+    let (full, updated) ← if operation == 236 || operation == 224 && specializedNeedsFull payload then do
         let (full, upgraded) ← upgrade config admitted own
         pure (some full, upgraded)
       else pure (none, admitted)
     let answer ← try
-        let reply ← if operation == 224 then
+        let reply ← if operation == 236 then do
+            unless payload.isEmpty do throw (IO.userError "full consent readiness requires empty input")
+            pure []
+          else if operation == 224 then
             specialized extraExpected settings config updated full payload
           else if operation == 227 then objectiveHeaders extraObjective settings config updated payload
           else do consent (← IO.ofExcept settings.providerRoutes) config updated operation payload
@@ -707,6 +710,9 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
 def run (extraExpected : ExtraExpected) (arguments : List String)
     (extraObjective : ExtraObjective := refuseObjective) : IO UInt32 := do
   match arguments with
+  | [_, "features"] =>
+      IO.println "mini-consent-full-ready-v1"
+      pure 0
   | [path, "stdio"] =>
       let settings ← loadSettings path
       withPinnedSignature settings.config fun config => do
