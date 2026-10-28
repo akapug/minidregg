@@ -48,6 +48,25 @@ and only its exact empty 236 acknowledgement produces readiness. This moves
 the cold work to a suitable startup budget; it does not make that work faster.
 The delegated proxy carries it to the same provider used for signing.
 
+On that same compatible copied q2 history, explicit 236 readiness passed in
+188.802 seconds wall /184.912 CPU cold, then 0.140 seconds wall /0.123 CPU
+through the same retained provider PID. Its RSS after the warm call was
+428,988 KiB (high-water 445,492 KiB); the whole test scope peaked at 976 MiB.
+The returned JSON was exactly the native readiness acknowledgement, and copied
+Store/config/key hashes stayed unchanged. This measures the local retained
+provider path; the delegated proxy's framing has filtered native test coverage,
+but this experiment did not exercise systemd's delegated controller endpoint.
+Evidence: `/build/lanes/oracle-served-inspection/fixture-q2/report.json`.
+
+The consent image has SHA-256
+`02fc190423adedb51afe78fb0f18e583f829ef8703f6928d728ad2b65307d1dd`.
+Its supported build compiled the three changed consent modules and linked;
+the first invocation's final usage-prefix check was misconfigured. A corrected
+supported warm relink is pending its compiler-seat probe. These receiving
+measurements are valid for the pinned image, and do not claim that unfinished
+packaging check passed.
+
+
 Both the old `aae3e2e37` and newer `349e59ef1` candidates already materialize
 `DurableEngine.Engine.install`'s ten budget allowances. The seven-minute q3
 cold replay cannot be explained by an absent budget-materialization fix.
