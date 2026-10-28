@@ -72,11 +72,23 @@ enroll alice 5000; enroll bob 2000; enroll carl 500; enroll eve 500
 A=$(subj alice); BOB=$(subj bob); CARL=$(subj carl); EVE=$(subj eve)
 
 # ------------------------------------------------ A. the narrowed law leaf
-q alice "room new vault" || die "room new vault"
+# The leaf lives on a declared cell born with fields 1,2, not on a room: ROOM-SCHEMA
+# v2 (6a173263b) dropped the pre-declared roster slots 2..1000 a v1 room carried, so
+# a room cell no longer declares any field for a law's clause to read (the original
+# `room new vault` + `create 2` red: undeclaredField 2 at prepare). The guests' field
+# grants are delegate proposals narrowed to field 1 (K-FIELDS) -- the same delegate a
+# `room invite --fields` compiles to; the shell `delegate` verb has no --fields yet.
+q alice "create vault declared open 1,2" || die "create vault"
 q alice "invoke v-c2 vault create 2 4242"; q alice "submit v-c2" || die "field 2"
 q alice "law v-law vault \"any [ not (verb == write), field 2 <= 3 ]\""; q alice "submit v-law" || die "vault law"
-q alice "room invite v-bob vault $BOB --verbs observe --fields 1"; share alice bob v-bob vault
-q alice "room invite v-carl vault $CARL --verbs observe,mutate --fields 1"; share alice carl v-carl vault
+mkdir -p -m 700 "$H/alice/requests"
+grant() {  # grant ID SUBJECT VERBS-JSON : one delegate on vault narrowed to field 1
+  printf '{"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"vault","recipient":"%s","verbs":[%s],"maxCost":"50000","fields":["1"]}\n' \
+    "$2" "$3" >"$H/alice/requests/jd-$1.json"
+  q alice "propose $1 @jd-$1.json" || die "propose $1: $(refused)"
+}
+grant v-bob "$BOB" '"observe"'; share alice bob v-bob vault
+grant v-carl "$CARL" '"observe","mutate"'; share alice carl v-carl vault
 q bob "invoke v-wb vault write 1 1 0"; q bob "submit v-wb"; R=$(refused)
 row narrow-observe-only "law-denied naming no clause, no 4242" "$R" \
   "$([[ $R == *"outside your grant"* && $R != *4242* ]] && echo 1 || echo 0)"
