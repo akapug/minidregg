@@ -800,7 +800,8 @@
             }
           },
           "additionalProperties": {}
-        }
+        },
+        "emptyValue": {}
       },
       "required": [
         "protocol",

@@ -67,6 +67,36 @@ class RealtimeDeclarations(unittest.TestCase):
             engine.call('task.put', {'id': 'typed-task', 'fulltext': '* DONE changed', 'expectedHash': 'f' * 64})
         self.assertIn('* TODO typed task', receiver.entries['typed-task']['fulltext'])
 
+    def test_prioritize_json_snapshot_csrf_and_version_conflict(self):
+        from binding import load
+        declaration = load('prioritize')
+        class Receiver:
+            def __init__(self):
+                self.jobs, self.version = [], 0
+            def http(self, request):
+                if request['path'] == '':
+                    assert request['redact']
+                    return 200, {'content-type': 'text/html'}, b'flags:{csrfToken: "safe-token",other:0}'
+                assert request['path'] == 'data'
+                if request['method'] == 'POST':
+                    assert request['redact']
+                    assert request['headers']['X-CSRF-Token'] == 'safe-token'
+                    if request['headers']['X-Sandstorm-App-Data-Version'] != str(self.version):
+                        return 409, {}, b''
+                    self.jobs = json.loads(request['body'])['jobs']
+                    self.version += 1
+                    return 200, {}, b''
+                assert request['headers']['X-Sandstorm-App-Data-Version'] == '-1'
+                return 200, {'content-type': 'application/json', 'x-sandstorm-app-data-version': str(self.version)}, (json.dumps({'jobs': self.jobs}).encode() if self.version else b'')
+        receiver = Receiver()
+        engine = Engine(declaration, receiver, {'runId': 'typed-periodic-task'})
+        result = run_scenario(engine)
+        self.assertEqual(result['after']['headers']['version'], '1')
+        self.assertEqual(receiver.jobs[0]['v']['title'], 'typed-periodic-task')
+        with self.assertRaisesRegex(Refusal, 'app-conflict: 409'):
+            engine.call('jobs.replace', {'jobs': [], 'expectedVersion': '0'})
+        self.assertEqual(len(receiver.jobs), 1)
+
 
 if __name__ == '__main__':
     unittest.main()
