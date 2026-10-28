@@ -3,6 +3,16 @@
 Read this whole before dispatching anything. (A resume once spawned a duplicate japps faerie before reading it.)
 Inputs: docs/review/2026-10-27-untouched-areas/{LEAN,NATIVE}.md, docs/review/2026-10-27-blind-spots/BLIND-SPOTS.md Sweep 1; docs/APP-MARKET-2026-10-27.md; docs/ROWS-OWED.md §0/§3.
 
+## STANDING RULINGS FROM ROOT (verbatim; re-read before every batch)
+1. Route latency: GO on (a), hold cell.root and receiverSemanticsFrom once per snapshot, PLUS astra's cut, carry the computed Ready, judgment and successor through NativeHostReplay.ExactReadback.ofAppended (Kernel/NativeHostReplay.lean:3861) instead of recomputing them. The owner is ac1e69b668c52c684, who holds the profile. Equality proofs, no statement change, so the auditor sees it only if a statement moves. Measure one submit's CPU before and after on hbox. (b) and (c) wait for that measurement. The astra critique is at /private/tmp/claude-501/-Users-ember-dev-minidregg/698fc87d-1ed5-4b8d-a00d-67388a9da60b/scratchpad/astra/route.out.md. Plan (op36) is 0.03 s; the cost is the submit. Login mutates state, so a read fast path won't fix logins.
+2. The read-without-turn design question is with ember. Don't raise it again.
+3. Netlink 11f1f23cf: reverted on main (03ef4b59a), held for ember. Do NOT send it to the integrator; the integrator will refuse it. It re-lands only on my relay.
+4. Composed: issuer = manager, the product's shape. 2c2c31d39 is on main.
+5. App-id bound: widens to canonical u64 with the worker's id-derivation overflow folded in, statement first, to me when it has elaborated.
+6. The last japps red is the app-id bound (check_coordinates), not a script collision.
+7. Lake and git run as lanes, never root, and only in the faerie's own worktree.
+After that, report only new events.
+
 ## Rules in force
 - Integration is continuous; the integrator (a34bdb948f1cf4796) merges lane shas, builds main on dregg-build, names candidates, and fixes reds in its own build. Re-genesis is free.
 - Boxes: dregg-build is the integration box only (OOM at 08:57). Faerie world runs and builds go to hbox under /tank/lanes/<lane> (never /, 85% used); each faerie deletes its own staging when done. Lean closures only on dregg-ref through `closure-lock swarm-build <cmd>`. Warm incremental trees only; seed only .lake/packages; no Lean on the Mac; never search from / or ~.
