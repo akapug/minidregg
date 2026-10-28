@@ -436,6 +436,34 @@ fn provider_command_route(command: &AllowedCommand, required_network: &str) -> b
             .is_some_and(|arg| arg == "/agent/hermes-acp")
 }
 
+const FOREGROUND_API_WALL_SECONDS: u64 = 1800;
+
+/// Physical foreground API budget. A reverse caller may narrow the actual
+/// deadline, never extend it or borrow the identity of a Hermes worker.
+struct ForegroundApiBudget {
+    operation_id: u64,
+    started: Instant,
+    deadline: Instant,
+}
+
+impl ForegroundApiBudget {
+    fn new(operation_id: u64) -> Self {
+        let started = Instant::now();
+        Self { operation_id, started, deadline: started + Duration::from_secs(FOREGROUND_API_WALL_SECONDS) }
+    }
+    fn tighten(&mut self, requested: u64) -> Result<u64> {
+        if requested == 0 || requested > FOREGROUND_API_WALL_SECONDS {
+            return Err("lifetime foreground wall exceeds controller API policy".into());
+        }
+        let deadline = self.deadline.min(self.started + Duration::from_secs(requested));
+        if Instant::now() >= deadline {
+            return Err("lifetime foreground API budget expired".into());
+        }
+        self.deadline = deadline;
+        Ok(requested)
+    }
+}
+
 fn checked_lifetime_worker_wall(
     selected: &AllowedCommand,
     requested: u64,
@@ -3528,6 +3556,7 @@ struct Runtime {
     /// reached at its boundary; written as one typed record when it ends.
     prompt_decision: Option<(u64, Option<prompt_outcome::Outcome>)>,
     foreground_operation: Option<u64>,
+    foreground_api_budget: Option<ForegroundApiBudget>,
     output: Option<control::OutputHandle>,
     /// First controller operation ID allocated by this process. Earlier
     /// attempts were started by a previous process.
@@ -4214,9 +4243,11 @@ impl Runtime {
                     "http":application_api_tools::routed_reserve_http(
                         &retained, &route.signed_api_path)?,
                 },
+                // Native application command is authored as the session participant;
+                // the payer's delegated parent witness belongs to ordinary task IO.
                 "parentTask":self.config.task,
-                "parentCapability":dispatch.parent_capability,
-                "parentObserve":dispatch.parent_observe_capability,
+                "parentCapability":self.config.capability,
+                "parentObserve":self.config.query_capability,
                 "purseTask":dispatch.task,
                 "purseCapability":dispatch.capability,
                 "purseObserve":dispatch.query_capability,
@@ -4239,6 +4270,30 @@ impl Runtime {
     /// exact op80 plan and current signed parent/purse are checked before the
     /// protected signer is opened. The client durably marks one public op2;
     /// any lost reply can only take the receipt-only op3 path.
+    fn checked_lifetime_dispatch_wall(&mut self, requested: u64) -> Result<u64> {
+        if let Some(operation_id) = self.foreground_operation {
+            let attempt = self.journal.foreground_attempt.as_ref()
+                .ok_or("lifetime foreground operation has no durable attempt")?;
+            let budget = self.foreground_api_budget.as_mut()
+                .ok_or("lifetime foreground API budget absent")?;
+            if self.config.foreground_tool.is_none() || self.prompt_active
+                || self.child.is_some() || self.journal.child.is_some()
+                || attempt.operation_id != operation_id || budget.operation_id != operation_id
+                || attempt.phase != ForegroundPhase::Executing
+                || !(attempt.name == "mini_application_api" || oracle_tools::is_tool(&attempt.name)) {
+                return Err("lifetime reserve differs from active foreground API invocation".into());
+            }
+            return budget.tighten(requested);
+        }
+        if self.foreground_api_budget.is_some() {
+            return Err("lifetime foreground budget has no active invocation".into());
+        }
+        let selected = self.config.commands.iter().find(|command| command.name == "hermes-acp")
+            .ok_or("selected Hermes worker command absent")?;
+        checked_lifetime_worker_wall(selected, requested, self.prompt_active, self.child.is_some(),
+            self.journal.child.as_ref().map(|child| child.program.as_path()), false)
+    }
+
     fn dispatch_reserve_v3(
         &mut self,
         route_name: &str,
@@ -4247,29 +4302,10 @@ impl Runtime {
         worker_wall_seconds: u64,
         fixed_request: &Value,
     ) -> Result<Value> {
-        let selected = self
-            .config
-            .commands
-            .iter()
-            .find(|command| command.name == "hermes-acp")
-            .ok_or("selected Hermes worker command absent")?;
-        let effective_wall = checked_lifetime_worker_wall(
-            selected,
-            worker_wall_seconds,
-            self.prompt_active,
-            self.child.is_some(),
-            self.journal
-                .child
-                .as_ref()
-                .map(|child| child.program.as_path()),
-            self.foreground_operation.is_some(),
-        )?;
         let (route, retained_forward) = self.verified_reverse_lifetime_fixed_request(
-            route_name,
-            forward_operation_id,
-            binding_sha256,
-            fixed_request,
+            route_name, forward_operation_id, binding_sha256, fixed_request,
         )?;
+        let effective_wall = self.checked_lifetime_dispatch_wall(worker_wall_seconds)?;
         if self.journal.dispatch_pending.is_some()
             || self.journal.dispatch_hold.is_some()
             || self.journal.dispatch_attempt.is_some()
@@ -4405,8 +4441,8 @@ impl Runtime {
             "manifestObserve":route.dispatch_selectors.manifest_observe,
             "enrollmentObserve":route.dispatch_selectors.enrollment_observe,
             "parentTask":self.config.task,
-            "parentCapability":task.parent_capability,
-            "parentObserve":task.parent_observe_capability,
+            "parentCapability":self.config.capability,
+            "parentObserve":self.config.query_capability,
             "purseTask":task.task,
             "purseCapability":task.capability,
             "purseObserve":task.query_capability,
@@ -6555,7 +6591,10 @@ impl Runtime {
         }
         let response = match self.dispatch_rpc(request.command) {
             Ok(value) => value,
-            Err(detail) => json!({"type":"refused","detail":detail}),
+            Err(detail) => {
+                eprintln!("grain-runtime: dispatch RPC refused: {detail}");
+                json!({"type":"refused","detail":detail})
+            },
         };
         request.phase.store(2, Ordering::SeqCst);
         let _ = request.reply.send(response);
@@ -6652,6 +6691,7 @@ impl Runtime {
             prompt_oracle: false,
             prompt_decision: None,
             foreground_operation: None,
+            foreground_api_budget: None,
             output: None,
             process_first_operation_id,
             startup_recovery_active: false,
@@ -7337,9 +7377,15 @@ impl Runtime {
         self.save()?;
         Ok(id)
     }
+    fn native_work_limit(&self) -> Result<Duration> {
+        let remaining = self.foreground_api_budget.as_ref().map(|budget|
+            budget.deadline.saturating_duration_since(Instant::now())).unwrap_or(deadline::NATIVE_CALL);
+        if remaining.is_zero() { return Err("foreground API budget expired before native helper spawn".into()); }
+        Ok(remaining.min(deadline::NATIVE_CALL))
+    }
     fn command_output(&self, program: &Path, args: &[&str]) -> Result<()> {
         self.custody_exit_reaped.store(false, Ordering::SeqCst);
-        let output = deadline::output(Command::new(program).args(args), deadline::NATIVE_CALL).map_err(|e| {
+        let output = deadline::output(Command::new(program).args(args), self.native_work_limit()?).map_err(|e| {
             // At the deadline deadline::wait killed the child's whole process
             // group and reaped the leader: the sender is stopped too.
             if e.kind() == std::io::ErrorKind::TimedOut {
@@ -7376,7 +7422,7 @@ impl Runtime {
         }
         let output = self
             .custody_gate
-            .run_capture(&self.cancelled, &mut command)?;
+            .run_capture_until(&self.cancelled, &mut command, self.native_work_limit().map_err(|_| custody_gate::CustodyError::BeforeSpawn)?)?;
         if !output.status.success() {
             return Err(custody_gate::CustodyError::Uncertain(io::Error::other(
                 format!(
@@ -7407,7 +7453,7 @@ impl Runtime {
         resource_tools::read_resource_with(&self.config, tool, read, nonce, signer, |command| {
             let output = self
                 .custody_gate
-                .run_capture(&self.cancelled, command)
+                .run_capture_until(&self.cancelled, command, self.native_work_limit()?)
                 .map_err(|error| format!("supervised native resource read: {error}"))?;
             if !output.status.success() {
                 return Err(format!(
@@ -7429,7 +7475,7 @@ impl Runtime {
         }
         let output = self
             .custody_gate
-            .run_capture(&self.cancelled, &mut command)
+            .run_capture_until(&self.cancelled, &mut command, self.native_work_limit()?)
             .map_err(|error| format!("supervised native lookup: {error}"))?;
         if !output.status.success() {
             return Err(format!(
@@ -13324,6 +13370,90 @@ impl Runtime {
         response.map(|_| ())
     }
 
+    /// Exclusive journal custody plus the prior-run watermark stops an old
+    /// controller from authoring another reserve. The v3 path saves the forward
+    /// fingerprint and dispatch attempt BEFORE opening the protected reserve
+    /// signer. No such marker means any surviving helper was only planning.
+    /// This archives a proved no-dispatch, never an HTTP response or a resend.
+    fn recover_foreground_api_unreserved(&mut self, request_id: &str) -> Result<Value> {
+        if !valid_foreground_request_id(request_id) || self.prompt_active
+            || self.foreground_operation.is_some() || self.foreground_api_budget.is_some()
+            || self.child.is_some() || self.journal.child.is_some() || !self.custody_gate.is_idle()
+            || self.journal.dispatch_pending.is_some() || self.journal.dispatch_hold.is_some()
+            || self.journal.dispatch_attempt.is_some() || self.journal.pending.is_some()
+            || self.journal.tool_pending.is_some() || self.journal.tool_hold.is_some()
+            || self.journal.provider_pending.is_some() || self.journal.provider_hold.is_some()
+            || self.journal.provider_attempt.is_some() || self.journal.birth_pending.is_some()
+            || self.journal.birth_operation.is_some() || self.journal.workspace_attempt.is_some()
+            || self.journal.workspace_birth.is_some() || self.journal.room_attempt.is_some()
+            || self.journal.settlement_due.is_some() {
+            return Err("unreserved API recovery requires a stopped invocation and no other pending effect".into());
+        }
+        let foreground = self.journal.foreground_attempt.as_ref()
+            .ok_or("unreserved API recovery has no foreground request")?.clone();
+        let forward = self.journal.application_api_attempt.as_ref()
+            .ok_or("unreserved API recovery has no retained API request")?.clone();
+        if foreground.request_id != request_id
+            || !matches!(foreground.phase, ForegroundPhase::Executing | ForegroundPhase::Uncertain)
+            || foreground.operation_id >= forward.operation_id
+            || forward.operation_id >= self.process_first_operation_id
+            || foreground.result_path.is_some() || foreground.result_sha256.is_some()
+            || !matches!(forward.phase, ApplicationApiPhase::DispatchStarted | ApplicationApiPhase::Uncertain)
+            || forward.operation_fingerprint.is_some() || forward.lifetime_committed_receipt.is_some()
+            || forward.lifetime_settled_response_sha256.is_some() || forward.lifetime_settlement.is_some()
+            || forward.reply_path.is_some() || forward.reply_sha256.is_some() {
+            return Err("unreserved API recovery differs from a prior unsealed invocation".into());
+        }
+        let tombstone = read_foreground_tombstone(&self.config.state_dir, request_id)?
+            .ok_or("unreserved API recovery foreground tombstone absent")?;
+        let raw = bounded_regular_file(&foreground.request_path, 262_144)?;
+        let request: ForegroundRequest = serde_json::from_slice(&raw)
+            .map_err(|e| format!("retained foreground request: {e}"))?;
+        if sha256_bytes(&raw)? != foreground.request_sha256
+            || tombstone.request_sha256 != foreground.request_sha256
+            || tombstone.operation_id != foreground.operation_id || request.request_id != request_id
+            || request.name != foreground.name {
+            return Err("unreserved API recovery foreground bytes changed".into());
+        }
+        let route = self.config.tool_task.as_ref().and_then(|tool|
+            tool.allowed_application_lifetime_routes.iter().find(|route| route.name == forward.route_name))
+            .ok_or("unreserved API recovery requires a pinned lifetime route")?;
+        let binding = forward.binding_sha256.as_deref().ok_or("unreserved API binding absent")?;
+        let arguments = self.application_tool_arguments(&request.name, &request.arguments)?;
+        let input = application_api_tools::parse_input(&arguments, &[route.name.clone()])?;
+        let expected = application_api_tools::lifetime_dispatch_request(forward.operation_id, binding, &input)?;
+        let forward_raw = bounded_regular_file(&forward.request_path, 262_144)?;
+        if sha256_bytes(&forward_raw)? != forward.request_sha256
+            || serde_json::from_slice::<Value>(&forward_raw).map_err(|e| e.to_string())? != expected {
+            return Err("unreserved API recovery forward HTTP differs from foreground request".into());
+        }
+        let authority = self.dispatch()?;
+        let query_start = self.journal.next_operation_id;
+        let purse = self.query_as(&authority)?;
+        if !matches!(purse.pointer("/grain/status").and_then(Value::as_str), Some("0" | "1" | "2" | "6"))
+            || purse.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
+            || purse.pointer("/grain/task").and_then(Value::as_str) != Some(authority.task.as_str()) {
+            return Err("unreserved API recovery requires signed idle dispatch purse".into());
+        }
+        let decision_id = self.next_id()?;
+        let proof = json!({"decisionId":decision_id.to_string(),"action":"recover-unreserved-foreground-api",
+            "requestId":request_id,"foregroundOperationId":foreground.operation_id.to_string(),
+            "apiOperationId":forward.operation_id.to_string(),"requestSha256":foreground.request_sha256,
+            "forwardRequestSha256":forward.request_sha256,"bindingSha256":binding,
+            "processFirstOperationId":self.process_first_operation_id.to_string(),
+            "basis":"exclusive journal; prior invocation; durable marker absent before reserve signer; signed idle purse",
+            "queryStartOperationId":query_start.to_string(),"signedPurse":purse,"noDispatch":true});
+        let mut finished = self.journal.application_api_attempt.take().unwrap();
+        finished.phase = ApplicationApiPhase::NoDispatch; finished.reported = true;
+        if self.journal.application_api_history.len() >= 16 { self.journal.application_api_history.remove(0); }
+        self.journal.application_api_history.push(finished);
+        self.journal.reconciliation_log.push(proof.clone());
+        self.save()?;
+        Ok(json!({"type":"mini-foreground-api-unreserved-recovery-v1","proof":proof,
+            "parentHoldRemains":self.journal.parent_hold.is_some(),"foregroundRemains":true,
+            "next":"reconcile remaining parent allowance and effects, then reconcile foreground audited"}))
+    }
+
     fn reconcile_foreground_audited(&mut self) -> Result<()> {
         let attempt = self
             .journal
@@ -13404,89 +13534,95 @@ impl Runtime {
         arguments: &Value,
         input: &Receiver<Input>,
     ) -> Result<Value> {
-        let (reply, received) = mpsc::channel();
-        let mut active = Some(self.begin_application_api(arguments, reply, None, false)?);
-        let deadline = Instant::now() + Duration::from_secs(1800);
-        loop {
-            self.poll_application_api(&mut active)?;
-            if let Ok(value) = received.try_recv() {
-                if value.get("isError").and_then(Value::as_bool) == Some(true)
-                    && self.journal.application_api_attempt.is_some()
-                {
-                    return Err(
-                        "application API outcome remains retained for read-only inspection".into(),
-                    );
-                }
-                return Ok(value);
-            }
-            if self.cancelled.load(Ordering::SeqCst) || Instant::now() >= deadline {
-                return Err(
-                    "foreground API call cancelled or timed out; inspect exact attempt".into(),
-                );
-            }
-            match input.try_recv() {
-                Ok(Input::Dispatch(request)) => self.answer_dispatch(request),
-                Ok(Input::Admin(request)) => {
-                    let _ = request.reply.send("foreground API call is running".into());
-                }
-                Ok(Input::Disconnect) => {
-                    self.stdin_gone = true;
-                    if self.hard_connection.load(Ordering::SeqCst) {
-                        return Err("hard disconnect during foreground API call".into());
-                    }
-                }
-                Ok(Input::Line(line)) if line == "disconnect" => {
-                    self.stdin_gone = true;
-                    if self.hard_connection.load(Ordering::SeqCst) {
-                        return Err("hard disconnect during foreground API call".into());
-                    }
-                }
-                Ok(Input::SoftDetach) => self.stdin_gone = true,
-                Ok(Input::Line(line))
-                    if line == "attach soft" && self.journal.connection == Connection::Soft =>
-                {
-                    self.emit("reconnected to soft foreground tool\n");
-                }
-                Ok(Input::Line(line))
-                    if line == "attach hard" && self.journal.connection == Connection::Soft =>
-                {
-                    self.note_hard_reconnect()?;
-                }
-                Ok(Input::ForegroundTool {
-                    attachment_id,
-                    frame,
-                }) => {
-                    if let Some(output) = &self.output {
-                        let _ = output.try_tool_event_for(
-                            attachment_id,
-                            json!({"v":1,
-                            "type":"tool-complete","isError":true,
-                            "requestId":foreground_request_id(&frame),
-                            "result":"foreground tool already in progress"}),
+        let operation_id = self.foreground_operation.ok_or("foreground API invocation absent")?;
+        self.foreground_api_budget = Some(ForegroundApiBudget::new(operation_id));
+        let result = (|| {
+            let (reply, received) = mpsc::channel();
+            let mut active = Some(self.begin_application_api(arguments, reply, None, false)?);
+            loop {
+                self.poll_application_api(&mut active)?;
+                if let Ok(value) = received.try_recv() {
+                    if value.get("isError").and_then(Value::as_bool) == Some(true)
+                        && self.journal.application_api_attempt.is_some()
+                    {
+                        return Err(
+                            "application API outcome remains retained for read-only inspection".into(),
                         );
                     }
+                    return Ok(value);
                 }
-                Ok(Input::ForegroundResult {
-                    attachment_id,
-                    request_id,
-                }) => {
-                    let _ = self.answer_foreground_result(attachment_id, &request_id);
+                if self.cancelled.load(Ordering::SeqCst) || self.native_work_limit().is_err() {
+                    return Err(
+                        "foreground API call cancelled or timed out; inspect exact attempt".into(),
+                    );
                 }
-                Ok(Input::ForegroundAck {
-                    attachment_id,
-                    request_id,
-                }) => {
-                    let _ = self.answer_foreground_ack(attachment_id, &request_id);
+                match input.try_recv() {
+                    Ok(Input::Dispatch(request)) => self.answer_dispatch(request),
+                    Ok(Input::Admin(request)) => {
+                        let _ = request.reply.send("foreground API call is running".into());
+                    }
+                    Ok(Input::Disconnect) => {
+                        self.stdin_gone = true;
+                        if self.hard_connection.load(Ordering::SeqCst) {
+                            return Err("hard disconnect during foreground API call".into());
+                        }
+                    }
+                    Ok(Input::Line(line)) if line == "disconnect" => {
+                        self.stdin_gone = true;
+                        if self.hard_connection.load(Ordering::SeqCst) {
+                            return Err("hard disconnect during foreground API call".into());
+                        }
+                    }
+                    Ok(Input::SoftDetach) => self.stdin_gone = true,
+                    Ok(Input::Line(line))
+                        if line == "attach soft" && self.journal.connection == Connection::Soft =>
+                    {
+                        self.emit("reconnected to soft foreground tool\n");
+                    }
+                    Ok(Input::Line(line))
+                        if line == "attach hard" && self.journal.connection == Connection::Soft =>
+                    {
+                        self.note_hard_reconnect()?;
+                    }
+                    Ok(Input::ForegroundTool {
+                        attachment_id,
+                        frame,
+                    }) => {
+                        if let Some(output) = &self.output {
+                            let _ = output.try_tool_event_for(
+                                attachment_id,
+                                json!({"v":1,
+                                "type":"tool-complete","isError":true,
+                                "requestId":foreground_request_id(&frame),
+                                "result":"foreground tool already in progress"}),
+                            );
+                        }
+                    }
+                    Ok(Input::ForegroundResult {
+                        attachment_id,
+                        request_id,
+                    }) => {
+                        let _ = self.answer_foreground_result(attachment_id, &request_id);
+                    }
+                    Ok(Input::ForegroundAck {
+                        attachment_id,
+                        request_id,
+                    }) => {
+                        let _ = self.answer_foreground_ack(attachment_id, &request_id);
+                    }
+                    Ok(_) | Err(mpsc::TryRecvError::Empty) => {}
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        return Err("foreground connector channel closed".into());
+                    }
                 }
-                Ok(_) | Err(mpsc::TryRecvError::Empty) => {}
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    return Err("foreground connector channel closed".into());
-                }
+                thread::sleep(Duration::from_millis(20));
             }
-            thread::sleep(Duration::from_millis(20));
-        }
+        })();
+        self.foreground_api_budget = None;
+        result
     }
     fn check_not_cancelled(&self) -> Result<()> {
+        self.native_work_limit()?;
         if self.cancelled.load(Ordering::SeqCst) {
             Err("hard connection closed; tool task requires reconciliation".into())
         } else {
@@ -18022,6 +18158,12 @@ fn serve(mut rt: Runtime) -> Result<()> {
                     });
                     continue;
                 }
+                if let Some(id)=request.command.strip_prefix("recover foreground api-unreserved ") {
+                    let result=rt.recover_foreground_api_unreserved(id);
+                    request.phase.store(2, Ordering::SeqCst);
+                    let _=request.reply.send(match result {Ok(value)=>value.to_string(),Err(error)=>format!("error: {error}")});
+                    continue;
+                }
                 if let Some(id)=request.command.strip_prefix("recover foreground session ") {
                     let result=rt.recover_foreground_session(id);
                     request.phase.store(2, Ordering::SeqCst);
@@ -18436,6 +18578,15 @@ fn main() -> ExitCode {
                 if ready { println!("{response}"); ExitCode::SUCCESS }
                 else { eprintln!("grain-runtime admin: {response}"); ExitCode::from(1) }
             }
+            Ok(response) if command.starts_with("recover foreground api-unreserved ") => {
+                let request_id = command.strip_prefix("recover foreground api-unreserved ").unwrap();
+                let ready = serde_json::from_str::<Value>(&response).ok().is_some_and(|value|
+                    value["type"] == "mini-foreground-api-unreserved-recovery-v1"
+                    && value["proof"]["requestId"] == request_id
+                    && value["proof"]["noDispatch"] == true);
+                if ready { println!("{response}"); ExitCode::SUCCESS }
+                else { eprintln!("grain-runtime admin: {response}"); ExitCode::from(1) }
+            }
             Ok(response) if command.starts_with("recover foreground session ") => {
                 let request_id = command.strip_prefix("recover foreground session ").unwrap();
                 if foreground_session_recovery::successful_reply(request_id, &response) {
@@ -18457,7 +18608,7 @@ fn main() -> ExitCode {
         };
     }
     if args.len() != 3 || args[1] != "serve" {
-        eprintln!("usage: grain-runtime create /absolute/spec.json | provider-table check FILE | serve /absolute/config.json | connect /absolute/socket [hard|soft] | terminal /absolute/socket [hard|soft] | tool-id | tool /absolute/socket hard|soft REQUEST_ID_32_HEX NAME /absolute/arguments.json | tool-result /absolute/socket REQUEST_ID_32_HEX | tool-ack /absolute/socket REQUEST_ID_32_HEX | admin /absolute/stateDir/admin.sock 'reconcile parent|tool|effects|worker audited|foreground audited|recover foreground session REQUEST_ID' | mcp-stdio /absolute/socket");
+        eprintln!("usage: grain-runtime create /absolute/spec.json | provider-table check FILE | serve /absolute/config.json | connect /absolute/socket [hard|soft] | terminal /absolute/socket [hard|soft] | tool-id | tool /absolute/socket hard|soft REQUEST_ID_32_HEX NAME /absolute/arguments.json | tool-result /absolute/socket REQUEST_ID_32_HEX | tool-ack /absolute/socket REQUEST_ID_32_HEX | admin /absolute/stateDir/admin.sock 'reconcile parent|tool|effects|worker audited|foreground audited|recover foreground api-unreserved REQUEST_ID|recover foreground session REQUEST_ID' | mcp-stdio /absolute/socket");
         return ExitCode::from(2);
     }
     let path = PathBuf::from(&args[2]);
@@ -18474,6 +18625,9 @@ fn main() -> ExitCode {
         ExitCode::SUCCESS
     }
 }
+
+#[cfg(test)]
+mod foreground_api_tests;
 
 #[cfg(test)]
 mod tests {
