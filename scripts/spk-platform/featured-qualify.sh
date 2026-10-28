@@ -20,7 +20,7 @@ rows=$out/rows.tsv; : >"$rows"
 row() { printf '%s\t%s\t%s\n' "$([ "$2" = 1 ] && echo PASS || echo FAIL)" "$1" "$3" | tee -a "$rows"; }
 state=$(jq -er .stateRoot "$PROFILE")
 
-# letter  name         packageId                         class  page   kind
+# letter  name         packageId                         class  page   kind  [role: the owner role id when role 0 cannot write]
 apps="j EtherCalc 9b3b76152e7d8db9f54dba7455ea9239 S / web
 k HedgeDoc ff642cdb65178a6a2dff96ca15dd7028 M / web
 l Davros 15bf92664a1b14a784bf737e502e13b7 M / web
@@ -142,10 +142,11 @@ write_Datasette() {
 }
 for f in "$here"/market-writes/*.sh ${QUALIFY_WRITES:+"$QUALIFY_WRITES"/*.sh}; do [[ -f $f ]] && . "$f"; done
 
-while read -r letter name pkg class page kind; do
+while read -r letter name pkg class page kind role; do
   [[ $want == *" $letter "* ]] || continue
   spk=$(package "$pkg") || { row "$name: package $pkg fetched and verified" 0 "fetch failed"; continue; }
   b=$(basis "$spk"); U=$(tr a-p A-P <<<"$letter")
+  [[ -z ${role:-} ]] || b="{\"type\":\"role\",\"id\":\"$role\"}"  # a table row may name the role its owner needs for the write
   started=$(date +%s)
   if env BIN="$BIN" "SPK_$U=$spk" "KIND_$U=$kind" "GET_PATH_$U=$page" "CLASS_$U=$class" "ROLE_BASIS_$U=$b" \
       sh "$repo/scripts/spk-platform/grain-journey.sh" phase "$RUN" "birth-$letter" "install-$letter" "share-$letter" \
