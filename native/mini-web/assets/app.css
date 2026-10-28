@@ -113,7 +113,7 @@ form.row > * { flex: 1 1 10rem; min-width: 0; } form.row > button { flex: 0 0 au
 .place-list a { display: block; padding: 1.25rem; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--paper); font-weight: 500; text-decoration: none; }
 .place-list a::after { content: "↗"; float: right; } .place-list a:hover { border-color: var(--accent); }
 .app-card { min-width: 0; border: 1px solid var(--rule); border-radius: var(--radius); padding: 1.25rem; display: flex; flex-direction: column; background: var(--paper); }
-.app-card header { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; } .app-card h2,.app-card h3 { margin: 0 0 .3rem; font-size: 1.1rem; } .app-card h2 a,.app-card h3 a { color: var(--ink); text-decoration: none; }
+.app-card header { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; } .app-card h2,.app-card h3,.app-card h4 { margin: 0 0 .3rem; font-size: 1.1rem; } .app-card h2 a,.app-card h3 a,.app-card h4 a { color: var(--ink); text-decoration: none; }
 .app-mark { width: 48px; height: 48px; flex: 0 0 auto; border: 1px solid var(--rule); background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; border-radius: 12px; font: 1.65rem var(--serif); }
 .app-card .publisher { font-size: .8rem; color: var(--ink-2); } .app-card .verdict { margin-top: auto; border-top: 1px solid var(--rule); padding-top: 1rem; }
 .app-card .actions { margin-top: 1rem; } .app-card .actions a { font-size: .85rem; }
@@ -171,3 +171,20 @@ body.standalone { display: block; max-width: 52rem; padding: 0 1rem; margin: aut
   th,td { padding: .6rem .35rem; } table { font-size: .8rem; } .doc { font-size: 1.1rem; } .doc .lines { padding-left: 1.3rem; }
 }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+
+/* Catalogue structure comes from featured ranks, categories and typed declarations. */
+.catalogue-search select { width: 100%; margin-top: .35rem; }
+.catalogue-search input { margin-top: .35rem; }
+.catalogue-count { color: var(--ink-2); margin: 1.5rem 0; }
+.catalogue-count strong { color: var(--ink); font-size: 1.3rem; }
+.catalogue-category { margin: 2rem 0; }
+.catalogue-category > h3 { border-bottom: 1px solid var(--rule); padding-bottom: .75rem; }
+.catalogue-category > h3 .note { margin-left: .5rem; }
+.app-categories { display: flex; gap: .35rem; flex-wrap: wrap; }
+.category { font-size: .7rem; padding: .2rem .5rem; border-radius: 4px; background: var(--accent-soft); color: var(--accent); }
+.app-agent { border-top: 1px solid var(--rule); padding-top: 1rem; margin-bottom: 1rem; }
+.app-agent .eyebrow { margin-bottom: .5rem; }
+.app-agent p { font-size: .85rem; }
+.app-agent details { padding: .6rem; font-size: .8rem; }
+.app-agent ul { padding-left: 1.1rem; }
+.app-agent li { margin-bottom: 1rem; }

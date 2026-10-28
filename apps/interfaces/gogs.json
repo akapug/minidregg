@@ -1,0 +1,788 @@
+{
+  "format": "mini-app-interface-v1",
+  "name": "gogs",
+  "interfaceVersion": 1,
+  "appId": "d9ygf47xrtnw12j92cyt6cu8ut75esx01u4q3kcrn8415w9qzzgh",
+  "packageId": "aede44cf19129337aae68b6993324574",
+  "appVersion": "0.11.34-fix1",
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 16384,
+    "replyBytes": 1048576,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "$defs": {
+    "User": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "login": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "login"
+      ],
+      "additionalProperties": true
+    },
+    "Repository": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "name": {
+          "type": "string"
+        },
+        "owner": {
+          "$ref": "#/$defs/User"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "owner"
+      ],
+      "additionalProperties": true
+    },
+    "Issue": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "number",
+        "title",
+        "body",
+        "state"
+      ],
+      "additionalProperties": true
+    },
+    "Comment": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "body": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "body"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "operations": {
+    "user.read": {
+      "description": "Read the member identity used by this Gogs session.",
+      "input": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "#/$defs/User"
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "api/v1/user"
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ]
+      }
+    },
+    "repo.create": {
+      "description": "Create an initialized repository owned by this member.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 8192
+          }
+        },
+        "required": [
+          "name",
+          "description"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "#/$defs/Repository"
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "POST",
+        "path": [
+          "api/v1/user/repos"
+        ],
+        "decode": "json",
+        "status": [
+          201
+        ],
+        "json": {
+          "name": {
+            "arg": "name"
+          },
+          "description": {
+            "arg": "description"
+          },
+          "auto_init": true,
+          "private": true,
+          "readme": "Default"
+        }
+      }
+    },
+    "repo.list": {
+      "description": "List repositories visible to this member, one page at a time.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "page"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Repository"
+        },
+        "maxItems": 1000
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "api/v1/user/repos"
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ],
+        "query": {
+          "page": {
+            "arg": "page"
+          }
+        }
+      }
+    },
+    "issue.create": {
+      "description": "Open an issue in the specified owner/repository.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "owner": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "repo": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 8192
+          }
+        },
+        "required": [
+          "owner",
+          "repo",
+          "title",
+          "body"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "#/$defs/Issue"
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "POST",
+        "path": [
+          "api/v1/repos/",
+          {
+            "arg": "owner",
+            "encoding": "segment"
+          },
+          "/",
+          {
+            "arg": "repo",
+            "encoding": "segment"
+          },
+          "/issues"
+        ],
+        "decode": "json",
+        "status": [
+          201
+        ],
+        "json": {
+          "title": {
+            "arg": "title"
+          },
+          "body": {
+            "arg": "body"
+          }
+        }
+      }
+    },
+    "issue.read": {
+      "description": "Read an issue by its repository-scoped number.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "owner": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "repo": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "number": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "owner",
+          "repo",
+          "number"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "#/$defs/Issue"
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "api/v1/repos/",
+          {
+            "arg": "owner",
+            "encoding": "segment"
+          },
+          "/",
+          {
+            "arg": "repo",
+            "encoding": "segment"
+          },
+          "/issues/",
+          {
+            "arg": "number",
+            "encoding": "segment"
+          }
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ]
+      }
+    },
+    "issue.list": {
+      "description": "List a page of issues filtered by state within a repository.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "owner": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "repo": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "open",
+              "closed"
+            ]
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "owner",
+          "repo",
+          "state",
+          "page"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Issue"
+        },
+        "maxItems": 1000
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "api/v1/repos/",
+          {
+            "arg": "owner",
+            "encoding": "segment"
+          },
+          "/",
+          {
+            "arg": "repo",
+            "encoding": "segment"
+          },
+          "/issues"
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ],
+        "query": {
+          "state": {
+            "arg": "state"
+          },
+          "page": {
+            "arg": "page"
+          }
+        }
+      }
+    },
+    "comment.create": {
+      "description": "Add a comment to a repository-scoped issue.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "owner": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "repo": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "number": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 8192
+          }
+        },
+        "required": [
+          "owner",
+          "repo",
+          "number",
+          "body"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "#/$defs/Comment"
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "POST",
+        "path": [
+          "api/v1/repos/",
+          {
+            "arg": "owner",
+            "encoding": "segment"
+          },
+          "/",
+          {
+            "arg": "repo",
+            "encoding": "segment"
+          },
+          "/issues/",
+          {
+            "arg": "number",
+            "encoding": "segment"
+          },
+          "/comments"
+        ],
+        "decode": "json",
+        "status": [
+          201
+        ],
+        "json": {
+          "body": {
+            "arg": "body"
+          }
+        }
+      }
+    },
+    "comment.list": {
+      "description": "Read a page of comments on an issue.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "owner": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "repo": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "number": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "owner",
+          "repo",
+          "number",
+          "page"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Comment"
+        },
+        "maxItems": 1000
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "api/v1/repos/",
+          {
+            "arg": "owner",
+            "encoding": "segment"
+          },
+          "/",
+          {
+            "arg": "repo",
+            "encoding": "segment"
+          },
+          "/issues/",
+          {
+            "arg": "number",
+            "encoding": "segment"
+          },
+          "/comments"
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ],
+        "query": {
+          "page": {
+            "arg": "page"
+          }
+        }
+      }
+    },
+    "file.read": {
+      "description": "Read bounded binary source at an immutable Git commit in this repository. Git writes use the native git worker, not a guessed contents API.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "owner": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "maxLength": 128
+          },
+          "repo": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "maxLength": 128
+          },
+          "commit": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}$"
+          },
+          "path": {
+            "type": "string",
+            "format": "relative-path",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        },
+        "required": [
+          "owner",
+          "repo",
+          "commit",
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "contentBase64": {
+            "type": "string",
+            "contentEncoding": "base64",
+            "maxLength": 1398104
+          }
+        },
+        "required": [
+          "contentBase64"
+        ],
+        "additionalProperties": false
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "api/v1/repos/",
+          {
+            "arg": "owner",
+            "encoding": "segment"
+          },
+          "/",
+          {
+            "arg": "repo",
+            "encoding": "segment"
+          },
+          "/raw/",
+          {
+            "arg": "commit",
+            "encoding": "segment"
+          },
+          "/",
+          {
+            "arg": "path",
+            "encoding": "path"
+          }
+        ],
+        "decode": "base64",
+        "status": [
+          200
+        ]
+      }
+    }
+  },
+  "qualification": [
+    {
+      "id": "me",
+      "op": "user.read",
+      "args": {}
+    },
+    {
+      "id": "repo",
+      "op": "repo.create",
+      "args": {
+        "name": {
+          "context": "runId"
+        },
+        "description": "typed qualification"
+      }
+    },
+    {
+      "id": "issue",
+      "op": "issue.create",
+      "args": {
+        "owner": {
+          "result": [
+            "me",
+            "login"
+          ]
+        },
+        "repo": {
+          "result": [
+            "repo",
+            "name"
+          ]
+        },
+        "title": {
+          "context": "runId"
+        },
+        "body": "typed issue"
+      }
+    },
+    {
+      "id": "comment",
+      "op": "comment.create",
+      "args": {
+        "owner": {
+          "result": [
+            "me",
+            "login"
+          ]
+        },
+        "repo": {
+          "result": [
+            "repo",
+            "name"
+          ]
+        },
+        "number": {
+          "result": [
+            "issue",
+            "number"
+          ]
+        },
+        "body": {
+          "context": "runId"
+        }
+      }
+    },
+    {
+      "id": "read",
+      "op": "issue.read",
+      "args": {
+        "owner": {
+          "result": [
+            "me",
+            "login"
+          ]
+        },
+        "repo": {
+          "result": [
+            "repo",
+            "name"
+          ]
+        },
+        "number": {
+          "result": [
+            "issue",
+            "number"
+          ]
+        }
+      },
+      "assert": [
+        {
+          "path": [
+            "title"
+          ],
+          "equals": {
+            "context": "runId"
+          }
+        }
+      ]
+    },
+    {
+      "id": "comments",
+      "op": "comment.list",
+      "args": {
+        "owner": {
+          "result": [
+            "me",
+            "login"
+          ]
+        },
+        "repo": {
+          "result": [
+            "repo",
+            "name"
+          ]
+        },
+        "number": {
+          "result": [
+            "issue",
+            "number"
+          ]
+        },
+        "page": 1
+      },
+      "assert": [
+        {
+          "contains": {
+            "body": {
+              "context": "runId"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "kind": "member-route",
+    "preflight": "user.read",
+    "refusal": "app-auth-required"
+  },
+  "sources": [
+    "https://github.com/gogs/gogs/blob/v0.11.34/routes/api/v1/api.go",
+    "https://github.com/cem/gogs-sandstorm",
+    "https://github.com/gogs/gogs/blob/v0.11.34/routes/api/v1/repo/issue.go"
+  ]
+}

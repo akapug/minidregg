@@ -87,7 +87,7 @@
       pane.dataset.path = landed;
       pane.querySelector(".pane-body").innerHTML = html;
       setTitle(pane, response.headers.get("X-Mini-Title") || landed);
-      wire(pane);
+      wire(pane, !options.quiet);
       sync();
       fill(pane);
       reportLink(landed);
@@ -295,7 +295,7 @@
     }, ms);
   }
 
-  function wire(pane) {
+  function wire(pane, focus = true) {
     const host = pane.querySelector(".term[data-ws]");
     if (host) assets(() => boot(pane, host));
     live(pane);
@@ -303,11 +303,11 @@
     const auto = pane.querySelector("form[data-autosubmit]");
     if (auto && !auto.dataset.done) { auto.dataset.done = "1"; setTimeout(() => auto.submit(), 300); }
     const first = pane.querySelector(".pane-body input:not([type=hidden]), .pane-body textarea");
-    if (first && pane.dataset.focus !== "no") first.focus({ preventScroll: true });
+    if (focus && first && pane.dataset.focus !== "no") first.focus({ preventScroll: true });
   }
 
   // ---------------------------------------------------------------- start
-  for (const pane of stage.querySelectorAll(".pane")) { dress(pane); wire(pane); }
+  for (const pane of stage.querySelectorAll(".pane")) { dress(pane); wire(pane, false); }
   restore();
   sync();
   addEventListener("hashchange", restore);

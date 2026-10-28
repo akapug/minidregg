@@ -17,6 +17,8 @@ pub(crate) mod front;
 pub(crate) mod worker;
 
 use crate::participant_namespace::{self, IdKind, Role};
+mod interfaces;
+
 use crate::{absolute, hex, path, Args, Result};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
@@ -367,9 +369,10 @@ pub(crate) fn suggested_class(raw_bytes: Option<u64>) -> &'static str {
     }
 }
 
-fn entry_json(entry: &Entry, verdict: &Verdict) -> Value {
+pub(crate) fn entry_json(entry: &Entry, verdict: &Verdict) -> Value {
     json!({
         "appId":entry.app_id,"packageId":entry.package_id,"name":entry.name,"version":entry.version,
+        "interface":interfaces::summary(&entry.app_id, &entry.package_id),
         "versionNumber":entry.version_number,"publisher":entry.author,"upstreamAuthor":entry.upstream_author,
         "shortDescription":entry.short_description,"categories":entry.categories,"webLink":entry.web_link,
         "codeLink":entry.code_link,"packageUrl":package_url(entry),

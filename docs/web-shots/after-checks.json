@@ -12,6 +12,12 @@
     "unlabelled": []
   },
   {
+    "page": "apps-filtered",
+    "variant": "light",
+    "overflow": false,
+    "unlabelled": []
+  },
+  {
     "page": "rooms",
     "variant": "light",
     "overflow": false,
@@ -67,6 +73,12 @@
   },
   {
     "page": "apps",
+    "variant": "dark",
+    "overflow": false,
+    "unlabelled": []
+  },
+  {
+    "page": "apps-filtered",
     "variant": "dark",
     "overflow": false,
     "unlabelled": []
@@ -127,6 +139,12 @@
   },
   {
     "page": "apps",
+    "variant": "phone",
+    "overflow": false,
+    "unlabelled": []
+  },
+  {
+    "page": "apps-filtered",
     "variant": "phone",
     "overflow": false,
     "unlabelled": []

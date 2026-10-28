@@ -39,6 +39,7 @@ mod body;
 mod verbs;
 #[path = "web/apps.rs"]
 mod apps;
+mod capture;
 #[path = "web/subscribe.rs"]
 pub(crate) mod subscribe;
 

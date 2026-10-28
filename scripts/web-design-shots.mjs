@@ -12,8 +12,9 @@ fs.mkdirSync(output, { recursive: true });
 fs.writeFileSync(path.join(dir, "screenshots.pid"), String(process.pid));
 const pages = JSON.parse(fs.readFileSync(path.join(dir, "pages.json")));
 const server = http.createServer((req, res) => {
-  const pathname = new URL(req.url, "http://localhost").pathname;
-  const match = pages.find(p => p.path === pathname);
+  const address = new URL(req.url, "http://localhost");
+  const pathname = address.pathname;
+  const match = pages.find(p => p.path === pathname + address.search) || pages.find(p => p.path === pathname);
   const file = path.resolve(dir, match ? `${match.name}.html` : pathname.replace(/^\//, ""));
   if (!file.startsWith(dir + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) { res.writeHead(404); res.end("Preview has no such fixture"); return; }
   if (match && req.headers["x-mini-fragment"]) {
@@ -57,6 +58,20 @@ try {
       }));
       results.push({ page: p.name, variant: variant.name, ...layout });
       if (tag === "after" && (layout.overflow || layout.unlabelled.length)) throw new Error(JSON.stringify(results.at(-1)));
+    }
+    if (tag === "after") {
+      await page.goto(`${origin}/apps`, { waitUntil: "networkidle" });
+      const catalogue = page.locator('.catalogue-search');
+      await catalogue.getByLabel("Find an app").fill("Gogs");
+      await catalogue.getByLabel("Category").selectOption("DevTools");
+      await catalogue.getByRole("button", { name: "Find apps" }).click();
+      await page.locator('.app-card').getByRole("heading", { name: "Gogs", exact: true }).waitFor();
+      if (await page.locator('.app-card').count() !== 1) throw new Error("Search/category did not narrow the catalogue");
+      await page.locator('.app-agent > details > summary').click();
+      await page.getByText("Read the member identity used by this Gogs session.", { exact: true }).waitFor();
+      await page.getByText("Input and output types", { exact: true }).first().click();
+      if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw new Error("Expanded interface overflows the page");
+      await page.screenshot({ path: path.join(output, `${tag}-apps-interface-${variant.name}.png`), fullPage: true });
     }
     if (external.length) throw new Error(`External requests: ${external}`);
     await context.close();

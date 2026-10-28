@@ -1,6 +1,7 @@
 //! Opt-in visual fixtures: real renderers, fixture observations, no Host.
 use super::*;
 use serde_json::json;
+use std::path::Path;
 
 #[test]
 #[ignore = "writes visual fixtures to MINI_WEB_PREVIEW"]
@@ -21,21 +22,27 @@ fn design_preview() {
         front: Front { origins: vec![], read_only: true }, base: String::new(), face: Face::Body,
         shell: Some(Shell { host: "/unused".into(), config: "/unused".into(), home: root.join("home"), public_subject: Some("99".into()), front_doc: None }),
     };
-    redteam::FAKE_SHELL.with(|f| *f.borrow_mut() = Some(Box::new(|lines| {
+    // Use the real market parser, ordering and JSON projection for catalogue screenshots.
+    // MINI_WEB_CATALOGUE is a captured upstream index, never a second production list.
+    let index = std::env::var("MINI_WEB_CATALOGUE").expect("MINI_WEB_CATALOGUE: captured market index JSON");
+    let entries = crate::apps::load_index(Path::new(&index)).unwrap();
+    redteam::FAKE_SHELL.with(|f| *f.borrow_mut() = Some(Box::new(move |lines| {
         let line = lines.join("\n");
         let stdout = if line.starts_with("apps search") {
-            json!({"total":3,"apps":[
-                {"appId":"slides","name":"Hacker Slides","version":"0.3","shortDescription":"Turn Markdown into presentations you can share.","publisher":"Hacker Slides contributors","suggestedClass":"S","verdict":{"state":"verified","reason":"Package signature verified"}},
-                {"appId":"todos","name":"Simple Todos","version":"1.0","shortDescription":"A simple, shared list for the things you want to get done.","publisher":"Sandstorm contributors","suggestedClass":"S","verdict":{"state":"verified","reason":"Package signature verified"}},
-                {"appId":"ethercalc","name":"EtherCalc","version":"0.2025","shortDescription":"Work together on a spreadsheet, right in your browser.","publisher":"EtherCalc contributors","suggestedClass":"M","verdict":{"state":"unchecked","reason":"Package has not been checked on this box"}}
-            ]}).to_string()
+            let words = crate::shell::words(&line).unwrap();
+            let term = words.get(2).filter(|w| !w.starts_with("--")).map(String::as_str).unwrap_or("");
+            let category = words.iter().position(|w| w == "--category").and_then(|i| words.get(i+1)).map(String::as_str);
+            let apps: Vec<Value> = crate::apps::search(&entries, term, category).iter().map(|e| crate::apps::entry_json(e, &crate::apps::Verdict {
+                state:"unverified".into(), reason:None, raw_bytes:None, signed_app_id:None, running:0
+            })).collect();
+            json!({"total":entries.len(),"apps":apps}).to_string()
         } else if line.starts_with("tail") {
             "mini-s-box · backup complete\nThe world's receipts and documents are retained.\n\nmini-s-box · certifier tick\nThe latest checkpoint is available.\n".into()
         } else { String::new() };
         Ending { code: 0, stdout, stderr: String::new() }
     })));
     let mut pages = Vec::new();
-    for (name, path, parts) in [("front", "/", vec![]), ("apps", "/apps", vec!["apps"]), ("rooms", "/room", vec!["room"])] {
+    for (name, path, parts) in [("front", "/", vec![]), ("apps", "/apps", vec!["apps"]), ("apps-filtered", "/apps?q=Gogs&category=DevTools", vec!["apps"]), ("rooms", "/room", vec!["room"])] {
         let page = get(&site, &parts, path);
         pages.push(json!({"name":name,"path":path,"title":page.title,"body":page.body,"member":false}));
     }

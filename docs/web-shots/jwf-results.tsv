@@ -3,64 +3,61 @@ PASS	login	cookie=1 second=403
 PASS	stage-member	200
 PASS	csrf-refused	403
 PASS	origin-refused	403
-PASS	term-open	terminal and WebSocket routes issued (ephemeral id omitted)
-PASS	term-whoami	t": "/run/user/1000/jm.nDlREx/world.sock",
-   "subject": "16430977054118023188",
-   "type": "minidregg-shell-session-v1",
-   "workspace": "/run/user/1000/jwf-m- 
+PASS	term-open	/term/Vd0UtJlYheO1fsZv71DBG3P4kdxC0J8kuftB1Vd1wL0 ws=/ws/term/[ephemeral-route]
+PASS	term-whoami	et": "/run/user/1000/jm.GBnCWZ/world.sock",    "subject": "9593845313614974702",    "type": "minidregg-shell-session-v1",    "workspace": "/run/user/1000/jwf-m-
 PASS	doc-new	200 Admitted
-PASS	doc-append	200 receipt=w-b1018c4be5ac Admitted
+PASS	doc-append	200 receipt=w-4b7dd471de01 Admitted
 PASS	receipt	200
-PASS	receipt-anchor	acceptedCount 16 worldRoot 65137085092143765541609828942988870471937534604860618747012972203955605739022
+PASS	receipt-anchor	acceptedCount 16 worldRoot 32112193571884618675500484860245952515744337476160282085557133371648460659270
 PASS	consent-enrol	200 contributed for research (CC0)
 PASS	consent-flip	to none: Admitted
-PASS	subscribe-page	200 
-PASS	export-start	200 world-1793183418
-PASS	export-ready	200 after 6 s, 2 references 
-PASS	export-download	200 application/x-tar 850432 bytes
+PASS	subscribe-page	200
+PASS	export-start	200 world-1793205922
+PASS	export-ready	200 after 5 s, 2 references
+PASS	export-download	200 application/x-tar 851456 bytes
 PASS	export-deleted	the box keeps no copy once downloaded
 PASS	export-document	 documents=2 attempts=27
 PASS	export-consent	manifest none, the world none
-PASS	export-root	manifest height 27 root 3978791376667957 | live height 27 root 3978791376667957
-PASS	private-room	room new priv146373 --private rc=0; declaration rc=0 workspace attempt: /run/user/1000/jwf-m-16577516/home/workspace/attempts/rk-found-6114402593575219-w room 16937199754721464154: pinned founder key f66348c984dc88b2443042f952003b1ed64446566b9578ef223540
+PASS	export-root	manifest height 27 root 4783934261955690 | live height 27 root 4783934261955690
+PASS	private-room	room new priv102606 --private rc=0; declaration rc=0 workspace attempt: /run/user/1000/jwf-m-16823010/home/workspace/attempts/rk-found-0250979474969033-w room 16566410946718638456: pinned founder key 2462e8ee4889ce9e39b7410f13aab29d9e3a8e75f21a0273931989
 PASS	hermes-tools-none	200 room new: Admitted; data-hermes-tools="0"
 PASS	hermes-tools-grant	Admitted; then data-hermes-tools="9"
 PASS	hermes-tools-revoke	Admitted; then data-hermes-tools="1"
-PASS	hermes-tools-refused	403 refused: 
+PASS	hermes-tools-refused	403 refused:
 PASS	bend-programs	200 0 programs
-PASS	bend-await-read	200 object 11548804467816084015: data-phase="none" Answered
-PASS	bend-answer-refused	403 alt=6 refused: 
+PASS	bend-await-read	200 object 11888889647846799947: data-phase="none" Answered
+PASS	bend-answer-refused	403 alt=6 refused:
 PASS	parity	74 verbs, 216 leaves in help, 216 dry-run leaves, 0 usage refusals, 0 world refusals; without a face: none; usage: none; world: none
 PASS	parity-redproof	404 for a verb the shell lacks
 PASS	verb-index	200
 PASS	verb-run	200 whoami through the derived form answers (a local verb, never admitted)
 PASS	tour	200 steps=12
 PASS	tour-step	200 Answered
-PASS	tour-lose	200 alt=24 fields=a2,a3,a4 undecided: uncertain host response: reply deliberately not read (--lose-reply-once); the Host decided as it would, so look 
+PASS	tour-lose	200 alt=24 fields=a2,a3,a4 undecided: uncertain host response: reply deliberately not read (--lose-reply-once); the Host decided as it would, so look
 PASS	tour-lose-retry	200 lines=1 Admitted
-PASS	tour-refused	200 /doc/jwf148420/edit/a5be0e631196ac78ee6deb5049f03c0b data-save-status="refused" class="note">The Store refused this operation: law-denied: any [ not (all [ open, open, open ]), any [ verb in {read,delegate,install
-PASS	tour-can-any	200 can --any jwf148420: jwf148420  law version 0   a write exists in principle (e.g. verb = write, slot "content/atom-edits" = 0, slot "content/tombstones" = 0)   paste:     doc append | paste=doc append ID jwf148420 'hello': Admitted
-PASS	rules-check	200 alt=3 Answered satisfiable: admits e.g. any step at all (the law reads no slot) writes: admits e.g. slot "content/payload-bytes/after" 
+PASS	tour-refused	200 /doc/jwf294682/edit/c58286ee5f335a572670079b3b6dcf6f data-save-status="refused" class="note">The Store refused this operation: law-denied: any [ not (all [ open, open, open ]), any [ verb in {read,delegate,install
+PASS	tour-can-any	200 can --any jwf294682: jwf294682  law version 0   a write exists in principle (e.g. verb = write, slot "content/atom-edits" = 0, slot "content/tombstones" = 0)   paste:     doc append | paste=doc append ID jwf294682 'hello': Admitted
+PASS	rules-check	200 alt=3 Answered satisfiable: admits e.g. any step at all (the law reads no slot) writes: admits e.g. slot "content/payload-bytes/after"
 PASS	rules-install	200 alt=4 fields=a1,a2,a3 Admitted
-PASS	rules-refused	403 refused: 
+PASS	rules-refused	403 refused:
 PASS	rules-revised	200 Admitted
 PASS	rules-admitted	200 Admitted
 PASS	tour-purse-later	200
 PASS	purse-meter	200 class="n">958
-PASS	story-new	200 alt=0 fields=a2,a3 Admitted /run/user/1000/jwf-m-16577516/home/workspace/sources/create-tale427602.authoring/g0001/intent.bin { 
+PASS	story-new	200 alt=0 fields=a2,a3 Admitted /run/user/1000/jwf-m-16823010/home/workspace/sources/create-tale100569.authoring/g0001/intent.bin {
 PASS	story-seal	200 Admitted
-PASS	story-invite	200 Admitted invitation={"author":"16430977054118023188","cell":"1262517175293913560
-PASS	story-page-invited	200 data-story="tale427602" data-file="tale427602-invite.json" data-to-me="true" data-story="tale427602" data-file="tale427602-other.json" data-to-me="false" 
+PASS	story-invite	200 Admitted invitation={"author":"9593845313614974702","cell":"15628631486418367288
+PASS	story-page-invited	200 data-story="tale100569" data-file="tale100569-invite.json" data-to-me="true" data-story="tale100569" data-file="tale100569-other.json" data-to-me="false"
 PASS	story-front-notice	200 data-invited="1"
-PASS	story-join-refused	400 form for another's invitation: none; usage: this invitation is not addressed to you (16430977054118023188)
-PASS	story-join	200 fields=8 Answered joined tale427602 as player; it is your current story (look)
-PASS	story-page-joined	200    tale427602  (current)  player   16430977054118023188    16430977054
+PASS	story-join-refused	400 form for another's invitation: none; usage: this invitation is not addressed to you (9593845313614974702)
+PASS	story-join	200 fields=8 Answered joined tale100569 as player; it is your current story (look)
+PASS	story-page-joined	200    tale100569  (current)  player   9593845313614974702    959384531361
 PASS	story-move	200 Admitted go north: admitted
-PASS	story-refused	200 refused: 
+PASS	story-refused	200 refused:
 PASS	grants-many	200 59 grants listed, each judged on its own
-PASS	grants-judge	200 jwf148420  object 16890581691249374528 (document)  held: append, delegate, installPolicy, mutate, ob
-PASS	can-bare	400 error: 7 of 59 grants judged within 100 s; narrow with `can REF` (the Grants page judges them one at a time) 7 of 59 grants judged within 100 s; narrow with `can REF` (the Grants page judges them one at a time)
-PASS	tour-chromium	steps=12 step4=outcome answered step4-ms=21959 terminal=whoami-ok errors=0 
+PASS	grants-judge	200 jwf294682  object 14884665207391367238 (document)  held: append, delegate, installPolicy, mutate, ob
+PASS	can-bare	400 error: 6 of 59 grants judged within 100 s; narrow with `can REF` (the Grants page judges them one at a time) 6 of 59 grants judged within 100 s; narrow with `can REF` (the Grants page judges them one at a time)
+PASS	tour-chromium	steps=12 step4=outcome answered step4-ms=22970 terminal=whoami-ok errors=0
 PASS	logout	logout=303 then /term=401
 PASS	public-reader	200 error: no market index at /var/lib/mini-market/index.json (cannot read /var/lib/mini-market/index.json:
 J-WEB-FRONTEND PASS 62/62

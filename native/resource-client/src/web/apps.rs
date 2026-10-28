@@ -21,37 +21,95 @@ fn grain_id(n: &str) -> Option<String> {
     (!id.is_empty() && id.len() <= 40 && id.bytes().all(|b| b.is_ascii_alphanumeric())).then(|| format!("a{id}"))
 }
 
-/// `/apps[?q=TERM]`: the catalogue.
+/// `/apps[?q=TERM&category=C]`: the catalogue, with shell-owned search semantics.
 pub(super) fn market(site: &Site, target: &str) -> Page {
     let term = super::body::query(target, "q").unwrap_or_default();
+    let category = super::body::query(target, "category").unwrap_or_default();
     let body = format!(
-        "<p class=\"eyebrow\">The app market</p><p>Make room for your tools. Browse apps from the Sandstorm catalogue, then install a copy of your own.</p>\
-         <form method=\"get\" action=\"/apps\" class=\"row\"><div><label for=\"q\">Find an app</label><input id=\"q\" name=\"q\" type=\"search\" placeholder=\"Search the catalogue\" value=\"{}\"></div><button>Search apps</button></form>\
-         <p class=\"note\">Names, descriptions and publishers are catalogue claims. Each card separately shows this box's package verdict. Your installed copy runs on its own origin.</p>{installed}<section><h2>Available apps</h2>{}</section>",
-        escape(&term), catalogue(site, &term, usize::MAX),
+        "<p class=\"eyebrow\">The app market</p><p class=\"lede\">Your next project starts here. Write together, organise a team, build something, or make room to play.</p>\
+         <p class=\"note\">Names, descriptions and publishers are catalogue claims. Package verdicts and declared agent interfaces are shown separately.</p>{installed}{}",
+        catalogue(site, &term, &category, false),
         installed = if site.front.read_only { "" } else { "<p><a href=\"/grain\">Open your installed apps →</a></p>" }
     );
     Page { status: 200, title: "Apps".into(), stamp: Stamp::None, body }
 }
 
-/// One catalogue, shared by the market and front page. The only input is `apps search`.
-/// A failed read keeps its explained outcome; an empty catalogue is never fabricated.
-pub(super) fn catalogue(site: &Site, term: &str, limit: usize) -> String {
+fn search(site: &Site, term: &str, category: &str) -> std::result::Result<Value, String> {
     let mut line = String::from("apps search");
     if !term.is_empty() { line.push(' '); line.push_str(&quote(term)); }
+    if !category.is_empty() { line.push_str(" --category "); line.push_str(&quote(category)); }
     line.push_str(" --json");
-    let Some(ending) = verb(site, &[line]) else { return "<p class=note>The app catalogue is unavailable: this body has no shell paths.</p>".into() };
-    let Some(value) = reply(&ending).filter(|_| ending.code == 0) else {
-        return super::body::answer_html(&ending, &[("Browse app commands", "/verb/apps")]);
+    let Some(ending) = verb(site, &[line]) else {
+        return Err("<p class=note>The app catalogue is unavailable: this body has no shell paths.</p>".into());
     };
-    let apps = value["apps"].as_array().or_else(|| value["receipt"]["apps"].as_array());
-    let apps = apps.map(Vec::as_slice).unwrap_or(&[]);
-    if apps.is_empty() {
-        return "<div class=\"empty\"><h3>No apps found</h3><p>Try another search, or <a href=\"/apps\">browse the whole catalogue</a>.</p></div>".into();
+    reply(&ending).filter(|_| ending.code == 0).ok_or_else(||
+        super::body::answer_html(&ending, &[("Browse app commands", "/verb/apps")]))
+}
+
+fn entries(value: &Value) -> &[Value] {
+    value["apps"].as_array().or_else(|| value["receipt"]["apps"].as_array()).map(Vec::as_slice).unwrap_or(&[])
+}
+
+/// One catalogue, shared by the market and landing page. No copied featured set or cap.
+/// Unfiltered data supplies category choices; the shell performs the actual filtering.
+pub(super) fn catalogue(site: &Site, term: &str, category: &str, featured_only: bool) -> String {
+    let all = match search(site, "", "") { Ok(v) => v, Err(html) => return html };
+    let categories: std::collections::BTreeSet<&str> = entries(&all).iter()
+        .flat_map(|a| a["categories"].as_array().into_iter().flatten().filter_map(Value::as_str)).collect();
+    let mut options = String::from("<option value=\"\">Every category</option>");
+    // Keep an unknown selection visible too, so a bookmarked query explains its empty result.
+    for c in categories.iter().copied().chain((!category.is_empty() && !categories.contains(category)).then_some(category)) {
+        options.push_str(&format!("<option value=\"{}\"{}>{}</option>", escape(c),
+            if c == category { " selected" } else { "" }, escape(c)));
     }
-    let cards: String = apps.iter().take(limit).map(|app| app_card(app, !site.front.read_only, 3)).collect();
-    format!("<div class=\"app-gallery\">{cards}</div><p class=note>{} of {} shown.</p>", apps.len().min(limit),
-        value["total"].as_u64().or_else(|| value["receipt"]["total"].as_u64()).unwrap_or(apps.len() as u64))
+    let mut out = format!(
+        "<form method=\"get\" action=\"/apps\" class=\"row catalogue-search\">\
+         <div><label>Find an app<input name=\"q\" type=\"search\" placeholder=\"Search the catalogue\" value=\"{}\"></label></div>\
+         <div><label>Category<select name=\"category\">{options}</select></label></div><button>Find apps</button></form>", escape(term));
+    let filtered;
+    let value = if term.is_empty() && category.is_empty() { &all } else {
+        filtered = match search(site, term, category) { Ok(v) => v, Err(html) => { out.push_str(&html); return out; } };
+        &filtered
+    };
+    let (mut featured, rest): (Vec<_>, Vec<_>) = entries(value).iter().partition(|a| a["featured"]["rank"].as_u64().is_some());
+    featured.sort_by_key(|a| a["featured"]["rank"].as_u64());
+    let writes = !site.front.read_only;
+    if featured_only {
+        let mut groups: std::collections::BTreeMap<&str, Vec<&Value>> = std::collections::BTreeMap::new();
+        for app in &featured {
+            groups.entry(app["categories"][0].as_str().unwrap_or("Other")).or_default().push(app);
+        }
+        out.push_str(&format!("<p class=\"catalogue-count\"><strong>{}</strong> featured apps · <a href=\"/apps\">Explore the whole catalogue</a></p>", featured.len()));
+        for (category, apps) in groups {
+            out.push_str(&format!("<section class=\"catalogue-category\"><h3>{} <span class=\"note\">{}</span></h3><div class=\"app-gallery\">{}</div></section>",
+                escape(category), apps.len(), apps.iter().map(|a| app_card(a, writes, 4)).collect::<String>()));
+        }
+    } else {
+        out.push_str(&format!("<p class=\"catalogue-count\"><strong>{}</strong> apps found · {} featured</p>", featured.len() + rest.len(), featured.len()));
+        for (title, apps) in [("Featured apps", &featured), ("More from the catalogue", &rest)] {
+            if !apps.is_empty() {
+                out.push_str(&format!("<section><h2>{title} <span class=\"note\">{}</span></h2><div class=\"app-gallery\">{}</div></section>",
+                    apps.len(), apps.iter().map(|a| app_card(a, writes, 3)).collect::<String>()));
+            }
+        }
+    }
+    if featured.is_empty() && (featured_only || rest.is_empty()) {
+        out.push_str("<div class=\"empty\"><h3>No apps found</h3><p>Try another search, or <a href=\"/apps\">browse the whole catalogue</a>.</p></div>");
+    }
+    out
+}
+
+/// Typed declarations describe agent capabilities without claiming qualification.
+fn agent_interface(app: &Value) -> String {
+    let interface = &app["interface"];
+    let Some(operations) = interface["operations"].as_array().filter(|o| !o.is_empty()) else { return String::new() };
+    let names = operations.iter().filter_map(|o| o["name"].as_str()).map(|n| format!("<code>{}</code>", escape(n))).collect::<Vec<_>>().join(", ");
+    let details: String = operations.iter().map(|op| format!(
+        "<li><strong><code>{}</code></strong> <span class=\"note\">{}</span><p>{}</p><details><summary>Input and output types</summary><p>Input</p>{}<p>Output</p>{}</details></li>",
+        escape(op["name"].as_str().unwrap_or("")), if op["write"] == true { "writes" } else { "reads" },
+        escape(op["description"].as_str().unwrap_or("")), super::body::json_tree_html(&op["input"]), super::body::json_tree_html(&op["output"]))).collect();
+    format!("<div class=\"app-agent\"><p class=\"eyebrow\">For agents</p><p>{names}</p><details><summary>Declared operations · {}</summary><ul>{details}</ul><details><summary>Shared types</summary>{}</details></details></div>",
+        escape(interface["status"].as_str().unwrap_or("qualification not reported")), super::body::json_tree_html(&interface["$defs"]))
 }
 
 fn app_card(app: &Value, writes: bool, level: u8) -> String {
@@ -61,15 +119,17 @@ fn app_card(app: &Value, writes: bool, level: u8) -> String {
     let mark = escape(&app["name"].as_str().unwrap_or("?").chars().next().unwrap_or('?').to_string());
     let state = escape(app["verdict"]["state"].as_str().unwrap_or("unchecked"));
     let reason = escape(app["verdict"]["reason"].as_str().unwrap_or("No additional verdict details reported."));
+    let categories = app["categories"].as_array().into_iter().flatten().filter_map(Value::as_str)
+        .map(|c| format!("<span class=\"category\">{}</span>", escape(c))).collect::<String>();
     let install = if writes {
         format!("<form method=\"post\" action=\"/apps/install\" class=\"inline\"><input type=\"hidden\" name=\"app\" value=\"{id}\"><button class=\"quiet\">Install</button></form>")
     } else { String::new() };
     format!(
         "<article class=\"app-card\" data-app=\"{id}\"><header><span class=\"app-mark\" aria-hidden=\"true\">{mark}</span><div><h{level}><a href=\"/apps/{id}\">{name}</a></h{level}><span class=\"publisher\">{}</span></div></header>\
-         <p>{}</p><p class=\"note\">Version {} · Size {}</p>\
+         <p class=\"app-description\">{}</p><p class=\"app-categories\">{categories}</p>{}<p class=\"note\">Version {} · Size {}</p>\
          <div class=\"verdict {state}\"><span class=\"badge\">{state}</span><p class=\"note\">{reason}</p></div>\
          <div class=\"actions\"><a href=\"/apps/{id}\">View app →</a>{install}</div></article>",
-        text("publisher"), text("shortDescription"), text("version"), text("suggestedClass")
+        text("publisher"), text("shortDescription"), agent_interface(app), text("version"), text("suggestedClass")
     )
 }
 

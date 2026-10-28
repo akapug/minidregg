@@ -49,11 +49,11 @@ page, and edited form values pause refresh even after focus leaves the field.
 
 | Place | What a visitor finds |
 | --- | --- |
-| `/` | What Mini is; Join and Tour; the published welcome document (or published-reference index); observed operations; three catalogue apps; links to rooms, stories, receipts and laws |
+| `/` | What Mini is; Join and Tour; the published welcome document (or published-reference index); observed operations; the complete featured catalogue grouped by primary category; links to rooms, stories, receipts and laws |
 | `/doc`, `/doc/NAME` | Published references and a quiet reading page; history, source and authored context stay available |
 | `/room`, `/room/NAME` | Reference cards, room resources and members, conversation and its labelled composer; resident access remains attached to the room |
 | `/story` | Invitations before ongoing stories, then the real join/enter/invite actions; an explicit empty state |
-| `/apps`, `/apps/ID`, `/grain` | Searchable catalogue cards with publisher claims and package verdicts separated; full package details, install and the member's installed apps |
+| `/apps`, `/apps/ID`, `/grain` | Featured apps followed by the rest of the index; text search and category filtering; human descriptions and package-bound agent declarations; full package details, install and the member's installed apps |
 | `/bend` | Running programs, the decisions they await, and a form to read another activity |
 | `/room/NAME/resident` | Room-granted tools, founder controls, assignment and signed replies; Oracle refusals still explain the missing grant or configuration |
 | `/join` | The same visual language around the existing hosted-account, funding, key, consent and enrolment choices |
@@ -77,6 +77,8 @@ screens show their corresponding renderer surface; no screenshot is a hand-drawn
 | --- | --- | --- | --- |
 | Entrance | [before](web-shots/before-front-light.png) | [after](web-shots/after-front-light.png) | [dark](web-shots/after-front-dark.png) · [phone](web-shots/after-front-phone.png) |
 | Apps | [before](web-shots/before-apps-light.png) | [after](web-shots/after-apps-light.png) | [dark](web-shots/after-apps-dark.png) · [phone](web-shots/after-apps-phone.png) |
+| Filtered app | — | [after](web-shots/after-apps-filtered-light.png) | [dark](web-shots/after-apps-filtered-dark.png) · [phone](web-shots/after-apps-filtered-phone.png) |
+| Agent interface | — | [after](web-shots/after-apps-interface-light.png) | [dark](web-shots/after-apps-interface-dark.png) · [phone](web-shots/after-apps-interface-phone.png) |
 | Reader | [before](web-shots/before-reader-light.png) | [after](web-shots/after-reader-light.png) | [dark](web-shots/after-reader-dark.png) · [phone](web-shots/after-reader-phone.png) |
 | Rooms | [before](web-shots/before-rooms-light.png) | [after](web-shots/after-rooms-light.png) | [dark](web-shots/after-rooms-dark.png) · [phone](web-shots/after-rooms-phone.png) |
 | Stories | [before](web-shots/before-stories-light.png) | [after](web-shots/after-stories-light.png) | [dark](web-shots/after-stories-dark.png) · [phone](web-shots/after-stories-phone.png) |
@@ -88,10 +90,10 @@ screens show their corresponding renderer surface; no screenshot is a hand-drawn
 
 Reproduce the after fixtures with the opt-in `design_preview` tests, in order:
 resource-client, mini-door, mini-web, with `MINI_WEB_PREVIEW` pointing to one scratch
-directory. Then run `node scripts/web-design-shots.mjs FIXTURE_DIR after`.
+directory and `MINI_WEB_CATALOGUE` pointing to a captured market index JSON. The preview uses the production index parser, featured ordering and JSON projection. Then run `node scripts/web-design-shots.mjs FIXTURE_DIR after`.
 `PLAYWRIGHT_PATH` overrides the default Mac tool path on Linux.
 
-Verified on `dregg-build`, in `/build/lanes/cx-web`, with its own target copied from
+Initial redesign verification on `dregg-build`, in `/build/lanes/cx-web`, with its own target copied from
 the warm web-parity target and all Rust builds under `swarm-build`:
 
 - 49 filtered renderer/web tests passed; after the final gallery edits, all 6
@@ -120,6 +122,64 @@ page displayed that explained read error. Catalogue visuals use the renderer fix
 this run does not establish catalogue deployment. The full evidence remains under
 `/build/lanes/cx-web/scratch/tour-1793183232`.
 
-The Mac sandbox refused both the shared Cargo target's lock and the parent
-repository's Git index lock. Checks therefore ran on the build box; local changes
-remain uncommitted until the parent can stage and push `lane/cx-web`.
+The initial redesign was committed and pushed as `7c4ecd454` by the parent after the Mac sandbox refused the Git index lock. Checks ran on the build box.
+
+
+## Catalogue breadth follow-up
+
+The landing page renders every entry marked featured by `apps search --json`, grouped
+by its first catalogue category. `/apps` places featured entries in their declared
+rank order, followed by the rest of the index. Category choices come from the real
+catalogue; submitted text and category go through `apps search TERM --category C`.
+Both controls and typed-operation disclosures work without JavaScript.
+
+The resource client's build discovers `apps/interfaces/*.json`; `apps search` and
+`apps show` include operation names, descriptions and input/output types from matching
+`mini-app-interface-v1` declarations. Matching requires **both app ID and package ID**.
+Missing declarations are omitted. Cards show the declaration's status, including
+`prototype-unqualified`, separately from the package verdict. This is a description
+of the interface, not a claim that its qualification succeeded. The initial Davros,
+Gogs and Wekan files are the exact declarations from `origin/lane/cx-app-interface` at
+`74a964e9fbbb7f86cae1e52169ea4240a7c5c594`;
+there is no second app-name or operation list in the renderer.
+
+New regression checks first failed on the three-card cap and the missing category
+argument. The breadth check supplies 36 featured entries and one ordinary entry,
+so growth of the featured set cannot reintroduce a sampler silently.
+
+Follow-up verification on the existing `7c4ecd454` lane base: nine filtered Rust
+checks pass; 33 base page/viewport layouts pass, plus three expanded agent-interface
+captures. Text/category submission and disclosures pass in light, dark and no-JS
+phone contexts. Adding the landing search exposed startup focus stealing the skip
+link; startup and quiet refresh now preserve focus, and the unchanged keyboard check
+passes. The final script passes all 12 app FOUC cases; the unchanged site passes 12.
+
+The captured 36-entry market observation is from the interface lane's catalogue;
+the preview uses this lane base's **17** featured ranks. No count is built into the
+UI. Updating to main's featured set requires the still-pending merge: `git fetch`
+was denied writing `.git/worktrees/cx-web/FETCH_HEAD` despite the advertised writable
+Git root. These captures are not evidence of a merged or deployed 27-app catalogue.
+
+The follow-up JWF tour passed **62/62** on a fresh world against the same candidate
+Host, with the new catalogue code and unchanged JWF assertions; full output is in
+`/build/lanes/cx-web/scratch/catalogue-tour-1793205820`. A subsequent receiving-path
+check found the real catalogue JSON is 68,929 bytes, above the body's old 64 KiB
+transcript cap. The shared capture now retains grammar-declared JSON read replies
+whole up to 8 MiB, explains larger replies, and bounds pipe-buffer retention. Text
+diagnostics retain their 64 KiB cap, now on a UTF-8 boundary. Both JSON-limit checks
+failed with the old capture and pass with the fix. The gallery's fake-shell tests
+now use the same capture function as real shell completion, including a catalogue
+over 64 KiB, rather than bypassing it.
+
+Final capture verification: **13/13** filtered client checks and the release build
+pass. A real HTTP request through `mini web --body` → `mini shell` → `apps search`
+renders all **36** index entries and **three** package-bound interfaces; a combined
+`q=Gogs&category=DevTools` request returns one card. The test uses a private mount
+namespace to supply `/var/lib/mini-market/index.json`, leaving the host catalogue
+untouched ([result](web-shots/catalogue-receiving.txt)). The body still clears its
+child environment. The JWF run above predates the final capture fix; its post-merge
+rerun remains due with the main integration. All test services have been stopped.
+
+Staging also failed creating `.git/worktrees/cx-web/index.lock`. Main merge,
+post-merge verification, commit and push remain blocked on effective Git write
+access; the configured writable-root announcement did not make either write work.

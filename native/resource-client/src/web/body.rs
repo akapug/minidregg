@@ -341,7 +341,7 @@ fn public_front_with_welcome(site: &Site, welcome: Option<Page>) -> Page {
          <p class=\"note\">Apps from the Sandstorm catalogue. Publisher claims and this box's verdict are shown separately.</p>{}</section>\
          <section><div class=\"section-heading\"><h2>Find your way around</h2><a href=\"/registry\">Read the world's laws →</a></div>\
          <ul class=\"place-list\"><li><a href=\"/room\">Gather in a room</a></li><li><a href=\"/story\">Step into a story</a></li><li><a href=\"/receipts\">Follow the receipts</a></li></ul></section>",
-        operations(site), apps::catalogue(site, "", 3)
+        operations(site), apps::catalogue(site, "", "", true)
     ) }
 }
 
@@ -1186,13 +1186,23 @@ fn verb_detached(site: &Site, line: &str, log: &std::path::Path) -> bool {
     true
 }
 
+fn captured_ending(code: i32, stdout: Vec<u8>, stderr: Vec<u8>, lines: &[String]) -> Ending {
+    let stdout = if code == 0 && structured_answer(lines) {
+        match super::capture::structured(stdout) {
+            Ok(value) => value,
+            Err(reason) => return Ending { code: 1, stdout: String::new(), stderr: reason.into() },
+        }
+    } else { super::capture::text(stdout) };
+    Ending { code, stdout, stderr: super::capture::text(stderr) }
+}
+
 /// Run shell lines as this member: `mini shell` in script mode (one line per form action, or the
 /// proposal and its `submit`), the same binary and subcommand the ssh login runs.
 pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
     let shell = site.shell.as_ref()?;
     #[cfg(test)]
     if let Some(ending) = redteam::FAKE_SHELL.with(|fake| fake.borrow().as_ref().map(|answer| answer(lines))) {
-        return Some(ending);
+        return Some(captured_ending(ending.code, ending.stdout.into_bytes(), ending.stderr.into_bytes(), lines));
     }
     let exe = std::env::current_exe().ok()?;
     let script = lines.iter().map(|l| format!("{l}\n")).collect::<String>();
@@ -1216,7 +1226,11 @@ pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
             let mut chunk = [0u8; 8192];
             while let Ok(n) = pipe.read(&mut chunk) {
                 if n == 0 { break; }
-                if let Ok(mut b) = sink.lock() { b.extend_from_slice(&chunk[..n]); }
+                if let Ok(mut b) = sink.lock() {
+                    // Retain one overflow byte, then keep draining without growing memory.
+                    let keep = n.min((super::capture::MAX_CAPTURE + 1).saturating_sub(b.len()));
+                    b.extend_from_slice(&chunk[..keep]);
+                }
             }
         });
         (buf, handle)
@@ -1234,18 +1248,11 @@ pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
             _ => break None,
         }
     };
-    let cap = |v: Vec<u8>| {
-        let mut s = String::from_utf8_lossy(&v).into_owned();
-        if s.len() > 64 * 1024 {
-            s.truncate(64 * 1024);
-            s.push_str("\n…");
-        }
-        s
-    };
+    let cap = super::capture::text;
     if let Some(status) = status {
         let _ = out_thread.join();
         let _ = err_thread.join();
-        return Some(Ending { code: status.code().unwrap_or(1), stdout: cap(snapshot(&out_buf)), stderr: cap(snapshot(&err_buf)) });
+        return Some(captured_ending(status.code().unwrap_or(1), snapshot(&out_buf), snapshot(&err_buf), lines));
     }
     if !only_answers(lines) {
         // A line that may move the world is never cut short: the shell keeps running to its
@@ -1278,6 +1285,16 @@ pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
         "error: the read did not finish within 100 s; what it printed stands above\n".to_owned()
     };
     Some(Ending { code: 1, stdout, stderr: notice })
+}
+
+/// Only a grammar-declared JSON answer uses the structured capture. Transition
+/// outcomes and unfinished requests retain their existing transcript/uncertainty path.
+fn structured_answer(lines: &[String]) -> bool {
+    use crate::shell_grammar::{grammar, parse, parse_line};
+    if lines.len() != 1 || !only_answers(lines) { return false; }
+    let Ok(words) = crate::shell::words(&lines[0]) else { return false; };
+    let Some(g) = words.first().and_then(|w| grammar(w)) else { return false; };
+    parse(g, &words).or_else(|_| parse_line(g, &lines[0])).is_ok_and(|p| p.flag("--json").is_some())
 }
 
 /// Whether every line is a read or a local verb by its grammar leaf (stopping one cannot leave the
@@ -1665,4 +1682,15 @@ mod tests {
         // A receipt path that is not an attempt id is not offered as one.
         assert!(!outcome_of(&refused, &[("x", "/receipts/a/b")], true).contains("from="));
     }
+}
+
+#[cfg(test)]
+#[test]
+fn structured_capture_follows_the_grammar() {
+    assert!(structured_answer(&["apps search --json".into()]));
+    assert!(structured_answer(&["apps show app --json".into()]));
+    assert!(!structured_answer(&["apps install app --json".into()]));
+    assert!(!structured_answer(&["apps search".into()]));
+    assert!(!structured_answer(&["say \"--json\"".into()]));
+    assert!(!structured_answer(&["apps search --json".into(), "whoami".into()]));
 }

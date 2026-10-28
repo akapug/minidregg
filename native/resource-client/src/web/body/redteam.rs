@@ -85,7 +85,9 @@ fn planted(lines: &[String]) -> Ending {
     let ok = |stdout: String| Ending { code: 0, stdout, stderr: String::new() };
     if first.starts_with("apps search") {
         let app = json!({"appId": PAYLOADS[0], "name": PAYLOADS[1], "version": PAYLOADS[2], "publisher": PAYLOADS[7],
-            "suggestedClass": PAYLOADS[3], "verdict": {"state": PAYLOADS[2], "reason": h}});
+            "suggestedClass": PAYLOADS[3], "categories":[PAYLOADS[0]], "featured":{"rank":1},
+            "interface":{"status":PAYLOADS[2],"operations":[{"name":PAYLOADS[1],"description":h,"input":{PAYLOADS[0]:PAYLOADS[6]},"output":PAYLOADS[3]}]},
+            "verdict": {"state": PAYLOADS[2], "reason": h}});
         return ok(json!({"apps": [app], "total": 1}).to_string());
     }
     if first.starts_with("apps show") {
@@ -293,4 +295,47 @@ fn outcome_partials_render_inert() {
     }
     assert_inert("json tree", &json_tree(&json!({PAYLOADS[0]: [PAYLOADS[1], {"x": h}], "id": "a".repeat(64)})));
     assert_inert("outcome page", &outcome_page(PAYLOADS[0], "refused", PAYLOADS[1], &h, &[(PAYLOADS[2], PAYLOADS[5])]).body);
+}
+
+// A growing catalogue must never silently become a three-card sampler.
+#[test]
+fn catalogue_breadth_and_category_are_derived() {
+    let (root, mut site) = site("catalogue-breadth");
+    site.front.read_only = true;
+    let apps: Vec<Value> = (1..=37).map(|i| json!({
+        "appId":format!("app{i}"), "name":format!("Tool {i}"),
+        "shortDescription":"A useful tool. ".repeat(160), "categories":["Office"],
+        "featured":if i <= 36 { json!({"rank":i}) } else { Value::Null },
+        "verdict":{"state":"unverified"}
+    })).collect();
+    FAKE_SHELL.with(|f| *f.borrow_mut() = Some(Box::new(move |_| Ending {
+        code:0, stdout:json!({"apps":apps,"total":37}).to_string(), stderr:String::new()
+    })));
+    let front = public_front_with_welcome(&site, None);
+    let market = apps::market(&site, "/apps");
+    FAKE_SHELL.with(|f| *f.borrow_mut() = None);
+    fs::remove_dir_all(root).unwrap();
+    assert_eq!(front.body.matches("data-app=").count(), 36, "every featured app, no arbitrary cap");
+    assert!(!front.body.contains("data-app=\"app37\""));
+    assert_eq!(market.body.matches("data-app=").count(), 37);
+    assert!(market.body.contains("name=\"category\""));
+    assert!(market.body.contains("Office"));
+    assert!(market.body.find("Featured apps").unwrap() < market.body.find("More from the catalogue").unwrap());
+}
+
+#[test]
+fn catalogue_filters_use_the_shell_and_keep_failures_explained() {
+    let (root, site) = site("catalogue-filter");
+    FAKE_SHELL.with(|f| *f.borrow_mut() = Some(Box::new(|lines| {
+        if lines == &["apps search Board --category Office --json".to_owned()] {
+            Ending { code:3, stdout:String::new(), stderr:"refused: catalogue temporarily unavailable".into() }
+        } else {
+            Ending { code:0, stdout:json!({"apps":[{"appId":"board","name":"Board","categories":["Office"]}],"total":1}).to_string(), stderr:String::new() }
+        }
+    })));
+    let page = apps::market(&site, "/apps?q=Board&category=Office");
+    FAKE_SHELL.with(|f| *f.borrow_mut() = None);
+    fs::remove_dir_all(root).unwrap();
+    assert!(page.body.contains("catalogue temporarily unavailable"), "category must reach the shell, and its refusal stays visible");
+    assert!(page.body.contains("value=\"Office\" selected"));
 }
