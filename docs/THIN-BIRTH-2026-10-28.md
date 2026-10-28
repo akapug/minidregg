@@ -240,6 +240,13 @@ when the arm lands.
   root only when the opening seals nothing (`sealsNothing`); `displayJson` prints `postRoot` only
   then. jthin-consent N1 (narrowed grant on a declared cell) now commits with an opened display
   and no `postRoot`; S2 seals its own write over N1's post.
-* **Owed:** the closure build of the consent modules on dregg-ref and JP2 on a candidate (row 22
-  and the swapped-plan rows); then the acceptance poles or journey rows for account-metadata,
-  world instance, world kind, content and stream targets.
+* **Poles (statements ACCEPTED by the auditor before proof, proved, one per payload):**
+  `honest_account_scalar_view_accepted`, `honest_world_view_accepted` and
+  `honest_kind_definition_view_accepted` (full scope: the opening seals nothing, so the display
+  carries the post root), `honest_content_read_view_accepted`, `honest_kind_read_view_accepted`,
+  and `honest_content_stream_write_named` (the honest view passes every opening check and is
+  refused `unsupportedPayload` by name; the full-peer provider covers those writes). Helpers:
+  `checkOpened_of` (the converse of `checkOpened_ok`), `servedOpening_honest`, `decode_narrowed`,
+  `items_none_sealed`, `visible_full`.
+* **Owed:** the closure build of the consent modules on dregg-ref, the consent binary, and JP2 on
+  a candidate (row 22 and the swapped-plan rows); jthin-consent's new N1 row on a world.

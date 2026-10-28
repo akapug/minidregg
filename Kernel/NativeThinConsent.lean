@@ -46,8 +46,12 @@ store hash at the actual pre-state (`OpeningCollision`), or the committed post e
 displayed post at every address that is neither kernel-owned nor sealed in the opening, and
 equals the pre-state at every sealed address that is not kernel-owned. A Host can narrow what
 is shown but cannot change what commits. Teeth: `opened_view_refused`,
-`pre_reading_sealed_refused`. Satisfiable: `honest_scalar_view_accepted` (declared-object
-scalar targets; the other kinds are owed, a pole or a journey row each).
+`pre_reading_sealed_refused`. Satisfiable, one pole per payload:
+`honest_scalar_view_accepted` (declared objects),
+`honest_account_scalar_view_accepted`, `honest_world_view_accepted` and
+`honest_kind_definition_view_accepted` (full-scope views, which seal nothing, so the post root
+is shown), `honest_content_read_view_accepted`, `honest_kind_read_view_accepted`; content writes
+and stream appends reach the named refusal (`honest_content_stream_write_named`).
 -/
 import Kernel.ResourceTransaction
 import Kernel.NativeObservationController
@@ -363,6 +367,12 @@ def checkOpened (deployment : Deployment) (command : Command) (target : Target)
       else .error (.servedRootMismatch target.target)
     else .error (.viewMalformed target.target)
 
+/-- Whether a served view's opening seals nothing. -/
+def sealsNothing (target : Target) (view : List UInt8) : Bool :=
+  match servedOpening target view with
+  | .ok (_, _, items) => !items.any Sum.isRight
+  | .error _ => false
+
 /-- A collision of the store hash at the actual pre-state: the items' leaves are not the
 actual store's leaves yet root to the same digest, or an opened item is not the actual
 opening at its position yet has the same leaf. -/
@@ -454,8 +464,7 @@ def PreReadingSealedRefusedStatement : Prop :=
 cell whose root is the signed root, the resource view the Host serves under any field scope
 (`NativeObservationController.resourceView`) is accepted whenever the narrowed cell is
 selected and the member patch applies to it. Scope: **declared-object scalar targets** (the
-cells JP2 writes). Owed, a pole or a journey row each: account-metadata scalar targets, world
-instances (jthin-consent's T1), world kinds, content and stream targets. -/
+cells JP2 writes). The other payloads have a pole each below. -/
 def HonestScalarViewAcceptedStatement : Prop :=
   ∀ (deployment : Deployment) (command : Command) (kind : ResourceKind) (id : Nat)
     (capability : CapabilityId) (version : Nat) (actions : List DeclaredActionLowering.Action)
@@ -474,6 +483,150 @@ def HonestScalarViewAcceptedStatement : Prop :=
       (NativeObservationController.resourceViewCodec.encode
         (NativeObservationController.resourceView fields ⟨.declaredObject, payload⟩ balances quote)) =
       .ok shown
+
+/-- **Satisfiable: account-metadata scalar targets.** As `HonestScalarViewAcceptedStatement`, for
+a scalar target over an account-metadata cell. -/
+def HonestAccountScalarViewAcceptedStatement : Prop :=
+  ∀ (deployment : Deployment) (command : Command) (kind : ResourceKind) (id : Nat)
+    (capability : CapabilityId) (version : Nat) (actions : List DeclaredActionLowering.Action)
+    (observe : Option CapabilityId) (audienceEpoch : Option Nat)
+    (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
+    (fields : Option (Finset CellField)) (payload : DeclaredEffectCell.Cell)
+    (balances : List (Nat × Int)) (quote : Option RunComputeView.ComputeQuote)
+    (narrowed : DeclaredEffectCell.Cell),
+    let target : Target := ⟨kind, id, capability, version, payload.root, .scalar actions, observe,
+      audienceEpoch, audienceRoster⟩
+    selectTarget deployment target
+        (ResourceObservationAdmission.narrowPacked fields ⟨.accountMetadata, payload⟩) =
+      some narrowed →
+    Patch.ValidFrom narrowed.logical (DeclaredResourceScalar.cellPatch (scalarCommand command target actions)) →
+    ∃ shown, checkOpened deployment command target
+      (NativeObservationController.resourceViewCodec.encode
+        (NativeObservationController.resourceView fields ⟨.accountMetadata, payload⟩ balances quote)) =
+      .ok shown
+
+/-- **Satisfiable: world instances over a full-scope view.** The resource view the Host serves a
+full-scope reader (`fields = none`) of a world-instance cell is accepted whenever the cell is
+selected and the patch the member's actions prepare from it applies; its opening seals nothing,
+so the display carries the post root (jthin-consent's T1 compares it with the committed one). -/
+def HonestWorldViewAcceptedStatement : Prop :=
+  ∀ (deployment : Deployment) (command : Command) (kind : ResourceKind) (id : Nat)
+    (capability : CapabilityId) (version : Nat) (actions : List WorldKindInstance.Action)
+    (observe : Option CapabilityId) (audienceEpoch : Option Nat)
+    (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
+    (payload : Materialized WorldKindCell.instanceMaterializer)
+    (balances : List (Nat × Int)) (quote : Option RunComputeView.ComputeQuote)
+    (narrowed : Materialized WorldKindCell.instanceMaterializer)
+    (patch : Patch WorldKindCell.instanceLayout),
+    let target : Target := ⟨kind, id, capability, version, payload.root, .world actions, observe,
+      audienceEpoch, audienceRoster⟩
+    let view := NativeObservationController.resourceViewCodec.encode
+      (NativeObservationController.resourceView none ⟨.worldInstance, payload⟩ balances quote)
+    selectTarget deployment target
+        (ResourceObservationAdmission.narrowPacked none ⟨.worldInstance, payload⟩) = some narrowed →
+    WorldKindCell.preparePatch narrowed.logical actions = some patch →
+    Patch.ValidFrom narrowed.logical patch →
+    (∃ shown, checkOpened deployment command target view = .ok shown) ∧
+      sealsNothing target view = true
+
+/-- **Satisfiable: world-kind definitions over a full-scope view.** As
+`HonestWorldViewAcceptedStatement`, for a kind-definition target over a world-kind cell. -/
+def HonestKindDefinitionViewAcceptedStatement : Prop :=
+  ∀ (deployment : Deployment) (command : Command) (kind : ResourceKind) (id : Nat)
+    (capability : CapabilityId) (version : Nat) (definition : WorldKindCell.Definition)
+    (observe : Option CapabilityId) (audienceEpoch : Option Nat)
+    (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
+    (payload : Materialized WorldKindCell.definitionMaterializer)
+    (balances : List (Nat × Int)) (quote : Option RunComputeView.ComputeQuote)
+    (narrowed : Materialized WorldKindCell.definitionMaterializer)
+    (patch : Patch WorldKindCell.definitionLayout),
+    let target : Target := ⟨kind, id, capability, version, payload.root, .kindDefinition definition,
+      observe, audienceEpoch, audienceRoster⟩
+    let view := NativeObservationController.resourceViewCodec.encode
+      (NativeObservationController.resourceView none ⟨.worldKind, payload⟩ balances quote)
+    selectTarget deployment target
+        (ResourceObservationAdmission.narrowPacked none ⟨.worldKind, payload⟩) = some narrowed →
+    WorldKindCell.prepareDefinition narrowed.logical definition = some patch →
+    Patch.ValidFrom narrowed.logical patch →
+    (∃ shown, checkOpened deployment command target view = .ok shown) ∧
+      sealsNothing target view = true
+
+/-- **Satisfiable: content reads under any field scope.** The resource view the Host serves of a
+content cell under any scope is accepted for an observe-only read target whenever the narrowed
+cell is selected. -/
+def HonestContentReadViewAcceptedStatement : Prop :=
+  ∀ (deployment : Deployment) (command : Command) (kind : ResourceKind) (id : Nat)
+    (capability : CapabilityId) (version : Nat)
+    (observe : Option CapabilityId) (audienceEpoch : Option Nat)
+    (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
+    (fields : Option (Finset CellField)) (payload : Materialized HyperdocumentCell.contentMaterializer)
+    (balances : List (Nat × Int)) (quote : Option RunComputeView.ComputeQuote)
+    (narrowed : Materialized HyperdocumentCell.contentMaterializer),
+    let target : Target := ⟨kind, id, capability, version, payload.root, .read, observe,
+      audienceEpoch, audienceRoster⟩
+    selectTarget deployment target
+        (ResourceObservationAdmission.narrowPacked fields ⟨.content, payload⟩) = some narrowed →
+    ∃ shown, checkOpened deployment command target
+      (NativeObservationController.resourceViewCodec.encode
+        (NativeObservationController.resourceView fields ⟨.content, payload⟩ balances quote)) =
+      .ok shown
+
+/-- **Satisfiable: world-kind reads under any field scope.** As
+`HonestContentReadViewAcceptedStatement`, for an observe-only kind read over a world-kind cell. -/
+def HonestKindReadViewAcceptedStatement : Prop :=
+  ∀ (deployment : Deployment) (command : Command) (kind : ResourceKind) (id : Nat)
+    (capability : CapabilityId) (version : Nat)
+    (observe : Option CapabilityId) (audienceEpoch : Option Nat)
+    (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
+    (fields : Option (Finset CellField)) (payload : Materialized WorldKindCell.definitionMaterializer)
+    (balances : List (Nat × Int)) (quote : Option RunComputeView.ComputeQuote)
+    (narrowed : Materialized WorldKindCell.definitionMaterializer),
+    let target : Target := ⟨kind, id, capability, version, payload.root, .kindRead, observe,
+      audienceEpoch, audienceRoster⟩
+    selectTarget deployment target
+        (ResourceObservationAdmission.narrowPacked fields ⟨.worldKind, payload⟩) = some narrowed →
+    ∃ shown, checkOpened deployment command target
+      (NativeObservationController.resourceViewCodec.encode
+        (NativeObservationController.resourceView fields ⟨.worldKind, payload⟩ balances quote)) =
+      .ok shown
+
+/-- **Thin consent refuses content writes and stream appends by name; the full-peer provider
+covers them.** The resource view the Host serves of a content or stream cell, under every field
+scope and for every request, passes every opening check (frame, signed root, opened entries),
+and the write is then refused `unsupportedPayload` (its patch reads inputs that are neither
+signed nor served), never `servedRootMismatch` or `openingMismatch`. Compute-funding and money
+payloads are likewise refused by `memberPatch` and are outside thin consent's scope. -/
+def HonestContentStreamWriteNamedStatement : Prop :=
+  (∀ (deployment : Deployment) (command : Command) (kind : ResourceKind) (id : Nat)
+    (capability : CapabilityId) (version : Nat) (contentCommand : ContentResource.Command)
+    (observe : Option CapabilityId) (audienceEpoch : Option Nat)
+    (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
+    (fields : Option (Finset CellField)) (payload : Materialized HyperdocumentCell.contentMaterializer)
+    (balances : List (Nat × Int)) (quote : Option RunComputeView.ComputeQuote)
+    (narrowed : Materialized HyperdocumentCell.contentMaterializer),
+    let target : Target := ⟨kind, id, capability, version, payload.root, .content contentCommand,
+      observe, audienceEpoch, audienceRoster⟩
+    selectTarget deployment target
+        (ResourceObservationAdmission.narrowPacked fields ⟨.content, payload⟩) = some narrowed →
+    ∃ what, checkOpened deployment command target
+      (NativeObservationController.resourceViewCodec.encode
+        (NativeObservationController.resourceView fields ⟨.content, payload⟩ balances quote)) =
+      .error (.unsupportedPayload id what)) ∧
+  (∀ (deployment : Deployment) (command : Command) (kind : ResourceKind) (id : Nat)
+    (capability : CapabilityId) (version : Nat) (request : StreamCell.Append)
+    (observe : Option CapabilityId) (audienceEpoch : Option Nat)
+    (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
+    (fields : Option (Finset CellField)) (payload : Materialized StreamCell.headMaterializer)
+    (balances : List (Nat × Int)) (quote : Option RunComputeView.ComputeQuote)
+    (narrowed : Materialized StreamCell.headMaterializer),
+    let target : Target := ⟨kind, id, capability, version, payload.root, .append request,
+      observe, audienceEpoch, audienceRoster⟩
+    selectTarget deployment target
+        (ResourceObservationAdmission.narrowPacked fields ⟨.stream, payload⟩) = some narrowed →
+    ∃ what, checkOpened deployment command target
+      (NativeObservationController.resourceViewCodec.encode
+        (NativeObservationController.resourceView fields ⟨.stream, payload⟩ balances quote)) =
+      .error (.unsupportedPayload id what))
 
 /-! ### Proofs -/
 
@@ -942,9 +1095,254 @@ theorem honest_scalar_view_accepted : HonestScalarViewAcceptedStatement := by
       (DeclaredResourceScalar.cellPatch (scalarCommand command target actions)) then _ else _) = _
   rw [if_pos valid]
 
+/-- The parts of the honest Host's view that thin consent reads. -/
+theorem servedOpening_honest (target : Target) (fields : Option (Finset CellField))
+    (packed : CellRegistry.PackedCell CanonicalCellRegistry.registry) (balances : List (Nat × Int))
+    (quote : Option RunComputeView.ComputeQuote) :
+    servedOpening target (NativeObservationController.resourceViewCodec.encode
+      (NativeObservationController.resourceView fields packed balances quote)) =
+      .ok (CellRegistry.PackedCell.bytes CanonicalCellRegistry.registry
+          (ResourceObservationAdmission.narrowPacked fields packed),
+        (NativeObservationController.openingView fields packed).1,
+        (NativeObservationController.openingView fields packed).2) := by
+  unfold servedOpening
+  rw [NativeObservationController.resourceViewCodec.decode_encode]
+  rfl
+
+theorem decode_narrowed (fields : Option (Finset CellField))
+    (packed : CellRegistry.PackedCell CanonicalCellRegistry.registry) :
+    CanonicalCellRegistry.cellCodec.decode
+      (CellRegistry.PackedCell.bytes CanonicalCellRegistry.registry
+        (ResourceObservationAdmission.narrowPacked fields packed)) =
+      some (ResourceObservationAdmission.narrowPacked fields packed) :=
+  CanonicalCellRegistry.cellCodec.decode_encode _
+
+/-- The converse of `checkOpened_ok`: a view that passes the opening checks is shown as the
+member patch run on its cell. -/
+theorem checkOpened_of {deployment : Deployment} {command : Command} {target : Target}
+    {view packedBytes frame : List UInt8} {items : List StoreHiding.Item}
+    {packed : CellRegistry.PackedCell Registry} {cell : TargetCell target}
+    (served : servedOpening target view = .ok (packedBytes, frame, items))
+    (framed : frame = StoreCodec.frame (targetWire target))
+    (rooted : StoreHiding.rootOfItems (targetWire target) items = target.expectedTargetRoot)
+    (decoded : CanonicalCellRegistry.cellCodec.decode packedBytes = some packed)
+    (selected : selectTarget deployment target packed = some cell)
+    (opened : (StoreCodec.entries (targetWire target) cell.logical).map
+      (StoreCodec.entryBytes (targetWire target)) = openedBytes items)
+    (preOk : ¬ (patchReadsPre target && items.any Sum.isRight) = true) :
+    checkOpened deployment command target view =
+      match memberPatch command target cell.logical with
+      | .error refusal => .error refusal
+      | .ok patch =>
+        if Patch.ValidFrom cell.logical patch then .ok (Patch.run cell.logical patch)
+        else .error (.patchRefused target.target) := by
+  unfold checkOpened
+  rw [served]
+  dsimp only
+  rw [if_pos framed, if_pos rooted, decoded]
+  dsimp only
+  rw [selected]
+  dsimp only
+  rw [if_pos opened, if_neg preOk]
+
+/-- A view that shows every address seals no item. -/
+theorem items_none_sealed {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L)
+    (visible : Address L → Prop) [DecidablePred visible] (store : Store L)
+    (all : ∀ address, visible address) :
+    (StoreHiding.items wire visible store).any Sum.isRight = false := by
+  simp [StoreHiding.items, StoreHiding.itemOf, all]
+
+/-- A full-scope reader is shown every address of a cell without a hiding key. -/
+theorem visible_full {kind : CanonicalCellRegistry.Kind}
+    (unblinded : ∀ address, CanonicalCellRegistry.isBlinding kind address = false) :
+    ∀ address, ResourceObservationAdmission.Visible none kind address := by
+  intro address
+  refine ⟨?_, unblinded address⟩
+  unfold ResourceObservationAdmission.Kept
+  split <;> trivial
+
+theorem honest_account_scalar_view_accepted : HonestAccountScalarViewAcceptedStatement := by
+  intro deployment command kind id capability version actions observe audienceEpoch audienceRoster
+    fields payload balances quote narrowed target selected valid
+  have opens := NativeObservationController.root_opens fields ⟨.accountMetadata, payload⟩
+    (wire := DeclaredEffectCell.wire) rfl
+  have narrowedLogical : narrowed.logical =
+      DFinsupp.filter (ResourceObservationAdmission.Visible fields .accountMetadata) payload.logical := by
+    simp only [target, selectTarget, CanonicalCellRegistry.selectDeclared,
+      ResourceObservationAdmission.narrowPacked] at selected
+    split at selected
+    · cases kind <;> simp at selected
+      rw [← Option.some.inj selected]
+      exact materialize_logical _ _
+    · cases selected
+  refine ⟨Patch.run narrowed.logical
+    (DeclaredResourceScalar.cellPatch (scalarCommand command target actions)), ?_⟩
+  rw [checkOpened_of (servedOpening_honest target fields _ balances quote) opens.2 opens.1.symm
+    (decode_narrowed fields _) selected ?opened (by simp [patchReadsPre, target])]
+  · show (if Patch.ValidFrom narrowed.logical
+      (DeclaredResourceScalar.cellPatch (scalarCommand command target actions)) then _ else _) = _
+    rw [if_pos valid]
+  · show (StoreCodec.entries DeclaredEffectCell.wire narrowed.logical).map
+        (StoreCodec.entryBytes DeclaredEffectCell.wire) =
+      openedBytes (StoreHiding.items DeclaredEffectCell.wire
+        (ResourceObservationAdmission.Visible fields .accountMetadata) payload.logical)
+    rw [narrowedLogical, entries_filter, openedBytes_items]
+
+theorem honest_world_view_accepted : HonestWorldViewAcceptedStatement := by
+  intro deployment command kind id capability version actions observe audienceEpoch audienceRoster
+    payload balances quote narrowed patch target view selected prepared valid
+  have opens := NativeObservationController.root_opens none ⟨.worldInstance, payload⟩
+    (wire := WorldKindCell.instanceWire) rfl
+  have all := visible_full (kind := .worldInstance) (fun _ => rfl)
+  have narrowedLogical : narrowed.logical =
+      DFinsupp.filter (ResourceObservationAdmission.Visible none .worldInstance) payload.logical := by
+    simp only [target, selectTarget, ResourceObservationAdmission.narrowPacked] at selected
+    split_ifs at selected
+    rw [← Option.some.inj selected]
+    exact materialize_logical _ _
+  have none_sealed : (NativeObservationController.openingView none ⟨.worldInstance, payload⟩).2.any
+      Sum.isRight = false :=
+    items_none_sealed WorldKindCell.instanceWire _ payload.logical all
+  refine ⟨⟨Patch.run narrowed.logical patch, ?_⟩, ?_⟩
+  · rw [checkOpened_of (servedOpening_honest target none _ balances quote) opens.2 opens.1.symm
+      (decode_narrowed none _) selected ?opened (by rw [none_sealed]; simp)]
+    · have member : memberPatch command target narrowed.logical = .ok patch := by
+        simp [memberPatch, target, prepared]
+      rw [member]
+      exact if_pos valid
+    · show (StoreCodec.entries WorldKindCell.instanceWire narrowed.logical).map
+          (StoreCodec.entryBytes WorldKindCell.instanceWire) =
+        openedBytes (StoreHiding.items WorldKindCell.instanceWire
+          (ResourceObservationAdmission.Visible none .worldInstance) payload.logical)
+      rw [narrowedLogical, entries_filter, openedBytes_items]
+  · unfold sealsNothing
+    rw [servedOpening_honest]
+    dsimp only
+    rw [none_sealed]
+    rfl
+
+theorem honest_kind_definition_view_accepted : HonestKindDefinitionViewAcceptedStatement := by
+  intro deployment command kind id capability version definition observe audienceEpoch audienceRoster
+    payload balances quote narrowed patch target view selected prepared valid
+  have opens := NativeObservationController.root_opens none ⟨.worldKind, payload⟩
+    (wire := WorldKindCell.definitionWire) rfl
+  have all := visible_full (kind := .worldKind) (fun _ => rfl)
+  have narrowedLogical : narrowed.logical =
+      DFinsupp.filter (ResourceObservationAdmission.Visible none .worldKind) payload.logical := by
+    simp only [target, selectTarget, ResourceObservationAdmission.narrowPacked] at selected
+    split_ifs at selected
+    rw [← Option.some.inj selected]
+    exact materialize_logical _ _
+  have none_sealed : (NativeObservationController.openingView none ⟨.worldKind, payload⟩).2.any
+      Sum.isRight = false :=
+    items_none_sealed WorldKindCell.definitionWire _ payload.logical all
+  refine ⟨⟨Patch.run narrowed.logical patch, ?_⟩, ?_⟩
+  · rw [checkOpened_of (servedOpening_honest target none _ balances quote) opens.2 opens.1.symm
+      (decode_narrowed none _) selected ?opened (by rw [none_sealed]; simp)]
+    · have member : memberPatch command target narrowed.logical = .ok patch := by
+        simp [memberPatch, target, prepared]
+      rw [member]
+      exact if_pos valid
+    · show (StoreCodec.entries WorldKindCell.definitionWire narrowed.logical).map
+          (StoreCodec.entryBytes WorldKindCell.definitionWire) =
+        openedBytes (StoreHiding.items WorldKindCell.definitionWire
+          (ResourceObservationAdmission.Visible none .worldKind) payload.logical)
+      rw [narrowedLogical, entries_filter, openedBytes_items]
+  · unfold sealsNothing
+    rw [servedOpening_honest]
+    dsimp only
+    rw [none_sealed]
+    rfl
+
+theorem honest_content_read_view_accepted : HonestContentReadViewAcceptedStatement := by
+  intro deployment command kind id capability version observe audienceEpoch audienceRoster
+    fields payload balances quote narrowed target selected
+  have opens := NativeObservationController.root_opens fields ⟨.content, payload⟩
+    (wire := HyperdocumentCell.contentWire) rfl
+  have narrowedLogical : narrowed.logical =
+      DFinsupp.filter (ResourceObservationAdmission.Visible fields .content) payload.logical := by
+    simp only [target, selectTarget, ResourceObservationAdmission.narrowPacked] at selected
+    split_ifs at selected
+    rw [← Option.some.inj selected]
+    exact materialize_logical _ _
+  refine ⟨Patch.run narrowed.logical [], ?_⟩
+  rw [checkOpened_of (servedOpening_honest target fields _ balances quote) opens.2 opens.1.symm
+    (decode_narrowed fields _) selected ?opened (by simp [patchReadsPre, target])]
+  · show (if Patch.ValidFrom narrowed.logical [] then _ else _) = _
+    rw [if_pos (show Patch.ValidFrom narrowed.logical [] from trivial)]
+  · show (StoreCodec.entries HyperdocumentCell.contentWire narrowed.logical).map
+        (StoreCodec.entryBytes HyperdocumentCell.contentWire) =
+      openedBytes (StoreHiding.items HyperdocumentCell.contentWire
+        (ResourceObservationAdmission.Visible fields .content) payload.logical)
+    rw [narrowedLogical, entries_filter, openedBytes_items]
+
+theorem honest_kind_read_view_accepted : HonestKindReadViewAcceptedStatement := by
+  intro deployment command kind id capability version observe audienceEpoch audienceRoster
+    fields payload balances quote narrowed target selected
+  have opens := NativeObservationController.root_opens fields ⟨.worldKind, payload⟩
+    (wire := WorldKindCell.definitionWire) rfl
+  have narrowedLogical : narrowed.logical =
+      DFinsupp.filter (ResourceObservationAdmission.Visible fields .worldKind) payload.logical := by
+    simp only [target, selectTarget, ResourceObservationAdmission.narrowPacked] at selected
+    split_ifs at selected
+    rw [← Option.some.inj selected]
+    exact materialize_logical _ _
+  refine ⟨Patch.run narrowed.logical [], ?_⟩
+  rw [checkOpened_of (servedOpening_honest target fields _ balances quote) opens.2 opens.1.symm
+    (decode_narrowed fields _) selected ?opened (by simp [patchReadsPre, target])]
+  · show (if Patch.ValidFrom narrowed.logical [] then _ else _) = _
+    rw [if_pos (show Patch.ValidFrom narrowed.logical [] from trivial)]
+  · show (StoreCodec.entries WorldKindCell.definitionWire narrowed.logical).map
+        (StoreCodec.entryBytes WorldKindCell.definitionWire) =
+      openedBytes (StoreHiding.items WorldKindCell.definitionWire
+        (ResourceObservationAdmission.Visible fields .worldKind) payload.logical)
+    rw [narrowedLogical, entries_filter, openedBytes_items]
+
+theorem honest_content_stream_write_named : HonestContentStreamWriteNamedStatement := by
+  refine ⟨?_, ?_⟩
+  · intro deployment command kind id capability version contentCommand observe audienceEpoch
+      audienceRoster fields payload balances quote narrowed target selected
+    have opens := NativeObservationController.root_opens fields ⟨.content, payload⟩
+      (wire := HyperdocumentCell.contentWire) rfl
+    have narrowedLogical : narrowed.logical =
+        DFinsupp.filter (ResourceObservationAdmission.Visible fields .content) payload.logical := by
+      simp only [target, selectTarget, ResourceObservationAdmission.narrowPacked] at selected
+      split_ifs at selected
+      rw [← Option.some.inj selected]
+      exact materialize_logical _ _
+    rw [checkOpened_of (servedOpening_honest target fields _ balances quote) opens.2 opens.1.symm
+      (decode_narrowed fields _) selected ?openedContent (by simp [patchReadsPre, target])]
+    · exact ⟨_, rfl⟩
+    · show (StoreCodec.entries HyperdocumentCell.contentWire narrowed.logical).map
+          (StoreCodec.entryBytes HyperdocumentCell.contentWire) =
+        openedBytes (StoreHiding.items HyperdocumentCell.contentWire
+          (ResourceObservationAdmission.Visible fields .content) payload.logical)
+      rw [narrowedLogical, entries_filter, openedBytes_items]
+  · intro deployment command kind id capability version request observe audienceEpoch
+      audienceRoster fields payload balances quote narrowed target selected
+    have opens := NativeObservationController.root_opens fields ⟨.stream, payload⟩
+      (wire := StreamCell.headWire) rfl
+    have narrowedLogical : narrowed.logical =
+        DFinsupp.filter (ResourceObservationAdmission.Visible fields .stream) payload.logical := by
+      simp only [target, selectTarget, ResourceObservationAdmission.narrowPacked] at selected
+      split_ifs at selected
+      rw [← Option.some.inj selected]
+      exact materialize_logical _ _
+    rw [checkOpened_of (servedOpening_honest target fields _ balances quote) opens.2 opens.1.symm
+      (decode_narrowed fields _) selected ?openedStream (by simp [patchReadsPre, target])]
+    · exact ⟨_, rfl⟩
+    · show (StoreCodec.entries StreamCell.headWire narrowed.logical).map
+          (StoreCodec.entryBytes StreamCell.headWire) =
+        openedBytes (StoreHiding.items StreamCell.headWire
+          (ResourceObservationAdmission.Visible fields .stream) payload.logical)
+      rw [narrowedLogical, entries_filter, openedBytes_items]
+
 #assert_axioms target_rootOf run_congr_at untouched_of_both_valid checkOpened_ok shown_agrees
   opened_display_is_commit opened_view_refused pre_reading_sealed_refused entries_filter
-  openedBytes_items honest_scalar_view_accepted
+  openedBytes_items honest_scalar_view_accepted servedOpening_honest decode_narrowed checkOpened_of
+  items_none_sealed visible_full honest_account_scalar_view_accepted honest_world_view_accepted
+  honest_kind_definition_view_accepted honest_content_read_view_accepted honest_kind_read_view_accepted
+  honest_content_stream_write_named
 
 /-! ## Headers: every member-derived field is recomputed locally
 
@@ -1058,12 +1456,6 @@ structure Display where
   target : Nat
   post : Option (List UInt8 × Option Digest)
   deriving DecidableEq, Repr
-
-/-- Whether a served view's opening seals nothing. -/
-def sealsNothing (target : Target) (view : List UInt8) : Bool :=
-  match servedOpening target view with
-  | .ok (_, _, items) => !items.any Sum.isRight
-  | .error _ => false
 
 /-- One target: its served view checked over its salted opening (`checkOpened`) and its
 display. -/
