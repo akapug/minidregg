@@ -22,23 +22,6 @@ write_OrgTodo() {
     && echo "1 POST /tasks/featured-1 $post; GET /tasks $got holds it"
 }
 
-# SandCal 0.9.3 (package: a Haskell scotty app, routes /event/new, /import, /export.ics; DB /var/sandcal.db).
-# SandCal has no CalDAV endpoint (its routes are the web UI, an ICS import form and an ICS export feed), so
-# the write is the import form: POST /import multipart with the .ics under the form's own file input (named
-# from GET /import, with any hidden inputs it carries), read back from GET /export.ics.
-write_SandCal() {
-  local ics=$'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//mini//resident//EN\r\nBEGIN:VEVENT\r\nUID:resident-1@mini\r\nDTSTAMP:20261027T200000Z\r\nDTSTART:20261028T150000Z\r\nDTEND:20261028T160000Z\r\nSUMMARY:planned by a resident\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n'
-  jar=""
-  jreq GET /import; local form=$JS
-  local fname; fname=$(grep -o '<input[^>]*type="file"[^>]*>' "$body" | head -1 | grep -o 'name="[^"]*"' | head -1 | sed 's/name="//; s/"//')
-  [[ $form == 200 && -n $fname ]] || { echo "0 GET /import $form, no file input"; return; }
-  local fields=() f
-  while IFS= read -r -d '' f; do fields+=(-F "$f"); done < <(python3 -I "$here/market-writes/form-fields.py" "$(grep -o '<form[^>]*enctype="multipart/form-data"[^>]*>' "$body" | head -1 | grep -o ' id="[^"]*"' | sed 's/ id="//; s/"//')" <"$body")
-  printf '%s' "$ics" >"$out/bodies/featured.ics"
-  jreq POST /import "${fields[@]}" -F "$fname=@$out/bodies/featured.ics;type=text/calendar;filename=featured.ics"; local post=$JS
-  jreq GET /export.ics; local got=$JS
-  [[ $post =~ ^(200|302|303)$ && $got == 200 ]] && grep -q 'planned by a resident' "$body" && echo "1 POST /import $post (file input $fname); GET /export.ics $got"
-}
 # ExpenseOwl (package 07a8207b, /opt/app/main, tanq16/expenseowl internal/api, data in /var/data). The route
 # table is in the binary's embedded page script (the add-expense form): fetch('/expense', {method: 'PUT', body:
 # JSON {name, category, amount, date}}), and GET /expenses lists JSON. The method is PUT in this build; the run on

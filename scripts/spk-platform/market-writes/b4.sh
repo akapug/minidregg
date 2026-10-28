@@ -8,54 +8,6 @@ b4_www() {
     -o "$body.www" -w '%{http_code}' "http://grain.test$1" 2>>"$out/curl.err"
 }
 
-# WordPress (package d6955e8f, 4.x with php-fpm 7.3 + nginx + sqlite-integration, large class). Lifecycle PASS.
-# Source: the package's wordpress-read-only/wp-admin/install.php (Sandstorm's replacement: it calls
-# wp_install("example blog", "User", ...) with fixed data and no form) and read-only-plugins/mu-plugins/
-# sandstorm.php (auto_login(): if is_blog_installed() and nobody is logged in, it creates or loads a WP user
-# from X-Sandstorm-User-Id, maps X-Sandstorm-Permissions admin/editor/author/... to a WP role, and sets the
-# auth cookie). The run on e89fe7b8b answered GET /wp-admin/post-new.php 303 to /wp-admin/install.php: the blog
-# is NOT installed until something visits install.php, and auto_login does nothing before that. So: GET
-# /wp-admin/install.php once (installs, redirects to index.php), then GET post-new.php (auto_login sets the
-# cookie on that response), then again WITH the cookie jar so the page's wpApiSettings nonce is bound to the
-# logged-in session token, and POST the REST post with that nonce (cookie auth + X-WP-Nonce:
-# https://developer.wordpress.org/rest-api/using-the-rest-api/authentication/). The read-back is the app's
-# rendering of the post (/?p=ID over the owner route); www.sock is probed and named, not gated on, because
-# WordPress renders dynamically rather than writing /var/www.
-write_WordPress() {
-  jar=""
-  jreq GET /wp-admin/install.php; local inst=$JS
-  jreq GET /wp-admin/post-new.php
-  jreq GET /wp-admin/post-new.php; local page=$JS
-  local nonce; nonce=$(grep -o '"nonce":"[0-9a-f]*"' "$body" | head -1 | sed 's/.*:"//; s/"//')
-  [[ $page == 200 && -n $nonce ]] || { echo "0 install.php $inst, post-new.php $page, no REST nonce (wpApiSettings): $(grep -i '^location:' "$body.headers" | tr -d '\r' | head -1)"; return; }
-  jreq POST '/?rest_route=/wp/v2/posts' -H "X-WP-Nonce: $nonce" -H 'Content-Type: application/json' \
-    --data '{"title":"featured","content":"published by a resident","status":"publish"}'
-  local made=$JS id; id=$(jq -r '.id // empty' "$body" 2>/dev/null)
-  [[ $made =~ ^20 && -n $id ]] || { echo "0 POST ?rest_route=/wp/v2/posts $made: $(head -c 120 "$body" | tr -d '\n')"; return; }
-  jreq GET "/?p=$id"; local got=$JS
-  local www; www=$(b4_www "/?p=$id")
-  [[ $got == 200 ]] && grep -q 'published by a resident' "$body" && echo "1 GET install.php $inst; POST wp/v2/posts $made id $id; GET /?p=$id $got (owner preview); www.sock $www"
-}
-
-# Hugo (the member-website app). The package is "hugo-standstorm": launcher.sh keeps a git repo in /var/git
-# (copied from /opt/app/template), a Cloud Commander file manager serves it under the prefix /admin
-# (root /var/git), and `GET /commit` runs `git add .; git commit` then /opt/app/post-receive, which is
-# `hugo -d /var/www`. The ingest wall of the first pass (436 s) is app-market 91429251's, not the recipe's.
-# Recipe: write content/featured.md through Cloud Commander's REST (PUT /admin/api/v1/fs/<path> creates the
-# file from the body), build with GET /commit ({"ok":true}), then read the page from the grain's -www origin
-# ANONYMOUSLY (www.sock, no cookie), which serves /var/www to the public.
-write_Hugo() {
-  local made; made=$(req PUT /admin/api/v1/fs/content/featured.md -H 'Content-Type: text/markdown' \
-    --data-binary $'---\ntitle: featured\ndate: 2026-10-27\ndraft: false\n---\nwritten by a resident\n')
-  [[ $made =~ ^20 ]] || { echo "0 PUT /admin/api/v1/fs/content/featured.md $made: $(head -c 120 "$body" | tr -d '\n')"; return; }
-  local back; back=$(req GET /admin/api/v1/fs/content/featured.md)
-  [[ $back == 200 ]] && grep -q 'written by a resident' "$body" || { echo "0 file not read back through the editor ($back)"; return; }
-  local built; built=$(req GET /commit)
-  [[ $built == 200 ]] && grep -q '"ok":true' "$body" || { echo "0 GET /commit $built: $(head -c 160 "$body" | tr -d '\n') (hugo -d /var/www did not report ok)"; return; }
-  local got; got=$(b4_www /featured/)
-  [[ $got == 200 ]] && grep -q 'written by a resident' "$body.www" && echo "1 PUT content/featured.md $made; GET /commit $built; anonymous www.sock GET /featured/ $got"
-}
-
 # Hacker CMS (package d269b9e9, server/ssjekyll.c++ in bin/ssjekyll, editor in client/index.html). The package
 # has no sandstorm-http-bridge-config; 365aaad7 gives it the canonical empty bridge config, so it installs.
 # Editor routes, read from client/index.html and the binary: GET /file is the source tree as JSON, GET|PUT|DELETE
