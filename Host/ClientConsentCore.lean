@@ -646,6 +646,9 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
       catch error => pure (255, error.toString.toUTF8.toList)
     writeSessionFrame output answer.1 answer.2
     serve extraExpected extraObjective settings config retained held input output own
+  else if operation == 236 && !payload.isEmpty then
+    writeSessionFrame output 255 "full consent readiness requires empty input".toUTF8.toList
+    serve extraExpected extraObjective settings config retained held input output own
   else if operation == 228 then
     if held.isSome then
       writeSessionFrame output 255
@@ -695,8 +698,7 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
         pure (some full, upgraded)
       else pure (none, admitted)
     let answer ← try
-        let reply ← if operation == 236 then do
-            unless payload.isEmpty do throw (IO.userError "full consent readiness requires empty input")
+        let reply ← if operation == 236 then
             pure []
           else if operation == 224 then
             specialized extraExpected settings config updated full payload
