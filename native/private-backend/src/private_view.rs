@@ -461,3 +461,17 @@ fn retired_public_coefficient_dealing_is_decoded_by_the_curious_holder() {
     assert_eq!(decode(&accepted(&states[0][CURIOUS as usize])), None);
     assert_eq!(reconstruct(&states[0], [0, 1]), 255);
 }
+
+#[test]
+fn pin_lagrange_weights() {
+    let xs = [Field(1), Field(2), Field(3), Field(4)];
+    assert_eq!(lagrange(&xs, 0, Field(0x00000000000000000000000000000000)), Field(0x5555555555555555555555555555557f));
+    assert_eq!(lagrange(&xs, 0, Field(0x00000000000000000000000000000009)), Field(0xffffffffffffffffffffffffffffffa8));
+    assert_eq!(lagrange(&xs, 0, Field(0xfeedfacefeedfacefeedfacefeedface)), Field(0xa12de536a6462b3bc4c45743c3afcc0a));
+    assert_eq!(lagrange(&xs, 2, Field(0x00000000000000000000000000000000)), Field(0xb6db6db6db6db6db6db6db6db6db6def));
+    assert_eq!(lagrange(&xs, 2, Field(0x00000000000000000000000000000009)), Field(0xb6db6db6db6db6db6db6db6db6db6da7));
+    assert_eq!(lagrange(&xs, 2, Field(0xfeedfacefeedfacefeedfacefeedface)), Field(0xd2b0729fde0972b5b89b46bfb422f7cb));
+    assert_eq!(lagrange(&xs, 3, Field(0x00000000000000000000000000000000)), Field(0x1c71c71c71c71c71c71c71c71c71c712));
+    assert_eq!(lagrange(&xs, 3, Field(0x00000000000000000000000000000009)), Field(0x49249249249249249249249249249266));
+    assert_eq!(lagrange(&xs, 3, Field(0xfeedfacefeedfacefeedfacefeedface)), Field(0xdd734e83230d29897c8b1e4982f56438));
+}

@@ -289,3 +289,58 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod pin_wire {
+    use super::*;
+    use crate::asks::PhaseMessage as PinPhase;
+    fn pin_sends() -> Vec<acs::Send> {
+        vec![
+            acs::Send { to: 1, message: acs::Message { context: [7; 32], body: acs::Body::Selector(1, PinPhase::Echo(vec![1])) } },
+            acs::Send { to: 3, message: acs::Message { context: [7; 32], body: acs::Body::Selector(1, PinPhase::Ready(vec![1])) } },
+        ]
+    }
+    /// Outbox wire: Nat count, then per packet u16 LE recipient and the
+    /// length-prefixed message wire; canonical, bounded, recipient-checked.
+    #[test]
+    fn pin_outbox_wire() {
+        let ps = pin_sends();
+        let b = encode_outbox(&ps);
+        let mut want = vec![2, 255];
+        for s in &ps {
+            want.extend(s.to.to_le_bytes());
+            let m = encode_acs(&s.message);
+            crate::codec::Nat::new(m.len() as u64).put(&mut want);
+            want.extend(m);
+        }
+        assert_eq!(&b[..4], &[2, 255, 1, 0]);
+        assert_eq!(b, want);
+        assert_eq!(decode_outbox(&b, 4).unwrap(), ps);
+        assert!(decode_outbox(&b, 3).is_err(), "recipient 3 is outside n = 3");
+        let mut trailing = b.clone();
+        trailing.push(0);
+        let b = trailing;
+        assert!(decode_outbox(&b, 4).is_err(), "trailing bytes refuse");
+        let mut huge = vec![];
+        crate::codec::Nat::new(crate::codec::MAX as u64).put(&mut huge);
+        let b = huge;
+        assert!(decode_outbox(&b, 4).is_err(), "an absurd count refuses");
+    }
+    #[test]
+    fn pin_phase_wire() {
+        for (tag, p) in [
+            (0u8, PinPhase::Init(vec![9, 8])),
+            (1, PinPhase::Echo(vec![9, 8])),
+            (2, PinPhase::Ready(vec![9, 8])),
+        ] {
+            let mut b = vec![];
+            put_phase(&p, &mut b);
+            assert_eq!(b, vec![tag, 2, 255, 9, 8]);
+            let mut c = crate::consensus_wire::Cursor::new(&b).unwrap();
+            assert_eq!(phase(&mut c).unwrap(), p);
+            c.finish().unwrap();
+        }
+        let mut c = crate::consensus_wire::Cursor::new(&[3, 0, 255]).unwrap();
+        assert!(phase(&mut c).is_err());
+    }
+}

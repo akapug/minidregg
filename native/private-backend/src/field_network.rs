@@ -890,3 +890,26 @@ pub(crate) mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod pin_wire {
+    use super::*;
+    use crate::asks::PhaseMessage as PinPhase;
+    #[test]
+    fn pin_phase_wire() {
+        for (tag, p) in [
+            (0u8, PinPhase::Init(vec![9, 8])),
+            (1, PinPhase::Echo(vec![9, 8])),
+            (2, PinPhase::Ready(vec![9, 8])),
+        ] {
+            let mut b = vec![];
+            put_phase(&p, &mut b);
+            assert_eq!(b, vec![tag, 2, 255, 9, 8]);
+            let mut c = crate::consensus_wire::Cursor::new(&b).unwrap();
+            assert_eq!(get_phase(&mut c).unwrap(), p);
+            c.finish().unwrap();
+        }
+        let mut c = crate::consensus_wire::Cursor::new(&[3, 0, 255]).unwrap();
+        assert!(get_phase(&mut c).is_err());
+    }
+}

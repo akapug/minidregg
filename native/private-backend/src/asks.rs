@@ -678,3 +678,56 @@ mod wire_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod pin_helpers {
+    use super::*;
+    use crate::codec::Nat;
+    fn g() -> Generation {
+        Generation {
+            invocation: Nat::new(1),
+            command: vec![9],
+            attempt: Nat::new(1),
+            generation: Nat::new(2),
+            configuration: Nat::new(3),
+        }
+    }
+    /// The dealer's share words are the Horner evaluation of the fixed
+    /// coefficients at x = holder + 1; the reconstructed key is H(0, constant
+    /// terms), the Lagrange interpolation at 0 from f + 1 valid shares.
+    #[test]
+    fn pin_dealer_horner_and_reconstruction_lagrange() {
+        let ns: Vec<Asks> = (0..4).map(|i| Asks::new(i, 0, 4, 1, &g()).unwrap()).collect();
+        let coeff = [vec![Field(42), Field(17)], vec![Field(7), Field(13)]];
+        let sends = ns[0].dealer_with_coefficients(&coeff).unwrap();
+        for s in &sends {
+            if let Body::PrivateShare(w) = &s.message.body {
+                let x = Field(s.recipient as u128 + 1);
+                assert_eq!(w[0], Field(42).add(Field(17).mul(x)));
+                assert_eq!(w[1], Field(7).add(Field(13).mul(x)));
+            }
+        }
+        let mut ns = ns;
+        let mut q: std::collections::VecDeque<(u16, Send)> =
+            sends.into_iter().map(|s| (0, s)).collect();
+        while let Some((sender, s)) = q.pop_back() {
+            let r = s.recipient;
+            for p in ns[r as usize].receive(sender, s.message).unwrap() {
+                q.push_front((r, p));
+            }
+        }
+        for n in &mut ns {
+            for s in n.start_reconstruction().unwrap() {
+                q.push_back((n.me, s));
+            }
+        }
+        while let Some((sender, s)) = q.pop_back() {
+            let r = s.recipient;
+            for p in ns[r as usize].receive(sender, s.message).unwrap() {
+                q.push_front((r, p));
+            }
+        }
+        let expect = ns[0].h(0, &[Field(42), Field(7)]);
+        assert!(ns.iter().all(|n| n.key == Some(expect)));
+    }
+}

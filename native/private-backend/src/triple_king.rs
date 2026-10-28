@@ -1742,3 +1742,19 @@ pub(crate) mod tests {
         (a, sock, r)
     }
 }
+
+#[cfg(test)]
+mod pin_helpers {
+    use super::*;
+    fn pin_p() -> Vec<Field> {
+        vec![Field(0x0123456789abcdeffedcba9876543210), Field(0x00112233445566778899aabbccddeeff), Field(0xdeadbeefcafebabe0badf00dfeedface)]
+    }
+    #[test]
+    fn pin_horner_eval() {
+        let p = pin_p();
+        assert_eq!(eval(&p, Field(0x00000000000000000000000000000000)), Field(0x0123456789abcdeffedcba9876543210));
+        assert_eq!(eval(&p, Field(0x00000000000000000000000000000001)), Field(0xdf9fd9bb070011267de8e02e44642621));
+        assert_eq!(eval(&p, Field(0x00000000000000000000000000000002)), Field(0x7bb7fabe2afbebf8c1582fd81458055f));
+        assert_eq!(eval(&p, Field(0xabcdef0123456789abcdef0123456789)), Field(0xcd0a51e834041f78337648c29524d3cc));
+    }
+}

@@ -1465,3 +1465,40 @@ mod tests {
         assert!(n.request_private_reconstruction(0, 1).is_err());
     }
 }
+
+#[cfg(test)]
+mod pin_helpers {
+    use super::*;
+    fn pin_p() -> Vec<Field> {
+        vec![Field(0x0123456789abcdeffedcba9876543210), Field(0x00112233445566778899aabbccddeeff), Field(0xdeadbeefcafebabe0badf00dfeedface)]
+    }
+    #[test]
+    fn pin_horner_eval() {
+        let p = pin_p();
+        assert_eq!(eval(&p, Field(0x00000000000000000000000000000000)), Field(0x0123456789abcdeffedcba9876543210));
+        assert_eq!(eval(&p, Field(0x00000000000000000000000000000001)), Field(0xdf9fd9bb070011267de8e02e44642621));
+        assert_eq!(eval(&p, Field(0x00000000000000000000000000000002)), Field(0x7bb7fabe2afbebf8c1582fd81458055f));
+        assert_eq!(eval(&p, Field(0xabcdef0123456789abcdef0123456789)), Field(0xcd0a51e834041f78337648c29524d3cc));
+    }
+    #[test]
+    fn pin_interpolate_values_and_masks() {
+        let p = pin_p();
+        let pts = vec![
+            (0u16, vec![p[0], p[1]], vec![p[2], p[1]]),
+            (2, vec![p[1], p[2]], vec![p[0], p[0]]),
+            (3, vec![p[2], p[0]], vec![p[1], p[2]]),
+        ];
+        let v = interpolate(&pts, 2, false).unwrap();
+        assert_eq!(v, vec![vec![Field(0xe6fcc0defa32b3efe5af2d2474f13231), Field(0x3ae217b780bb674404bc9d274805a5af), Field(0xdd3d920ef32219441fcf0a9b4aa0a58e)], vec![Field(0xe44d91f9ec1c941f3017f93978914e3d), Field(0x1d5d18a90d42066c907d8635d080c6c8), Field(0xf901ab63a50bf40428f3d5b764cc660a)]]);
+        assert_eq!(interpolate(&pts, 2, true).unwrap(), vec![vec![Field(0xdd2e889c112e36d6a850343348045a2d), Field(0x27bf0f1e8df9612894c11b1298856367), Field(0x243c396d5629ed40373cdf2c2e6cc384)], vec![Field(0x5137c77e2d2fb92f9cc73f4a00f9f60a), Field(0xe1b3a8ef93f9a6d40e8a9eae3cfbb537), Field(0xb0954da2fa83798c1ad40b5ff0dfadc2)]]);
+        assert!(interpolate(&pts, 3, false).is_err());
+    }
+    #[test]
+    fn pin_sh2t_seeded_prg() {
+        let seed: [u8; 32] = std::array::from_fn(|i| i as u8);
+        let ctx: [u8; 32] = std::array::from_fn(|i| 100 + i as u8);
+        assert_eq!(entropy(seed, ctx, 0, 0), [0xaf, 0x7d, 0x41, 0xad, 0x74, 0x96, 0x13, 0x33, 0x4e, 0x4f, 0x57, 0x81, 0x47, 0x96, 0x28, 0xfc, 0xbe, 0x06, 0x8a, 0x6f, 0x04, 0xe9, 0x1d, 0xd5, 0xf7, 0x96, 0xe9, 0x4d, 0x2a, 0x5a, 0xe3, 0x8f]);
+        assert_eq!(entropy(seed, ctx, 1, 0), [0x7c, 0xb1, 0xbf, 0xbb, 0xf2, 0x22, 0x47, 0x4d, 0x7e, 0x23, 0x86, 0x19, 0x80, 0xaa, 0xaa, 0xd3, 0x09, 0x68, 0xe0, 0x2c, 0xad, 0x8f, 0x3f, 0x39, 0x1a, 0x03, 0x57, 0xaa, 0xf2, 0x63, 0x6f, 0x4a]);
+        assert_eq!(entropy(seed, ctx, 3, 7), [0x17, 0x93, 0xd2, 0xc3, 0x5b, 0x01, 0xbd, 0xa6, 0x09, 0xa7, 0x8d, 0x0c, 0x6a, 0x71, 0xc0, 0x04, 0x60, 0x5d, 0x3c, 0xf3, 0xc7, 0xbb, 0xce, 0x5b, 0x45, 0x6c, 0xdd, 0xcb, 0x69, 0x33, 0x1e, 0x7c]);
+    }
+}

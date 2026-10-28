@@ -746,3 +746,28 @@ impl RecipientKeyCustody {
         capsule.open(secret, public, party, sequence, &expected)
     }
 }
+
+#[cfg(test)]
+mod pin_helpers {
+    use super::*;
+    use crate::consensus_wire::Cursor as PinCursor;
+    fn pin(bytes: &[u8]) -> PinCursor<'_> {
+        PinCursor::new(bytes).unwrap()
+    }
+    /// Pins the shape of the per-module Nat reader: terminator-delimited,
+    /// canonical, refuses unterminated or noncanonical digits.
+    #[test]
+    fn pin_nat_cursor_recipient_seal() {
+        let mut c = pin(&[45, 1, 255, 7]);
+        assert_eq!(cursor_nat(&mut c).unwrap().value().unwrap(), 300);
+        assert_eq!(c.byte().unwrap(), 7);
+        assert_eq!(cursor_nat(&mut pin(&[255])).unwrap().value().unwrap(), 0);
+        assert_eq!(cursor_nat(&mut pin(&[200, 254, 255])).unwrap().value().unwrap(), 200 + 254 * 255);
+        for bad in [&[45u8, 1][..], &[45, 0, 255], &[][..]] {
+            assert!(cursor_nat(&mut pin(bad)).is_err());
+        }
+        let mut huge = vec![];
+        crate::codec::Nat::new(crate::codec::MAX as u64 + 1).put(&mut huge);
+        assert_eq!(cursor_nat(&mut pin(&huge)).is_err(), false);
+    }
+}

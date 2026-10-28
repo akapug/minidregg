@@ -908,3 +908,66 @@ pub(crate) mod tests {
         drop(anchors);
     }
 }
+
+#[cfg(test)]
+mod pin_helpers {
+    use super::*;
+    use crate::consensus_wire::Cursor as PinCursor;
+    fn pin(bytes: &[u8]) -> PinCursor<'_> {
+        PinCursor::new(bytes).unwrap()
+    }
+    /// Pins the shape of the per-module Nat reader: terminator-delimited,
+    /// canonical, refuses unterminated or noncanonical digits.
+    #[test]
+    fn pin_nat_cursor_private_output_store() {
+        let mut c = pin(&[45, 1, 255, 7]);
+        assert_eq!(nat(&mut c).unwrap(), 300);
+        assert_eq!(c.byte().unwrap(), 7);
+        assert_eq!(nat(&mut pin(&[255])).unwrap(), 0);
+        assert_eq!(nat(&mut pin(&[200, 254, 255])).unwrap(), 200 + 254 * 255);
+        for bad in [&[45u8, 1][..], &[45, 0, 255], &[][..]] {
+            assert!(nat(&mut pin(bad)).is_err());
+        }
+        let mut huge = vec![];
+        crate::codec::Nat::new(crate::codec::MAX as u64 + 1).put(&mut huge);
+        assert_eq!(nat(&mut pin(&huge)).is_err(), true);
+    }
+}
+
+#[cfg(test)]
+mod pin_wire {
+    use super::*;
+    use crate::asks::PhaseMessage as PinPhase;
+    fn pin_sends() -> Vec<Send> {
+        vec![
+            Send { to: 1, message: Message { context: [7; 32], dealer: 1, message: crate::private_send::Message { context: [8; 32], body: crate::private_send::Body::Cipher(PinPhase::Echo(vec![1])) } } },
+            Send { to: 3, message: Message { context: [7; 32], dealer: 1, message: crate::private_send::Message { context: [8; 32], body: crate::private_send::Body::Cipher(PinPhase::Ready(vec![1])) } } },
+        ]
+    }
+    /// Outbox wire: Nat count, then per packet u16 LE recipient and the
+    /// length-prefixed message wire; canonical, bounded, recipient-checked.
+    #[test]
+    fn pin_outbox_wire() {
+        let ps = pin_sends();
+        let b = outbox(&ps);
+        let mut want = vec![2, 255];
+        for s in &ps {
+            want.extend(s.to.to_le_bytes());
+            let m = private_output::encode_message(&s.message);
+            crate::codec::Nat::new(m.len() as u64).put(&mut want);
+            want.extend(m);
+        }
+        assert_eq!(&b[..4], &[2, 255, 1, 0]);
+        assert_eq!(b, want);
+        assert_eq!(packets(&b, 4).unwrap(), ps);
+        assert!(packets(&b, 3).is_err(), "recipient 3 is outside n = 3");
+        let mut trailing = b.clone();
+        trailing.push(0);
+        let b = trailing;
+        assert!(packets(&b, 4).is_err(), "trailing bytes refuse");
+        let mut huge = vec![];
+        crate::codec::Nat::new(crate::codec::MAX as u64).put(&mut huge);
+        let b = huge;
+        assert!(packets(&b, 4).is_err(), "an absurd count refuses");
+    }
+}

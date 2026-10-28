@@ -1109,3 +1109,50 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod pin_helpers {
+    use super::*;
+    fn pin_p() -> Vec<Field> {
+        vec![Field(0x0123456789abcdeffedcba9876543210), Field(0x00112233445566778899aabbccddeeff), Field(0xdeadbeefcafebabe0badf00dfeedface)]
+    }
+    #[test]
+    fn pin_horner_eval() {
+        let p = pin_p();
+        assert_eq!(eval(&p, Field(0x00000000000000000000000000000000)), Field(0x0123456789abcdeffedcba9876543210));
+        assert_eq!(eval(&p, Field(0x00000000000000000000000000000001)), Field(0xdf9fd9bb070011267de8e02e44642621));
+        assert_eq!(eval(&p, Field(0x00000000000000000000000000000002)), Field(0x7bb7fabe2afbebf8c1582fd81458055f));
+        assert_eq!(eval(&p, Field(0xabcdef0123456789abcdef0123456789)), Field(0xcd0a51e834041f78337648c29524d3cc));
+    }
+    fn pin_points() -> Vec<(u16, Vec<Field>)> {
+        let p = pin_p();
+        vec![(0, vec![p[0], p[1]]), (2, vec![p[1], p[2]]), (3, vec![p[2], p[0]])]
+    }
+    #[test]
+    fn pin_interpolate_at() {
+        let ps = pin_points();
+        assert_eq!(interpolate_at(&ps, Field(0x00000000000000000000000000000000), 2).unwrap(), vec![Field(0xe6fcc0defa32b3efe5af2d2474f13231), Field(0xe44d91f9ec1c941f3017f93978914e3d)]);
+        assert_eq!(interpolate_at(&ps, Field(0x00000000000000000000000000000004), 2).unwrap(), vec![Field(0xdeadbeefcafebabe0badf00dfeedface), Field(0x0123456789abcdeffedcba9876543210)]);
+        assert_eq!(interpolate_at(&ps, Field(0xfeedfacefeedfacefeedfacefeedface), 2).unwrap(), vec![Field(0x95844b0b3d3980ac6e40c6d4bddd27e3), Field(0xdbc3cacdf3726a8790c50c391d382dde)]);
+    }
+    #[test]
+    fn pin_polynomial() {
+        let ps = pin_points();
+        assert_eq!(
+            polynomial(&ps, 2).unwrap(),
+            vec![
+                vec![Field(0xe6fcc0defa32b3efe5af2d2474f13231), Field(0x3ae217b780bb674404bc9d274805a5af), Field(0xdd3d920ef32219441fcf0a9b4aa0a58e)],
+                vec![Field(0xe44d91f9ec1c941f3017f93978914e3d), Field(0x1d5d18a90d42066c907d8635d080c6c8), Field(0xf901ab63a50bf40428f3d5b764cc660a)],
+            ]
+        );
+        assert!(polynomial(&ps, 3).is_err());
+    }
+    #[test]
+    fn pin_acss_seeded_prg() {
+        let seed: [u8; 32] = std::array::from_fn(|i| i as u8);
+        let ctx: [u8; 32] = std::array::from_fn(|i| 100 + i as u8);
+        assert_eq!(random(seed, ctx, 0, 0), [0x72, 0x31, 0x93, 0x44, 0xa0, 0x06, 0xcd, 0x63, 0x5b, 0x0b, 0xf8, 0x29, 0xcb, 0x81, 0xc3, 0x1b, 0xa8, 0x49, 0x63, 0x5d, 0x8f, 0x00, 0xea, 0x06, 0xa7, 0x01, 0x6e, 0xda, 0x54, 0x45, 0xda, 0x0c]);
+        assert_eq!(random(seed, ctx, 1, 0), [0x4b, 0x10, 0x13, 0x27, 0xa6, 0x8b, 0x24, 0x0e, 0xe7, 0x44, 0xdb, 0xd8, 0xcc, 0x51, 0xab, 0xba, 0x98, 0xc6, 0xc2, 0xf4, 0x7d, 0x0a, 0x9a, 0xbc, 0x31, 0x22, 0x25, 0xc5, 0x95, 0x07, 0x0d, 0xcf]);
+        assert_eq!(random(seed, ctx, 3, 7), [0xbc, 0x0e, 0x16, 0x7e, 0x88, 0x62, 0x51, 0x6b, 0x65, 0xf2, 0x0a, 0x05, 0x2f, 0x4c, 0x7c, 0x15, 0xa3, 0xdf, 0xab, 0xf0, 0xff, 0x06, 0x75, 0xd0, 0xdd, 0x85, 0x1e, 0xec, 0x27, 0x71, 0x19, 0x23]);
+    }
+}
