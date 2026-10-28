@@ -510,7 +510,20 @@ case $(uname -s) in
     ACP_RELEASE="$EVIDENCE/acp-prompt-release"
     ;;
   Linux)
-    HERMES_PROGRAM=$(absolute_executable "$REPO/deploy/grain-host/bwrap")
+    # The worker launcher as hermes-journey and jpay6 make it: the source bwrap launcher
+    # materialized for the box's physical bwrap, with the candidate's own launch gate beside it
+    # (the launcher refuses without one; the runtime then refuses "configured grain launcher
+    # lacks launch-gate v1 protocol"). LAUNCH_GATE defaults to the gate shipped beside GRAIN
+    # (a candidate's bin/launch-gate; journey-runner exports it the same way).
+    LAUNCH_GATE=${LAUNCH_GATE:-"$(dirname "$GRAIN")/launch-gate"}
+    [ -x "$LAUNCH_GATE" ] || { echo "not executable: LAUNCH_GATE=$LAUNCH_GATE" >&2; exit 2; }
+    BWRAP=$(sh "$REPO/deploy/grain-host/resolve-bwrap") || exit 2
+    mkdir -m 700 "$EVIDENCE/launcher"
+    python3 "$REPO/deploy/grain-host/materialize-bwrap.py" --physical-bwrap "$BWRAP" \
+      --physical-sha256 "$(sha256sum "$BWRAP" | cut -d' ' -f1)" --output "$EVIDENCE/launcher/bwrap" \
+      >"$EVIDENCE/launcher.json"
+    install -m 0700 "$LAUNCH_GATE" "$EVIDENCE/launcher/launch-gate"
+    HERMES_PROGRAM="$EVIDENCE/launcher/bwrap"
     CONTROLLER_UNIT=mini-grain-controller@7001.service
     CONTROLLER_MARKER="mini-grain-acceptance:$EVIDENCE"
     mkdir -m 700 "$EVIDENCE/worker-work" "$EVIDENCE/worker-runtime"
