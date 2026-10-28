@@ -16,7 +16,7 @@ un-verify (Generic Simplex gate), un-bend (bend verb + lost reply), un-world (Ta
 - World apps native on candidate 0ce31391 (un-effects-rows; commons split into app + scenarios, policy bound kept): effect 19/19, dues 17/17, bounty 21/21, play 27/27, ballot 27/27, story 25/25, commons 20/20; cohort gates ballot 37/37, dues 49/49, commons 64/64. README native lines + evidence at 20f28ac31 (docs only, sent to the integrator a34bdb948f1cf4796).
 
 ## In flight
-- lane/un-shared-names (Sonnet a852f5df40229de24): DONE. 179494a88 and e4acc9df0 on main; f0894a415 (stale label rows 79/82) sent to the integrator. jtemplates (KTPL) 196/196 on 2d8b7ed54 incl. the background writer and dana's split tenancy (/build/t/uns-run5/steps/KTPL/jtemplates.tsv on dregg-build). Room bind reads room pointer, index and target in ONE batched signed view; bounded replan only on a changed room pointer, named.
+- lane/un-shared-names (Sonnet a852f5df40229de24): DONE. 179494a88, e4acc9df0 and f0894a415 (stale label rows 79/82) all on main (f0894a415 at d91e9d6d2). jtemplates (KTPL) 196/196 on 2d8b7ed54 incl. the background writer and dana's split tenancy (/build/t/uns-run5/steps/KTPL/jtemplates.tsv on dregg-build). Room bind reads room pointer, index and target in ONE batched signed view; bounded replan only on a changed room pointer, named.
 
 ## Waiting on others
 - Codec pin re-emit (ACTIVITY-RECORD v9): the integrator's full build runs the regen once (its state file).
@@ -53,6 +53,7 @@ fn out; private-backend stays; Effects/ registry is Phase 3 (EFFECTS.md); dues a
 - Box hygiene: hbox staging (candidate copies, worlds, grain installs) under /tank, never / (85% used); each faerie deletes its own staging dirs when its run ends.
 
 ## Coordinator status
+Candidates since: 7027e0ace (/build/candidates/7027e0ace4bf5763dd1d78b47380dfe4ceb15b57, 06:21; composed-inputs fix; carries un-ns-owner 125927331+29d3152d3 and un-stream-continuity a971a649d). The 76758dba6 full build (op-7 bound 507d6ce78) is running; the integrator names it to me on READY, and japps, the market batches and the validator's app worlds run on it.
 Candidate 2d8b7ed54 (/build/candidates/2d8b7ed544100acfaeb9ff2f9b597c31b8cb81e6, READY 05:48) carries 25cfb86bd, 621aded18, e4acc9df0, b3/b5/b7/b8, un-tale-welcome. Runs on it (fresh worlds, one at a time from now): b3 a85d12892ea6de3ca, b5 a0ef59eabda7075b4, b7 abf203f357754001b, b8 a13f0bc9626b1320a, jtemplates a852f5df40229de24 (green, 196/196). japps co-edit (a4e312352a7091f59) is parked with world w2 kept as evidence; it reruns once on the 76758dba6 candidate.
 
 ## Rows validator (a373556d56d56744d)
