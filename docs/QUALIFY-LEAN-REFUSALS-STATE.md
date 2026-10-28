@@ -24,10 +24,12 @@ unavailable/uncertain line uses different text, so those counts don't move.
 
 ## Elaboration: UNELABORATED at push time
 
-- First `scripts/pipeline/lane-check Host/Main.lean` on dregg-ref (tree /srv/lanes/qualify-lean-refusals,
-  a cp -a of thin-birth's .lake): its stale-import rebuild was OOM-killed at 17:53:54Z in the shared
-  swarm.slice while other lanes ran unlocked builds. Host/Main.lean itself was never reached.
-- Retry running: `/srv/lanes/qlr-state/qlr-retry.sh` (PID in `/srv/lanes/qlr-state/retry.pid`) runs
+- Both earlier runs on dregg-ref (tree /srv/lanes/qualify-lean-refusals, a cp -a of thin-birth's .lake) never
+  compiled anything: launched through `runuser` without the lanes user's bus, `swarm-build`'s `systemd-run --user`
+  failed ("Failed to connect to user scope bus"), so the import build exited 1 with no Lean error. (An OOM kill
+  at 17:53:54Z in the box log belonged to another lane, not this one.) Log of the second: `/srv/lanes/qlr-state/retry-1-nobus.log`.
+- Third run, with `XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus`:
+  `/srv/lanes/qlr-state/qlr-retry.sh` (PID in `/srv/lanes/qlr-state/retry.pid`) runs
   `closure-lock swarm-build lake build -j 2 <Host/Main imports>`, then, separately and not nested,
   `scripts/pipeline/lane-check Host/Main.lean`. The verdict goes to `/srv/lanes/qlr-state/retry.log`
   (`IMPORTS rc=`, then `EXIT=`).
