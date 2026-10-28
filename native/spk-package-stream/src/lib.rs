@@ -30,7 +30,13 @@ const MAGIC: [u8; 8] = [0x8f, 0xc6, 0xcd, 0xef, 0x45, 0x1a, 0xea, 0x96];
 /// admit a segment table past it.
 const MAX_SEGMENTS: u32 = 4096;
 const MAX_SIGNATURE: usize = 64 * 1024;
-const MAX_MANIFEST: usize = 1024 * 1024;
+/// Sandstorm's `Manifest.metadata` carries the app's icon, screenshots and marketing art
+/// inline, so a genuine manifest is routinely over a megabyte (OrgTodo's is 1.5 MiB:
+/// five inline SVGs and two PNGs). Sandstorm sets no limit of its own. The cap only bounds
+/// the heap copy of one member that is already inside the profile's `decoded_bytes`; the
+/// decoder reads the title, version and launch command and never touches the art, and
+/// Mini keeps nothing of the manifest but its SHA-256.
+const MAX_MANIFEST: usize = 16 * 1024 * 1024;
 const MAX_CONFIG: usize = 64 * 1024;
 const MAX_NAME_BYTES: usize = 16 * 1024 * 1024;
 const MAX_FILES: usize = 100_000;
@@ -818,6 +824,30 @@ mod tests {
         )
         .is_err());
         assert!(unpack(&bytes, Limits::DEFAULT).is_ok());
+    }
+    #[test]
+    fn manifest_with_inline_metadata_art_is_admitted_up_to_the_cap_and_refused_past_it() {
+        let padded = |bytes: usize| {
+            let title = "x".repeat(bytes);
+            format!(
+                r#"{{"app_id":"untrusted","app_title":"{title}","app_version":1,"continue_command":{{"argv":["/app"]}}}}"#
+            )
+        };
+        let build = |manifest: &str| {
+            SpkBuilder::new()
+                .manifest_json(manifest)
+                .file(Member::regular("data", b"d".to_vec()))
+                .pack(&key())
+        };
+        // 1.5 MiB, the size of a real catalog manifest with inline screenshots.
+        let big = padded(1_500_000);
+        let parsed = unpack(&build(&big), Limits::DEFAULT).unwrap();
+        assert_eq!(parsed.manifest_bytes, big.as_bytes());
+        assert_eq!(parsed.manifest.app_version, 1);
+        // Past the cap it is still refused, by name.
+        let huge = padded(MAX_MANIFEST + 1);
+        let error = unpack(&build(&huge), Limits::DEFAULT).err().unwrap();
+        assert!(error.to_string().contains("invalid or oversized sandstorm-manifest"));
     }
     #[test]
     fn corrupt_truncated_extra_and_validly_compressed_tampering_fail() {

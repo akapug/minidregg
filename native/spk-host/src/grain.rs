@@ -939,16 +939,68 @@ fn scan_runs(app_dir: &Path) -> io::Result<Vec<Run>> {
     Ok(runs)
 }
 
-fn unit_property(unit: &str, property: &str) -> io::Result<String> {
+/// What `systemctl --user show` said about one property of a unit.
+#[derive(Debug, PartialEq, Eq)]
+enum UnitProperty {
+    Known(String),
+    /// systemctl failed or printed nothing. `show` always prints `ActiveState`, even for
+    /// a unit that does not exist (`inactive`), so this is "could not ask" (a busy or
+    /// pressured user manager), never an answer about the unit.
+    Unreadable(String),
+}
+
+fn classify_show(success: bool, stdout: &[u8], stderr: &[u8]) -> UnitProperty {
+    let value = String::from_utf8_lossy(stdout).trim().to_owned();
+    if success && !value.is_empty() {
+        return UnitProperty::Known(value);
+    }
+    let said = String::from_utf8_lossy(stderr).trim().to_owned();
+    UnitProperty::Unreadable(if said.is_empty() { "systemctl printed nothing".into() } else { said })
+}
+
+fn unit_probe(unit: &str, property: &str) -> io::Result<UnitProperty> {
     let output = crate::os::systemctl()
         .args(["--user", "show", unit, &format!("--property={property}"), "--value"])
         .stdin(Stdio::null())
         .output()?;
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+    Ok(classify_show(output.status.success(), &output.stdout, &output.stderr))
+}
+
+fn unit_property(unit: &str, property: &str) -> io::Result<String> {
+    match unit_probe(unit, property)? {
+        UnitProperty::Known(value) => Ok(value),
+        UnitProperty::Unreadable(said) => Err(io::Error::other(format!(
+            "cannot read {property} of {unit}: {said}"
+        ))),
+    }
 }
 
 fn unit_active(unit: &str) -> io::Result<String> {
     unit_property(unit, "ActiveState")
+}
+
+/// Consecutive unreadable polls (500 ms apart) the START wait absorbs before it gives
+/// up on the user manager: one minute.
+const MAX_UNREADABLE_POLLS: u32 = 120;
+
+/// One poll of the START wait. A readable state resets the count and is returned; an
+/// unreadable one is absorbed (`None`) until `MAX_UNREADABLE_POLLS` in a row.
+fn judge_poll(unit: &str, probe: UnitProperty, unreadable: &mut u32) -> io::Result<Option<String>> {
+    match probe {
+        UnitProperty::Known(state) => {
+            *unreadable = 0;
+            Ok(Some(state))
+        }
+        UnitProperty::Unreadable(said) => {
+            *unreadable += 1;
+            if *unreadable > MAX_UNREADABLE_POLLS {
+                return Err(io::Error::other(format!(
+                    "cannot read ActiveState of {unit} for {MAX_UNREADABLE_POLLS} polls: {said}"
+                )));
+            }
+            Ok(None)
+        }
+    }
 }
 
 /// The resident unit is rendered by the broker from its own template (the
@@ -1176,6 +1228,7 @@ fn start_inner(host: &Host, app: &str, prepare_only: bool) -> io::Result<Value> 
             return Err(error);
         }
     }
+    let mut unreadable = 0u32;
     let completed = loop {
         // Re-read each turn: the lane is fixed only once the resident retains
         // its admitted marker (a recovered create retries under v4).
@@ -1191,7 +1244,13 @@ fn start_inner(host: &Host, app: &str, prepare_only: bool) -> io::Result<Value> 
         if exists(&completed)? && sockets_ready && agents_ready {
             break completed;
         }
-        let state = unit_active(&unit)?;
+        // The 2026-10-27 HakyllCMS row failed here at 125 s with an empty state while its
+        // resident was alive until the world was torn down (a START takes 140-630 s): an
+        // unreadable state is not a stopped unit.
+        let Some(state) = judge_poll(&unit, unit_probe(&unit, "ActiveState")?, &mut unreadable)? else {
+            std::thread::sleep(Duration::from_millis(500));
+            continue;
+        };
         if !matches!(state.as_str(), "active" | "activating") {
             return Err(io::Error::other(format!(
                 "resident unit {unit} is {state} before START completion; see journalctl -u {unit}"
@@ -1624,6 +1683,46 @@ mod tests {
                 app_capability:"9502".into(),app_observe_capability:"9503".into(),package_capability:"9504".into(),package_observe_capability:"9505".into()},
             raw_sha256:"a".repeat(64),image_dir:None,app_uid:64010,app_gid:64010,
             volume_resource:"8502".into(),volume_mib:512,class:"S".into() }
+    }
+
+    #[test]
+    fn systemctl_that_prints_nothing_or_fails_is_unreadable_never_a_state() {
+        assert_eq!(classify_show(true, b"active\n", b""), UnitProperty::Known("active".into()));
+        assert_eq!(classify_show(true, b"failed\n", b""), UnitProperty::Known("failed".into()));
+        assert_eq!(classify_show(true, b"", b""), UnitProperty::Unreadable("systemctl printed nothing".into()));
+        assert_eq!(classify_show(true, b"  \n", b""), UnitProperty::Unreadable("systemctl printed nothing".into()));
+        assert_eq!(
+            classify_show(false, b"", b"Failed to connect to bus\n"),
+            UnitProperty::Unreadable("Failed to connect to bus".into())
+        );
+        // A nonzero exit never yields a state, whatever it printed.
+        assert!(matches!(classify_show(false, b"active", b""), UnitProperty::Unreadable(_)));
+    }
+
+    #[test]
+    fn start_wait_absorbs_a_pressured_manager_and_gives_up_only_after_a_minute() {
+        let gone = || UnitProperty::Unreadable("Failed to connect to bus".into());
+        let mut misses = 0;
+        for _ in 0..MAX_UNREADABLE_POLLS {
+            assert_eq!(judge_poll("u", gone(), &mut misses).unwrap(), None);
+        }
+        // One readable poll resets the run.
+        assert_eq!(
+            judge_poll("u", UnitProperty::Known("activating".into()), &mut misses).unwrap(),
+            Some("activating".into())
+        );
+        assert_eq!(misses, 0);
+        for _ in 0..MAX_UNREADABLE_POLLS {
+            assert_eq!(judge_poll("u", gone(), &mut misses).unwrap(), None);
+        }
+        let error = judge_poll("u", gone(), &mut misses).unwrap_err().to_string();
+        assert!(error.contains("cannot read ActiveState of u") && error.contains("Failed to connect to bus"));
+        // A real terminal state is returned at once, not absorbed.
+        let mut fresh = 0;
+        assert_eq!(
+            judge_poll("u", UnitProperty::Known("failed".into()), &mut fresh).unwrap(),
+            Some("failed".into())
+        );
     }
 
     #[test]
