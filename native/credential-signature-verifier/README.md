@@ -40,7 +40,7 @@ files. Passing this check establishes a library verification result, not
 authorization, revocation freshness, replay prevention, or a Lean proof of
 Ed25519. Those obligations stay with the credential/authority receiving path.
 
-## `verify-sshsig` (PAY §11.3 self-enrollment)
+## `verify-sshsig` (docs/PAY.md §11.3 self-enrollment)
 
 ```text
 minidregg-credential-signature-verifier verify-sshsig <public-key-file> <namespace-file> <message-file> <signature-file>

@@ -480,8 +480,8 @@ pub(crate) fn refusal_line(outcome: &Value) -> Option<String> {
     ))
 }
 
-/// What to do about a refusal whose name alone does not say (AUDIT-ROOMS,
-/// client defect 8). A delegation's `descent` check reads the authority as it
+/// What to do about a refusal whose name alone does not say (JDISCLOSE row
+/// d8). A delegation's `descent` check reads the authority as it
 /// stood when the proposal was authored (its root, the issuer and policy
 /// epochs, a fresh child id, an unspent nullifier); most often the authority
 /// has moved since, and the cure is a new proposal.
@@ -734,12 +734,16 @@ const USAGE: &str = r#"mini — custody and exact-retry client for minidregg-hos
 
 usage:
   mini consent-full-ready --host HOST --config CONFIG.json
-  mini [--verify-host] [--remote DEST] COMMAND [options] [--replan-max N]
+  mini [--verify-host] [--remote DEST] COMMAND [options] [--replan-window SECONDS] [--replan-max N]
     --verify-host (or MINI_VERIFY_HOST=1): hash the local Host image even when the workspace pinned
     its hostSha256 at init, and refuse a mismatch before any request.
-    --replan-max N: when a tick, certify or another write lands between an observation and
-    its use, the Host answers stale-root; mini observes again up to N times (default 5;
-    MINI_REPLAN_MAX when the flag is absent). Only stale-root is retried.
+    --replan-window SECONDS: when a tick, certify or another write lands between an observation and
+    its use (the Host's stale-root, or a document append's moved target), mini observes again,
+    after a random pause of up to a few of its own attempt times, until SECONDS have passed
+    (default 600; MINI_REPLAN_WINDOW when the flag is absent). Each such refusal is the Host's
+    proof that another write landed first.
+    --replan-max N: an explicit ceiling of N re-plans inside the window (none by default; 0 is a
+    single observation; MINI_REPLAN_MAX when the flag is absent).
   mini private-compute --left 0..=255 --right 0..=255   (research demonstration: a local four-party MPC computation, never an admission; needs the mini-private-compute binary beside mini)
   mini keygen --secret KEY --public PUBLIC [--next-to NEXT-KEY | --no-prerotation] [--escrow-to-sponsor @FILE|HEX --escrow-subject SUBJECT]
   mini adopt-next-key --workspace WORKSPACE [--next-key NEXT-KEY] [--attempt CHILD] [--action prepare|submit|lookup]
@@ -808,8 +812,8 @@ usage:
   mini enroll --action submit|lookup --dir ATTEMPT
   mini key --action providers|choose|set|grant|revoke|ls (--dir WORKSPACE | --pool true) [--provider NAME] [--secret FILE|-] [--runner SUBJECT --per-call TOKENS --per-day CALLS --until HEIGHT --model MODEL] [--task TASK] [--broker CLIENT_CONFIG]
   mini shell --socket SOCKET --host HOST --config CONFIG.json --workspace WORKSPACE --home SESSION-HOME [--line LINE]
-  mini apps search [--term TEXT] [--category C] [--json]        the Sandstorm app market, cached by mini-market (docs/APP-MARKET-2026-10-27.md)
-  mini apps show --app APP-ID|PACKAGE-ID [--json]
+  mini apps search [--term TEXT] [--category C] [--qualification FILE] [--json]   the Sandstorm app market and recorded lifecycle verdicts
+  mini apps show --app APP-ID|PACKAGE-ID [--qualification FILE] [--json]
   mini apps install --app APP-ID|PACKAGE-ID --dir WORKSPACE [--class S|M|L] [--retry REQUEST-ID]   a member turn: birth + delegation, then the worker
   mini apps list|status|open|stop|start|share|export|delete [--grain a<APP>] [--to MEMBER] [--out FILE]   decoded outcomes over the worker socket
   mini apps index-check --in RAW.json --out INDEX.json              the fetcher's validation of the downloaded index
@@ -981,7 +985,7 @@ impl Args {
             return Err(USAGE.to_owned());
         }
         let mut raw = raw.peekable();
-        // `mini pay ACTION ...` (PAY.md §5 spells the verbs this way) is `mini pay --action ACTION ...`.
+        // `mini pay ACTION ...` (docs/PAY.md §5 spells the verbs this way) is `mini pay --action ACTION ...`.
         if command == OsStr::new("pay") || command == OsStr::new("store") || command == OsStr::new("apps") {
             if let Some(action) = raw.next_if(|next| !next.to_string_lossy().starts_with("--")) {
                 // `mini apps share a4501 bob`: the grammar leaf's positionals are the flags
@@ -999,7 +1003,7 @@ impl Args {
         }
         while let Some(flag) = raw.next() {
             let rendered = flag.to_string_lossy();
-            // `mini join --solana|--wait|--renew` (PAY.md §11.6) is `mini join --mode MODE`.
+            // `mini join --solana|--wait|--renew` (docs/PAY.md §11.6) is `mini join --mode MODE`.
             if command == OsStr::new("join")
                 && matches!(rendered.as_ref(), "--solana" | "--wait" | "--renew")
             {
@@ -2680,7 +2684,7 @@ fn continuity(
     }
 }
 
-/// The Host's public enrollment view (op 112, PAY §11.5), decoded by the same Host (op 8
+/// The Host's public enrollment view (op 112, docs/PAY.md §11.5), decoded by the same Host (op 8
 /// `inspect pay-enrolment-view`) and printed as its JSON. This is the roster sync's input
 /// (`render-authorized-keys.sh --view required`): it needs only the socket, whose own config
 /// pin (`SOCKET.config`, written by `mini serve`) is the default envelope config, and the Host
@@ -2725,7 +2729,7 @@ fn run(mut args: Args) -> Result<()> {
         let uid = uid.to_str().and_then(|n| n.parse::<u32>().ok()).ok_or("operator peer UID must be a u32 decimal")?;
         operator_peer::configure(uid)?;
     }
-    replan::configure(args.optional("replan-max"))?;
+    replan::configure(args.optional("replan-max"), args.optional("replan-window"))?;
     if let Some(identity) = args.optional("ssh-identity") { pin_ssh_identity(&path(identity))?; }
     let mut socket_argument = args.optional("socket");
     #[cfg(unix)]

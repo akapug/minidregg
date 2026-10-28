@@ -1,7 +1,7 @@
 /-
 # Theory.Channel.Trace — the observers and the trace theorems
 
-CHANNELS.md §2.4 "The observable trace" (revision 2). A run of a channel is deterministic: at global
+docs/CHANNELS.md §2.4 "The observable trace" (revision 2). A run of a channel is deterministic: at global
 tick `k` (epoch `k / E`, tick `k mod E`) every connected holder emits one cell — payload or padding,
 sealed — at the offset its emission rule gives; the relay assembles the tick vector (`assemble`, with
 fills) and fans it out (`fanout`). Each observer sees a projection of the run:
@@ -328,7 +328,7 @@ theorem vector_traffic_invariant {β : Type} (F : CellObs Obs × Source → β) 
   simp only [Function.comp] at this ⊢
   rw [this]
 
-/-- **`observable_trace_depends_only_on_membership`** (CHANNELS.md §2.4). Fix the membership (the
+/-- **`observable_trace_depends_only_on_membership`** (docs/CHANNELS.md §2.4). Fix the membership (the
 schedule) and the presence. Under constant emission and `PayloadHidden`, ANY two traffic patterns give
 the wire, the relay, the operator, every witness and every non-recipient member equal traces, under
 any relay policy. -/
@@ -441,7 +441,7 @@ theorem posObs_presence_invariant (hide : FillHidden X.S X.prf) (τ : Traffic Ms
         · simp [hq]
     rw [side p₁, side p₂]
 
-/-- **`member_view_independent_of_presence`** (CHANNELS.md §2.4, revision 2). Fix the membership and the
+/-- **`member_view_independent_of_presence`** (docs/CHANNELS.md §2.4, revision 2). Fix the membership and the
 traffic. When the relay fills absent positions and keeps the mask from members (`RelayFills`), fans
 out to every slot every tick (`ConstantFanout`), the fill half of the sealing hypothesis holds, and
 presence agrees at duty ticks, a non-recipient member's trace does not depend on who else is online. -/

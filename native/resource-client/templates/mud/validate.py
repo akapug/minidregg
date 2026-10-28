@@ -1,4 +1,4 @@
-# Reference area validator for `area load` (MUD.md §2.1): fail-closed, every refusal names its file:line.
+# Reference area validator for `area load` (docs/MUD.md §2.1): fail-closed, every refusal names its file:line.
 # This is a COPY OF THE RULES for the MUD-AREA lane to implement in native/resource-client/src/mud.rs and to
 # check its refusals against; it is not the shell and it births nothing. Checks (Bread's parse_dungeon set,
 # docs/AUTHORING-DUNGEONS.md:8-10, plus what the laws need):

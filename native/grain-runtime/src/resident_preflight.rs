@@ -26,12 +26,26 @@ fn checked_operator(config:&Config,text:&[u8])->Result<Value> {
     }
     Ok(value)
 }
+fn operator_status_command(config:&Config)->Result<Command> {
+    // Dispatch custody already names a controller-private, peer-pinned route.
+    // Its status-only control listener proves the same upstream operator while
+    // ordinary room traffic continues through the participant transport.
+    let dispatch=config.dispatch_task.as_ref().filter(|task|task.operator_socket.is_some());
+    let socket=dispatch.and_then(|task|task.operator_socket.as_deref()).or(config.host_socket.as_deref())
+        .ok_or("resident controller requires private native operator socket")?;
+    let mut command=Command::new(&config.mini);
+    command.args(["operator-status","--socket"]).arg(socket)
+        .arg("--host").arg(&config.host).arg("--config").arg(&config.host_config);
+    if let Some(uid)=dispatch.and_then(|task|task.operator_peer_uid) {
+        command.arg("--operator-peer-uid").arg(uid.to_string());
+    }
+    Ok(command)
+}
 /// The native Mini control command proves the current owner-private transport
 /// role and response nonce. An operator path or stale mode file cannot do so.
 pub(crate) fn require_private_operator(config:&Config)->Result<Value> {
-    let socket=config.host_socket.as_deref().ok_or("resident controller requires private native operator socket")?;
-    let result=crate::deadline::output(Command::new(&config.mini).args(["operator-status","--socket"]).arg(socket)
-        .arg("--host").arg(&config.host).arg("--config").arg(&config.host_config),crate::deadline::NATIVE_CALL)
+    let mut command=operator_status_command(config)?;
+    let result=crate::deadline::output(&mut command,crate::deadline::NATIVE_CALL)
         .map_err(|e|crate::deadline::describe("private operator preflight",e))?;
     if !result.status.success() || result.stdout.len()>65_536 {
         return Err(format!("private operator preflight refused: {}",String::from_utf8_lossy(&result.stderr).chars().take(2048).collect::<String>()));
@@ -192,6 +206,27 @@ pub(crate) fn fixture_retain_preparation(rt:&Runtime,id:&str,sha:&str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn dispatch_preflight_uses_private_status_route_and_exact_activation_peer() {
+        let (root,mut rt)=crate::tests::restart_resolution_fixture("dispatch-status-route");
+        rt.config.host_socket=Some(root.join("public.sock"));
+        let args=|command:Command|command.get_args().map(|v|v.to_string_lossy().into_owned()).collect::<Vec<_>>();
+        assert_eq!(args(operator_status_command(&rt.config).unwrap())[2],root.join("public.sock").to_str().unwrap());
+        rt.config.dispatch_task=Some(serde_json::from_value(json!({
+            "task":"7500","subject":"12","capability":"121","queryCapability":"122",
+            "custodyKey":root.join("payer.key"),"parentCapability":"1204","parentObserveCapability":"1205",
+            "reserve":"1","charge":"1","socketPath":root.join("dispatch.sock"),"hostUid":1001,
+            "operatorSocket":root.join("operator/mini.sock"),"operatorPeerUid":0
+        })).unwrap());
+        let selected=args(operator_status_command(&rt.config).unwrap());
+        assert_eq!(selected[2],root.join("operator/mini.sock").to_str().unwrap());
+        assert_eq!(&selected[selected.len()-2..],["--operator-peer-uid","0"]);
+        assert!(!selected.iter().any(|a|a==root.join("public.sock").to_str().unwrap()));
+        assert_eq!(rt.config.host_socket,Some(root.join("public.sock")),"public transport binding stays unchanged");
+        rt.config.dispatch_task.as_mut().unwrap().operator_peer_uid=None;
+        assert!(!args(operator_status_command(&rt.config).unwrap()).contains(&"--operator-peer-uid".into()));
+        fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn private_operator_preflight_refuses_public_dead_closed_or_substituted_source() {
         let (root,mut rt)=crate::tests::restart_resolution_fixture("private-operator-preflight");

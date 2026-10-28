@@ -33,6 +33,16 @@ read the declaration it names.
 
 ## Admission and the kernel
 
+- [Data model](DATAMODEL.md): kernel state as one store over a fold of patches; roots,
+  history, checkpoints.
+- [SURPASS](SURPASS.md): the Host's admission as one World transition (`Turn.ofIntent`).
+- [The place](PLACE.md): rooms, streams, documents, laws and runners;
+  [the docuverse](DEOS.md).
+- [Programs](NOCK.md): Nock programs refereed by re-execution, and
+  [any registered evaluator](EVAL.md).
+- [Jobs](COMPUTE.md): compute jobs as cells, checked by re-execution and paid through the Book.
+- [The MUD](MUD.md): rooms, items, combat and markets as laws.
+- [Channels](CHANNELS.md): constant-rate broadcast domains (Lean model and epoch record).
 - [Hyperedge design](HYPEREDGE-DESIGN.md): a turn as a wide pullback; the design behind
   `Kernel/Turn`.
 - [Kernel necessity](KERNEL-NECESSITY.md), [N2](N2-HYPEREDGE-LIMIT.md),
@@ -72,6 +82,7 @@ read the declaration it names.
 - [Native Host](NATIVE-HOST.md): building and operating the Host.
 - [Lean qualification](LEAN-QUALIFICATION.md): the Lean build targets and what each checks.
 - [Durable Store](DURABLE-STORE.md): files, schema, backup and restore.
+- [PAY](PAY.md): the $DREGG payment rail and self-enrollment by payment, as shipped.
 - [Hot path](HOT-PATH-2026-10-27.md): the signed-write path and its representation.
 - [Carry verifier](CARRY-VERIFIER.md), [audit phase timing](audit-phase-timing.md),
   [observation batches](latency-observation-batch-2026-10-02.md),
@@ -115,7 +126,7 @@ read the declaration it names.
 ## Proof systems
 
 - [Selvage recomposition](SELVAGE-RECOMPOSITION.md): the design ledger and its obligations.
-- [Selvage completeness](SELVAGE-COMPLETE.md), [receipt encoding (OB-3)](OB3-RECEIPT-ENCODING.md),
+- [Selvage completeness](SELVAGE-COMPLETE.md), [native prover plan](PROVER-PLAN.md), [receipt encoding (OB-3)](OB3-RECEIPT-ENCODING.md),
   [proof-system survey](PROOF-SYSTEM-SURVEY.md).
 - Decisions: [authenticated column history](decisions/D-0001-authenticated-column-history.md),
   [canonical hyperedge kernel](decisions/D-0002-canonical-hyperedge-kernel.md),

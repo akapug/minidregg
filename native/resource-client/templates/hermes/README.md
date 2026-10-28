@@ -3,7 +3,7 @@
 `summon ROOM as ROLE [--budget N]` reads `hermes/ROLE/` and nothing else
 (`native/resource-client/src/hermes.rs` compiles these files in: the files are
 the roles). The roles differ only in their grants and their program text
-(PLACE §2.7).
+(`docs/PLACE.md` §2.7).
 
 | file | read by | what it is |
 |---|---|---|
@@ -66,4 +66,4 @@ What binds this, said plainly: the kernel guarantees Hermes cannot spend more
 than `ROOM-hermes` holds and cannot write what it holds no grant on. That each
 write is preceded by its payment is the controller's discipline (its journal
 shows every payment and every write); joining the posting and the write in one
-transaction is K-BOOK-SLOTS (PLACE §4.8).
+transaction is K-BOOK-SLOTS (`docs/PLACE.md` §4.8).

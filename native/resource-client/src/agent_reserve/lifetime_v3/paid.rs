@@ -407,10 +407,12 @@ pub(crate) fn lifetime_paid_payer_sign(directory: &Path, approval_json: &Path) -
 }
 
 fn payer_slot_shape(slots: &[Value], signers: &[Value]) -> Result<()> {
-    if slots.len() != 3 || signers.len() != 3 {
-        return Err("lifetime payer requires exact target/observe/authority slots".into());
+    // The source payer command has one mutating target, so native admission
+    // requires target+authority and no foreign observation incidence.
+    if slots.len() != 2 || signers.len() != 2 {
+        return Err("lifetime payer requires exact target/authority slots".into());
     }
-    for ((slot, signer), role) in slots.iter().zip(signers).zip(["4", "8", "1"]) {
+    for ((slot, signer), role) in slots.iter().zip(signers).zip(["4", "1"]) {
         if field(slot, "role")? != role
             || field(slot, "index")? != "0"
             || field(signer, "role")? != role
@@ -729,24 +731,26 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    fn payer_only_approval_requires_three_ordered_source_incidence_slots() {
+    fn payer_only_approval_requires_two_ordered_source_incidence_slots() {
         let slot = |role: &str| {
             json!({"role":role,"index":"0",
             "keyId":"7007","keyEpoch":"1","publicKey":"ab",
             "keyPath":"/private/payer.key"})
         };
-        let slots = vec![slot("4"), slot("8"), slot("1")];
+        let slots = vec![slot("4"), slot("1")];
         assert!(payer_slot_shape(&slots, &slots).is_ok());
+        let extra_observation = vec![slot("4"), slot("8"), slot("1")];
+        assert!(payer_slot_shape(&extra_observation, &extra_observation).is_err());
         let mut swapped = slots.clone();
-        swapped.swap(1, 2);
+        swapped.swap(0, 1);
         assert!(payer_slot_shape(&swapped, &slots).is_err());
         let mut foreign = slots.clone();
-        foreign[2]["index"] = json!("1");
+        foreign[1]["index"] = json!("1");
         assert!(payer_slot_shape(&slots, &foreign).is_err());
         foreign = slots.clone();
-        foreign[2]["keyPath"] = json!("/private/other.key");
+        foreign[1]["keyPath"] = json!("/private/other.key");
         assert!(payer_slot_shape(&slots, &foreign).is_err());
-        assert!(payer_slot_shape(&slots[..2], &slots[..2]).is_err());
+        assert!(payer_slot_shape(&slots[..1], &slots[..1]).is_err());
     }
 
     #[test]

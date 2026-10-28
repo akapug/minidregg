@@ -1,12 +1,8 @@
 # Signed observations and physical read guards
 
-Integration finding, September 27, 2026, against the pre-repair source at
-`5a76cf9`. The first fresh source-publication fixture refused before source
-admission or fn POST. A private source-owned diagnostic found that the packet's
-selected content root matched the loaded directory's materialized content root,
-while that root differed from the durable physical snapshot root. The public
-refusal remains generic; source-side diagnostics must not become an unsigned
-participant observation endpoint.
+A signed observation and a durable read guard name a resource by two different roots. A
+source-side refusal over a mismatch between them stays generic to the participant; source
+diagnostics must not become an unsigned participant observation endpoint.
 
 These commitments have different meanings:
 
@@ -23,21 +19,14 @@ and snapshot coherence, and retain both commitments in their proper roles.
 `CanonicalCellRegistry.LoadedPolicySource.readGuard` already documents this
 physical-root discipline.
 
-Root's scoped source audit found the same mistaken comparison in the following
-pre-repair paths; their owners are repairing them together:
+`Kernel/PhysicalResourceReadGuard` is the bridge: it derives the physical root from the same
+verifier-loaded directory and durable snapshot. These admission paths take their physical guards
+through `ResourceBirthCodec.physicalRoot`, never from a signed observation root:
 
-| Path | Incorrect use to replace |
+| Path | Physical guard |
 | --- | --- |
-| `FnSelectiveReleaseSourceAuthority.prepare` | Inner selected-content root equated with physical snapshot root. |
-| `ApplicationShareIssueDelegation.prepare` | Inner application root equated with physical snapshot root. |
-| `ApplicationDispatchAdmission.checkRead` and `ApplicationDispatchPending` | Signed observation root used directly as physical guard for four observed cells. |
-| `ApplicationLifecycleBeginReceiver` | Signed package root used directly as the physical package guard. |
-| `ApplicationLifecycleClaimCurrent` and `ApplicationLifecycleClaimCore` | Signed app/package roots used directly as physical guards. |
-
-This is an implementation defect, not evidence that the signed observation is
-invalid. Earlier source compilation and conditional proofs do not demonstrate
-that these admission paths can accept a real request. Closure requires the
-coherence bridge, updated guard proofs, source-matched native execution on a
-case with distinct inner/outer roots, refusal on actual physical drift, and
-the original receipt/recovery checks. This note records the finding and repair
-contract; it is not completion evidence.
+| `FnSelectiveReleaseSourceAuthority.prepare` | `physicalCurrent` over the selected content cell |
+| `ApplicationShareIssueDelegation.prepare` | `physicalCurrent` over the application cell |
+| `ApplicationDispatchAdmission` and `ApplicationDispatchPending` | the app, manifest and enrollment reads |
+| `ApplicationLifecycleBeginReceiver` | the package manifest cell |
+| `ApplicationLifecycleClaimCurrent` (used by `ApplicationLifecycleClaimCore.packageGuard`) | the package observation |

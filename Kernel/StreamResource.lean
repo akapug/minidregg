@@ -1,5 +1,5 @@
 /-
-# Kernel.StreamResource -- per-author streams in a room (PLACE §2.3, §4.4)
+# Kernel.StreamResource -- per-author streams in a room (docs/PLACE.md §2.3, §4.4)
 
 A stream is a `stream` head cell (`Compiler.StreamCell`) born `--in R`, plus
 one cell per entry.  Speaking is an ordinary resource transaction whose target

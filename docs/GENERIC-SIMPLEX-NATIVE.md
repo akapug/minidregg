@@ -1,12 +1,13 @@
 # Native Generic Simplex agreement
 
-This is an in-progress domain-log implementation. The current engine, inert
-source-history validation cache, transferable COMMIT witness implementation and
-streaming storage adapter compile. The four-logical-node native harness passes
-with actual TCP, ML-DSA, selective Byzantine COMMIT delivery, durable certificate
-recovery after restart, lost CAS replies and the streaming CAS helper. The source
-participant and four-store driver compile against the frozen 373-module receiver
-cohort. The actual workdesk fixture has not run.
+Generic Simplex is Mini's domain-log agreement engine. Its core (`Kernel/GenericSimplex`,
+`…Quorum`, `…Local`, `…Structure`, `Compiler/GenericSimplexIO`, `…Codec`, `…SourceAnchor`) is in
+the `Host.Main` closure. The safety proofs build in the `SimplexQualification` library. The
+controller, participant, serve and native modules build through the executables `generic-simplex-harness`,
+`generic-simplex-log-reopen`, `generic-simplex-load` and `minidregg-four-source-fixture`
+(`lakefile.toml`). The transferable COMMIT witness (`Compiler/GenericSimplexTransferability`)
+and reconfiguration (`Kernel/GenericSimplexReconfig`) build only in the opt-in `ResearchWip`
+library; `Verify/GenericSimplexNativeHarness.lean` is in no library.
 
 The model is a fixed committee of n = 3f + 1 with at most f cumulatively Byzantine
 members, authenticated reliable delivery and partial synchrony. The configured
@@ -124,7 +125,7 @@ evidence: CPU per appended input 0.57 s rising to 1.68 s over 45 minutes idle).
 - Safety: the theorems quantify over this executable `step`. The nine
   invariant files' `progressOuter` lemmas gained the `propose` case (the
   existing `propose_*` lemmas); no statement changed. The witness executions
-  (GenericSimplexWitnesses) now begin with checked offers, since a leader with
+  (GenericSimplexWitnesses) begin with checked offers, since a leader with
   no offer no longer proposes; they still exhibit a committing honest run and
   the f+1-fault conflicting commits.
 - Consequences: an idle domain proposes nothing and every view ends by

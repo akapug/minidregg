@@ -11,9 +11,9 @@ it on any box is recorded in this repository.
 | version | Lean | on the live op 22 submit path |
 |---|---|---|
 | v1 | `Kernel/ApplicationLifecycle{Begin,Claim,Completion}*.lean` | no |
-| v2 | `Kernel/ApplicationLifecycle{BeginV2,ClaimV2,CompletionV2}*.lean`, `…V2Lookup.lean` | BEGIN and CLAIM no; the CompletionV2 frame is the live COMPLETION ("fresh completion requires canonical launch-bound v2 ingress", `Host/Main.lean:1591-1593`) |
-| v3 | `Kernel/ApplicationLifecycle{BeginV3,ClaimV3}*.lean`, `…V3Lookup.lean` | yes: fresh BEGIN "requires canonical launch-bound v3 ingress" (`Host/Main.lean:1467-1476`) |
-| v4 retry | `Kernel/ApplicationLifecycleRetry{Begin,Claim,Completion}V4*.lean`, `…RetryV4Lookup.lean`, `Kernel/ApplicationFailedCreateRetryEvidence.lean` | yes: the same op 22/26/38 submit and 23/27/39 lookup try the v4 frame first (`Host/Main.lean:1471`, `:1493`, `:1522`, `:1588`, `:1613`, and the op 26 dispatch at `:2665-2713`) |
+| v2 | `Kernel/ApplicationLifecycle{BeginV2,ClaimV2,CompletionV2}*.lean`, `…V2Lookup.lean` | BEGIN and CLAIM no; the CompletionV2 frame is the live COMPLETION ("fresh completion requires canonical launch-bound v2 ingress", `Host/Main.lean` `applicationLifecycleCompletionSubmitSession`) |
+| v3 | `Kernel/ApplicationLifecycle{BeginV3,ClaimV3}*.lean`, `…V3Lookup.lean` | yes: fresh BEGIN "requires canonical launch-bound v3 ingress" (`Host/Main.lean` `applicationLifecycleBeginSubmitSession`; CLAIM likewise in `dispatchLifecycleClaimSubmitSession`) |
+| v4 retry | `Kernel/ApplicationLifecycleRetry{Begin,Claim,Completion}V4*.lean`, `…RetryV4Lookup.lean`, `Kernel/ApplicationFailedCreateRetryEvidence.lean` | yes: the same op 22/26/38 submit and 23/27/39 lookup try the v4 frame first (`Host/Main.lean`: `applicationLifecycleBeginSubmitSession`, `applicationLifecycleBeginLookupSession`, `applicationLifecycleClaimLookupSession`, `applicationLifecycleCompletionSubmitSession`, `applicationLifecycleCompletionLookupSession`, and for op 26 `dispatchLifecycleClaimSubmitSession` → `dispatchLifecycleRetryClaimV4SubmitSession`) |
 
 The Rust side is `native/spk-host/src/lifecycle_v3_*.rs` (including the STOP
 lane) and `lifecycle_v4_retry{,_claim,_completion}_native.rs`; the resident

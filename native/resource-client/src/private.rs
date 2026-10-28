@@ -5,8 +5,8 @@
 //! laws are computed from counts and byte sizes only (`Kernel/ContentResource.lean`,
 //! `project`), so nothing here is checked by the host. Members hold the room key;
 //! the operator holds ciphertext, the epoch, the commitment and a size class: every
-//! envelope is a whole number of 64-byte blocks (`envelope_len`). Design:
-//! PRIVACY.md §3.1, §3.6; operator view and key-loss policy: `docs/PRIVATE-CELL.md`.
+//! envelope is a whole number of 64-byte blocks (`envelope_len`). Design, operator
+//! view and key-loss policy: `docs/PRIVATE-CELL.md`.
 //!
 //! v1 -> v2 (lane PRIVATE-ROOMS): v1 padded the value to 64 bytes inside a 133-byte
 //! overhead, so envelopes were 133 + 64k bytes. v2 pads so the WHOLE envelope is a
@@ -212,7 +212,7 @@ impl Keyring {
         self.rooms.get(room).map(|e| e.keys().copied().collect()).unwrap_or_default()
     }
 
-    /// Delete one epoch locally and remember it as forgotten (PRIVACY §3.6 `forget`).
+    /// Delete one epoch locally and remember it as forgotten (`forget`: the ciphertext stays in the log; this client stops holding its key).
     pub(crate) fn forget(&mut self, room: &str, epoch: u32) -> bool {
         let held = self
             .rooms

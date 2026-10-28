@@ -136,6 +136,14 @@ it is showing.
 
 ## 2. Catalogue: `mini apps search`, `mini apps show`
 
+- Whole-store lifecycle evidence is now a separate `qualification` field beside the local
+  ingest verdict. `scripts/spk-platform/store-sweep.sh` runs the public index without
+  per-app recipes; the candidate embeds `deploy/market/store-qualification.json` and
+  `--qualification FILE` (or `MINI_APPS_QUALIFICATION`) selects a newer recorded sweep.
+  Search says **known working (lifecycle; candidate SHA)** only for an exact appId/packageId
+  PASS through install/share/start/enrol/GET `/`. Unswept entries remain unswept; this does
+  not assert that the app's writes or external services work. See
+  [`STORE-SWEEP.md`](../scripts/spk-platform/STORE-SWEEP.md) for running, resuming and publishing it.
 - `mini apps search [TERM] [--category C] [--json]` lists matching apps: name, version, appId (the
   publisher's key hash), publisher, package size when known, and **Mini's verdict** from
   `/var/lib/mini-apps/verdicts/<packageId>.json`, written by the worker's real ingest: `verified`
@@ -433,7 +441,7 @@ identities | revoke-identity`), each with its arguments spelled in `usage` and i
 
 | L12 route | the body runs (as the member's own uid, through `mini-web-spawn`, exactly a shell line) | what comes back |
 |---|---|---|
-| `GET /apps` | `apps search [TERM] --json` | the catalogue JSON (`{apps:[{appId, packageId, name, version, publisher, verdict:{state, reason, rawBytes, running}, suggestedClass, packageUrl}], total}`); the pane renders claims beside verdicts |
+| `GET /apps` | `apps search [TERM] --json` | the catalogue JSON (`{apps:[{appId, packageId, name, version, publisher, verdict:{state, reason, rawBytes, running}, qualification:{state, verdict, candidate, scope, stage, reason, evidence, checkedAt, importProfile} or null, suggestedClass, packageUrl}], total}`); the pane renders claims beside verdicts |
 | `GET /apps/<appId>` | `apps show APP-ID --json` | one entry whole, the refusals an install can meet |
 | `POST /apps/install` (fields `app`, `class`) | `apps install APP-ID [--class C]` | the decoded outcome: `request <id>` then performed (`receipt: {grain, origin, class, rawSha256, signedAppId, identityNotice}`), refused by name (`unknownApp`, `sizeOverProfile`, `unsupportedBridge`, `funding`, `birthRequired`, ...), or undecided with `exact retry: apps retry <id>` |
 | `GET /grain/N` | `apps status aN --json` | state (generation, phase decoded, `running`/`stopped`/`stopping since`), the origin, the routes this member holds, **identities held by this grain** (the §3a records: who, since, revoked), the v1 notice |

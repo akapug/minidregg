@@ -28,6 +28,7 @@
 #                      placeholder-filled form plans through the shell (/verb/NAME/dry)          -> none missing, 0 refusals
 #   parity-redproof    a verb the shell lacks has no face                                          -> 404
 #   publish / public-read-published / public-front-doc / public-read-unpublished / unpublish / public-read-revoked
+#   / public-house-name-reserved (a member's `operations` is handed over as operations-MEMBER, never the box's room)
 #                      the member publishes a document to a second member (the public reader); an anonymous GET
 #                      reads its text (200) and the front page shows it; an unpublished document is refused;
 #                      after Unpublish the Host refuses the visitor (403)
@@ -50,6 +51,14 @@
 #   tour-chromium      jtour.mjs: login, /tour, step 4 (`can DOC`) through the pane, a terminal prompt (needs Playwright) -> answered, elapsed
 #   logout             POST /logout clears the cookie; the old cookie no longer opens /term   -> 303; 401
 #   public-reader      GET / without a session answers (the public body, or a named refusal) -> 200|502, "public reader"
+#   J-COLD-READ        the public reader's first visit after idle (demo-dry 2026-10-28: 504 at the gateway's 120 s).
+#     cold-read-consent   the public body's consent provider ends (box: mini-consent@public stopped, as its idle
+#                         exit does; dev: the reader's resident stopped by its PID file); anonymous GET / through
+#                         the gateway, whose own deadline is 120 s                              -> 200 within it
+#     cold-read-body      the public body ended too (box: its scope; dev: the pid the helper recorded), the first
+#                         visit after a start                                                     -> 200 within it
+#     warm-at-start       the helper warms the public body before any visitor (dev: the helper restarted by its
+#                         PID file; box: its journal since it started) -> "public reader warmed ... 200", then GET / 200
 # Output: one row per check (`PASS|FAIL<TAB>row<TAB>detail`), then `J-WEB-FRONTEND PASS n/n` or
 # `... FAIL k/n` as the last line of stdout and stderr. Exit 0 only on PASS. Every process this script
 # starts is stopped by the PID in its PID file, and only that.
@@ -158,10 +167,10 @@ if [ -n "${SPONSOR_WS:-}" ] && [ -f "$SPONSOR_WS/workspace.json" ]; then
     --arg psub "${PUBREAD_SUBJECT:-}" --arg front "$DOC" \
     '{mini:$mini,host:$host,config:$config,socket:$socket,wrapper:$wrapper,
       sessions:{alice:{workspace:$aws,home:$ahome}}, public:{workspace:$pws,home:$phome}}
-     + (if $psub == "" then {} else {publicSubject:$psub,frontDoc:$front} end)' >"$R/dev.json"
+     + (if $psub == "" then {} else {publicSubject:$psub,frontDoc:$front,housePublications:{($front):"alice"}} end)' >"$R/dev.json"
   HSOCK=$RUNDIR/spawn.sock
-  nohup "$HELPER" --dev "$R/dev.json" --socket "$HSOCK" --state "$R/state" --run "$RUNDIR" >"$R/helper.log" 2>&1 &
-  echo $! >"$R/helper.pid"; PIDS+=("$R/helper.pid")
+  start_helper() { nohup "$HELPER" --dev "$R/dev.json" --socket "$HSOCK" --state "$R/state" --run "$RUNDIR" >>"$R/helper.log" 2>&1 & echo $! >"$R/helper.pid"; }
+  start_helper; PIDS+=("$R/helper.pid")
   PORT=$(free_port); ORIGIN=http://127.0.0.1:$PORT
   nohup "$GATEWAY" --listen "127.0.0.1:$PORT" --helper "$HSOCK" --origin "$ORIGIN" --shutdown "the end of this journey" >"$R/gateway.log" 2>&1 &
   echo $! >"$R/gateway.pid"; PIDS+=("$R/gateway.pid")
@@ -264,6 +273,18 @@ else
   page=$(req POST "/doc/$DOC/publish" --data-urlencode "csrf=$CSRF")
   pstatus=0; for _ in $(seq 1 24); do anon / >/dev/null; pstatus=$(anon "/doc/$DOC"); [ "$pstatus" = 200 ] && break; sleep 5; done
   row public-republish "$(grep -q 'outcome admitted' <<<"$page" && [ "$pstatus" = 200 ] && grep -q "$TEXT" "$R/anon.body" && echo 1 || echo 0)" "republish then anonymous GET /doc/$DOC -> $pstatus"
+  # A house name is the operator's to give (/etc/mini/house-publications; here frontDoc is alice's and
+  # `operations` is nobody's): alice's own document named `operations` reaches the public reader as
+  # operations-alice, and the public index's operations room does not show it as the box's.
+  req POST /doc/new --data-urlencode "csrf=$CSRF" --data-urlencode "name=operations" --data-urlencode "law=note" >/dev/null
+  TEXT3="squatted operations $(date +%s)"
+  req POST /doc/operations/append --data-urlencode "csrf=$CSRF" --data-urlencode "text=$TEXT3" >/dev/null
+  page=$(req POST /doc/operations/publish --data-urlencode "csrf=$CSRF")
+  qstatus=0; for _ in $(seq 1 24); do anon /doc >/dev/null; qstatus=$(anon /doc/operations-alice); [ "$qstatus" = 200 ] && break; sleep 5; done
+  qread=$(grep -c "$TEXT3" "$R/anon.body")
+  istatus=$(anon /doc)
+  row public-house-name-reserved "$([ "$qstatus" = 200 ] && [ "$qread" -gt 0 ] && [ "$istatus" = 200 ] && ! grep -q "$TEXT3" "$R/anon.body" && echo 1 || echo 0)" \
+    "member-published operations: GET /doc/operations-alice -> $qstatus (text $qread); GET /doc -> $istatus, operations room shows it: $(grep -c "$TEXT3" "$R/anon.body")"
 fi
 # Research consent (ember's ruling): the door wrote the member's fact at enrolment (ticked: CC0);
 # /export shows it with the sentence; the member flips it there (a write on their own cell); the
@@ -566,4 +587,74 @@ after=$(curl -s -o /dev/null -w '%{http_code}' -H "Cookie: $COOKIE_NAME=$COOKIE_
 row logout "$([ "$logout_status" = 303 ] && [ "$after" = 401 ] && echo 1 || echo 0)" "logout=$logout_status then /term=$after"
 pub=$(curl -s -o "$R/body" -w '%{http_code}' "$BASE/")
 row public-reader "$(grep -q 'public reader' "$R/body" && echo 1 || echo 0)" "$pub $(grep -o 'class="headline">[^<]*' "$R/body" | head -1 | cut -c18-120)"
+# J-COLD-READ: the first visit after the public reader went cold answers within the gateway's own
+# deadline (proxy::BODY_TIMEOUT, 120 s; curl waits past it so a 504 is the gateway's). On the box the
+# public member's consent worker idles out and its next start replays the Store (demo-dry 2026-10-28,
+# 349e59ef1: 23 s on an idle box, 504 under load); in dev the reader's consent is its resident provider,
+# stopped here by its PID file, and the body reconnects to a new one. The front document is the
+# published DOC in dev (its TEXT on the page); on the box, the operator's.
+cold_get() { # -> "STATUS SECONDS"; the page in $R/anon.body
+  curl -s -o "$R/anon.body" -w '%{http_code} %{time_total}' -m 150 "$BASE/"
+}
+cold_ok() { # "STATUS SECONDS" -> 1|0: 200 within 120 s, with the front document when dev published one
+  local status=${1%% *} secs=${1##* }
+  [ "$status" = 200 ] && awk -v s="$secs" 'BEGIN { exit !(s < 120) }' && { [ "$mode" = --box ] || [ -z "${PUBREAD_SUBJECT:-}" ] || grep -q "$TEXT" "$R/anon.body"; } && echo 1 || echo 0
+}
+gone() { # PID: wait up to 30 s for it to exit (a zombie has exited: a resident's parent, the body, never reaps it)
+  for _ in $(seq 1 300); do
+    kill -0 "$1" 2>/dev/null || return 0
+    case $(ps -o stat= -p "$1" 2>/dev/null) in Z*) return 0 ;; esac
+    sleep 0.1
+  done; return 1
+}
+stop_reader_residents() { # dev: the public reader's resident consent (r-) and codec (c-) providers, by their PID files
+  local f pid kinds=${1:-r}
+  for k in $kinds; do
+    for f in "${PUBREAD_HOME:-/nonexistent}"/.mini/consent-anchors/"$k"-*.pid; do
+      [ -f "$f" ] || continue
+      pid=$(cat "$f"); kill "$pid" 2>/dev/null && gone "$pid"
+    done
+  done
+}
+if [ "$mode" = --box ]; then
+  systemctl stop mini-consent@public.service
+  got=$(cold_get)
+  row cold-read-consent "$(cold_ok "$got")" "mini-consent@public stopped, then anonymous GET / -> $got"
+  systemctl stop mini-web-body-public.scope mini-consent@public.service 2>/dev/null
+  got=$(cold_get)
+  row cold-read-body "$(cold_ok "$got")" "public body and mini-consent@public stopped, then anonymous GET / -> $got"
+  since=$(systemctl show -p ActiveEnterTimestamp --value mini-web-spawn.service)
+  warmed=$(journalctl -u mini-web-spawn.service --since "$since" -o cat 2>/dev/null | grep 'public reader warmed' | tail -1)
+  got=$(cold_get)
+  row warm-at-start "$([ -n "$warmed" ] && grep -q ': HTTP/1.1 200 ' <<<"$warmed" && [ "$(cold_ok "$got")" = 1 ] && echo 1 || echo 0)" "${warmed:-no warming line since the helper started ($since)}; GET / -> $got"
+elif [ -z "${PUBREAD_SUBJECT:-}" ]; then
+  row cold-read "0" "no public reader member (needs SPONSOR_WS): the cold rows cannot run"
+else
+  cold_get >/dev/null   # the body and its provider are warm before the provider ends
+  stop_reader_residents r
+  got=$(cold_get)
+  row cold-read-consent "$(cold_ok "$got")" "the reader's resident consent stopped by its PID file, then anonymous GET / -> $got"
+  bpid=$(jq -r '.bodyPid // empty' "$R/state/sessions/public.json" 2>/dev/null)
+  [ -z "$bpid" ] || { kill "$bpid" 2>/dev/null; gone "$bpid"; }
+  stop_reader_residents "r c"
+  got=$(cold_get)
+  row cold-read-body "$(cold_ok "$got")" "public body ${bpid:-none} and the reader's residents stopped, then anonymous GET / -> $got"
+  # The helper restarted by its PID file, every body it started first by the pid it recorded (a fresh
+  # helper ends an earlier helper's bodies only on Linux), the reader's residents too: it must warm the
+  # public body itself, before any visitor.
+  for f in "$R"/state/sessions/*.json; do
+    bpid=$(jq -r '.bodyPid // empty' "$f" 2>/dev/null); [ -z "$bpid" ] || { kill "$bpid" 2>/dev/null; gone "$bpid"; }
+  done
+  hpid=$(cat "$R/helper.pid"); kill "$hpid" 2>/dev/null; gone "$hpid"
+  stop_reader_residents "r c"
+  mark=$(wc -l <"$R/helper.log")
+  start_helper
+  warmed=""
+  for _ in $(seq 1 300); do   # a warming that failed is sent again at the helper's next sweeps
+    warmed=$(tail -n +"$((mark + 1))" "$R/helper.log" | grep -E 'public reader (not )?warmed' | tail -1)
+    grep -q 'public reader warmed' <<<"$warmed" && break; sleep 1
+  done
+  got=$(cold_get)
+  row warm-at-start "$(grep -q 'public reader warmed.*: HTTP/1.1 200 ' <<<"$warmed" && [ "$(cold_ok "$got")" = 1 ] && echo 1 || echo 0)" "${warmed:-the restarted helper logged no warming within 300 s}; then GET / -> $got"
+fi
 verdict

@@ -1,7 +1,7 @@
 /-
 # Kernel.DeployedBridge -- the deployed `Bridge`: the real cell codec, one wire per kind (T3b)
 
-SURPASS §2(b), stage 0, lane T3b.  T3 defined `Represents` over an abstract
+docs/SURPASS.md §2(b), stage 0, lane T3b.  T3 defined `Represents` over an abstract
 `Bridge` and only named the deployed registry.  This module assembles the
 deployed one, so `Represents` is stated over the real codecs:
 

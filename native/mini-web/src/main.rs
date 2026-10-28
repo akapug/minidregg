@@ -426,6 +426,9 @@ impl Gateway {
                 self.stage(fragment.status, &fragment.title, fragment.html, who, request)
             }
             Err((status, why)) => {
+                // The visitor's page is unchanged; the gateway's journal keeps why the body could not answer.
+                let whose = who.as_ref().map_or("the public reader", |w| w.name.as_str());
+                eprintln!("mini-web: body for {whose}: {} {}: {status}: {why}", request.method, request.path);
                 let headline = match status {
                     403 => "This body refused",
                     504 => "The body did not answer in time",

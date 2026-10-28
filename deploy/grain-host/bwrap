@@ -129,8 +129,12 @@ fi
 
 # Refuse to attach to an existing unit. A stale name requires investigation;
 # reusing it could signal a process from a different operation.
-if [[ $(systemctl --user show -p LoadState --value "$unit" 2>/dev/null || :) != not-found ]]; then
-  echo "unit already exists: $unit" >&2
+if ! unit_load_state=$(systemctl --user show -p LoadState --value "$unit"); then
+  echo "worker manager observation failed for $unit; no worker was launched" >&2
+  exit 69
+fi
+if [[ $unit_load_state != not-found ]]; then
+  echo "unit already exists or has unrecognized state ($unit_load_state): $unit" >&2
   exit 73
 fi
 

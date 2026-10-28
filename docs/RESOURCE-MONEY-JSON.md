@@ -6,4 +6,4 @@ Every integer is a canonical decimal string. Funding is null or `{asset,credits,
 
 Authoring is not admission. The receiver binds exact original Book/root, fee-first intermediate balances, ordered solvency, source-position coverage, current account metadata and law, signed capability/observe grants and both net changes and gross debit bounds. Mint and burn additionally require their distinct existing capability verbs. Room/return effects share the same native atomic intent. Inspection exposes the complete typed declaration; account metadata has no authored content publication.
 
-This interface is WIP pending the merged Host and actual signed native receiving checks. Foundation preparation and its named proof gates passed a separate scoped check; that alone is not a native settlement acceptance claim.
+The receiver is in the Host build (`Kernel/ResourceMoneyWire`, `Kernel/ResourceMoneyReceiver`, `Kernel/DeclaredResourceController`; JSON in `Host/Json.lean`). No journey row submits a `moneyConsent` target, so native settlement is covered by the Lean receiver, not by a run.

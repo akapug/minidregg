@@ -539,8 +539,10 @@ impl PrivateOperator {
         output: &Path,
         deadline: Instant,
     ) -> io::Result<Vec<u8>> {
+        let pin_began = Instant::now();
         let _ = self.check_pin()?;
         let executable = self.verified_host()?;
+        let pin_ms = pin_began.elapsed().as_millis();
         let cap = match command {
             "author" => MAX_AUTHOR_JSON,
             "inspect" => (HOST_MAX_FRAME - 1) as u64,
@@ -579,7 +581,9 @@ impl PrivateOperator {
             }
             process.arg(input).arg(output).stdout(Stdio::null());
         }
+        let run_began = Instant::now();
         run_pinned(process, output, deadline)?;
+        eprintln!("spk-host: tool-timing {command} {kind} pin_ms={pin_ms} host_ms={}", run_began.elapsed().as_millis());
         read_bounded(
             output,
             if command == "inspect" {
@@ -1310,8 +1314,10 @@ pub(crate) fn author_and_submit(
     #[cfg(feature = "integration-qualification")]
     let qualification = qualification::claim(custody, http, operation_id, attempt_dir)?;
     let deadline = Instant::now() + RESPONSE_DEADLINE;
+    let began = Instant::now();
     let ingress =
         author_signed_ingress(operator, custody, http, operation_id, attempt_dir, deadline)?;
+    let t_author = began.elapsed().as_millis();
     let opcode = dispatch_opcode(route_binding);
     let submission = match route_binding {
         None => ingress.clone(),
@@ -1330,6 +1336,7 @@ pub(crate) fn author_and_submit(
             )?
         }
     };
+    let t_route = began.elapsed().as_millis();
     let submitted = submit_once(
         attempt_dir,
         operation_id,
@@ -1352,6 +1359,7 @@ pub(crate) fn author_and_submit(
             operator.invoke_until(opcode, bytes, deadline)
         },
     )?;
+    let t_submit = began.elapsed().as_millis();
     let submitted = match submitted {
         Submit::Frame(submitted) => submitted,
         Submit::NoRecord(outcome) => return Err(outcome.into_error()),
@@ -1407,6 +1415,12 @@ pub(crate) fn author_and_submit(
         }
         Ok(matched)
     })();
+    eprintln!(
+        "spk-host: author-timing op={operation_id} author_ms={t_author} route_ms={} submit_ms={} inspect_ms={}",
+        t_route - t_author,
+        t_submit - t_route,
+        began.elapsed().as_millis() - t_submit
+    );
     let matched = match inspected {
         Ok(matched) => matched,
         Err(error) => {

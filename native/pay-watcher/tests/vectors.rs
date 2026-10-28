@@ -1,4 +1,4 @@
-//! The hostile fixture suite (PAY.md §3.1: "the contract is the test vectors"). Each test runs
+//! The hostile fixture suite (docs/PAY.md §3.1: "the contract is the test vectors"). Each test runs
 //! the watcher over `fixtures/<vector>/` with its two endpoints and asserts the observations
 //! AND the named reason. Each also checks the vector's `expect.json` (what the J-PAY-1 hook
 //! reads) says the same thing, so the hook and this suite cannot drift apart.
@@ -437,7 +437,7 @@ fn every_vector_gives_the_binary_exit_its_expect_json_names() {
     }
 }
 
-// Enrollment (PAY.md §11.9, J-PAY-E1) ----------------------------------------------------------
+// Enrollment (docs/PAY.md §11.9, J-PAY-E1) ----------------------------------------------------------
 
 use minidregg_pay_watcher::{cursor_json, load_cursor, Cursor, MemoError};
 

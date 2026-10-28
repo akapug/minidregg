@@ -23,16 +23,16 @@
 #   KCH    CH-EPOCH: journey.d/jchan-epoch.sh (a channel domain's epoch records under ChannelLaw)
 #   M3-M7  list items 3-7; each runs journey.d/<id>.sh when that file exists
 #          and is UNBUILT until then (contract below)
-#   J12    PLACE §2.2/§2.4: two friends co-write a document through `mini shell`
-#   JDV    J-DOCUVERSE: DEOS §8 J19-J24 through the shell (journey.d/jdocuverse.sh)
+#   J12    docs/PLACE.md §2.2/§2.4: two friends co-write a document through `mini shell`
+#   JDV    J-DOCUVERSE: docs/DEOS.md §8 J19-J24 through the shell (journey.d/jdocuverse.sh)
 #   JPD    Protected authored documents on the same JDV Store (journey.d/jprotected-docs.sh)
-#   J12W   DEOS §2.2 #4: doc pull / doc push @FILE, stale by line (journey.d/j12w.sh)
+#   J12W   docs/DEOS.md §2.2 #4: doc pull / doc push @FILE, stale by line (journey.d/j12w.sh)
 #   BD     c-bind: plan footprints commute/overlap (journey.d/bind.sh, on this Store)
 #   M8     agent fleet (journey.d/m8.sh -> fleet-journey.sh, its own Store)
 #   J13    P-LAW: a law refusal names its clause (journey.d/j13.sh -> law-leaf-journey.sh, its own Store)
-#   JJOB1  COMPUTE C1: the job law on fresh cells; every lifecycle edge admitted and refused by clause (journey.d/jjob1.sh; own Store)
-#   JJOB   COMPUTE floor: post / claim / answer / check (the ran truth turn) / settle between two friends (journey.d/jjob.sh; own Store)
-#   JJOBM  COMPUTE C3: a job's money as conservation-checked Book turns (journey.d/jjob-money.sh; own Store)
+#   JJOB1  docs/COMPUTE.md §8 C1: the job law on fresh cells; every lifecycle edge admitted and refused by clause (journey.d/jjob1.sh; own Store)
+#   JJOB   docs/COMPUTE.md §2: post / claim / answer / check (the ran truth turn) / settle between two friends (journey.d/jjob.sh; own Store)
+#   JJOBM  docs/COMPUTE.md §8 C3: a job's money as conservation-checked Book turns (journey.d/jjob-money.sh; own Store)
 #   KCL    K-FIELD-CLOSURE: a declared cell holds only the fields it declares (journey.d/jclosure.sh)
 #   JMKT   SEALED-MARKET: a sealed-bid market through mini shell (journey.d/jmarket.sh)
 #   J12A   P-AFFORDANCES: `can NAME`, each held verb dry-run (journey.d/j12a.sh -> affordances-journey.sh, its own Store)
@@ -58,7 +58,7 @@
 #          refused (journey.d/jstorygm.sh; enrolls one friend)
 #   JR17   R17: home, key, app, adopt-next-key, hermes through mini shell, each ended by the Host's
 #          decision or a named refusal (journey.d/jr17.sh)
-#   JP2    J-PRIV-2 (PRIVACY.md): a friend enrolled from their own key reaches
+#   JP2    J-PRIV-2: a friend enrolled from their own key reaches
 #          the Host only through the ssh byte proxy (journey.d/jpriv2.sh)
 #
 # MANIFEST (JSON; paths absolute):

@@ -2,7 +2,7 @@
 # Source-owned mutations of the canonical hyperdocument content cell
 
 A content cell is one `Store` over `Hyperdocument.layout` at the declared
-`HyperdocumentCell.contentWire` (DATAMODEL B1); the cell's identifier is the
+`HyperdocumentCell.contentWire` (docs/DATAMODEL.md §5 B1); the cell's identifier is the
 document's identity (`documentOf`).  The transaction receiver supplies
 authenticated author and operation identity.  The command contains edits,
 never proposed stores or authority decisions: each action lowers to guarded

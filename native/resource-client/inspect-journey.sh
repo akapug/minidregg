@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# JINSPECT: the moldable inspector's first views (K-INSPECT-VIEWS, DEOS #13).
+# JINSPECT: the moldable inspector's first views (K-INSPECT-VIEWS, docs/DEOS.md §9 row 13).
 #
 # On a fresh private Store, A (the sponsor) and B (a newcomer) look at what
 # they hold through `inspect` views: Lean renderers (Host `inspect

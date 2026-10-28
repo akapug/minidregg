@@ -1,5 +1,5 @@
 //! `mini job` — a Nock job between two friends, adjudicated by one `ran` turn
-//! (COMPUTE, the J-JOB floor).
+//! (docs/COMPUTE.md §2, journey J-JOB).
 //!
 //! A job is one declared cell born in a room under the job law
 //! (`native/resource-client/templates/job/law.job`, `Kernel/Job.lean`), bound here at

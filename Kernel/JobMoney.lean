@@ -1,8 +1,8 @@
 /-
 # Kernel.JobMoney — a job's money: escrow, bond and payout as conservation-checked Book turns
-(COMPUTE §2.6, lane C3 K-JOB-MONEY)
+(docs/COMPUTE.md §2.6, lane C3 K-JOB-MONEY)
 
-A job is one declared object (COMPUTE §2.2).  Its credit is held by the
+A job is one declared object (docs/COMPUTE.md §2.2).  Its credit is held by the
 **Book**, in an account whose id is the job cell's own id (`heldAccount`): the
 Book's `held` term.  The job cell's fields `escrow` and `bond` are the law's
 view of it, and every money turn keeps the two equal (`held_agrees`).  Three
@@ -137,7 +137,7 @@ def actions (job : Nat) (before after : Job) : List Action :=
   (before.fields.zip after.fields).map fun pair =>
     .write (DeclaredFields.key job pair.1.1) (some (Int.ofNat pair.1.2)) (Int.ofNat pair.2.2)
 
-/-! ## Payouts — a pure function of the terminal job (COMPUTE §2.3, last column) -/
+/-! ## Payouts — a pure function of the terminal job (docs/COMPUTE.md §2.6) -/
 
 structure Payouts where
   /-- Paid to `providerAcct`. -/
@@ -672,7 +672,7 @@ theorem held_agrees {tariff : Option Tariff} {stored : Option (StoredCapability 
   simp only [Int.ofNat_eq_natCast] at balanced before ⊢
   omega
 
-/-- **Escrow is conserved** (COMPUTE §2.6's rule): every accepted fund, claim
+/-- **Escrow is conserved** (docs/COMPUTE.md §2.6): every accepted fund, claim
 or settle leaves the Book's total in the credit asset (well included)
 unchanged; the change in the job's held credit, the change in circulating
 credit and the change in the well sum to zero; the well moves only by a
@@ -743,7 +743,7 @@ theorem fund_requires_caller {tariff : Option Tariff} {stored : Option (StoredCa
   · exact absurd bad (by decide)
 
 /-- **A claim requires a funded, open, unclaimed job and a bond of at least
-the price** (COMPUTE §9 D3), paid from an account the signer owns. -/
+the price** (docs/COMPUTE.md §9 D3), paid from an account the signer owns. -/
 theorem claim_requires_bond {tariff : Option Tariff} {stored : Option (StoredCapability .account)}
     {subject : SubjectId} {book : Book} {job : Nat} {jo : Option Job} {account amount : Nat}
     {plan : Plan}
@@ -799,7 +799,7 @@ theorem no_double_settle {tariff : Option Tariff} {stored : Option (StoredCapabi
   · have := (decideClaim_ok claim).2.1; omega
   · have := (decideSettle_ok settle).choose_spec.2.2.1; exact this closed
 
-/-! ## Griefing (COMPUTE §2.7): what a challenge that fails costs, and whom -/
+/-! ## Griefing (docs/COMPUTE.md §2.7): what a challenge that fails costs, and whom -/
 
 /-- The Book leg of a `truth` turn: its submitter pays the re-execution fee.
 C4 NOCK-FEE supplies the fee (`run/steps × perStep`, the oracle's count);

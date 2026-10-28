@@ -65,8 +65,8 @@ is the platform record's (`Kernel.PlatformCellLayout`), so the record and the ru
 parameters carry one type. -/
 abbrev GrainBirthTariffPin := Kernel.PlatformCellLayout.GrainBirthTariffPin
 
-/-- C17 (claudesplosion planning/compute/c13-latency-fuel.md): the referee adds
-about 1 s at 1.5e6 steps on persvati; rounded down. -/
+/-- C17 (measured 2026-10-01 on persvati): the referee adds about 0.66 µs per admitted
+step, so 1 s at about 1.5e6 steps; rounded down. -/
 def defaultNockFSync : Nat := 1000000
 
 structure Config where

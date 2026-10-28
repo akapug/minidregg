@@ -1,8 +1,9 @@
 # The performance workload
 
 `scripts/perf/workload.sh` is the one fixed workload we optimize the Store against. It runs a
-small, complete life of a Mini world on a fresh scratch Store, times every operation, and finishes
-in under 180 s on hbox at its default size. Its parameters (N births, M updates, K reads) scale it
+small, complete life of a Mini world on a fresh scratch Store, times every operation, and holds its
+default size to a 180 s budget (`PERF_BUDGET_S`). Wall time is quoted only from a quiet SSD box
+(`dregg-build` or the demo box), never from hbox (`/tank` is an HDD mirror; COORDINATION §5). Its parameters (N births, M updates, K reads) scale it
 up without changing what it does, so the same script measures a later, larger bar.
 
 ## The operation it serves
@@ -68,16 +69,9 @@ verdict taken under someone else's load. Plant: `JOURNEY_PLANT_PERF=budget-1s` j
 the row must go red with `workload FAIL: wall ...s not under the 1s bound`. All failure reasons are
 listed in that one line (phases not completed, then the bound).
 
-## Why these parameters, and where they stand (2026-10-13, candidate 7dea0626)
-
-The 180 s bound and phase 5 (cross the 64-record checkpoint boundary) do not both hold at today's
-performance. The smoke runs on hbox (busy box, `underLoad`) at N=20 M=16 K=8 completed every phase in
-364 s and 441 s: a born object costs a `resource` of 4.7–6.2 s p50 plus a `create` of 2.5–3.3 s, an
-`invoke` 5.7–6.5 s, an `at` read 5–7 s, all rising with the record count (at ~20 records the same
-operations were ~4.5 s, 1.9 s, 3.3 s, 1.9 s). Instructions per phase agreed within 2–7% between the
-two runs where wall time differed by up to 50%. Parameters that would fit 180 s today (N=8 M=8 K=4 by estimate from the per-operation figures; not run)
-cannot cross height 64, so the default keeps every phase and the row is red on the bound until the
-Store hot path is fixed: the bound is the target, not a description of today.
+Smaller parameters would fit the 180 s budget sooner but never reach the checkpoint boundary, so
+the default keeps every phase. The budget is a target for the Store hot path, not a measured
+figure; measured figures are published in the row's table.
 
 ## How to read the table
 

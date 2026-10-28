@@ -161,6 +161,11 @@ install_app() { # APP-ID
   outcome=$(mini apps install --dir "$WS9" --home "$HOME9" --app "$app" --class "$CLASS" --json 2>"$out/install-$app.err")
   rid=$(grep -oE 'request [0-9a-f]{32}' <<<"$outcome" | head -1 | cut -d' ' -f2)
   [ -n "$rid" ] || rid=$(ls "$WS9/apps/requests/" 2>/dev/null | grep -E '^[0-9a-f]{32}\.json$' | tail -1 | cut -d. -f1)
+  # The worker answers a long install `pending` at once and runs it on its own thread: a read meanwhile is not held.
+  if grep -q '"state": "pending"' <<<"$outcome"; then
+    local t0 t1 during; t0=$(date +%s%N); during=$(mini apps list --dir "$WS9" --json 2>&1); t1=$(date +%s%N)
+    row "while install $app is pending, apps list answers within 5 s" "$(grep -q '"state": "listed"' <<<"$during" && [ $(( (t1 - t0) / 1000000 )) -lt 5000 ] && echo 1 || echo 0)" "$(( (t1 - t0) / 1000000 )) ms"
+  fi
   # A first attempt refused before the worker (no request id) is decided; only an undecided request is retried.
   while [ -n "$rid" ] && [ $attempt -le "$ATTEMPTS" ] && ! grep -q '"decided": true' <<<"$outcome"; do
     attempt=$((attempt + 1)); sleep 15

@@ -6,11 +6,12 @@ use ordinary `summon` and `dismiss` commands.
 
 Fresh rooms declare the central `room_schema.rs` table: names 1010, paid-open 1011,
 assignment 1012, and a roster tail from field 2000 with no member ceiling
-(`native/resource-client/src/room_schema.rs:1-30`). Native closed-field admission is
+(`NAMES_FIELD`, `OPEN_FIELD`, `ASSIGNMENT_FIELD` and `ROSTER_FROM` in
+`native/resource-client/src/room_schema.rs`). Native closed-field admission is
 unchanged. Leaving/kicking retains history; re-inviting the same subject issues fresh
 authority and reuses its existing stream. A room born under the earlier v1 schema
 (roster pre-declared in fields 2..1000, 499 slots) is refused by name
-(`room_schema.rs:104-108`).
+(`check_room_view` in `room_schema.rs`).
 
 An operator registration is topology, not native authority. Its exact shape is:
 

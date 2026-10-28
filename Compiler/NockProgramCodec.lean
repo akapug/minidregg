@@ -3,7 +3,7 @@
 
 A friend's Nock program is a kernel object: one immutable cell holding the
 MINIMAL jam bytes of the program noun and the `Abi` the kernel reads to build
-the program's sample and decode its writes (NOCK §2.1, §2.3).
+the program's sample and decode its writes (docs/NOCK.md §2.1, §2.3).
 
 * **Code.** `jam` must be exactly `Noun.jam` of the noun it cues to
   (`Noun.canonical`), so a noun has one byte string here (`admissible_jam_unique`,
@@ -142,7 +142,7 @@ structure OutputSlot where
   type : SlotType
   deriving DecidableEq, Repr
 
-/-- A NockApp kernel door (NOCK §2.7, N11). The program's jam is the kernel
+/-- A NockApp kernel door (docs/NOCK.md §2.7, N11). The program's jam is the kernel
 trap (booted with `[9 2 0 1]`); the params' arm is the poke axis (NockApp: 23) and
 `peek` the peek axis (NockApp: 22). The door's state (core axis 6) lives as the
 atom of its jam in object field `state` of the command's target 0, its event
@@ -170,7 +170,7 @@ structure Abi where
 /-- A program record. `evaluator` is the registry id of the evaluator the code is
 for (`Compiler.Evaluator.id`; Nock's is `idOf "nock" "4K/Theory.Nock/v1"`): the kernel
 re-executes the program on that evaluator and on no other, and `programId` covers it,
-so the same bytes under another evaluator are another program (EVAL §1.4). -/
+so the same bytes under another evaluator are another program (docs/EVAL.md §1.4). -/
 structure Program where
   evaluator : Digest
   jam : List UInt8
@@ -263,7 +263,7 @@ def framed {α : Type} (frame : List UInt8) (stream : StreamCodec α) : LawfulCo
 /-- `DREGG/ABI/v5` -/
 def abiFrame : List UInt8 :=
   [68, 82, 69, 71, 71, 47, 65, 66, 73, 47, 118, 53]
-/-- `DREGG/PROGRAM/v1` (E3, EVAL §1.4: the evaluator-generic record — evaluator id, code, ABI,
+/-- `DREGG/PROGRAM/v1` (E3, docs/EVAL.md §1.4: the evaluator-generic record — evaluator id, code, ABI,
 params; the `DREGG/NOCK/PROGRAM/v1..v3` frames do not decode, and every `programId` changes). -/
 def programFrame : List UInt8 :=
   [68, 82, 69, 71, 71, 47, 80, 82, 79, 71, 82, 65, 77, 47, 118, 49]
@@ -485,7 +485,7 @@ theorem padded_refused (jam : List UInt8) (canonical : Noun.canonical jam = true
     simp at this
 
 /-- An admitted program's bytes are a function of its noun: `programId` and
-`codeDigest` are functions of the program (NOCK §2.10), never of an encoding
+`codeDigest` are functions of the program (docs/NOCK.md §2.10), never of an encoding
 choice. -/
 theorem admissible_jam_unique {left right : Program} (hl : Noun.canonical left.jam = true)
     (hr : Noun.canonical right.jam = true) (same : Noun.cue left.jam = Noun.cue right.jam) :

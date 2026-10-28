@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# J-PAY-E2 (PAY.md §11.9 P3b-1): the self-enrollment decision with real signatures,
+# J-PAY-E2 (docs/PAY.md §11.9 P3b-1): the self-enrollment decision with real signatures,
 # the public enrollment view, and the pay-cell observer replaced at runtime.
 #
 # Follows the journey hook contract (journey.sh header): executed with HOST,

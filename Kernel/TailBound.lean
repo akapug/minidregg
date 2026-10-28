@@ -1,7 +1,7 @@
 /-
 # Kernel.TailBound — a node runs at most `L` heights past its last certified head
 
-COMPUTE.md §5.2/§6: Mina's one idea worth keeping is the scan state's
+docs/COMPUTE.md §5.2/§6: Mina's one idea worth keeping is the scan state's
 backpressure — no new transactions unless the older work is done.  Here the
 older work is the node's own checkpoint chain, and the obligation is the
 sequencer's, not a purchase:

@@ -1,4 +1,4 @@
-//! P-CREDIT (PLACE §2.10): a week in a room, bought with a posting.
+//! P-CREDIT (docs/PLACE.md §2.10): a week in a room, bought with a posting.
 //!
 //! A room's tariff is data on the room cell `R` itself: declared fields
 //! (`TARIFF_FIELDS`), written only by a holder of `mutate` on `R` (the
@@ -869,7 +869,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             );
             Ok(())
         }
-        // One Hermes turn's payment (PLACE §2.10 "every Hermes turn debits
+        // One Hermes turn's payment (docs/PLACE.md §2.10 "every Hermes turn debits
         // tariff.hermes/turn"): one fleet turn from Hermes's account to the
         // room's till, `hermes/turn` credit plus the fleet fee, publishing
         // MEMO on Hermes's `hermes` topic. An account that cannot cover it is

@@ -22,8 +22,7 @@
 # python3 3.11-3.13 (the worker sees the host's /usr read-only), uv on PATH (or
 # UV) and network for the venv. Nothing is installed outside OUT.
 set -euo pipefail
-# 6d8a8beb: the commit that ran in the gated worker on 2026-09-26
-# (deploy/grain-host/HERMES-LINUX-2026-09-26.md); Python >=3.11,<3.14, so
+# 6d8a8beb: the commit qualified in the gated worker on 2026-09-26; Python >=3.11,<3.14, so
 # Debian 13's python3 3.13 serves it. Later commits lock to Python >=3.14.
 HERMES_AGENT_COMMIT=${HERMES_AGENT_COMMIT-6d8a8bebf70b09554deda5a0fcd95facbbde7b07}
 UV=${UV:-uv}

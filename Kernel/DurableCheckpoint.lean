@@ -2,13 +2,13 @@
 # Kernel.DurableCheckpoint — resume a durable image from a materialized state
 
 A checkpoint is the statement "the replay of the first `h` accepted records is
-this state" (DATAMODEL §3.3, §4.4). The host reopens by materializing that
+this state" (docs/DATAMODEL.md §3.3, §4.4). The host reopens by materializing that
 state and replaying only the records after `h`; the genesis replay survives as
 `Image.restore` (and, with signature re-admission, as the operator `audit`).
 
 What a checkpoint cannot certify is that the prefix was correctly admitted.
 That is trust in the host's own past execution, authenticated by the host-held
-MAC in `Compiler.DurableCheckpointCodec` (DATAMODEL §6 Q1): an attacker who can
+MAC in `Compiler.DurableCheckpointCodec` (docs/DATAMODEL.md §6 Q1): an attacker who can
 forge that MAC can already forge the host's receipts, so no new trust is
 introduced. The theorems below say what the checkpoint buys under that trust:
 
@@ -239,7 +239,7 @@ theorem resume_genesis (rootBytes : List UInt8 → Digest) (image : Image) :
       fun admissible => valid admissible.1
     rw [if_neg notAdmissible, if_neg valid]
 
-/-- **Checkpoint soundness** (DATAMODEL §4.4 for the host's record type). If
+/-- **Checkpoint soundness** (docs/DATAMODEL.md §4.4 for the host's record type). If
 the checkpoint's materialized state is the replay of the prefix it claims,
 resuming from it is exactly the replay from genesis. -/
 theorem resume_sound (rootBytes : List UInt8 → Digest) (image : Image) (height : Nat)

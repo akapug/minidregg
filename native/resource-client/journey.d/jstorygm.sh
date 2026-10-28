@@ -146,6 +146,8 @@ for i in $(seq 1 24); do
   sleep 15
 done
 if [ "$RC" = 0 ]; then record story sponsor "story seal $S" 0 ok ""; else record story sponsor "story seal $S" 0 FAIL "rc $RC: $(grep -m1 -E '^(refused|undecided|error|usage): ' "$ERR")"; fi
+ok story sponsor "story seal $S"
+check story "a second seal is a no-op that says so" grep -q 'already sealed' "$OUT"
 ok story sponsor "story invite $S $G gm"
 mkdir -p -m 700 "$H/gm/requests"
 sed -n "s/^story join $S //p" "$OUT" | head -1 >"$H/gm/requests/invitation.txt"

@@ -548,7 +548,7 @@ theorem read_after_tick_admitted :
 #guard_msgs (whitespace := lax) in #print axioms authorizeChecked_lawDenied
 /-- info: 'Minidregg.Kernel.ResourceObservationAdmission.authorizeChecked_leaf_fails' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms authorizeChecked_leaf_fails
-/-! ## Room confidentiality at the controller (PRIVACY row 8)
+/-! ## Room confidentiality at the controller
 
 The observation portal is the source-capability portal: it has no signature
 and no proof witness, so no signature-mode or proof-mode evidence exists for an

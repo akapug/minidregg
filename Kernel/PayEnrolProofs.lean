@@ -1,5 +1,5 @@
 /-
-# Kernel.PayEnrolProofs — what an accepted self-enrollment turn does (PAY §11.4, P3b-2)
+# Kernel.PayEnrolProofs — what an accepted self-enrollment turn does (docs/PAY.md §11.4, P3b-2)
 
 * `multi_cell_intent_atomic` — the step-0 answer as a theorem: ONE `DataIntent`
   writing any number of distinct cells installs every write or none, whatever
