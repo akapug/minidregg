@@ -311,15 +311,27 @@ detached.  It writes `rebuild.pid` and `rebuild.log`, builds kernels, then `lake
 Lean never runs on the Mac.
 
 **Owed, in order.**
-1. **After the A12c regen build lands on main.**  The integrator re-records both recorded
-   fixtures (`NativeAcceptedFixture`, `NativeDocWriteFixture`) from it (coordinator,
-   10-28).  No Revival proof imports a fixture: the ghost half of `ContentTeeth` and every
-   other pole are kernel proofs on hand-built cells.  So this lane's job then is only:
-   1. merge main;
-   2. re-sync the hbox tree and run `rebuild.sh Effects`;
-   3. fix anything red in `Effects/`, plus any Revival red the integrator's umbrellas stage
-      reports with file:line;
-   4. send the integrator one sha.
+1. **Doc-write fixture re-recording** (the integrator reassigned it here on 10-28, from
+   candidate `349e59ef1`, the post-conversion, post-M2 build).  No Revival proof imports a
+   fixture, so `Effects` is unaffected (it is green on main `5e819cb1d`).  State:
+   - The acceptance world is recorded at `/build/lanes/effects-revival-fixture/run-349e59ef1`
+     on dregg-build, copied to `/tank/lanes/effects-revival/world-349e59ef1` on hbox.  A
+     verifier built from `native/credential-signature-verifier` is at
+     `/tank/lanes/effects-revival/target/release/`; the candidate's binary needs glibc 2.41,
+     which hbox lacks.
+   - `gen.sh` (PID `gen.pid`, log `gen.log`) runs `generate.sh` in the hbox tree, which got a
+     bare `git init` for the script's `rev-parse`.  The Lean replay is ACCEPTED, record=same,
+     root=Host's.
+   - The generator REFUSES: `write.charge.turnBytes` 1047→1045 and `storageBytes` 1474→1468.
+   - Cause: those two authority lanes are run-dependent.  A second run with the same binaries
+     (`run-349e59ef1-b`) gives a 1015-byte a2 call against 1013, and different record
+     lengths.  Per-run random values are encoded as variable-length naturals.
+   - Options: (c) the authority states those lanes as relations to the run (turnBytes = the
+     call length + 32, storageBytes from the record), a reviewed `Authority-Change` commit
+     to the shared projection; (b) new constants plus a reason (the next regen goes red
+     again); never (a), re-running until it matches.
+   - The ruling was asked of the integrator on 10-28; NativeAcceptedFixture likely shares the
+     defect.  After the fixture lands, send the integrator one sha.
 2. **The migration commit** (§5 step 1; post-demo; prepare, never land without the
    coordinator's word).  The gate is `HostKeystone` and `HostLegacyCensus` (both provable
    only after it) plus the already-proved `PrepareFactors`.  Its shape:
