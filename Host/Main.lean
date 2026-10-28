@@ -366,6 +366,11 @@ open Minidregg.Kernel
 
 namespace Minidregg.Host
 
+-- The selected-release receivers' rejections render in the operator's log.
+deriving instance Repr for FnSelectiveReleaseAdmission.PrepareReject,
+  FnSelectiveReleaseAdmission.Reject, FnSelectiveReleaseReceiver.Reject,
+  FnSelectiveReleaseSourceReceiver.Reject
+
 structure GatewayPinSettings where
   application : String
   subject : Nat
@@ -1582,8 +1587,8 @@ def selectedReleaseSubmitSession (config : NativeHost.Config)
   let outcome ← match result with
     | .confirmed kind receipt =>
         sessionConfirmed config state kind receipt.transactionId receipt.eventId
-    | .rejected _ =>
-        pure (.refused .operationRejected "selected-release".toUTF8.toList "request refused".toUTF8.toList)
+    | .rejected reason =>
+        pure (.refused .operationRejected "selected-release".toUTF8.toList (reprStr reason).toUTF8.toList)
     | .transactionConflict =>
         pure (.refused .conflict "replay".toUTF8.toList "transaction identity conflict".toUTF8.toList)
     | .contention => pure .contention
@@ -1623,7 +1628,10 @@ def applicationLifecycleRetryBeginV4SubmitSession (config : NativeHost.Config)
     | .confirmed confirmed =>
         sessionSetWalked state confirmed.old confirmed.readback
         return .confirmed confirmed.confirmation confirmed.receipt
-    | .rejected _ =>
+    | .rejected detail =>
+        -- The member's frame stays the bare refusal; the operator's log keeps the reason.
+        NativeHost.logOperatorRefusal <|
+          .refused .operationRejected "application-lifecycle-begin".toUTF8.toList detail.toUTF8.toList
         return .refused .operationRejected "application-lifecycle-begin".toUTF8.toList "request refused".toUTF8.toList
     | .contention => return .contention
     | .unavailable detail => return .unavailable detail.toUTF8.toList
@@ -1644,7 +1652,10 @@ def applicationLifecycleBeginSubmitSession (config : NativeHost.Config)
     | .confirmed confirmed =>
         sessionSetWalked state confirmed.old confirmed.readback
         return .confirmed confirmed.confirmation confirmed.receipt
-    | .rejected _ =>
+    | .rejected detail =>
+        -- The member's frame stays the bare refusal; the operator's log keeps the reason.
+        NativeHost.logOperatorRefusal <|
+          .refused .operationRejected "application-lifecycle-begin".toUTF8.toList detail.toUTF8.toList
         return .refused .operationRejected "application-lifecycle-begin".toUTF8.toList "request refused".toUTF8.toList
     | .contention => return .contention
     | .unavailable detail => return .unavailable detail.toUTF8.toList
@@ -1808,9 +1819,9 @@ def fnConsumerNamespaceSubmitSession (config : NativeHost.Config)
   let outcome ← match result with
   | .confirmed kind receipt =>
       sessionConfirmed config state kind receipt.transactionId receipt.eventId
-  | .rejected _ =>
+  | .rejected reason =>
       pure (.refused .operationRejected "fn-consumer-namespace".toUTF8.toList
-        "request refused".toUTF8.toList)
+        reason.toUTF8.toList)
   | .transactionConflict =>
       pure (.refused .conflict "replay".toUTF8.toList
         "transaction identity conflict".toUTF8.toList)
@@ -1843,8 +1854,8 @@ def fnSelectedPollSubmitSession (config : NativeHost.Config)
   let outcome ← match result with
   | .confirmed kind receipt =>
       sessionConfirmed config state kind receipt.transactionId receipt.eventId
-  | .rejected _ =>
-      pure (.refused .operationRejected "fn-selected-poll".toUTF8.toList "request refused".toUTF8.toList)
+  | .rejected reason =>
+      pure (.refused .operationRejected "fn-selected-poll".toUTF8.toList reason.toUTF8.toList)
   | .transactionConflict =>
       pure (.refused .conflict "replay".toUTF8.toList "transaction identity conflict".toUTF8.toList)
   | .contention => pure .contention
@@ -1874,8 +1885,8 @@ def fnEmptyPollSubmitSession (config : NativeHost.Config)
   let outcome ← match result with
   | .confirmed kind receipt =>
       sessionConfirmed config state kind receipt.transactionId receipt.eventId
-  | .rejected _ =>
-      pure (.refused .operationRejected "fn-empty-poll-v2".toUTF8.toList "request refused".toUTF8.toList)
+  | .rejected reason =>
+      pure (.refused .operationRejected "fn-empty-poll-v2".toUTF8.toList reason.toUTF8.toList)
   | .transactionConflict =>
       pure (.refused .conflict "replay".toUTF8.toList "transaction identity conflict".toUTF8.toList)
   | .contention => pure .contention
@@ -1906,8 +1917,8 @@ def selectedSourcePublicationSubmitSession (config : NativeHost.Config)
   let outcome ← match result with
     | .confirmed kind receipt =>
         sessionConfirmed config state kind receipt.transactionId receipt.eventId
-    | .rejected _ => pure (.refused .operationRejected "selected-source-publication".toUTF8.toList
-        "request refused".toUTF8.toList)
+    | .rejected reason => pure (.refused .operationRejected "selected-source-publication".toUTF8.toList
+        (reprStr reason).toUTF8.toList)
     | .transactionConflict => pure (.refused .conflict "replay".toUTF8.toList
         "transaction identity conflict".toUTF8.toList)
     | .contention => pure .contention
@@ -2042,6 +2053,7 @@ def applicationSessionEnrollmentSubmitSession (config : NativeHost.Config)
     | .contention => pure .contention
     | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
     | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  NativeHost.logOperatorRefusal outcome
   return outcome
 
 /-- Historical event28 recovery returns only the verified original receipt. -/
@@ -2781,10 +2793,13 @@ def dispatchApplicationSubmitSession (config : NativeHost.Config)
   -- The three outcomes the receiver decides before any permit or append go out under
   -- NO_RECORD (the grain fence settles the dispatch on this frame); only `uncertain`,
   -- which follows an attempted append, keeps the op's own frame.
-  | .rejected _ =>
+  | .rejected detail =>
+      -- The submitter gets the uniform frame; the operator's log keeps the reason.
+      let outcome : NativeHostCodec.Outcome :=
+        .refused .operationRejected "application-dispatch".toUTF8.toList detail.toUTF8.toList
+      NativeHost.logOperatorRefusal outcome
       writeSessionFrame output HostOperations.noRecordMarker <| outcomeCodec.encode <|
-        NativeHost.publicSubmissionOutcome
-          (.refused .operationRejected "application-dispatch".toUTF8.toList "request refused".toUTF8.toList)
+        NativeHost.publicSubmissionOutcome outcome
   | .contention =>
       writeSessionFrame output HostOperations.noRecordMarker <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome .contention
@@ -2934,11 +2949,13 @@ def dispatchLifecycleRetryClaimV4SubmitSession (config : NativeHost.Config)
           writeSessionFrame output 26 <| outcomeCodec.encode <|
             NativeHost.publicSubmissionOutcome
               (.confirmed .replayed reservation.receipt)
-  | .rejected _ =>
+  | .rejected detail =>
+      -- The submitter gets the uniform frame; the operator's log keeps the reason.
+      let outcome : NativeHostCodec.Outcome :=
+        .refused .operationRejected "application-lifecycle-claim".toUTF8.toList detail.toUTF8.toList
+      NativeHost.logOperatorRefusal outcome
       writeSessionFrame output 26 <| outcomeCodec.encode <|
-        NativeHost.publicSubmissionOutcome
-          (.refused .operationRejected "application-lifecycle-claim".toUTF8.toList
-            "request refused".toUTF8.toList)
+        NativeHost.publicSubmissionOutcome outcome
   | .contention =>
       writeSessionFrame output 26 <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome .contention
@@ -2985,11 +3002,13 @@ def dispatchLifecycleClaimSubmitSession (config : NativeHost.Config)
           writeSessionFrame output 26 <| outcomeCodec.encode <|
             NativeHost.publicSubmissionOutcome
               (.confirmed .replayed reservation.receipt)
-  | .rejected _ =>
+  | .rejected detail =>
+      -- The submitter gets the uniform frame; the operator's log keeps the reason.
+      let outcome : NativeHostCodec.Outcome :=
+        .refused .operationRejected "application-lifecycle-claim".toUTF8.toList detail.toUTF8.toList
+      NativeHost.logOperatorRefusal outcome
       writeSessionFrame output 26 <| outcomeCodec.encode <|
-        NativeHost.publicSubmissionOutcome
-          (.refused .operationRejected "application-lifecycle-claim".toUTF8.toList
-            "request refused".toUTF8.toList)
+        NativeHost.publicSubmissionOutcome outcome
   | .contention =>
       writeSessionFrame output 26 <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome .contention
@@ -4371,6 +4390,11 @@ def sessionCarriedWalked (config : NativeHost.Config)
     state.set none
     throw (IO.userError "carried suffix validation failed")
 
+/-- A carried frame keeps its fixed public text, so no custody detail reaches the
+member; the operator's log (this process's stderr) keeps the receiver's own detail. -/
+def logOperatorWithheld (phase kind detail : String) : IO Unit :=
+  IO.eprintln s!"host: submission {kind} (operator log): {phase}: {detail}"
+
 def carriedEnrollmentSubmit (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (carried : IO.Ref (Option (CarriedNativeHostSession.Walked config)))
@@ -4381,15 +4405,22 @@ def carriedEnrollmentSubmit (config : NativeHost.Config)
       carried.set (some ⟨session.anchor, confirmed.target, confirmed.verified⟩)
       return .confirmed confirmed.confirmation confirmed.receipt
   | .historical receipt => return .confirmed .replayed receipt
-  | .rejected _ =>
+  | .rejected detail =>
+      -- The member's frame keeps its fixed text; the operator's log keeps the reason.
+      NativeHost.logOperatorRefusal <|
+        .refused .operationRejected "application-session-enrollment".toUTF8.toList detail.toUTF8.toList
       return .refused .operationRejected "application-session-enrollment".toUTF8.toList
         "carried enrollment refused".toUTF8.toList
   | .transactionConflict =>
       return .refused .conflict "replay".toUTF8.toList
         "transaction identity conflict".toUTF8.toList
   | .contention => return .contention
-  | .unavailable _ => return .unavailable "carried enrollment unavailable".toUTF8.toList
-  | .uncertain _ => return .uncertain "carried enrollment readback uncertain".toUTF8.toList
+  | .unavailable detail =>
+      logOperatorWithheld "application-session-enrollment" "unavailable" detail
+      return .unavailable "carried enrollment unavailable".toUTF8.toList
+  | .uncertain detail =>
+      logOperatorWithheld "application-session-enrollment" "uncertain" detail
+      return .uncertain "carried enrollment readback uncertain".toUTF8.toList
 
 def carriedEnrollmentLookup (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
@@ -4541,14 +4572,19 @@ def carriedApplicationSubmit (config : NativeHost.Config)
           (.uncertain "dispatch absence tip changed before handoff".toUTF8.toList))
   | .historical receipt =>
       writeSessionFrame output 34 (outcomeCodec.encode (.confirmed .replayed receipt))
-  | .rejected _ => writeSessionFrame output 34 <| outcomeCodec.encode <|
-      NativeHost.publicSubmissionOutcome (.refused .operationRejected
-        "application-dispatch".toUTF8.toList "request refused".toUTF8.toList)
+  | .rejected detail =>
+      -- The submitter gets the uniform frame; the operator's log keeps the reason.
+      let outcome : NativeHostCodec.Outcome :=
+        .refused .operationRejected "application-dispatch".toUTF8.toList detail.toUTF8.toList
+      NativeHost.logOperatorRefusal outcome
+      writeSessionFrame output 34 <| outcomeCodec.encode <| NativeHost.publicSubmissionOutcome outcome
   | .contention => writeSessionFrame output 34 (outcomeCodec.encode .contention)
-  | .unavailable _ =>
+  | .unavailable detail =>
+      logOperatorWithheld "application-dispatch" "unavailable" detail
       writeSessionFrame output 34 (outcomeCodec.encode
         (.unavailable "carried dispatch unavailable".toUTF8.toList))
-  | .uncertain _ =>
+  | .uncertain detail =>
+      logOperatorWithheld "application-dispatch" "uncertain" detail
       writeSessionFrame output 34 (outcomeCodec.encode
         (.uncertain "carried dispatch readback uncertain".toUTF8.toList))
 
@@ -7472,7 +7508,9 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                             let outcome ← NativeHost.paySubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened payload
                             -- A pay submission is blind: its refusal (including the
                             -- receiver's pre-signature notOwner/bookExhausted/...) is
-                            -- the uniform `undisclosed` frame (MR's rule).
+                            -- the uniform `undisclosed` frame (MR's rule); the
+                            -- operator's log keeps the reason.
+                            NativeHost.logOperatorRefusal outcome
                             return ((105 : UInt8),
                               outcomeCodec.encode (NativeHost.publicSubmissionOutcome outcome))
                         | 106 =>
@@ -7503,6 +7541,7 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                             let outcome ← NativeHost.platformSubmitLoaded pinnedConfig
                               (sessionConfirmed pinnedConfig state) opened payload
                             -- Blind, as the pay submission (105): the operator's log keeps the reason.
+                            NativeHost.logOperatorRefusal outcome
                             return ((242 : UInt8),
                               outcomeCodec.encode (NativeHost.publicSubmissionOutcome outcome))
                         | 243 =>
@@ -7530,6 +7569,7 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                             let outcome ← NativeHost.meterRefillSubmitLoaded pinnedConfig
                               (sessionConfirmed pinnedConfig state) opened payload
                             -- Blind, as the platform install (242): the operator's log keeps the reason.
+                            NativeHost.logOperatorRefusal outcome
                             return ((246 : UInt8),
                               outcomeCodec.encode (NativeHost.publicSubmissionOutcome outcome))
                         | 247 =>
@@ -7597,6 +7637,9 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                                   | none => pure (.uncertain "key commitment suffix receipt unavailable".toUTF8.toList)
                               | other => pure other
                             else pure outcome
+                            -- Blind: the submitter gets the uniform frame; the operator's log
+                            -- keeps the adoption's reason.
+                            if operation == 189 then NativeHost.logOperatorRefusal outcome
                             return (operation, outcomeCodec.encode (NativeHost.publicSubmissionOutcome outcome))
                         | 140 =>
                             let opened ← sessionOpened pinnedConfig state
