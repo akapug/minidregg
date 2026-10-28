@@ -14,6 +14,16 @@ SPEC.loader.exec_module(M)
 
 
 class AttachmentTests(unittest.TestCase):
+    def test_inspection_mode_is_explicit_without_fallback(self):
+        op = M.Attachment.__new__(M.Attachment)
+        with tempfile.TemporaryDirectory() as directory:
+            op.mini = Path(directory) / "mini"; op.mini.write_bytes(b"qualified image")
+            op.operator = Path(directory) / "operator.sock"
+            op.contract = {}
+            self.assertEqual(op.inspection_args(), ["--served", op.mini, op.operator, M.sha(op.mini)])
+            op.contract = {"inspectionMode": "detached"}
+            self.assertEqual(op.inspection_args(), [])
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
