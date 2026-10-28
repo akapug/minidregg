@@ -81,7 +81,7 @@ elaborates) seeds its dregg-ref tree from the integ8 copy; tell it when the copy
 Next steps: A10 → regen patch onto main → full build at main's tip (it carries 25cfb86bd, custody-b's
 delegated consent, f79044d79 and c11b235ee (grain-runtime NO_RECORD refusals; a0d58aaef), hermes-b 5422506f, custody-b 97aab6054 (55e8a05d9; the profiled grain bootstrap twin deleted), un-tale-welcome bc6c837ba (docs), the world/ pack 1b870fbdd, red-jli-refname 81349cec2 (JLI reruns on it), un-tale-welcome 19bb968e0 (f5602a8cd; the door joins members to door.json's story)). On READY the chain runs gate + enrol-resume;
 report "candidate <sha> at <path>: gate <verdict>, reds by name" to the coordinator, and the sha + path to the rows
-validator (aeee8349c191e8506, the app tables wait on 25cfb86bd), L4b (ad81db6d6fd317d3a) and the deputy
+validator (aeee8349c191e8506, the app tables wait on 25cfb86bd), infra (ae95a4eac63b0715e; reruns the seed in the demo-dry container on the first candidate carrying 25cfb86bd, f73893fce, 52c0eae22 and 19bb968e0), L4b (ad81db6d6fd317d3a) and the deputy
 (a308118209b4a48ea, owns the app market; wants the first candidate carrying 25cfb86bd). Pending lands:
 lean-audit-c only on L1e's warm-tree green sha (e2dae30ee queued on dregg-ref; b7412f32a and three more unbuilt behind it); iter-speed successor's census re-pin (a0fd127abfb9aac75) only
 after that candidate is reported.
@@ -105,7 +105,7 @@ gates main and fixes reds itself.
   the auditor's acceptance; L1d (ad6d6eff243f32816) coordinates the order with the integrator and the iter-speed
   successor (a0fd127abfb9aac75).
 - closure.pid on dregg-ref (empty for jobs started before lanes joined group `closure`) is infra's
-  (aed5ecf506cf840af), not the integrator's.
+  (ae95a4eac63b0715e), not the integrator's.
 - Transitive bumps through registry constants: closed, no. Nesting already propagates through the regen's round
   loop; both stops were spelling forms, now handled.
 - Owner-less pins: the census refuses a registered DREGG identity no definition spells or names, landed once
