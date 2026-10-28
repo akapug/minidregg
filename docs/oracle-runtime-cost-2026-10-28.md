@@ -13,7 +13,7 @@ served path; a refused served request fails without detached fallback. The
 old standalone inspection remains available for explicit operator use. This
 removes two redundant full audits from an attachment's normal preparation.
 No new wall-time measurement is claimed until the successor Host is built and
-qualified. The reported old q 3 cohort direct inspection took about 138 seconds
+qualified. The reported old q3 cohort direct inspection took about 138 seconds
 under contention; it is not a measurement of this change.
 
 Independent consent is a separate cost. `ClientConsentCore.verifyInitial`
@@ -27,8 +27,8 @@ and only its exact empty 236 acknowledgement produces readiness. This moves
 the cold work to a suitable startup budget; it does not make that work faster.
 The delegated proxy carries it to the same provider used for signing.
 
-Both the old `aae 3 e 2 e 37` and newer `349 e 59 ef 1` candidates already materialize
-`DurableEngine.Engine.install`'s ten budget allowances. The seven-minute q 3
+Both the old `aae3e2e37` and newer `349e59ef1` candidates already materialize
+`DurableEngine.Engine.install`'s ten budget allowances. The seven-minute q3
 cold replay cannot be explained by an absent budget-materialization fix.
 Materialization removes repeated evaluation of prior subtraction closures;
 it still evaluates the current intent's exact charge at each admitted prefix.
@@ -36,7 +36,7 @@ it still evaluates the current intent's exact charge at each admitted prefix.
 reads its exact charges; `Engine.view` defines roots by running `rootBytes`
 on the selected cell's complete bytes.
 
-The existing 349 e SandMD profile, a different workload from Oracle startup,
+The existing 349e59ef1 SandMD profile, a different workload from Oracle startup,
 found five of eight compute stacks in whole-cell Store root/codec work and
 two in `receiverSemanticsFrom` over the compiled manifest. Its route calls
 spent about 5.3 seconds of single-thread CPU per submit. That supports the
@@ -45,7 +45,7 @@ snapshot, then measure full replay on an independently copied stopped Store
 with identical receipt bytes. The route-latency lane owns that shared change.
 A byte-array codec rewrite is a larger follow-on, not the first experiment.
 
-Old q 3 measurements reported by its acceptance owner remain useful capacity
+Old q3 measurements reported by its acceptance owner remain useful capacity
 warnings: around 125 events, consent cold readiness took about seven minutes
 and peaked at 1,858,396,160 bytes in its cgroup, while the controller itself was
 about 57 MiB. Keeping dozens of controllers light does not make simultaneous
