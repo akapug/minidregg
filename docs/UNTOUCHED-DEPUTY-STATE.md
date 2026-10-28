@@ -22,7 +22,7 @@ un-verify (Generic Simplex gate), un-bend (bend verb + lost reply), un-world (Ta
 
 ## Owed / unowned
 - ember's ruling (memory "no hand-written kernel effects"): kernel effects must come from a revived Effects/ derivation engine. un-effects' transfer/commit are hand-written in Kernel/ObjectiveActivity.lean: deferrable for the demo, owed after (EFFECTS.md has the Phase-3 design: EffectSpec widened with refusal, authority demand and frame; the dispatch keystone; the hand arm deleted in the same commit).
-- private-backend helper-copy merges (Cursor, Lagrange, Horner, PRG, urandom, outbox codecs): unowned.
+- private-backend helper-copy merges (Lagrange, Horner, PRG/urandom into Entropy, Nat cursors into one Cursor::nat, outbox codecs into one Outbox): in flight on lane/un-pb-helpers (Sonnet ad546f4c4b4fe0ede, from main 92ec75c3). One commit per family; outputs and wire bytes pinned by a test before each merge; non-twins kept and named; warm builds on dregg-build in /build/lanes/un-pb-helpers with the un-pb-seal-target. Shas go to the integrator as they land.
 - private-backend P6 (lost reply on reserve/burn): open; the verifier exists.
 - Tier 2 (after the opening): R1 the in-process MPC as a door. The sibling product deputy (a5a600787670d2be5) now owns the MPC demo door, invite codes, Host request rate, web3.js serializer, grain class slices: not ours.
 
@@ -35,4 +35,4 @@ fn out; private-backend stays; Effects/ registry is Phase 3 (EFFECTS.md); dues a
 ## Next three
 1. Read the central build's verdict on un-effects 2b9de248; fix routed reds by reasoning; get the codec pins re-emitted; write the remaining world scenarios (bounty, play, ballot, story, commons) in world-activity-admit.py and README native lines.
 2. Route any central reds on un-stream-continuity / un-pred-census / un-pb-twins to their faeries; tell the coordinator when the japps co-edit row is green.
-3. Assign the private-backend helper merges if the coordinator wants them now.
+3. Review each un-pb-helpers landing (pinning test green on the box, bytes identical); send the shas to the integrator.
