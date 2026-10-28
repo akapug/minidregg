@@ -16,6 +16,7 @@ write_IPythonNotebook() {
   local kid; kid=$(jq -r '.id // empty' "$body" 2>/dev/null)
   [[ $k =~ ^20 && -n $kid ]] || { echo "0 POST /api/kernels $k: $(head -c 120 "$body" | tr -d '\n')"; return; }
   local code="print('resident computed', 6*7)" res
+  sleep 5; local alive; alive=$(req GET "/api/kernels/$kid"); [[ $alive == 200 ]] || { echo "0 kernel $kid gone 5 s after POST /api/kernels (GET $alive): the kernel process exited before any request"; req DELETE "/api/kernels/$kid" >/dev/null; return; }
   res=$(python3 -I "$here/market-writes/jupyter-exec.py" "$dir" "$kid" "$code" 2>&1 | tail -1)
   local kst; req GET "/api/kernels/$kid" >/dev/null; kst=$(head -c 160 "$body" | tr -d '\n')
   req DELETE "/api/kernels/$kid" >/dev/null
