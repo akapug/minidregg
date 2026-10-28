@@ -141,7 +141,7 @@ Next steps (10-28, 12:45): A12d (integ4/regen-A12d.pid) ends with codec-shapes-r
 4ce6c29a3. Then: (1) commit integ8/regen-A12.patch onto main's tip (scp it to the Mac, `git apply`, check the census
 diff is pins/bumps only, commit, push); (2) launch integ4/main-full2.sh at that sha. That build IS the rehearsal
 candidate: it carries M2 + the module conversion (fresh genesis), un-public-read 86ad31dd3 + 2add39053, b71898658,
-birthStale 6325a6045 and un-spk-pinned-read 31c96d923. Its host stage is the first incremental number under modules
+birthStale 6325a6045 and un-spk-pinned-read 31c96d923 + ccc527405 (main 7007d5068; the offline qualifier half). Its host stage is the first incremental number under modules
 (A12d's tree is warm at 4ce6c29a3): send that wall time to the coordinator and iter-speed (a0fd127abfb9aac75).
 (3) On READY: "candidate <sha> at <path>: gate <verdict>, reds by name" to the coordinator; the sha + full
 /build/candidates/<sha> path to infra a298031c78e86d651 (demo-dry, then the rehearsal), L4c a6c2f758a0dac46fe and the
