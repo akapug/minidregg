@@ -7,7 +7,7 @@
 #
 # durable_image STORE_ROOT OUTPUT [CONFIG]: the Store's durable image (seed and every log record),
 # read under the Store's own anchor identity as the Host's transport opens it (`Config.anchorIdentity`,
-# printed by `HOST CONFIG describe` as storeAnchorIdentity, never re-derived here). CONFIG defaults
+# printed by `HOST CONFIG profile` as storeAnchorIdentity, never re-derived here). CONFIG defaults
 # to $CONFIG; HOST and STORE_BINARY are the caller's. The legacy single-blob `read-to` image no longer
 # exists: the Store keeps a durable log, so `read-to` refuses ("published byte record is missing").
 
@@ -16,6 +16,6 @@ sha256() {
 }
 
 durable_image() {
-  _image_id=$("$HOST" "${3:-$CONFIG}" describe | jq -er .storeAnchorIdentity) || return 2
+  _image_id=$("$HOST" "${3:-$CONFIG}" profile | jq -er .storeAnchorIdentity) || return 2
   "$STORE_BINARY" --anchor-identity "$_image_id" durable-read "$1" 1 1 "$2"
 }
