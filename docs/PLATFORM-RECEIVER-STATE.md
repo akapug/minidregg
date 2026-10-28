@@ -36,110 +36,101 @@ forward the reds the integrator sends with file:line. Merge origin/main before e
   the Host loads came from genesis and install patches (the writers are proved; the induction
   over the replayed log is not stated yet).
 
-## L1d (lane/lean-audit-c): state
+## L1e (lane/lean-audit-c, lane/lean-audit-c-m2): state
 
-L1d (successor to L1c) prices every birth family and the completion custodian key from the
-platform cell. Next it does `Intent.credit` with ops 244–247, then audit (c)'s Lean witnesses.
-lane/lean-audit-c is held off main until one of its shas is green in a warm tree. The
-integrator (a34bdb948f1cf4796) lands exactly that sha. The auditor is af7a93e7b8ba729d4, with
-passes 16–21 on lane/audit-platform.
+L1e (successor to L1d) prices every birth family and the completion custodian key from the
+platform cell (lane/lean-audit-c), and carries M2, `Intent.credit` and the refill family
+(lane/lean-audit-c-m2, worktree /Users/ember/dev/minidregg-lanes/lean-audit-c-m2). Neither is
+on main. The integrator (a34bdb948f1cf4796) lands one green sha after the module conversion.
+The auditor is af7a93e7b8ba729d4; passes 16–23 are on lane/audit-platform.
 
-### Build status (read this first)
+### Green
 
-L1e (successor to L1d) holds the lane. **82c17c448 is green** in a warm tree on dregg-ref
-(build 6, closure-lock, peak 23.7 GB) and cold on hbox (build 3). Both box trees match the
-lane's HEAD byte for byte. The targets were the twenty modules in
-/build/lanes/lean-audit-c-build.sh, plus Host.ApplicationAgentLifetimeGrantAuthoring,
--Inspection, Host.ApplicationShareIssueGrainInspection and
-tests/lean/LifetimeGrantSourceAdversary.lean (lane-check).
-- Reds fixed on the way (statements unchanged):
-  - bd199e0e9 `recordOn_congr`;
-  - 82c17c448 `select_pinned`'s split chain, and provisioning `recordOf`. Lean 4.30
-    generalizes a match discriminant inside the subtype it returns, so the equation is
-    carried by a local `go` instead.
-- dregg-ref box tree /build/lanes/lean-audit-c (a worktree of /build/minidregg; `git fetch`
-  there fails on the other user's object dirs). Sync it with `git archive HEAD <files> | ssh
-  dregg-ref tar -x` and chown the files to lanes. Build scripts must export
-  `PATH=/build/home-lanes/.cargo/bin:/build/home-lanes/.elan/bin:$PATH`; build 4 died with
-  `lake` not found. PID file /build/lanes/lean-audit-c-build.pid.
-- hbox tree /othersys/lanes/lean-audit-c/src (git archive, build.sh, build.pid, SWARM_MEM_MAX=40G).
-  Remove /othersys/lanes/lean-audit-c when the lane ends.
+- **lane/lean-audit-c 82c17c448** is green warm on dregg-ref (build 6, closure-lock, peak
+  23.7 GB) and cold on hbox. The targets were the twenty modules in
+  /build/lanes/lean-audit-c-build.sh, plus the lifetime-grant and share-issue Host files and
+  tests/lean/LifetimeGrantSourceAdversary.lean (lane-check). The integrator has it, held.
+- **lane/lean-audit-c-m2 1a29e71af, on top of 82c17c448's tree,** is green on hbox (build-m2d):
+  the same targets plus Kernel.MeterRefillReceiver, Kernel.NativeHostReplay and
+  Assurance.DeployedCredentialLifecycle. 3fa536765 adds the World refill pole, built per
+  module. The hbox tree matches the M2 tip byte for byte.
 
-### Item 5 ruling
+### Order with the module conversion (agreed with iter-speed a0fd127abfb9aac75; the integrator confirms)
 
-The coordinator ruled: `Intent.credit` persists in `IntentRecord` (durable log frame v3,
-`DREGG.DURABLE.IMAGE` v3). It ships with the module conversion's re-genesis, so the
-StoreEpoch moves once, and the codec-shape pins move only through the integrator's regen.
-The auditor accepted the design (pass 21) and the deployed keystones (pass 21 addendum).
-M2 is on lane/lean-audit-c-m2, unbuilt.
+1. The conversion lands on main (iter-speed re-derives it on main after the A11 candidate).
+2. Merge it into lane/lean-audit-c. Header conflicts come in the seven files whose imports
+   this lane changed: the four completion admissions, ParticipantFactoryProvisioning,
+   NativeHostContext and ResourceBirthPolicyController. The two Host lifecycle operators may
+   conflict too (main's storeIdentity change). Take the lane's side of the HEADER hunks only and
+   merge bodies. Then `python3 scripts/lean-modularize.py <those files>
+   Kernel/CompletionCustodianKey.lean`. Never hand-edit a converted header.
+3. Merge lane/lean-audit-c-m2 on top (the only conflict is this file). Modularize
+   Kernel/MeterRefillReceiver.lean and NativeHostReplay. In converted NativeHostReplay every
+   `Derived` literal names each defaulted field (`… := none`), so M2's `meterRefill` literal must
+   too (Lean 4.30 private-ctor-plus-defaults bug).
+4. Check each changed file and its direct importers with `scripts/pipeline/lane-check` on a box
+   tree. A hidden-body failure means: run `scripts/module-hidden-bodies.sh FILE`, add its lines to
+   PER_FILE in lean-modularize.py, and re-convert.
+5. Build the merged tree on a box and send the integrator ONE green sha. It lands with the
+   integrator's codec-shapes regen, in the conversion's single re-genesis (one StoreEpoch move).
+   M2 moves, all in that one re-genesis:
+   - durable log frame v3 and DREGG.DURABLE.IMAGE v3 (credit in IntentRecord);
+   - the turn-digest preimage (`turnFields` + DeployedTurnCompact carry `credit`);
+   - the representsCheck meter comparison.
 
-### Order with the module conversion (agreed with iter-speed, a0fd127abfb9aac75)
+### Box trees
 
-1. The module conversion lands on main first.
-2. L1d merges iter-speed's landing sha into lane/lean-audit-c.
-   - Header conflicts are expected in the 7 files whose imports L1d changed: the four
-     completion admissions, ParticipantFactoryProvisioning, NativeHostContext and
-     ResourceBirthPolicyController.
-   - Take L1d's side of the HEADER hunks only and merge body hunks normally.
-   - Then run `python3 scripts/lean-modularize.py <those files> Kernel/CompletionCustodianKey.lean`.
-     Never hand-edit a converted header.
-3. Check each changed file and its direct importers with `scripts/pipeline/lane-check FILE`
-   on a box tree, never with `lake env lean`.
-   - A hidden-body failure: run `scripts/module-hidden-bodies.sh FILE` and add its lines to
-     PER_FILE in lean-modularize.py, then re-convert.
-4. Re-prove green on the merged tree and send that sha to the integrator.
-5. Then put the M2 commits on top and run the same modularize step for
-   Kernel/MeterRefillReceiver.lean and NativeHostReplay.
-   - In the converted NativeHostReplay every `Derived` literal names each defaulted field
-     (`… := none`). That works around Lean 4.30's private-ctor-plus-defaults bug. Rewrite
-     M2's `meterRefill` Derived literal the same way.
-6. M2 lands in one integration build with the integrator's codec-shapes regen, so the
-   StoreEpoch moves once.
+- dregg-ref /build/lanes/lean-audit-c is a worktree of /build/minidregg. `git fetch` fails there
+  on the other user's object dirs, so sync it with `git archive HEAD <files> | ssh dregg-ref tar
+  -x` and chown the files to lanes. Scripts export
+  `PATH=/build/home-lanes/.cargo/bin:/build/home-lanes/.elan/bin:$PATH`. PID file
+  /build/lanes/lean-audit-c-build.pid; run as `sudo -u lanes`.
+- hbox /othersys/lanes/lean-audit-c/src: git archive plus overlays (82c17c448 + the M2 tip now).
+  build.sh / build-m2.sh, build.pid, SWARM_MEM_MAX=40G. Remove /othersys/lanes/lean-audit-c when
+  the lane ends.
 
-The M2 commits, on lane/lean-audit-c-m2 (pushed, unbuilt):
-- f21407b2e: the protocol.
-- a7f17b12d and ab030d544: the refill family, the registry and K3.
-- e870fd03e: the spec twin retired and the deployed teeth.
+### M2 as built (pass 21, pass 23 and addenda, all accepted)
 
-The auditor accepted the deployed K1/K2/K3 (pass 21 and its addendum). K3's proof needs
-per-arm work on a box: about 25 arms carry the intent as a structure field with an
-`intentExact`.
+- Protocol: `Intent.credit`, install `available - exactCharge + credit`, sameCheck compares
+  credit, IntentRecord.credit (v3), `IntentRecord.erase` carries it.
+- The World carries credit (pass 23, option A):
+  - `World.Turn.credit`, documented as turn data that `admit` does not decide; minting is
+    confined only by K3.
+  - `meteredLanes`/`meterPatch`; regression poles `meteredLanes_uncredited`,
+    `meterPatch_uncredited` and `sysPatch_uncredited`.
+  - `sysPost_allowance` and `step_meter` on every lane; `charge_le_allowance` with
+    `+ t.credit l`.
+  - `turnOf_credit`/`ofIntent_credit`; `SnapRepresents.meter` strengthened to
+    `allowanceOf l = some (available l)`, with `meter_eq` keeping the old reading. The four
+    HostRefinesWorld statements are unchanged.
+  - The tooth `encodeTurn_credit_ne`, and the pole `toy_refill_at_exhausted_meter` (0 → 5).
+- K1 `protocol_install_matches`, K2 `AcceptedRefill.sound` (deployed), K3
+  `NativeAdmission.credit_confined`: proved per arm. `Reserved.uncredited` was added and
+  accepted: the one construction site fills it by rfl. The other per-arm lemmas are
+  `AdmittedTurn.finalIntent_credit` and the ClaimV3 `Conditional.intent` unfold.
 
-### Done since L1c (all unbuilt)
+### Done since L1c (all in 82c17c448)
 
 | sha | what |
 |---|---|
-| f07166482 | Completion custodian key from the platform cell, accepted in pass 20. `Kernel/CompletionCustodianKey.lean` (`Read`, `select`, `Read.current`, `Read.stale`, `select_unavailable`, `select_pinned`, `recordOn_light_keys`). `PlatformCellDomain.recordOn` is the one record reader (`platformRecordAt` = `recordOn … durable.snapshot`). Each of the four completion Candidates carries `custodian` and the checked `platformReadOnly`. Each Core guards the platform root and proves `keyCurrent`. Host pre-checks read the record. `provisionPlanLoaded` signs over `prepared.template` |
-| b9d5fbd7e | Application grain births: builders take the record (`record.creation`, `record.lifetime`). The loaded author reads `recordOn` and checks `record.grainBirth`. The pure Json author passes `genesisRecord` |
-| aad599082 | Pay quotes price from the receiver's ambient. Reserve birth authoring prices from the record. SourceAgreementJson.birthCurrent takes the record (port of a9b916cbf). `descriptionLoaded` offers grain-birth per the record. BirthRuntimeProfile.select no longer compares the grain tariff |
-| b7412f32a | Grain births guard the platform cell: `platformGuard` in `Accepted.readGuards`, checked `Pending.platformUnwritten` (`.platformWritten`), `Accepted.platformGuarded` |
+| f07166482 | Completion custodian key from the platform cell (pass 20): `Kernel/CompletionCustodianKey.lean`, `PlatformCellDomain.recordOn` the one record reader, the four completion Candidates carry `custodian` and checked `platformReadOnly` |
+| b9d5fbd7e | Application grain births read `record.creation`/`record.lifetime`; the loaded author checks `record.grainBirth` |
+| aad599082 | Pay quotes, reserve birth authoring, SourceAgreementJson.birthCurrent and `descriptionLoaded` price from the record |
+| b7412f32a | Grain births guard the platform cell (`platformGuard`, checked `Pending.platformUnwritten`, `Accepted.platformGuarded`) |
+| d95bf65ea, bd199e0e9, 82c17c448 | build reds: enrolObserve call sites, provisioning import, `recordOn_congr`, `select_pinned`, provisioning `recordOf` (Lean 4.30 generalizes a match discriminant inside the returned subtype; a local `go` carries the equation) |
 
-Census (`scripts/check-platform-field-readers.py`): 0 owed rows, 0 refusals, and `--ship` passes.
-`config.grainBirthTariff` is now a counted pattern. Every non-owed row carries a `reason`
-(`--write` keeps it). `templateAt config.profile.template` counts as the cell path.
+The census (`scripts/check-platform-field-readers.py`) has 0 owed rows, and `--ship` passes.
 
 ### Owed
 
 - The theorem form of the two checked refusals, `platformReadOnly` (completions) and
-  `platformUnwritten` (grain births): that no DRC or grain write lands at the platform id. Pass
-  20 (a) accepted the checked form as fail-safe.
+  `platformUnwritten` (grain births). Pass 20 (a) accepted the checked form as fail-safe.
 - `GrainResourceBirthAdmission.Pending.admitBranch` still lets `law.admit`'s `none` cover a
   binding failure (pass 16).
-- Item 5, `Intent.credit` and refill ops 244–247. The design is accepted in pass 21 with one
-  finding: the overflow fit belongs in the protocol's preflight (`creditOverflow` at commit),
-  not at plan time.
-  - Take the controller from the platform cell's `controllerOf`.
-  - Guard the authority cell.
-  - State the replay link: a record whose credit differs from its arm's re-admitted intent is
-    refused (the sameCheck credit clause).
-  - The coordinator's ruling: credit persists in `IntentRecord`, with durable log v3 and image
-    v3. It ships with the module conversion's re-genesis so the StoreEpoch moves once. Order
-    it with the integrator and the iter-speed successor (a0fd127abfb9aac75).
-  - Keystones: K1 `protocol_install_matches`, K2 `refill_lawful` (deployed), K3
-    `credit_confined` over the `NativeAdmission` arms.
-- Item 7: the concrete witnesses. Each is not done until it exists.
-  - Audit (c)'s poles and `ReceiverReadsCurrent`'s satisfiable pole: one concrete loaded,
-    signed `AcceptedBirth` or `Pending`, one with a passing verdict and one refused.
-  - The completion `Candidate` that passes `platformReadOnly`.
-  - The admitted refill at an exhausted meter.
+- Item 7, the concrete witnesses (none done until it exists):
+  - audit (c)'s poles and `ReceiverReadsCurrent`'s satisfiable pole: one concrete loaded,
+    signed `AcceptedBirth` or `Pending`, one with a passing verdict and one refused;
+  - the completion `Candidate` that passes `platformReadOnly`;
+  - the Host-level admitted refill at an exhausted meter (the World half is
+    `toy_refill_at_exhausted_meter`).
   - `scripts/kn2/neutral-birth.lean` is the accepted interim executed witness for births only.
