@@ -130,7 +130,7 @@
  "Kernel/ActivitySeatEnd.lean": {
   "config.tariff": {
    "count": 2,
-   "status": "owed"
+   "status": "other"
   }
  },
  "Kernel/ApplicationFailedStartRecoveryAdmission.lean": {
@@ -230,31 +230,31 @@
  "Kernel/ObjectiveActivity.lean": {
   "config.tariff": {
    "count": 17,
-   "status": "owed"
+   "status": "other"
   }
  },
  "Kernel/ObjectiveActivityReceiverCore.lean": {
   "config.tariff": {
    "count": 3,
-   "status": "owed"
+   "status": "other"
   }
  },
  "Kernel/ObjectiveActivityUpgrade.lean": {
   "config.tariff": {
    "count": 3,
-   "status": "owed"
+   "status": "other"
   }
  },
  "Kernel/ObjectiveCall.lean": {
   "config.tariff": {
    "count": 2,
-   "status": "owed"
+   "status": "other"
   }
  },
  "Kernel/ObjectiveDomain.lean": {
   "config.tariff": {
    "count": 1,
-   "status": "owed"
+   "status": "other"
   }
  },
  "Kernel/ObjectiveRefinesWorld.lean": {
@@ -266,39 +266,39 @@
  "Kernel/ObjectiveResumeContract.lean": {
   "config.tariff": {
    "count": 16,
-   "status": "owed"
+   "status": "other"
   }
  },
  "Kernel/ObjectiveSend.lean": {
   "config.tariff": {
    "count": 2,
-   "status": "owed"
+   "status": "other"
   }
  },
  "Kernel/ObjectiveUpgradeInvariant.lean": {
   "config.tariff": {
    "count": 2,
-   "status": "owed"
+   "status": "other"
   }
  },
  "Kernel/ParticipantFactoryProvisioning.lean": {
   "template.lifetime": {
    "count": 1,
-   "status": "owed"
+   "status": "cell"
   },
   "template.ownerBudget": {
    "count": 1,
-   "status": "owed"
+   "status": "cell"
   }
  },
  "Kernel/PayEnrolReceiver.lean": {
   "template.lifetime": {
    "count": 1,
-   "status": "owed"
+   "status": "cell"
   },
   "template.ownerBudget": {
    "count": 1,
-   "status": "owed"
+   "status": "cell"
   }
  },
  "Kernel/ResourceBirthPolicyController.lean": {
@@ -314,13 +314,13 @@
  "Kernel/SeatStore.lean": {
   "config.tariff": {
    "count": 1,
-   "status": "owed"
+   "status": "other"
   }
  },
  "TokenCensus/Table.lean": {
   "config.tariff": {
    "count": 1,
-   "status": "owed"
+   "status": "other"
   }
  }
 }

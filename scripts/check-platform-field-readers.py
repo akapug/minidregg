@@ -12,6 +12,9 @@ status:
   owed     must read the platform cell before the digest change ships;
   genesis  the genesis seed itself (the record the cell starts from);
   encoding the template's own encoding (issuer and birthSlack stay profile fields);
+  other    a different structure's field of the same name: the objective activity's
+           `ObjectiveActivity.Config.tariff` is the work tariff (`ObjectiveTariff.Tariff`:
+           workOf, domainWork, heap, stack), which the platform cell does not own;
   cell     reads the field through the platform record (`templateAt profile.template record`
            takes only issuer and birthSlack from the profile).
 
