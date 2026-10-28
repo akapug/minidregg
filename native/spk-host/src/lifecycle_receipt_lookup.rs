@@ -18,7 +18,7 @@ use std::io::{self, Read};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 
-pub(crate) const OUTCOME_TAG: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v7";
+pub(crate) const OUTCOME_TAG: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v8";
 const MAX_FRAME: u64 = 12_102_760;
 
 fn invalid(reason: &'static str) -> io::Error {

@@ -1,37 +1,38 @@
-# Untouched-areas deputy: state (rewritten whole; 2026-10-27 late evening)
+# Untouched-areas deputy: state (rewritten whole; 2026-10-27 night)
 
 Inputs: docs/review/2026-10-27-untouched-areas/{LEAN,NATIVE}.md, docs/review/2026-10-27-blind-spots/BLIND-SPOTS.md Sweep 1.
-Each lane: /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>. The integrator reads lane/* at its cuts.
-Box rules for every brief: dregg-build = filtered tests + journey rows; dregg-ref (lanes@2.31.71.194) = Lean closures, ONLY via `closure-lock swarm-build …`, load < 8, seed only .lake/packages (never cp -al a .lake/build), PID file as its own statement, one box-wait. The Mac = per-file elaboration (APFS clone `cp -cR` of the integration .lake/build is safe there).
+Each lane: /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>.
 
-## Landed (checked against the code; most merged by cut 12)
-- un-verify 9f5a7cf4: Generic Simplex gate (harness, log-reopen, load; plants fixed-timer, split-tip, flip-byte). Load curve: publish only from the cut's dregg-build run.
-- un-bend 91f8a83c: `bend publish|run|show|lookup|retry`; jbend 29/0 incl. the step-6 lost-reply shape; transport lose-reply waits for readability (poll) before dropping; scripts/author-objective-policy.sh (infra adds it to genesis).
-- un-world e279d8ac (+ ae6bf1a1 statement): Tally, call, send admitted natively; dues split; DOMAINS.md (seven domains need effect Plans).
-- un-assurance e6eac995: census, kernel-subject verdicts, Door 11 trace + sentence, gen-storylaw row, StoryHistory (R1 proved; R2a needs the receiver call; generator in Kernel/StoryLaw.lean).
-- un-native-rows 6fae5fa4; un-moves 755e0533 (terminal/benchmarks/coordination/checkpoint/DeployedCellRegistry/QuotaGc/PrivateEscrow; DreggNet lease cluster parked); un-pred-census f8677835 then 109f42b7 (TokenCensus 5 fixed, 18 open, TOKEN-DEFECTS.md); un-fixtures a6a32103; un-seats ccb34bc5 (seat lock).
-- private-backend (stays, ember): un-pb-codec 470f41e7 (R8), un-pb-exec 64211340 (R7/P9/KAT), un-pb-seal e8fd7019 (R3 whole: verified epoch adoption, key-byte digest binding), un-pb-wal 7659fea5 (R2: torn tail rule, two-step sh2t dealer, dzk test gated, anchor on transition_journal, protocol_store deleted).
-- un-deputy: this file; docs/review/2026-10-27-untouched-areas/EFFECTS.md.
+## Rules in force (ember; COORDINATION §4 on main)
+- Lanes may build, elaborate and run rows again, but ONLY in a warm, incremental tree on dregg-ref or hbox: never the Mac, never a cold build, never a hard-linked build/ dir (seed only .lake/packages). Stop only your own processes, by PID file (or the harness task that started them).
+- The integrator fixes the reds it finds in main's build itself; only reds needing a design decision come back to the deputy.
+- No Lean on the Mac, ever. Each faerie works only in its own worktree. Never search the filesystem from / or ~ (a whole-disk find overflowed the Mac's file table).
+- Statements go directly to the statements auditor (af7a93e7b8ba729d4), copying the deputy.
+- Integration is continuous (no cuts). Re-genesis is free (flag days are not held).
+- Never kill by pattern; no PID file: tell the coordinator.
 
-## In flight (agent ids for resumption are in the session transcript; route through the coordinator)
-- un-effects (Opus implementer): activity-kernel effect Plans (transfer/commit as kernel-decided yields). Statement in DOMAINS.md. Rulings: recordFrame v8->v9 flag day rides L1's re-genesis (lane OFF cuts until the coordinator says the seed is in); law refusal refuses the turn; keystone file Kernel/ObjectiveActivityEffect.lean -> statements auditor before proof; wire entries already sent to L1. Its closure runs on dregg-ref when its Lean elaborates.
-- un-pred-census (Sonnet): Vouchers. Statement 726e1c09 (Theory/ReceivingVerifier.lean). Auditor pass 8 to fold in: deployed receivers stated at `Vouchers receiverVerifier` in Kernel/Compiler + census row refusing other Verifier IO values; ofAnswered private or truthfully justified; Ran's file has no other mint/instances/unsafe, with a check; pilot uses observed+verified, top-level theorem at receiverVerifier, IO-level teeth. Then the sweep of every receiver EXCEPT PlatformInstallReceiver, PayEnrolReceiver/V2, SubjectKeyRotation (those after L1's seed).
-- un-stream-continuity (Sonnet): hot-route `withOpenedFreshTip` refusal (Kernel/ApplicationStreamContinuity.lean:208-227); statement first -> auditor; closure; japps co-edit repro; then tell the coordinator so the L13 successor reruns DDP.
-- un-pb-wal (Sonnet): two-step dealers for King composite, dzk_store, private_send_store.
-- un-pb-twins (Sonnet): private-backend §5.3 twin deletions; then custody Pool/Cut + CLI arms + crash-probes.py on top of un-pb-wal; helper merges last.
+## Landed earlier (on main)
+un-verify (Generic Simplex gate), un-bend (bend verb + lost reply), un-world (Tally/call/send native; DOMAINS.md), un-assurance (census, Door 11, StoryHistory, Kernel/StoryLaw), un-native-rows, un-moves, un-fixtures, un-seats, un-pb-codec (R8), un-pb-exec (R7/P9), un-pb-seal (R3 whole), un-pb-wal (R2 + all five two-step dealers, 68d9f28e).
+
+## Pushed, waiting on the central build (reasoned; built only by the integrator so far)
+- un-effects 2acd8acf (fix 2b9de248 "ready" told; five more world scenarios bounty/play/ballot/story/commons 2d4ff2bd..2acd8acf, unrun). The effect Plan: keystone proved 5e116ec9 (on main). Pass-11 additions (FundsAgree, DepositIndependent, BirthCommitJudged, DeliverLawRefuses + two poles; commitYield_spec restated) at 2aaf5ec9. Kernel fix: deliver refuses payerInvalid when the submitter or the collector is the purse (Delivery.purseApart); payerInvalid docstring names it. 2b9de248 adds the missing opens (addCapacity; applyOperations/registerAccounts/deregisterAccounts/_accounts) and drops a no-progress dsimp. World apps (dues, bounty Board, play, ballot, story, commons) on the kernel protocol, e6c7ed42; native scenarios dues/effect + purse-as-submitter/law-refused rows 0fa0eb98. OWED to the central build: codec pins re-emit (scripts/codec-shapes-regen.py, ACTIVITY-RECORD v9), cohort gate (renamed rows: ballot 1, story 1, commons 2), native rows on a main candidate, README native lines; scenarios for bounty/play/ballot/story/commons not yet written. Continuation: docs/evidence/2026-10-27-world-native/EFFECTS-STATE.md. Its faerie is retired (~536k); the deputy owns the remainder.
+- un-pred-census 44479e30 (the integrator takes it for the cut-14 ReceivingVerifier red): Vouchers conversion = the whole sweep (every receiver is a Kernel.Receiving.Family through Family.receiver, now fixed to receiverVerifier with Answered = Ran). Ran private, one mint; live_voucher_has_ran (CredentialSignatureAdmission.lean:391); gate rows receiver-verifier (text) and ran-mint (term-level, needs AxiomCensusResearch built). L1's three receivers got forced edits only (PayEnrolReceiver 1182,1192,1195,1596-1601; V2 818-823,843,847; SubjectKeyRotation 427-428); L1 merges before editing them. Faerie retired (~299k).
+- un-stream-continuity 0d95b3e1 on main via cut 14; its 14 statement-file reds are the integrator's (faerie's 6544ea37 offered as a start; a pole statement change comes to the deputy and auditor). Was: hot-route op154 refusal fixed at the cause (Appended.headTagExact; exactCandidate carries the tag; withOpenedFreshTip through verdict with Head.verify; distinct refusals). Statement accepted (e0916a53). Gate: japps co-edit row; then L13 reruns DDP. Faerie (a4e312352a7091f59, ~220k) fixes forward routed reds.
+- un-pb-twins 134535c2: §5.3 deletions (reconstruction, two_bit_addition, source_endpoint outcome side, PROGRESS v1, dealer_start, binding v1, sequential Engine + store, circuit_batch items, reserve_material, custody Pool/Cut + CLI arms + crash-probes.py); AnchorFixture replaced by the real serve(listener, stop) (blocking accept, wake connect); P6 receipt verifier rebuilt on the anchor with its test (extends case shown); LayerEngine non-Boolean test. Faerie (a1d3a428143ff3b8e, ~294k) retired.
+
+## Owed / unowned
+- ember's ruling (memory "no hand-written kernel effects"): kernel effects must come from a revived Effects/ derivation engine. un-effects' transfer/commit are hand-written in Kernel/ObjectiveActivity.lean: deferrable for the demo, owed after (EFFECTS.md has the Phase-3 design: EffectSpec widened with refusal, authority demand and frame; the dispatch keystone; the hand arm deleted in the same commit).
+- private-backend helper-copy merges (Cursor, Lagrange, Horner, PRG, urandom, outbox codecs): unowned.
+- private-backend P6 (lost reply on reserve/burn): open; the verifier exists.
+- Tier 2 (after the opening): R1 the in-process MPC as a door. The sibling product deputy (a5a600787670d2be5) now owns the MPC demo door, invite codes, Host request rate, web3.js serializer, grain class slices: not ours.
+
+## Web item (done)
+- un-web-front 0da04999: the public front page renders the operator's published document. mini-web-spawn reads /etc/mini/front-doc and passes --front-doc to the public body only; it falls back to the index. Infra writes `welcome` there (demo-vm 3b8e729, run-sheet step 9c); its check line: an anonymous GET / renders welcome. Sha sent to the integrator.
 
 ## Decided
-- fn out of the demo; exchange row UNCONFIGURED by name; sentence published.
-- private-backend stays; tier 1 now (R7/R8/R2/R3 done, twins in flight); tier 2 after the opening: R1 the in-process four-party MPC as a "private computation" door (CLI arm, derived form, one row, curious-holder transcript, labelled research, no transport); R4-R6 parked (Phase 3).
-- Effects/: label repaired; the registry is a Phase-3 redesign over the live admission (EFFECTS.md).
-- world/dues and six more wait on effect Plans (un-effects); drex (action list) and Route A pure domains out of that change.
-- Contracts Cuts/Snapshot/Refinements/Futures kept; Pred BoundedQuantifiedView/CoordinationDial kept; four-source fixture not in the Simplex gate.
-- provider-services/Check.lean is L1's; resource-client dead dep is the L2 successor's.
-
-## Seams handed upward
-- Door 11 sentence -> web lane; roomkey.rs:3100 wrapAtomId -> L2 successor; host closure 777 vs ceiling 776 on main -> integrator; demo genesis objectiveInvocation -> infra; story receiver call (checkActiveComponent resolved (law t S)) -> platform lane.
+fn out; private-backend stays; Effects/ registry is Phase 3 (EFFECTS.md); dues and six more ride the effect Plan; DreggNet lease cluster parked; Contracts Cuts/Snapshot/Refinements/Futures kept; Pred BoundedQuantifiedView/CoordinationDial kept; twin conflict on un-pb-twins resolved to un-pb-wal 68d9f28e's design (82f3710b).
 
 ## Next three
-1. Route the Vouchers pilot sha + pass-8 changes to the auditor; hand the sweep its closure slots.
-2. Review un-effects' keystone (to the auditor) and its closure; then the seven domains' native rows (dues first).
-3. Review un-stream-continuity's statement and fix; tell the coordinator when DDP can rerun.
+1. Read the central build's verdict on un-effects 2b9de248; fix routed reds by reasoning; get the codec pins re-emitted; write the remaining world scenarios (bounty, play, ballot, story, commons) in world-activity-admit.py and README native lines.
+2. Route any central reds on un-stream-continuity / un-pred-census / un-pb-twins to their faeries; tell the coordinator when the japps co-edit row is green.
+3. Assign the private-backend helper merges if the coordinator wants them now.

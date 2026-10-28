@@ -34,6 +34,7 @@ fn request(method: Method, path: &str, bytes: &[u8]) -> WebRequest {
             encoding: "".into(),
             bytes: bytes.into(),
         }),
+        dav: Default::default(),
     }
 }
 fn status(reply: &WebResponse) -> u16 {

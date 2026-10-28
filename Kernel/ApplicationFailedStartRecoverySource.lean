@@ -123,7 +123,7 @@ def Source.command (domain semantics : Digest) (source : Source) :
     else [appTarget]
   { subject := begin.managementSubject
     nonce := (Sp800185Cshake256.hash
-      "DREGG/APPLICATION/FAILED-START-RECOVERY-COMMAND/v1".toUTF8.toList
+      "DREGG/APPLICATION/FAILED-START-RECOVERY-COMMAND/v2".toUTF8.toList
       ((StreamCodec.product digestStream
         (StreamCodec.product digestStream bytesStream)).encode
         (domain, semantics, source.physical.report.canonicalBytes))).digest.value

@@ -422,7 +422,7 @@ theorem observedPhysicalRoot_current {deployment : Deployment}
 selected issue/ticket coordinates, without including their own envelopes. -/
 def observationContext (ingress : ApplicationDispatchAdmissionIngress.Ingress) :
     List UInt8 :=
-  "DREGG/APPLICATION/DISPATCH-OBSERVATION/v4".toUTF8.toList ++
+  "DREGG/APPLICATION/DISPATCH-OBSERVATION/v5".toUTF8.toList ++
     ((StreamCodec.product digestStream
       (StreamCodec.product StreamCodec.nat
         (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream

@@ -151,7 +151,13 @@ impl Deployment {
         let _ = stream.set_read_timeout(Some(deadline));
         let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
         if stream.write_all(format!("{}\n{line}\n", session.name).as_bytes()).is_err() {
-            return Outcome::entrance(Ending::entrance("error", "the session runner did not take the line; nothing ran"));
+            // The runner had already taken the connection (Linux answers a close-mid-send
+            // with EPIPE, macOS with ENOTCONN; a write timeout is the third way). Whether
+            // it took the line cannot be known, and a maybe is never rerun.
+            return Outcome::entrance(Ending::entrance(
+                "undecided",
+                "the session runner did not take the whole line; it may have run, `lookup ID` asks the Host again",
+            ));
         }
         let _ = stream.shutdown(std::net::Shutdown::Write);
         let mut answer = Vec::new();

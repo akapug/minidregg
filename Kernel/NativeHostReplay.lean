@@ -3173,16 +3173,91 @@ structure Failure where
   deriving Repr
 
 /-- One checked step of the real replay loop. Its derived value contains
-`NativeAdmission`, so a stored record alone cannot witness this relation. -/
+`NativeAdmission`, so a stored record alone cannot witness this relation.
+
+The validated successor is the executor's `next` up to its `headTag`: the tag is the cache of an
+authenticated Store head, not admitted state. A replay over stored records carries `next`'s own
+(`none`); the receiver's exact readback carries the tag its append wrote
+(`Appended.headTagExact`, so the hot route needs no re-read). -/
 def AdmittedStep (config : Config) (before after : Opened config)
     (record : DurableReceiver.IntentRecord) (receipt : NativeHostCodec.Receipt) : Prop :=
   ∃ derived : Derived config before,
     recordMatches record derived.intent = true ∧
     ∃ next : Durable,
       advance before derived = .ok next ∧
-      validateLoaded config next = .ok after ∧
+      ∃ headTag : Option (List UInt8),
+      validateLoaded config { next with headTag := headTag } = .ok after ∧
       receipt = ⟨derived.intent.transactionId, derived.intent.event.eventId,
         before.durable.image.accepted.length + 1, next.worldRoot⟩
+
+/-- **The head tag rides along.** Validation judges an image without reading its `headTag`: for any
+tag, the same refusal or the same pins (and by `validateLoaded_durable` the validated image is the
+input, so it differs only in that cache field). This confines `AdmittedStep`'s `∃ headTag` to the
+cache; if validation ever reads the tag, this breaks. -/
+theorem validateLoaded_headTag (config : Config) (durable : Durable) (headTag : Option (List UInt8)) :
+    (validateLoaded config { durable with headTag := headTag }).map (·.pins) =
+      (validateLoaded config durable).map (·.pins) := by
+  have rows : CredentialAuthorityDomainReceiver.directoryRows { durable with headTag := headTag } =
+      CredentialAuthorityDomainReceiver.directoryRows durable := rfl
+  have directories :
+      (CredentialAuthorityDomainReceiver.loadDirectory { durable with headTag := headTag }).map
+          (·.directory) =
+        (CredentialAuthorityDomainReceiver.loadDirectory durable).map (·.directory) := by
+    unfold CredentialAuthorityDomainReceiver.loadDirectory
+    dsimp only
+    by_cases absent : durable.image.seed.absentBytes = []
+    · rw [dif_pos absent, dif_pos absent]
+      split
+      · split
+        · rfl
+        · rename_i left _ right
+          rw [rows] at left
+          rw [left] at right
+          cases right
+      · split
+        · rename_i _ left right
+          rw [rows] at left
+          rw [left] at right
+          cases right
+        · rename_i _ left _ right
+          rw [rows] at left
+          rw [left] at right
+          cases right
+          rfl
+    · rw [dif_neg absent, dif_neg absent]
+      rfl
+  have lawfulSame : ∀ directory,
+      cellsLawful config { durable with headTag := headTag } directory = cellsLawful config durable directory :=
+    fun _ => rfl
+  have lawfuls :
+      (CredentialAuthorityDomainReceiver.loadDirectory { durable with headTag := headTag }).map
+          (fun loaded => cellsLawful config { durable with headTag := headTag } loaded.directory) =
+        (CredentialAuthorityDomainReceiver.loadDirectory durable).map
+          (fun loaded => cellsLawful config durable loaded.directory) := by
+    have mapped := congrArg (Option.map (cellsLawful config durable)) directories
+    simpa only [Option.map_map, Function.comp_def, lawfulSame] using mapped
+  have core := validateCore_map config durable.image.seed durable.logStart
+    (CredentialAuthorityDomainReceiver.loadDirectory durable)
+    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
+    (·.directory) (·.snapshot.logical) (fun loaded => cellsLawful config durable loaded.directory)
+    (CredentialAuthorityDomainReceiver.loadDirectory { durable with headTag := headTag })
+    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
+    (·.directory) (·.snapshot.logical)
+    (fun loaded => cellsLawful config { durable with headTag := headTag } loaded.directory)
+    directories lawfuls rfl
+  unfold validateLoaded validateParts validatePartsWith validatePartsVia
+  revert core
+  generalize validateCore config durable.image.seed durable.logStart
+    (CredentialAuthorityDomainReceiver.loadDirectory durable)
+    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
+    (·.directory) (·.snapshot.logical) (fun loaded => cellsLawful config durable loaded.directory) = right
+  generalize validateCore config durable.image.seed durable.logStart
+    (CredentialAuthorityDomainReceiver.loadDirectory { durable with headTag := headTag })
+    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
+    (·.directory) (·.snapshot.logical)
+    (fun loaded => cellsLawful config { durable with headTag := headTag } loaded.directory) = left
+  intro core
+  cases left <;> cases right <;> simp_all [Except.map]
 
 /-- **`tail_bounded`, on the replayed history.**  Every step of the replay walk
 that is not a certify record sits at most `L` heights past the certified height
@@ -3195,7 +3270,7 @@ theorem AdmittedStep.tail_bounded {config : Config} {before after : Opened confi
         ∃ system, Kernel.TailBound.valueOf
             (before.durable.snapshot.canonicalBytes config.systemCell) = some system ∧
           before.durable.height + 1 - system.certifiedHeight ≤ system.tailBound) := by
-  obtain ⟨derived, matched, next, advanced, _, _⟩ := step
+  obtain ⟨derived, matched, next, advanced, _, _, _⟩ := step
   exact ⟨derived, matched, fun notCertify =>
     Kernel.TailBound.tail_bounded (advance_judged advanced) notCertify⟩
 
@@ -3246,11 +3321,13 @@ theorem AdmittedStep.image {config : Config} {before after : Opened config}
     (step : AdmittedStep config before after record receipt) :
     after.durable.image = ⟨before.durable.image.seed, before.durable.image.accepted ++ [record]⟩ ∧
       after.durable.logStart = before.durable.logStart := by
-  obtain ⟨derived, matched, next, advanced, validated, _⟩ := step
+  obtain ⟨derived, matched, next, advanced, headTag, validated, _⟩ := step
   have wraps := validateLoaded_durable validated
   have exact := (recordMatches_iff record derived.intent).mp matched
   obtain ⟨imaged, started⟩ := advance_image advanced
-  rw [wraps, imaged, started, exact]
+  have image : after.durable.image = next.image := by rw [wraps]
+  have start : after.durable.logStart = next.logStart := by rw [wraps]
+  rw [image, start, imaged, started, exact]
   exact ⟨rfl, rfl⟩
 
 /-- **The replay walk's final image is its start followed by exactly the
@@ -3497,7 +3574,7 @@ private def walk (config : Config) (opened : Opened config)
               | .error failure => return .error failure
               | .ok tail =>
                 let step : AdmittedStep config opened after record receipt :=
-                  ⟨derived, matched, next, advanced, validated, rfl⟩
+                  ⟨derived, matched, next, advanced, next.headTag, validated, rfl⟩
                 let selectedAt :=
                   if selectIndex == some index then
                     let selected : SelectedStep config opened tail.final
@@ -3815,13 +3892,15 @@ def extendExact {config : Config} {store : DurableHistory.StoreIdentity}
   have matched : recordMatches record readback.derived.intent = true := by
     exact (recordMatches_iff _ _).mpr rfl
   have step : AdmittedStep config old.opened readback.after record receipt := by
-    have advanced : advance old.opened readback.derived = .ok target := by
+    -- The executor's successor is the untagged extension; the readback validated it carrying the
+    -- tag its append wrote (`exactCandidate`), which is the step's post image up to `headTag`.
+    have advanced : advance old.opened readback.derived =
+        .ok (old.opened.durable.extend readback.ready) := by
       unfold advance
       simp only
       rw [DurableReceiverIO.Loaded.prepare_eq, readback.prepared]
       simp only [readback.judged]
-      rfl
-    exact ⟨readback.derived, matched, target, advanced, readback.validated, rfl⟩
+    exact ⟨readback.derived, matched, _, advanced, some readback.tag, readback.validated, rfl⟩
   have exactImage : readback.after.durable.image = target.image :=
     congrArg DurableReceiverIO.Loaded.image (validateLoaded_durable readback.validated)
   have countExact : (old.receipts ++ [receipt]).length = target.image.accepted.length := by
@@ -4233,7 +4312,8 @@ def SuffixStep (config : Config) (before after : Opened config)
     recordMatches record derived.intent = true ∧
     ∃ next : Durable,
       advanceSuffix before derived = .ok next ∧
-      validateLoaded config next = .ok after ∧
+      ∃ headTag : Option (List UInt8),
+      validateLoaded config { next with headTag := headTag } = .ok after ∧
       receipt = ⟨derived.intent.transactionId, derived.intent.event.eventId,
         before.durable.image.accepted.length + 1, next.worldRoot⟩
 
@@ -4241,8 +4321,8 @@ theorem SuffixStep.ofAdmittedStep {config : Config} {before after : Opened confi
     {record : DurableReceiver.IntentRecord} {receipt : NativeHostCodec.Receipt}
     (step : AdmittedStep config before after record receipt) :
     SuffixStep config before after record receipt := by
-  obtain ⟨derived, matched, next, advanced, validated, sealed⟩ := step
-  exact ⟨.ordinary derived, matched, next, advanced, validated, sealed⟩
+  obtain ⟨derived, matched, next, advanced, headTag, validated, sealed⟩ := step
+  exact ⟨.ordinary derived, matched, next, advanced, headTag, validated, sealed⟩
 
 inductive AdmittedSuffix (config : Config) : Opened config →
     List DurableReceiver.IntentRecord → Opened config →
@@ -4311,16 +4391,18 @@ theorem AdmittedSuffix.image {config : Config} {before after : Opened config}
       after.durable.logStart = before.durable.logStart := by
   induction trace with
   | nil opened => exact ⟨by rw [List.append_nil], rfl⟩
-  | cons step tail ih =>
-      obtain ⟨derived, matched, next, advanced, validated, _⟩ := step
+  | @cons _ middle _ _ _ _ _ step tail ih =>
+      obtain ⟨derived, matched, next, advanced, headTag, validated, _⟩ := step
       obtain ⟨tailImage, tailStart⟩ := ih
       have wraps := validateLoaded_durable validated
       have exact := (recordMatches_iff _ derived.intent).mp matched
       obtain ⟨imaged, started⟩ := advanceSuffix_image advanced
+      have image : middle.durable.image = next.image := by rw [wraps]
+      have start : middle.durable.logStart = next.logStart := by rw [wraps]
       refine ⟨?_, ?_⟩
-      · rw [tailImage, wraps, imaged, exact]
+      · rw [tailImage, image, imaged, exact]
         simp only [DurableReceiver.Image.append, List.append_assoc, List.singleton_append]
-      · rw [tailStart, wraps, started]
+      · rw [tailStart, start, started]
 
 theorem advance_base {config : Config} {opened : Opened config} {derived : Derived config opened}
     {next : Durable} (advanced : advance opened derived = .ok next) :
@@ -4372,12 +4454,14 @@ theorem AdmittedSuffix.base {config : Config} {before after : Opened config}
       after.durable.base = before.durable.base := by
   induction trace with
   | nil opened => exact ⟨rfl, rfl⟩
-  | cons step tail ih =>
-      obtain ⟨derived, _, next, advanced, validated, _⟩ := step
+  | @cons _ middle _ _ _ _ _ step tail ih =>
+      obtain ⟨derived, _, next, advanced, headTag, validated, _⟩ := step
       obtain ⟨tailHeight, tailBase⟩ := ih
       have wraps := validateLoaded_durable validated
       obtain ⟨height, base⟩ := advanceSuffix_base advanced
-      exact ⟨by rw [tailHeight, wraps, height], by rw [tailBase, wraps, base]⟩
+      have heightExact : middle.durable.baseHeight = next.baseHeight := by rw [wraps]
+      have baseExact : middle.durable.base = next.base := by rw [wraps]
+      exact ⟨by rw [tailHeight, heightExact, height], by rw [tailBase, baseExact, base]⟩
 
 #assert_axioms AdmittedSuffix.base
 
@@ -4513,7 +4597,7 @@ private def walkSuffix (config : Config) (anchor : Opened config)
               | .error failure => return .error failure
               | .ok tail =>
                 let step : SuffixStep config opened after record receipt :=
-                  ⟨derived, matched, next, advanced, validated, rfl⟩
+                  ⟨derived, matched, next, advanced, next.headTag, validated, rfl⟩
                 return .ok ⟨tail.final, receipt :: tail.receipts,
                   .cons step tail.trace, tail.context⟩
       else return .error ⟨index, "retained suffix differs from source-admitted intent"⟩
@@ -4814,6 +4898,8 @@ def verifyBytes (config : Config)
 #guard_msgs (whitespace := lax) in #print axioms advance_judged
 /-- info: 'Minidregg.Kernel.NativeHostReplay.AdmittedStep.tail_bounded' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms AdmittedStep.tail_bounded
+
+#assert_axioms validateLoaded_headTag
 
 end Minidregg.Kernel.NativeHostReplay
 

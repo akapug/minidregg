@@ -125,6 +125,13 @@ done
 for tool in jq curl python3 sha256sum timeout; do command -v "$tool" >/dev/null || fail "missing $tool"; done
 [[ -f $spk && ! -L $spk && -f $inventory && ! -L $inventory && -d $source && ! -L $source ]] || fail 'inputs absent or linked'
 [[ -f $benchmark && ! -L $benchmark ]] || fail 'qualified STOP benchmark absent or linked'
+# Refuse a receipt from an older Host before creating a Store or copying data.
+# The final report still checks the full cold/served comparison and controls.
+[[ -f $base/minidregg-host && -x $base/minidregg-host ]] || fail 'Host executable absent'
+jq -e --arg host "$(sha256sum "$base/minidregg-host" | cut -d ' ' -f1)" '
+  .schema == "mini-stop-inspection-continuation-v1" and .passed == true
+  and .host_sha256 == $host
+' "$benchmark" >/dev/null || fail 'STOP benchmark must qualify the selected Host binary'
 [[ $(stat -c '%s' "$spk") -le 268435456 ]] || fail 'runtime exceeds Mini signed package admission cap'
 # The publisher, signed package inspector and Mini decide identity/acceptance.
 # These are preflight and evidence pins only.

@@ -40,6 +40,10 @@
 # of 8 for a test scenario (scenario-genesis.sh); a deployment never sets it.
 #
 # The params may carry `factoryPredicate` (a predicate object; absent = all[]).
+# `operatorPolicy` optionally supplies the whitelisted deployment settings below
+# before profile/genesis identity is computed. Values also specified through
+# grainPlatform or top-level settings must agree. Native profile parsing validates
+# their full types; this template derives the platform record from that same config.
 #
 # The params may name compiled-in evaluators the operator disables
 # ("disabledEvaluators": ["nock"], registry names; K-EVAL E2/E3). They go into the
@@ -83,8 +87,19 @@ check_params() {
     and (.meterAllowance | type == "object" and length == 10 and (map_values(int) | all))
     and ((.disabledEvaluators // []) | type == "array" and all(type == "string" and length > 0))
     and ((.factoryPredicate // {}) | type == "object")
+    and ((.operatorPolicy // {}) | type == "object" and
+      (keys - ["completionCustodianKey", "lifecycleManagement", "grainBirthTariff",
+        "providerServices", "disabledEvaluators", "agentLifetimeDispatchTargets"] | length == 0))
   ' "$1" >/dev/null || { echo "genesis: params file fails the minidregg-candidate-genesis-params-v1 schema" >&2; exit 2; }
   check_grain_platform "$1"
+  jq -e '
+    (.operatorPolicy // {}) as $policy |
+    ((.grainPlatform // {}) +
+      (if has("providerServices") then {providerServices} else {} end) +
+      (if has("disabledEvaluators") then {disabledEvaluators} else {} end)) as $existing |
+    all($policy | keys[]; . as $key |
+      ($existing | has($key) | not) or $existing[$key] == $policy[$key])
+  ' "$1" >/dev/null || { echo "genesis: conflicting operatorPolicy settings" >&2; exit 2; }
 }
 # The grain platform's operator policy (deploy/market/INSTALL.md §0), pinned at genesis so the world
 # can host SPK grains at all: `grainPlatform {lifecycleManagement {managementSubject, managementKeyId},
@@ -195,13 +210,14 @@ jq -n --slurpfile p "$params" --arg store "$store" --arg root "$dir/store" --arg
         lifecycleManagement: $p.grainPlatform.lifecycleManagement,
         grainBirthTariff: $p.grainPlatform.grainBirthTariff} else {} end)
   + (if $p.providerServices then {providerServices: $p.providerServices} else {} end)
-  + (if $p.requestRate then {requestRate: $p.requestRate} else {} end)' >"$dir/operator.json"
+  + (if $p.requestRate then {requestRate: $p.requestRate} else {} end)
+  + ($p.operatorPolicy // {})' >"$dir/operator.json"
 
 "$host" "$dir/operator.json" profile >"$dir/profile.json"
 semantics=$(jq -er '.semantics | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
   "$dir/profile.json") || { echo 'genesis: Host profile has no semantics digest' >&2; exit 1; }
 
-jq -n --slurpfile p "$params" --arg semantics "$semantics" --arg public "$public" \
+jq -n --slurpfile p "$params" --slurpfile operator "$dir/operator.json" --arg semantics "$semantics" --arg public "$public" \
   --arg clockPublic "$clock_public" '
   $p[0] as $p | def s: tostring;
   {domain: ($p.domain|s), factoryId: ($p.factoryId|s), resourceBookId: ($p.resourceBookId|s),
@@ -237,9 +253,9 @@ jq -n --slurpfile p "$params" --arg semantics "$semantics" --arg public "$public
    factoryControllerCapability: ($p.factoryControllerCapability|s),
    payControlCapability: ($p.payControlCapability|s),
    clockControlCapability: ($p.clockControlCapability|s),
-   platform: {ownerBudget: ($p.ownerBudget|s), lifetime: ($p.lifetime|s),
-     grainBirthTariff: (if $p.grainPlatform then ($p.grainPlatform.grainBirthTariff | map_values(s)) else null end),
-     completionCustodianKey: (if $p.grainPlatform then $p.grainPlatform.completionCustodianKey else null end)},
+   platform: {ownerBudget: ($operator[0].ownerBudget|s), lifetime: ($operator[0].lifetime|s),
+     grainBirthTariff: (if $operator[0].grainBirthTariff then ($operator[0].grainBirthTariff | map_values(s)) else null end),
+     completionCustodianKey: ($operator[0].completionCustodianKey // null)},
    meterAllowance: ($p.meterAllowance | map_values(s)),
    tailBound: ($p.tailBound|s),
    issuanceCap: ($p.issuanceCap|s),

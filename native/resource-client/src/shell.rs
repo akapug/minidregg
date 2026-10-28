@@ -1181,6 +1181,12 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 }
                 "run" => flags.extend([flag("action", "run"), flag("name", p.arg(0)), flag("object", p.arg(1))]),
                 "show" => flags.extend([flag("action", "show"), flag("object", p.arg(0))]),
+                "await" => flags.extend([flag("action", "await"), flag("object", p.arg(0)), flag("transaction", p.arg(1))]),
+                "answer" => {
+                    let file = p.arg(1).trim_start_matches('@');
+                    session_file(file, "answer")?;
+                    flags.extend([flag("action", "answer"), flag("slot", p.arg(0)), flag("answer", session.home.join("requests").join(file))]);
+                }
                 action => flags.extend([flag("action", action), flag("name", p.arg(0))]),
             }
             if p.has("--lose-reply-once") { flags.push(flag("lose-reply-once", "true")); }
@@ -3362,7 +3368,7 @@ mod tests {
         fs::write(ws.join("refs").join("factory.json"), b"{}").unwrap();
         let s = Session { workspace: ws, home: root.join("h"), host: "/x".into(), config: "/y".into() };
         assert_eq!(complete(&s, "su"), ["submit", "summon"]);
-        assert_eq!(complete(&s, "re"), ["refs", "read", "reveal", "retry", "revoke", "renounce", "react"]);
+        assert_eq!(complete(&s, "re"), ["refs", "read", "reveal", "retry", "revoke", "renounce", "react", "reports"]);
         assert_eq!(complete(&s, "bid "), ["factory", "shared"]);
         assert_eq!(complete(&s, "bids s"), ["shared"]);
         assert_eq!(complete(&s, "market s"), ["settle"]);

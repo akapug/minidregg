@@ -153,7 +153,7 @@ def valueStream : (space : Namespace) → StreamCodec (Namespace.Value space)
   | .clock => clockStream
   | .maxStepSeconds => StreamCodec.nat
 
-def wireName : String := "DREGG/CLOCK/v4"
+def wireName : String := "DREGG/CLOCK/v5"
 
 def wire : Wire layout where
   name := wireName
@@ -166,7 +166,7 @@ def wire : Wire layout where
     | .clock => "unit"
     | .maxStepSeconds => "unit"
   valueCodecId
-    | .clock => "DREGG/CLOCK/NOW-SLOT/v3"
+    | .clock => "DREGG/CLOCK/NOW-SLOT/v4"
     | .maxStepSeconds => "positive-nat/max-step-seconds/v1"
 
 def materializer : Materializer layout Digest := StoreCodec.materializer wire

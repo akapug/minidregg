@@ -56,17 +56,27 @@ jq -n --arg key "$SPK_COMPLETION_PUBLIC" '
 cp "$REPO/scripts/workroom/provision.sh" "$ROOT/source-stage/provision-grain.sh"
 chmod 700 "$ROOT/source-stage/provision-grain.sh"
 
-# Explicit fresh-genesis agent allocation. The overlay generates only native
-# enrollment/birth/delegation source; it never imports a retained Store or key.
+# Explicit fresh-genesis agent allocation. Fixed workroom phases consume only
+# allocation data; they never import a retained Store or key.
 # An absent variable preserves the historical workroom-only provision path.
 PROVISION_GRAIN="$ROOT/source-stage/provision-grain.sh"
+# Normalize the provisioner's name and the older SPK caller name once, so
+# enrollment and lifetime authoring cannot consume different allocations.
+if [ -n "${WORKROOM_AGENT_ALLOCATION-}" ]; then
+  if [ "${SPK_AGENT_ALLOCATION+x}" = x ] && [ "$SPK_AGENT_ALLOCATION" != "$WORKROOM_AGENT_ALLOCATION" ]; then
+    fail "conflicting agent allocation paths"
+  fi
+  SPK_AGENT_ALLOCATION=$WORKROOM_AGENT_ALLOCATION
+fi
 if [ "${SPK_AGENT_ALLOCATION+x}" = x ]; then
   case "$SPK_AGENT_ALLOCATION" in /*) ;; *) fail "agent allocation must be an absolute file" ;; esac
   [ -f "$SPK_AGENT_ALLOCATION" ] && [ ! -L "$SPK_AGENT_ALLOCATION" ] || fail "agent allocation absent or linked"
   cp "$SPK_AGENT_ALLOCATION" "$ROOT/source-stage/agent-allocation.json"
   chmod 600 "$ROOT/source-stage/agent-allocation.json"
   SPK_AGENT_ALLOCATION="$ROOT/source-stage/agent-allocation.json"
-  export SPK_AGENT_ALLOCATION
+  WORKROOM_AGENT_ALLOCATION="$SPK_AGENT_ALLOCATION"
+  export SPK_AGENT_ALLOCATION WORKROOM_AGENT_ALLOCATION
+  sh "$HERE/check-agent-allocation.sh" "$WORKROOM_AGENT_ALLOCATION"
   # Stable authoring selectors are pinned before genesis. Historical event22
   # and event27 indices are deliberately absent: later native authoring still
   # verifies those exact admitted receipts and current authority.
@@ -93,9 +103,6 @@ if [ "${SPK_AGENT_ALLOCATION+x}" = x ]; then
     >"$ROOT/source-stage/operator-policy-required-agents.json"
   mv "$ROOT/source-stage/operator-policy-required-agents.json" \
     "$ROOT/source-stage/operator-policy-required.json"
-  sh "$HERE/agent-genesis-overlay.sh" "$PROVISION_GRAIN" "$SPK_AGENT_ALLOCATION" \
-    "$ROOT/source-stage/provision-with-agents.sh"
-  PROVISION_GRAIN="$ROOT/source-stage/provision-with-agents.sh"
 fi
 
 # A caller may repeat the required values, but cannot silently replace them.
@@ -127,14 +134,19 @@ EOF
 chmod 700 "$ROOT/source-stage/workroom-only.sh"
 
 sha256sum "$0" "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY" \
-  "$REPO/scripts/workroom/provision.sh" "$REPO/scripts/grain-birth/native-share-member.sh" \
+  "$REPO/scripts/workroom/provision.sh" "$REPO/scripts/workroom/agent-enrollment.sh" \
+  "$GENESIS_PARAMS_TREE/native/resource-client/scenario-genesis.sh" \
+  "$GENESIS_PARAMS_TREE/native/resource-client/genesis.sh" \
+  "$GENESIS_PARAMS_TREE/native/resource-client/genesis-params.example.json" \
+  "$REPO/scripts/grain-birth/native-share-member.sh" \
   "$REPO/scripts/application-share-issue/native-positive-base.sh" \
   "$ROOT/source-stage/provision-grain.sh" "$ROOT/source-stage/workroom-only.sh" \
   "$ROOT/source-stage/operator-policy-input.json" \
   "$ROOT/source-stage/operator-policy-required.json" "$WORKROOM_OPERATOR_POLICY" \
   >"$ROOT/source-stage/input-sha256.txt"
-if [ "$PROVISION_GRAIN" != "$ROOT/source-stage/provision-grain.sh" ]; then
-  sha256sum "$HERE/agent-genesis-overlay.sh" "$SPK_AGENT_ALLOCATION" "$PROVISION_GRAIN" \
+if [ "${SPK_AGENT_ALLOCATION+x}" = x ]; then
+  sha256sum "$HERE/check-agent-allocation.sh" \
+    "$REPO/scripts/workroom/agent-enrollment.sh" "$WORKROOM_AGENT_ALLOCATION" \
     >>"$ROOT/source-stage/input-sha256.txt"
 fi
 

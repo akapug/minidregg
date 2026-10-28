@@ -189,7 +189,7 @@ def valueStream : (space : Namespace) → StreamCodec (Namespace.Value space)
   | .record => platformStream
   | .controller => subjectStream
 
-def wireName : String := "DREGG/PLATFORM/v1"
+def wireName : String := "DREGG/PLATFORM/v2"
 
 def wire : Wire layout where
   name := wireName
@@ -202,7 +202,7 @@ def wire : Wire layout where
     | .record => "unit"
     | .controller => "unit"
   valueCodecId
-    | .record => "DREGG/PLATFORM/RECORD/v1"
+    | .record => "DREGG/PLATFORM/RECORD/v2"
     | .controller => "nat/subject-id/v1"
 
 def materializer : Materializer layout Digest := StoreCodec.materializer wire

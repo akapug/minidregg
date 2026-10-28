@@ -45,32 +45,41 @@ the newest built main that passed the gate; each is reported in one line, and in
 | main a7b5afec | — | stopped by PID on the coordinator's word (integ8/stop-main.list) |
 | 14 | aa9366f8 | phase A: host stage rc=1 at 21:14 (integ8/COMMANDS.log) |
 | 14 A2 | 36f719cc5 | host stage rc=1 at 21:37 (903 s, peak 16.1 GB): only Kernel.ResourceBirthPolicyController, lean-audit-c's three proofs that never elaborated; fixed on main 61bf01e1d (verified by `lake env lean` in integ8, seconds per try); no regen ran |
-| 14 A3 | 8103b29a4 | running since 21:43: `integ4/cut14c.sh` (pid file cut14c.pid): incremental host closure + codec regen in integ8 (logs host-A3.log, regen-A3.log); the regen diff lands in `integ8/regen.patch` |
+| 14 A3 | 8103b29a4 | host stage rc=1 at 21:53 (566 s, peak 16.2 GB): only Kernel.PlatformCell (c0b2d6ab1's seventh Admits conjunct unpropagated to four proofs); fixed 26fcdd889 |
+| 14 A4 | 26fcdd889 | host rc=1 at 21:55 (38 s): only Kernel.PlatformInstallReceiver (admitsObserved_decides, decide instances after c0b2d6ab1); fixed cacefcba8 |
+| 14 A5 | cacefcba8 | host rc=1 at 21:58 (41 s): only Kernel.NativeHostReplay:3823 (extendExact: exactCandidate sets headTag since e0916a53f, advance does not; #guard_msgs 4827/4829 follow). Fixed by the deputy, a8eb2c50e (post image = successor up to its head tag; FnSelectedHistoricalStep's admitted_record gains ∃ headTag; reds there go to the deputy) |
+| 14 A6 | a8eb2c50e | host rc=1 at 22:09 (294 s): only Host.Main:2048 (claimOf: the intent subject is a SubjectId; the rate table is keyed by Nat); fixed 43023f83f |
+| 14 A7 | 969929026 | host stage CLEAN at 22:22 (534 s). Regen: A7 rc=2 (seed v5), A7b rc=1 (seed proofs), A7c rc=2 (ADMITTED-INPUT-CONTEXT trailing byte, bumped by hand), A7d rc=2 (DREGG/CLOCK: literal twin in ClockCell vs the registry constant), A7e rc=0 at 23:50 (938 s, peak 20.2 GB, 638 pins). Its diff is main da4a7645e (integ8/regen-A7e.patch); the tool changes are held on local branch integration/regen-tool 21077e063 for after the candidate |
+| full | da4a7645e | `integ4/main-full.sh da4a7645e` (pid file integ4/main-full.pid; build.pid, then gate.pid + enrol-resume.pid under integ8) started 23:53: host clean 00:24:47 (1670 s); consent rc=1 at 00:28 (PersistedCodecTagCensus: the platform install receiver's six identities unregistered). Fixed fbb66b069 |
+| A8 | fbb66b069 | host clean 01:02 (1842 s); regen rc=0 (644 pins, six additions, integ8/regen-A8.patch) → main 1e976af0f; consent rc=65 only because the host artifacts predate the new pins (companion check: PersistedCodecShapes.lean) |
+| full | 1e976af0f | `integ4/main-full.sh` started 01:07 (main-full.pid 3307367; build.pid, then gate.pid + enrol-resume.pid under integ8). Before relaunching any build, move integ8/{native-out,consent-out,artifacts,fixtures} aside (the host stage refuses existing outputs, rc=73) |
 
 A3's tree (main 8103b29a4) holds everything since aa9366f8: pd-host-rate, oracle-lifetime-grant, oracle-grant-factory,
 lean-audit-c, un-effects 2acd8acf (effect Plan; its codec pins re-emit with this regen), un-pb-twins 134535c2,
 demo-seed, app-recipes (rows validator aeee8349c191e8506 runs them on the candidate; Wekan/WordPress/IPython need
 MINI_IMPORT_PROFILE=market-large-v1), snipe-rate-row (its report at docs/evidence/snipe-rate-row-2026-10-27.md) and
-un-web-front 0da04999 (front-page document; infra's step 9c depends on it).
+un-web-front 0da04999 (front-page document; infra's step 9c depends on it). Also since: app-market db312c6f (30e24095f; b2.sh resolved per function against app-recipes, L13 agreed). Correction to that commit message: ExpenseOwl's positive-amount POST is reasoned from upstream, not row-proven (B2's run left GET /expenses empty); unproven until the rows validator runs it.
 After A3's tip (Rust only, in the full build): hermes 68394077 (6f4251c21; contained tools, room fields 1014/1015,
 J14_TOOLS row) and fb15f121b (redteam test initializer for un-web-front's Shell.front_doc; the mini bin's tests did
 not compile). The first candidate carrying both bc88a5ab (frame v8)
-and hermes 68394077 (any full build from main >= fb15f121b): send its sha and path to L4 (ac2a5ad7827eb4744) and
-the coordinator at once; L4 runs J14_TOOLS against it (3315a908 refuses the v8 genesis). Unit
+and hermes ea8a991e (e2374f120, the await bridge; any full build from main >= d3a0c41f3): send its sha and path to L4b (ad81db6d6fd317d3a) and
+the coordinator at once; L4b runs J14_TOOLS and J14_AWAIT as one run against it (3315a908 refuses the v8 genesis). Unit
 mini-grain-controller@9870001 is free (it was L4's orphan). Also after A3's tip: e7958d3b9 (NativeHost.birthRejection/birthReason arms for
 f2010f574's platformUnavailable/platformStale; A3 is expected to red at Kernel.NativeHost and its dependents,
 elaboration of the fix pending NativeHostReplay.olean). L1c (lean-audit-c a281e53b8, e59846239; deletes those two
 constructors with pricedAt, drops e7958d3b9's arms on merge; unbuilt, not to merge until its warm-tree build
 elaborates) seeds its dregg-ref tree from the integ8 copy; tell it when the copy lands.
 
-Next steps: when phase A3 ends, carry on as planned: commit regen.patch onto main (from the Mac: scp the patch, `git apply`, commit, push); start the full
-build at that sha in integ8 (a copy of main-next.sh with the tip fixed; seats 4 on a clear slice; check swarm.slice
-for co-tenants first); if the census still reds (oracle fixtures), rerun the regen there once more. When a host
-stage ends cleanly (A3's, if it does), name that clean host-stage tree, `/build/lanes/integ8/src`, to infra
-(aed5ecf506cf840af) and the coordinator so dregg-ref gets its warm tree. Report each candidate in one line; the coordinator spawns a rows validator for it (featured-qualify,
-batch tables, Hermes/tier, japps co-edit, codex's Oracle v7 world).
+Next steps: the full build of 1e976af0f is running. When the build ends: run `swarm-build lake lean
+Effects/Revival/Statements.lean` (lane/effects-revival, on main) in integ8/src and send the errors verbatim to
+effects-revival (a83b7949ba401cca5). When the candidate exists: report "candidate <sha> at <path>: gate <verdict>, reds
+by name" to the coordinator and L4b (ad81db6d6fd317d3a; J14_TOOLS + J14_AWAIT); then land local branch
+integration/regen-tool 32646f241 on main (the regen learns the trailing-byte version form and transitive bumps;
+ClockCell uses the registry constant; one spelling per identity; the next build checks it), and start the next full
+build from main. Every lane tip named so far is on main (hermes, hermes-b, abuse-caps, snipe-unconfigured,
+effects-revival, redteam) except lean-audit-c d4e192f35, which waits for L1c's warm-tree green sha.
 
-Red routing: lean-audit-c reds go to L1c (acf52d65283ef4ebc) directly; un-stream-continuity reds
+Red routing: lean-audit-c reds go to L1c (acf52d65283ef4ebc) directly; Hermes to L4b (ad81db6d6fd317d3a); L13 a1618140607ac439b; un-stream-continuity reds
 (ApplicationStreamContinuityFresh pole proofs, NativeHostReplay.lean:3816) to the deputy a308118209b4a48ea; all
 others through the coordinator. Expected reds, not new: the eight hand-rolled genesis writers (acceptance.sh,
 application-acceptance.sh, authority-acceptance.sh, selected-release-acceptance.sh, grain-runtime/acceptance.sh,

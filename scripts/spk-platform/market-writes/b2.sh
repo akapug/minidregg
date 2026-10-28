@@ -7,6 +7,8 @@ write_YetAnotherTODO() {
   [[ $made =~ ^(200|302|303)$ && $got == 200 ]] && grep -q 'featured by a resident' "$body" && echo "1 POST /todos/new $made; GET / $got lists it"
 }
 
+# Row evidence (lane/app-batch-2): install refused, "grain refused: invalid or oversized sandstorm-manifest"
+# (package 727e6323, a defect of the package or the manifest limit); this recipe runs once it installs.
 # OrgTodo 0.1.7 (package: `npm start` = node build/app.js, express, body parsed as text for every type;
 # sqlite at /var/tasks.db). POST /tasks (addTask) inserts columns (done, priority, deadline) the tasks
 # table does not have: do not use it. POST /tasks/:id is the sync path (upsertTodo) and takes the wire entry
@@ -36,9 +38,12 @@ write_SandCal() {
   jreq GET /export.ics; local got=$JS
   [[ $post =~ ^(200|302|303)$ && $got == 200 ]] && grep -q 'planned by a resident' "$body" && echo "1 POST /import $post (file input $fname); GET /export.ics $got"
 }
+# ExpenseOwl: upstream API (tanq16/expenseowl): POST /expense JSON {name,category,amount,date}, GET /expenses lists JSON.
+# Row evidence: the first attempt (negative amount) left GET /expenses at [], so the amount is sent positive.
 write_ExpenseOwl() {
-  local p; p=$(req PUT /expense -H 'Content-Type: application/json' -d '{"name":"featured by a resident","category":"Other","amount":-3.5,"date":"2026-10-27T12:00:00Z"}')
-  [[ $p =~ ^20 ]] || p=$(req POST /expense -H 'Content-Type: application/json' -d '{"name":"featured by a resident","category":"Other","amount":-3.5,"date":"2026-10-27T12:00:00Z"}')
+  local p; p=$(req POST /expense -H 'Content-Type: application/json' \
+    -d '{"name":"featured by a resident","category":"Other","amount":3.5,"date":"2026-10-27T12:00:00Z"}')
   local g; g=$(req GET /expenses)
-  [[ $p =~ ^20 && $g == 200 ]] && grep -q 'featured by a resident' "$body" && echo "1 POST /expense $p; GET /expenses $g"
+  [[ $p =~ ^20 && $g == 200 ]] && grep -q 'featured by a resident' "$body" && echo "1 POST /expense $p; GET /expenses $g" \
+    || echo "0 POST /expense $p, GET /expenses $g: expense not in the list"
 }

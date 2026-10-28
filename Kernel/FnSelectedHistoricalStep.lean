@@ -67,15 +67,16 @@ theorem Selected.admitted_record {config : Config} {origin tip : Opened config}
       selected.record = DurableReceiver.IntentRecord.ofIntent derived.intent ∧
       ∃ next : Durable,
         advance selected.before derived = .ok next ∧
-        validateLoaded config next = .ok selected.after ∧
+        ∃ headTag : Option (List UInt8),
+        validateLoaded config { next with headTag := headTag } = .ok selected.after ∧
         originalReceipt =
           ⟨derived.intent.transactionId, derived.intent.event.eventId,
             selected.before.durable.image.accepted.length + 1,
             next.worldRoot⟩ := by
-  obtain ⟨derived, matched, next, advanced, validated, receipt⟩ := selected.selectedAdmitted
+  obtain ⟨derived, matched, next, advanced, headTag, validated, receipt⟩ := selected.selectedAdmitted
   exact ⟨derived, matched, derived.admission,
     (recordMatches_iff selected.record derived.intent).mp matched,
-    next, advanced, validated, receipt⟩
+    next, advanced, headTag, validated, receipt⟩
 
 /-- The selected signed ingress is the event bytes of the actual
 native-admitted intent, not a separately supplied caller string. -/
@@ -86,7 +87,7 @@ theorem Selected.signed_ingress_admitted {config : Config} {origin tip : Opened 
     ∃ derived : Derived config selected.before,
       NativeAdmission config selected.before derived.intent ∧
       derived.intent.event.canonicalBytes = signedIngress := by
-  obtain ⟨derived, _, admission, recordEq, _, _, _, _⟩ := selected.admitted_record
+  obtain ⟨derived, _, admission, recordEq, _, _, _, _, _⟩ := selected.admitted_record
   refine ⟨derived, admission, ?_⟩
   calc
     derived.intent.event.canonicalBytes = selected.record.event.canonicalBytes := by
