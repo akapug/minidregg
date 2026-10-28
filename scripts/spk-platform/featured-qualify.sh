@@ -87,13 +87,6 @@ write_EtherCalc() {
 write_HedgeDoc() { write_HedgeDocRT; }
 write_Davros() { typed_app_row davros; }
 
-write_sntfy() {
-  local post; post=$(req POST /featured --data-binary 'job done, from a resident')
-  local postbody; postbody=$(snip)
-  local got; got=$(req GET '/featured/json?poll=1&since=all')
-  [[ $post == 200 && $got == 200 ]] && grep -q 'job done' "$body" && { echo "1 POST /featured $post; poll $got"; return; }
-  echo "0 POST /featured $post [$postbody]; poll $got [$(snip)]"
-}
 # DokuWiki: the edit form (id dw__editform) posts sectok, id, rev, date, prefix, suffix, changecheck and
 # target as hidden fields next to wikitext, summary and the button do[save]. sectok is a hash of the PHP
 # session id, so the form GET and the POST must share the session cookie the GET sets (jreq keeps it);
@@ -110,31 +103,6 @@ write_DokuWiki() {
   jreq GET '/doku.php?id=featured&do=export_raw'; local got=$JS
   [[ $save =~ ^(200|302|303)$ && $got == 200 ]] && grep -q 'written by a resident' "$body" && { echo "1 POST do[save] $save; export_raw $got"; return; }
   echo "0 POST do[save] $save; export_raw $got without the text"
-}
-# hledger-web 1.31 runs with --allow=sandstorm (the owner holds view, add, manage): its JSON API takes
-# PUT /add with the full JSON of one transaction (the form needs a Yesod _token). The read-back is
-# GET /transactions (JSON). tsourcepos is a pair of SourcePos objects in 1.31 (the first run, with the older
-# {tag: JournalSourcePos} shape, was refused: "expected Array, but encountered Object").
-write_HledgerWeb() {
-  local amt='{"aprice":null,"acommodity":"$","aquantity":{"floatingPoint":@Q@,"decimalPlaces":10,"decimalMantissa":@M@},"aismultiplier":false,"astyle":{"ascommodityside":"L","asdigitgroups":null,"ascommodityspaced":false,"asprecision":2,"asdecimalmark":".","asrounding":"NoRounding"}}'
-  local a1=${amt//@Q@/3}; a1=${a1//@M@/30000000000}; local a2=${amt//@Q@/-3}; a2=${a2//@M@/-30000000000}
-  local post1='{"pbalanceassertion":null,"pstatus":"Unmarked","pamount":['"$a1"'],"ptransaction_":"1","paccount":"expenses:demo","pdate":null,"ptype":"RegularPosting","pcomment":"","pdate2":null,"ptags":[],"poriginal":null}'
-  local post2='{"pbalanceassertion":null,"pstatus":"Unmarked","pamount":['"$a2"'],"ptransaction_":"1","paccount":"assets:cash","pdate":null,"ptype":"RegularPosting","pcomment":"","pdate2":null,"ptags":[],"poriginal":null}'
-  local txn='{"tcomment":"","tpostings":['"$post1,$post2"'],"ttags":[],"tsourcepos":[{"sourceName":"","sourceLine":1,"sourceColumn":1},{"sourceName":"","sourceLine":1,"sourceColumn":1}],"tdate":"2026-10-27","tcode":"","tindex":1,"tprecedingcomment":"","tdate2":null,"tdescription":"featured by a resident","tstatus":"Unmarked"}'
-  local add; add=$(req PUT /add -H 'Content-Type: application/json' --data "$txn")
-  local addbody; addbody=$(snip)
-  local got; got=$(req GET /transactions)
-  [[ $add =~ ^20 && $got == 200 ]] && grep -q 'featured by a resident' "$body" && { echo "1 PUT /add $add; GET /transactions $got"; return; }
-  echo "0 PUT /add $add [$addbody]; GET /transactions $got [$(snip)]"
-}
-# Datasette 0.63 has no HTTP write (a database is uploaded through the page's own form), so the row is
-# a RECORDED READ and passes as one: the grain answers the JSON API beneath the HTML and the database
-# list is read back. Any other outcome fails.
-write_Datasette() {
-  local got; got=$(req GET '/-/versions.json')
-  [[ $got == 200 ]] && grep -q '"datasette"' "$body" || { echo "0 GET /-/versions.json $got"; return; }
-  local dbs; dbs=$(req GET '/-/databases.json')
-  [[ $dbs == 200 ]] && echo "1 read-only by design (no HTTP write in 0.63): recorded GET /-/versions.json $got, GET /-/databases.json $dbs"
 }
 for f in "$here"/market-writes/*.sh ${QUALIFY_WRITES:+"$QUALIFY_WRITES"/*.sh}; do [[ -f $f ]] && . "$f"; done
 

@@ -53,6 +53,10 @@ def check_declaration(d):
         b = op['binding']
         if b['protocol'] == 'http' and sum(k in b for k in ('json', 'text', 'base64', 'form', 'multipart')) > 1:
             raise Refusal('declaration-invalid', 'ambiguous HTTP body')
+        if b.get('decode') == 'json-string-fragment' and (not op.get('internal') or op['write']):
+            raise Refusal('declaration-invalid', 'auth fragment must be an internal read')
+        if any(name not in SAFE_RESPONSE_HEADERS for name in b.get('responseHeaders', {}).values()):
+            raise Refusal('declaration-invalid', 'response header forbidden')
     # Relations may only read. Reject cycles before a row can dispatch anything.
     def visit(name, ancestors):
         if name not in d['operations'] or name in ancestors:
@@ -268,7 +272,70 @@ def dav_decode(body, calendar=False):
         raise Refusal('dav-response-invalid') from None
 
 
+def rss_decode(body, limit):
+    if b'<!DOCTYPE' in body.upper() or b'<!ENTITY' in body.upper():
+        raise Refusal('rss-xml-unsafe')
+    try:
+        root = ET.fromstring(body)
+        if root.tag != 'rss' or root.get('version') != '2.0':
+            raise ValueError()
+        channels = root.findall('channel')
+        if len(channels) != 1:
+            raise ValueError()
+        entries = channels[0].findall('item')
+        if len(entries) > limit:
+            raise Refusal('rss-items-over-bound')
+        result = []
+        for item in entries:
+            def field(name):
+                elements = item.findall(name)
+                if len(elements) > 1 or any(len(e) for e in elements):
+                    raise ValueError()
+                return (elements[0].text or '') if elements else None
+            identity = field('guid') or field('link')
+            if not identity:
+                raise ValueError()
+            enclosures = item.findall('enclosure')
+            if len(enclosures) > 1:
+                raise ValueError()
+            enclosure = None
+            if enclosures:
+                e = enclosures[0]
+                length = e.get('length', '')
+                if not e.get('url') or not e.get('type') or not re.fullmatch(r'[0-9]+', length):
+                    raise ValueError()
+                enclosure = {'url': e.get('url'), 'bytes': int(length), 'type': e.get('type')}
+            result.append({'id': identity, 'title': field('title'), 'link': field('link'),
+                           'description': field('description'), 'published': field('pubDate'),
+                           'enclosure': enclosure})
+        return result
+    except (ET.ParseError, ValueError, TypeError):
+        raise Refusal('rss-response-invalid') from None
+
+
+SAFE_RESPONSE_HEADERS = frozenset({'etag', 'last-modified', 'content-type', 'content-length',
+                                   'x-sandstorm-app-data-version'})
+
+
 def decode_http(d, op, response):
+    projection = op['binding'].get('responseHeaders')
+    if projection is not None and any(name not in SAFE_RESPONSE_HEADERS for name in projection.values()):
+        raise Refusal('binding-response-header-forbidden')
+    value = decode_http_body(d, op, response)
+    if projection is None:
+        return value
+    headers = {}
+    for field, name in projection.items():
+        header = response[1].get(name)
+        if header is None:
+            raise Refusal('app-response-header-missing', name)
+        if not isinstance(header, str) or len(header) > 4096 or any(ord(c) < 32 or ord(c) == 127 for c in header):
+            raise Refusal('app-response-header-invalid', name)
+        headers[field] = header
+    return {'body': value, 'headers': headers}
+
+
+def decode_http_body(d, op, response):
     status, headers, body = response
     if len(body) > d['limits']['replyBytes']:
         raise Refusal('reply-over-bound')
@@ -287,10 +354,26 @@ def decode_http(d, op, response):
             return body.decode('utf-8')
         if mode == 'json-lines':
             return [json.loads(line) for line in body.decode('utf-8').splitlines() if line.strip()]
+        if mode == 'json-string-fragment':
+            fragment = op['binding'].get('fragment', {})
+            prefix, suffix = fragment.get('prefix'), fragment.get('suffix')
+            if not op.get('internal') or op['write'] or not isinstance(prefix, str) or not isinstance(suffix, str) or not (1 <= len(prefix) <= 256 and 1 <= len(suffix) <= 64):
+                raise Refusal('binding-auth-fragment-invalid')
+            text = body.decode('utf-8')
+            if text.count(prefix) != 1:
+                raise Refusal('app-auth-fragment-invalid')
+            fragment_text = text.split(prefix, 1)[1]
+            value, end = json.JSONDecoder().raw_decode(fragment_text)
+            if not isinstance(value, str) or not fragment_text[end:].lstrip().startswith(suffix):
+                raise Refusal('app-auth-fragment-invalid')
+            value.encode('utf-8')
+            return value
         if mode == 'base64':
             return {'contentBase64': base64.b64encode(body).decode()}
         if mode == 'status':
             return {'status': status}
+        if mode == 'rss':
+            return rss_decode(body, d['limits']['snapshotDocuments'])
         if mode in ('dav-multistatus', 'caldav-multistatus'):
             return dav_decode(body, calendar=mode == 'caldav-multistatus')
         raise Refusal('binding-decoder-unsupported')
@@ -363,7 +446,7 @@ class Engine:
             raise cls('dispatch-uncertain' if op['write'] else 'transport-closed') from e
         except Refusal as e:
             # A malformed success reply is not evidence that a mutation did not occur.
-            if op['write'] and e.name in ('output-schema', 'app-json-invalid', 'app-content-type', 'reply-over-bound'):
+            if op['write'] and e.name in ('output-schema', 'app-json-invalid', 'app-content-type', 'reply-over-bound', 'app-response-header-missing', 'app-response-header-invalid'):
                 raise Uncertain('reply-uninterpretable', e.name) from e
             raise
 
