@@ -641,7 +641,9 @@ A failed initial worker-tree copy can continue with
 installer accepts only an unchanged, unpublished stage with exact retained files;
 it refuses a controller which has advanced to native birth or publication.
 The J14 driver accepts a retained `mini-j14-worker-preparation-checkpoint-v1`
-for this boundary. Later failures require their native exact-attempt recovery.
+for this boundary. A retained `mini-j14-worker-birth-checkpoint-v1` continues the exact native birth
+spec after a pre-submit failure or performs lookup of its retained signed attempt.
+Later failures require their native exact-attempt recovery.
 For an explicitly qualified controller binary successor before birth,
 `J14_ORACLE_CONTROLLER_UPGRADE` names a private JSON file containing `runtime`,
 `sha256`, and `sourceCommit`; the driver retains the stopped installer's upgrade

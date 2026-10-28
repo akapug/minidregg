@@ -75,6 +75,27 @@ class CheckpointTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,'unsupported'):
                     driver.Journey.from_checkpoint(checkpoint)
 
+    def test_native_birth_checkpoint_requires_spec_pins_and_existing_controller(self):
+        with tempfile.TemporaryDirectory(prefix='j14-birth-',dir='/tmp') as temp:
+            root=Path(temp)/'oracle';root.mkdir(mode=0o700);logs=root/'commands';logs.mkdir()
+            basis=[]
+            for name in ('worker-prepare.json','grain-spec.json'):
+                path=root/name;driver.write(path,{});basis.append({'path':str(path),'sha256':driver.sha(path)})
+            driver.write(logs/'0001-birth.argv.json',['native','exact-birth'])
+            driver.write(logs/'0001-birth.result.json',{'exitCode':1})
+            pins={str(driver.REPO/rel):driver.sha(driver.REPO/rel) for rel in ('deploy/spk-host/install-user-world','deploy/spk-host/controller-world.py')}
+            value={'protocol':'mini-j14-worker-birth-checkpoint-v1','nextPhase':'worker_birth','sourceCommit':'test',
+                   'workerPreparation':str(root/'worker-prepare.json'),'pins':pins,'basis':basis,
+                   'state':{'root':str(root),'logs':str(logs),'counter':1,'controller':True,'daemons':[], 'c':{}}}
+            path=root/'birth-checkpoint.json';driver.write(path,value);path.chmod(0o600)
+            with patch.dict(driver.os.environ,{'JOURNEY_STEP_DIR':temp}):
+                bad={**value,'basis':[]};path.write_text(driver.json.dumps(bad))
+                with self.assertRaisesRegex(ValueError,'exact retained'):driver.Journey.from_checkpoint(path)
+                bad={**value,'state':{**value['state'],'controller':False}};path.write_text(driver.json.dumps(bad))
+                with self.assertRaisesRegex(ValueError,'exact retained'):driver.Journey.from_checkpoint(path)
+                path.write_text(driver.json.dumps(value));resumed=driver.Journey.from_checkpoint(path)
+                self.assertEqual(resumed.resume_phase,'worker_birth');resumed._lock.close()
+
 class WorkerPreparationTests(unittest.TestCase):
     def test_partial_copy_continuation_keeps_original_spec_and_waits_for_installer(self):
         with tempfile.TemporaryDirectory(prefix='j14-preparation-',dir='/tmp') as temp:
