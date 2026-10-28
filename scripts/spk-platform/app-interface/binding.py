@@ -41,6 +41,8 @@ def check_declaration(d):
     contract = json.loads((ROOT / 'format.schema.json').read_text())
     if not Draft202012Validator(contract).is_valid(d):
         raise Refusal('declaration-invalid')
+    if d.get('auth', {}).get('appCookies', 'omit') not in ('omit', 'retain'):
+        raise Refusal('declaration-invalid', 'unknown app cookie policy')
     for op in d['operations'].values():
         ids = [step['id'] for step in op.get('prepare', [])]
         if len(ids) != len(set(ids)):
@@ -157,7 +159,7 @@ def encode_path(parts, args):
 def multipart(parts, args, context, results):
     encoded = []
     for part in parts:
-        name, filename, content_type = part['name'], part.get('filename'), part.get('contentType')
+        name, filename, content_type = part['name'], resolve(part.get('filename'), args, context, results), part.get('contentType')
         for field in (name, filename, content_type):
             if field is not None and (not isinstance(field, str) or any(c in field for c in '\r\n\x00"\\')):
                 raise Refusal('multipart-metadata-invalid')
@@ -220,7 +222,7 @@ def encode_http(d, op, args, context, results=None):
     return request
 
 
-def dav_decode(body):
+def dav_decode(body, calendar=False):
     if b'<!DOCTYPE' in body.upper() or b'<!ENTITY' in body.upper():
         raise Refusal('dav-xml-unsafe')
     try:
@@ -239,6 +241,13 @@ def dav_decode(body):
                     props.update({p.tag: p for p in ps.find('{DAV:}prop')})
                 elif ' 404 ' not in status:
                     raise Refusal('dav-property-refused')
+            if calendar:
+                data = props.get('{urn:ietf:params:xml:ns:caldav}calendar-data')
+                etag = props.get('{DAV:}getetag')
+                if data is None or etag is None or not etag.text:
+                    raise Refusal('caldav-property-missing')
+                result.append({'href': href, 'etag': etag.text, 'calendarData': data.text or ''})
+                continue
             if '{DAV:}resourcetype' not in props:
                 raise Refusal('dav-property-missing')
             size = props.get('{DAV:}getcontentlength')
@@ -263,7 +272,7 @@ def decode_http(d, op, response):
     mode = op['binding']['decode']
     try:
         if mode == 'json':
-            if 'json' not in headers.get('content-type', '').lower():
+            if 'json' not in headers.get('content-type', '').lower() and headers.get('content-type', '').split(';')[0].strip().lower() not in op['binding'].get('acceptedContentTypes', []):
                 raise Refusal('app-content-type')
             return json.loads(body)
         if mode == 'text':
@@ -274,8 +283,8 @@ def decode_http(d, op, response):
             return {'contentBase64': base64.b64encode(body).decode()}
         if mode == 'status':
             return {'status': status}
-        if mode == 'dav-multistatus':
-            return dav_decode(body)
+        if mode in ('dav-multistatus', 'caldav-multistatus'):
+            return dav_decode(body, calendar=mode == 'caldav-multistatus')
         raise Refusal('binding-decoder-unsupported')
     except (ValueError, UnicodeError):
         raise Refusal('app-json-invalid') from None
@@ -321,7 +330,7 @@ class Engine:
         try:
             b = op['binding']
             if b['protocol'] == 'http':
-                context = {**self.context, 'cookies': self.transport.cookie_values() if hasattr(self.transport, 'cookie_values') else {}}
+                context = {**self.context, 'cookies': self.transport.cookie_values(encode_path(b['path'], args)) if hasattr(self.transport, 'cookie_values') else {}}
                 value = decode_http(self.d, op, self.transport.http(encode_http(self.d, op, args, context, results)))
             elif b['protocol'] == 'ddp':
                 value = self.transport.ddp(b, args, self.context, op['write'])
@@ -368,7 +377,11 @@ def run_scenario(engine):
                 got = value
                 for p in check['path']:
                     got = got[p]
-                ok = got == resolve(check['equals'], {}, engine.context, results)
+                if 'containsText' in check:
+                    expected = resolve(check['containsText'], {}, engine.context, results)
+                    ok = isinstance(got, str) and isinstance(expected, str) and expected in got
+                else:
+                    ok = got == resolve(check['equals'], {}, engine.context, results)
             if not ok:
                 raise Refusal('readback-mismatch', step['id'])
     return results
