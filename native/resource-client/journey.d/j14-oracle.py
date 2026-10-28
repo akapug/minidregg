@@ -19,6 +19,7 @@ import time
 
 HERE=Path(__file__).resolve().parent
 REPO=HERE.parents[2]
+PHASES=['world','prepare_platform','prepare_application','publish_data','worker','room','attach','probe']
 spec=importlib.util.spec_from_file_location('inputs',HERE/'j14-oracle-inputs.py')
 inputs=importlib.util.module_from_spec(spec);spec.loader.exec_module(inputs)
 read,write,sha=inputs.read,inputs.write,inputs.sha
@@ -39,7 +40,7 @@ class Journey:
         self.root=Path(os.environ['JOURNEY_STEP_DIR'])/'oracle'
         self.root.mkdir(mode=0o700)
         self.logs=self.root/'commands';self.logs.mkdir()
-        self.processes=[];self.counter=0;self.controller=False
+        self.processes=[];self.daemons=[];self.counter=0;self.controller=False
         # A separate fresh private root avoids sharing controller traversal ACLs
         # with another preserved world (including /run/user/UID).
         socket_parent=Path(os.environ.get('J14_ORACLE_SOCKET_PARENT','/build/lanes'))
@@ -116,7 +117,7 @@ class Journey:
         room=read(Path(j.c['sponsorWorkspace'])/'refs/oracle-room.json');j.c['room']={'target':room['target'],'capability':room['observeCapability']}
         if read(j.c['allocation'])!=inputs.allocation(j.c) or sha(j.c['hostConfig'])!=sha(j.root/'operator-with-oracle.json'):
             raise ValueError('continuation allocation or installed metadata differs')
-        j.counter=last;j.processes=[];j.controller=False;j.world_pid=None
+        j.counter=last;j.processes=[];j.daemons=[];j.controller=False;j.world_pid=None
         record=j.root/(f'checkpoint-continuation-{last:04d}.json' if checkpoint else 'transport-continuation.json')
         if record.exists():raise ValueError('transport continuation already attempted; inspect its retained commands')
         write(record,{'previousSource':candidate['orchestrationSource'],'sourceCommit':os.environ.get('J14_ORACLE_ORCHESTRATION_COMMIT'),
@@ -134,6 +135,57 @@ class Journey:
     def resume_world(self):
         self.restart_transport()
         self.c['nativeProfile']=str(self.run('native-profile',[self.host,self.c['hostConfig'],'profile']))
+
+    def checkpoint(self,next_phase,basis=None):
+        """Retain orchestration coordinates, never fabricate native state."""
+        path_fields={'root','logs','sockets','bins','installer','homes','workspaces','contract'}
+        omit={'processes','world_pid'}
+        state={k:str(v) if k in path_fields else v for k,v in vars(self).items() if k not in omit}
+        pins={str(p):sha(p) for p in [self.mini,self.host,self.runtime,self.provider,self.bins/'spk-host',self.installer,
+            REPO/'deploy/spk-host/controller-world.py',self.c['hostConfig']]}
+        value={'protocol':'mini-j14-checkpoint-v1','nextPhase':next_phase,'state':state,'pins':pins,
+            'basis':basis or [],'sourceCommit':os.environ.get('J14_ORACLE_ORCHESTRATION_COMMIT')}
+        path=self.root/f'checkpoint-{self.counter:04d}-{next_phase}.json';write(path,value)
+        return path
+
+    @classmethod
+    def from_checkpoint(cls,path):
+        os.umask(0o077)
+        expected=Path(os.environ['JOURNEY_STEP_DIR'])/'oracle'
+        if path.parent!=expected or path.is_symlink():raise ValueError('checkpoint must be a retained direct child of the journey root')
+        meta=path.stat()
+        if meta.st_uid!=os.getuid() or meta.st_mode&0o077:raise ValueError('checkpoint must be private operator custody')
+        value=read(path)
+        if value.get('protocol')!='mini-j14-checkpoint-v1' or value['nextPhase'] not in PHASES[1:]:
+            raise ValueError('unsupported journey checkpoint phase')
+        for name,digest in value['pins'].items():
+            if sha(name)!=digest:raise ValueError('checkpoint input changed: '+name)
+        for proof in value['basis']:
+            if sha(proof['path'])!=proof['sha256']:raise ValueError('checkpoint native basis changed')
+        j=cls.__new__(cls)
+        for name,data in value['state'].items():
+            setattr(j,name,Path(data) if name in {'root','logs','sockets','bins','installer','homes','workspaces','contract'} else data)
+        if j.root!=expected:raise ValueError('checkpoint root differs')
+        # A source update is explicit in the successor receipt. Native artifacts,
+        # transports and controller custody stay pinned to the retained world.
+        prior_repo=j.c['repo'];j.c['repo']=str(REPO);j.installer=REPO/'deploy/spk-host/install-user-world'
+        for rel in ['deploy/spk-host/install-user-world','deploy/spk-host/controller-world.py']:
+            if sha(REPO/rel)!=value['pins'][str(Path(prior_repo)/rel)]:raise ValueError('checkpoint installer custody changed')
+        j.processes=[];j.world_pid=None;j.resume_phase=value['nextPhase']
+        prior_daemons=j.daemons;j.daemons=[]
+        record=j.root/f'checkpoint-resume-{j.counter:04d}-{j.resume_phase}.json'
+        if record.exists():raise ValueError('checkpoint continuation already attempted; inspect its exact retained outputs')
+        write(record,{'checkpoint':str(path),'sha256':sha(path),'priorSource':value['sourceCommit'],
+            'sourceCommit':os.environ.get('J14_ORACLE_ORCHESTRATION_COMMIT'),'driverSha256':sha(HERE/'j14-oracle.py')})
+        j.restart_daemons=prior_daemons
+        return j
+
+    def restore_services(self):
+        for item in self.restart_daemons:
+            if sha(item['argv'][0])!=item['executableSha256']:raise ValueError('checkpoint daemon executable changed')
+            self.spawn(item['label']+'-resume-'+str(self.counter),item['argv'])
+            if item.get('socket'):self.wait_socket(item['socket'])
+        del self.restart_daemons
 
     def pin_candidate(self):
         candidate=read(self.candidate_manifest)
@@ -167,7 +219,11 @@ class Journey:
     def spawn(self,label,args):
         out=(self.logs/(label+'.stdout')).open('w');err=(self.logs/(label+'.stderr')).open('w')
         p=subprocess.Popen(list(map(str,args)),stdout=out,stderr=err);out.close();err.close();self.processes.append(p)
-        write(self.logs/(label+'.process.json'),{'pid':p.pid,'argv':list(map(str,args))})
+        argv=list(map(str,args))
+        write(self.logs/(label+'.process.json'),{'pid':p.pid,'argv':argv})
+        daemon={'label':label,'argv':argv,'executableSha256':sha(argv[0])}
+        if '--socket' in argv:daemon['socket']=argv[argv.index('--socket')+1]
+        self.daemons.append(daemon)
         return p
 
     def wait_socket(self,path):
@@ -178,6 +234,7 @@ class Journey:
             try:
                 with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as client:
                     client.settimeout(.2);client.connect(str(path))
+                if getattr(self,'daemons',[]):self.daemons[-1]['socket']=str(path)
                 return
             except (OSError,TimeoutError):pass
             time.sleep(.1)
@@ -254,7 +311,7 @@ class Journey:
         self.spawn('participant',[self.mini,'serve-public-proxy','--socket',self.c['publicSocket'],'--upstream',sock,'--config',self.c['hostConfig']]);self.wait_socket(self.c['publicSocket'])
         native=self.run('native-profile',[self.host,self.c['hostConfig'],'profile']);self.c['nativeProfile']=str(native)
 
-    def application(self):
+    def prepare_platform(self):
         env=dict(os.environ,MINI_IMPORT_PROFILE='operator-appliance-v1')
         broker=self.root/f'broker-{self.counter+1:04d}'
         self.run('broker-world',[REPO/'scripts/spk-platform/broker-world-up.sh',self.bins,self.c['hostConfig'],broker],env=env)
@@ -271,9 +328,17 @@ class Journey:
             'bwrap':self.run('bwrap',['sh',REPO/'deploy/grain-host/resolve-bwrap']).read_text().strip(),'importProfile':'operator-appliance-v1'}
         path=self.root/'profile-input.json';write(path,p)
         result=read(self.run('profile',['python3',REPO/'scripts/spk-platform/same-store-profile.py',path]));self.c['profileResult']=result['profileResult']
-        path=self.root/'application-input.json';write(path,inputs.provision(self.c))
+
+    def prepare_application(self):
+        path=self.root/'application-input.json'
+        expected=inputs.provision(self.c)
+        if path.exists():
+            if read(path)!=expected:raise ValueError('retained application input differs')
+        else:write(path,expected)
         prepared=self.run('application-prepare',['python3',REPO/'scripts/spk-platform/same-store-app.py','prepare',path],timeout=14400)
         self.c['preparedApplication']=str(prepared)
+
+    def publish_data(self):
         self.run('publish-data',[self.bins/'spk-data-publish','publish','--store',Path(self.broker['grainsRoot'])/'spk/public-data','--source',self.data,'--inventory',self.inventory],timeout=3600)
 
     def cleanup(self):
@@ -576,15 +641,21 @@ class Journey:
 
 def main():
     resume=os.environ.get('J14_ORACLE_RESUME_WORLD')=='1'
-    checkpoint=os.environ.get('J14_ORACLE_RESUME_CHECKPOINT')
-    j=Journey.resume_transport(Path(checkpoint)) if checkpoint else Journey.resume_transport() if resume else Journey()
+    selected=os.environ.get('J14_ORACLE_RESUME_CHECKPOINT')
+    checkpoint=Path(selected) if selected else None
+    generic=checkpoint is not None and read(checkpoint).get('protocol')=='mini-j14-checkpoint-v1'
+    j=Journey.from_checkpoint(checkpoint) if generic else Journey.resume_transport(checkpoint) if checkpoint else Journey.resume_transport() if resume else Journey()
     phase='transport';start_counter=j.counter
     try:
-        if checkpoint:j.restart_transport()
-        for phase in (['application','worker','room','attach','probe'] if checkpoint else ['world','application','worker','room','attach','probe']):
+        if generic:j.restore_services()
+        elif checkpoint:j.restart_transport()
+        phases=PHASES[PHASES.index(j.resume_phase):] if generic else PHASES[1:] if checkpoint else PHASES
+        for phase in phases:
             if phase=='worker':j.await_worker_release()
             (j.resume_world if resume and phase=='world' else getattr(j,phase))()
             write(j.root/('context-after-'+phase+'.json'),j.c)
+            next_index=PHASES.index(phase)+1
+            if next_index<len(PHASES):j.checkpoint(PHASES[next_index])
     except Exception as error:
         write(j.root/(f'failure-checkpoint-{start_counter:04d}.json' if checkpoint else 'failure-transport-continuation.json' if resume else 'failure.json'),{'phase':phase,'error':str(error),'passed':False,'lastCommand':j.counter,
             'recovery':'Inspect retained exact native attempts; do not repeat an uncertain submission as new work.'})
