@@ -1,4 +1,4 @@
-# Untouched-areas deputy: state (rewritten whole; 2026-10-28 morning, candidate 76758dba6 named)
+# Untouched-areas deputy: state (rewritten whole; 2026-10-28 morning, japps co-edit green on 76758dba6)
 
 Inputs: docs/review/2026-10-27-untouched-areas/{LEAN,NATIVE}.md, docs/review/2026-10-27-blind-spots/BLIND-SPOTS.md Sweep 1.
 Each lane: /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>.
@@ -21,7 +21,6 @@ un-verify (Generic Simplex gate), un-bend (bend verb + lost reply), un-world (Ta
 
 ## Waiting on others
 - Codec pin re-emit (ACTIVITY-RECORD v9): the integrator's full build runs the regen once (its state file).
-- japps co-edit row on a candidate carrying the stream-continuity fix; then L13 reruns DDP. Faerie a4e312352a7091f59 fixes forward routed reds.
 - L1 merges before editing PayEnrolReceiver/V2 and SubjectKeyRotation (forced edits only from the Vouchers sweep).
 
 ## Owed / unowned
@@ -39,7 +38,7 @@ Sources: docs/APP-MARKET-2026-10-27.md "State at hand-off"; docs/ROWS-OWED.md §
 - app-writes-2 (Kimi) landed only Etherpad 956b91bff and Hacker Slides 8a3682c3e (merged); HakyllCMS, HackerCMS and OrgTodo are covered by faerie app-market-fixups.
 - Tale invite (the demo seed's item 4, decided): the door processor joins every enrolled member to `tale` once per world (lane/un-tale-welcome 19bb968e0, 4/4 filtered on dregg-build, sent to the integrator). Infra seam: story.author is the seed's SEED_HOST (demo: house), README bc6c837ba on main. Infra is now ae95a4eac63b0715e.
 - Faeries (Sonnet, recipes now, one run on the candidate): lane/app-market-b5 (agent a0ef59eabda7075b4: FileDrop, Kiwix, Groove Basin, Tube; streamed bodies under the 8 MiB bound or the exact missing method named) and lane/app-market-b8 (agent a13f0bc9626b1320a: IPython kept, Mercurial, MediaWiki, Firefly III) started; briefs scratchpad brief-b5.txt/brief-b8.txt. lane/app-market-b3 6f2bfd3bc pushed (DiagramsNet, EtherDraw, Scrumblr, SwaggerEditor; agent a85d12892ea6de3ca), lane/app-market-b7 d8ee43cdb pushed (2048, PerplexitySudoku, 3DBlockstack, SimpleChat; agent abf203f357754001b; its spk-rpc get_view_info UNIMPLEMENTED = empty ViewInfo change reviewed and accepted), lane/app-market-fixups 299c0cb98 (on main). b3 and b7 reviewed and sent to the integrator for main. Shared brief: scratchpad market-common.txt.
-- japps co-edit row: faerie a4e312352a7091f59 runs it on the same candidate (stream-continuity 6544ea37 + 25cfb86bd), then L13's DDP rerun is mine to report.
+- japps co-edit: GREEN on 76758dba6 (w3: a second browser session co-edits Simple Todos, B sees A's todo over DDP; the hot-route registration admitted). japps 28/29, recorded by the rows validator in ROWS-OWED §0. L13 has stopped; the DDP rerun is this result. Faerie a4e312352a7091f59 now on the Hacker Slides write 403 (the one red).
 - Later: bodies > 8 MiB (designed §2b), the member install debit (apps-e2e.sh) into INSTALL.md §4. Each green app (lifecycle + write) goes into FEATURED in native/resource-client/src/apps.rs; target 2-3 dozen.
 
 ## Decided
@@ -69,13 +68,13 @@ Story: JSLK 23/23 on a fresh world with the a8376ce8f mini (2 of 23 red on the u
 Older: 2d8b7ed54 (jtemplates 196/196 there), 7027e0ace.
 
 ## Rows validator (a373556d56d56744d)
-- m6grain on 76758dba6: resident-start fixes hold (birth-a .. start-a2 pass); red at enroll-a2: `mini session-enrollment-plan` after the restart writes nothing and names no refusal (grain-journey.sh:604; later steps cascade). OURS, routed to a4e312352a7091f59 after its japps run (red-first test, the client must refuse by name). Evidence hbox:/tank/dregg-build/rows-76758dba/rerun-m6grain/.../rows/m6grain/evidence-a/.
+- m6grain on 76758dba6: resident-start fixes hold (birth-a .. start-a2 pass); red at enroll-a2: `mini session-enrollment-plan` after the restart writes nothing and names no refusal (grain-journey.sh:604; later steps cascade). OURS. Cause: the second-session work made a trailing `2` mean "second browser session", so enroll-a2 (a repeat after restart) enrolled the never-shared session 9150, its query was refused blind, the plan was refused, and the script ignored the exit. Fixed on lane/un-journey-repeat-suffix 789b9b478: second session is suffix `s`, a digit is a repeat again (also two-world-journey, jspk1, jspk10, oracle-shared-data), and the enroll step fails by name. Sent to the integrator; the validator reruns m6grain on it (confirming run pending). Evidence hbox:/tank/dregg-build/rows-76758dba/rerun-m6grain/.../rows/m6grain/evidence-a/.
 Its hbox worlds: /tank/rows-2d8b7ed5-apps/w-{featured,b1,b2,b4,b6,rt,fixups}. Mine: b3 /tank/lanes/app-market-b3, b5 /tank/rows-b5, b7 and b8 under /tank; japps /build/lanes/un-stream-continuity-runs/w*, jtemplates /build/t/uns-run* (dregg-build). Verdicts go to it for ROWS-OWED section 0.
 
 ## Shas sent to the integrator this round
-a8376ce8f (story GM install), 50ec8de76 (importProfile), 353a6d11d (pb helpers), 20f28ac31 (commons split + world READMEs). Infra told a8376ce8f fixes its demo-dry story red; the door README already says author = the seed's SEED_HOST (bc6c837ba).
+789b9b478 (journey repeat suffix), a8376ce8f (story GM install), 50ec8de76 (importProfile), 353a6d11d (pb helpers), 20f28ac31 (commons split + world READMEs). Infra told a8376ce8f fixes its demo-dry story red; the door README already says author = the seed's SEED_HOST (bc6c837ba).
 
 ## Next three
-1. Read the six runs on 2d8b7ed54 and the validator's batch tables; fix reds (recipes or spk-host); add every app green on lifecycle + write to FEATURED in apps.rs; tell the coordinator when DDP can rerun.
-2. b5 (e1458689a) and b8 (bec955336) recipes are on main; they run on the candidate along with jtemplates (e4acc9df0) and japps.
+1. Read B3/B5/B7/B8 on 76758dba6 (each serial under the world-up flock); fix reds (recipes or spk-host); every app green on lifecycle + write into FEATURED in apps.rs (B3 does its own commit; DiagramsNet stays out); target 2-3 dozen.
+2. Hacker Slides 403 (a4e312352a7091f59); m6grain confirming rerun on 789b9b478 (validator); SQLite failure 15 cause (a6603277e4ffe2d70).
 3. Owed after the demo: revive Effects/ so transfer/commit come from the derivation engine (EFFECTS.md); private-backend P6 lost reply; the child() twin check.
