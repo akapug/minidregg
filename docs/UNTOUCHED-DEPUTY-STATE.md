@@ -1,4 +1,4 @@
-# Untouched-areas deputy: state (rewritten whole; 2026-10-28 morning)
+# Untouched-areas deputy: state (rewritten whole; 2026-10-28 morning, later)
 
 Inputs: docs/review/2026-10-27-untouched-areas/{LEAN,NATIVE}.md, docs/review/2026-10-27-blind-spots/BLIND-SPOTS.md Sweep 1.
 Each lane: /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>.
@@ -16,7 +16,7 @@ un-verify (Generic Simplex gate), un-bend (bend verb + lost reply), un-world (Ta
 - World apps native on candidate 0ce31391 (un-effects-rows; commons split into app + scenarios, policy bound kept): effect 19/19, dues 17/17, bounty 21/21, play 27/27, ballot 27/27, story 25/25, commons 20/20; cohort gates ballot 37/37, dues 49/49, commons 64/64. README native lines + evidence at 20f28ac31 (docs only, sent to the integrator a34bdb948f1cf4796).
 
 ## In flight
-- lane/un-shared-names 179494a88 (Sonnet a852f5df40229de24): room bind reads room pointer, index and target in ONE batched signed view (snapshot by construction; only a changed room pointer replans, at most 3, refused by name); jtemplates background writer + split-tenancy member; seed.sh errtail_ and 600 s story limits. Sha sent to the integrator. Now: the 13 jtemplates reds, each judged stale-expectation (find the product commit, assert the new shape exactly) or regression (empty `doc show lab/notes`, `backlinks lab/wall` 0: trace and fix at the cause).
+- lane/un-shared-names (Sonnet a852f5df40229de24): 179494a88 on main (room bind reads room pointer, index and target in ONE batched signed view; jtemplates background writer + split tenancy; seed errtail_ and 600 s story limits). The rebased e4acc9df0 (only jtemplates.sh, strictly stronger rows: exact-ID bindings, one exact backlink) went to the integrator. All 13 jtemplates reds are explained: 12 stale expectations (90562d76c, 1a9ce0663, 433d5bc38, 37ffc2706), and backlinks=0 was the regression 621aded18 fixes. The faerie runs the row on the candidate carrying 25cfb86bd + 621aded18.
 
 ## Waiting on others
 - Codec pin re-emit (ACTIVITY-RECORD v9): the integrator's full build runs the regen once (its state file).
@@ -46,5 +46,5 @@ fn out; private-backend stays; Effects/ registry is Phase 3 (EFFECTS.md); dues a
 
 ## Next three
 1. On the first candidate carrying 25cfb86bd: tell the three market faeries and a4e312352a7091f59 to run; read the validator's batch tables; fix reds; add every green app to FEATURED.
-2. Review the b5/b8 recipes and the jtemplates verdicts as they land.
+2. b5 (e1458689a) and b8 (bec955336) recipes are on main; they run on the candidate along with jtemplates (e4acc9df0) and japps.
 3. Owed after the demo: revive Effects/ so transfer/commit come from the derivation engine (EFFECTS.md); private-backend P6 lost reply; the child() twin check.
