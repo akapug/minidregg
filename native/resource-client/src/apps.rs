@@ -1196,6 +1196,8 @@ pub(crate) fn bootstrap(root: &Path, ws: &Value, budget: &str, tool_ref: &str, p
             "appsConfig":{"protocol":"mini-apps-config-v1","managementSubject":subject,"toolRef":tool_ref,"parentRef":parent_ref,"tariff":{"base":"2","perBirth":"1"}}})
     };
     if let (Ok(tool), Ok(parent)) = (w::reference(root, tool_ref), w::reference(root, parent_ref)) {
+        // A world bootstrapped before the tasks were activated is repaired by a rerun.
+        activate_tasks(root, ws, &subject, &tool, &parent)?;
         return Ok(report(&tool, &parent));
     }
     let context = w::bounded_json(&member_path(ws, "birthContext")?)?;
@@ -1260,7 +1262,65 @@ pub(crate) fn bootstrap(root: &Path, ws: &Value, budget: &str, tool_ref: &str, p
             "authority":"hint-only"});
         crate::create_private(&reference_path, &serde_json::to_vec_pretty(&value).map_err(|e| e.to_string())?)?;
     }
-    Ok(report(&w::reference(root, tool_ref)?, &w::reference(root, parent_ref)?))
+    let (tool, parent) = (w::reference(root, tool_ref)?, w::reference(root, parent_ref)?);
+    activate_tasks(root, ws, &subject, &tool, &parent)?;
+    Ok(report(&tool, &parent))
+}
+
+/// A task `apps bootstrap` has just birthed is idle (status 0): in the grain-task law only an attach
+/// leaves status 0 (to 1, generation +1), and a reserve is legal only from an attached task. So every
+/// member's first install reservation was law-denied. The workroom fixture's `workroom_ready` does
+/// exactly this: attach the tool; attach the metered birth parent and reserve 1 on it. Each step is
+/// one retained grain-intent attempt, recovered exactly and never submitted twice, and a task already
+/// past the step is left alone (a rerun of bootstrap finds it done).
+fn activate_tasks(root: &Path, ws: &Value, subject: &str, tool: &Value, parent: &Value) -> Result<()> {
+    for (name, task) in ACTIVATION_STEPS {
+        let (reference, operation) = match name {
+            "tool-attach" => (tool, json!({"type":"attach","soft":false})),
+            "parent-attach" => (parent, json!({"type":"attach","soft":false})),
+            _ => (parent, json!({"type":"reserve","amount":"1"})),
+        };
+        let _ = task;
+        activate_step(root, ws, subject, name, reference, operation)?;
+    }
+    Ok(())
+}
+
+/// The activation steps in the order the law permits them (name, which task).
+const ACTIVATION_STEPS: [(&str, &str); 3] = [("tool-attach", "tool"), ("parent-attach", "parent"), ("parent-reserve", "parent")];
+
+/// Whether a step is still needed given the task's grain state (status and reserved as the signed
+/// view prints them): attach only leaves status 0, and the parent's one-unit reserve is legal only once
+/// attached (status 1) with nothing reserved.
+pub(crate) fn activation_needed(step: &str, grain: &Value) -> bool {
+    match step {
+        "tool-attach" | "parent-attach" => grain["status"] == "0",
+        "parent-reserve" => grain["status"] == "1" && grain["reserved"] == "0",
+        _ => false,
+    }
+}
+
+fn activate_step(root: &Path, ws: &Value, subject: &str, name: &str, task: &Value, operation: Value) -> Result<()> {
+    use crate::workspace::{self as w, member_path};
+    let attempt = root.join("attempts").join(format!("apps-activate-{name}"));
+    if attempt.exists() {
+        if w::accepted_outcome(&attempt)?.is_none() && attempt.join("call.bin").is_file() {
+            crate::retry(&attempt, "lookup", false)?;
+        }
+        return w::accepted_outcome(&attempt)?.map(|_| ()).ok_or_else(|| format!("taskActivationUndecided: {name} is neither confirmed nor refused; inspect {}", attempt.display()));
+    }
+    let (view, _, _) = w::signed_view(root, ws, task, "resource")?;
+    let grain = view.pointer("/cell/grain").ok_or("the task's signed view has no grain state")?;
+    if !activation_needed(name, grain) {
+        return Ok(());
+    }
+    let intent = tool_intent(subject, &w::random_nonce()?, name, task, &view, operation)?;
+    let intent_path = root.join("sources").join(format!("apps-activate-{name}.json"));
+    let _ = fs::remove_file(&intent_path);
+    crate::create_private(&intent_path, &serde_json::to_vec_pretty(&intent).map_err(|e| e.to_string())?)?;
+    eprintln!("apps task activation attempt: {}", attempt.display());
+    crate::submit(&w::workspace_host(ws)?, &member_path(ws, "config")?, &intent_path, std::ffi::OsStr::new("grain-intent"), &member_path(ws, "key")?, &attempt, false)?;
+    w::accepted_outcome(&attempt)?.map(|_| ()).ok_or_else(|| format!("taskActivationRefused: {name}; see {}", attempt.display()))
 }
 
 // ------------------------------------------------ the request cell (law.apps)
@@ -1407,6 +1467,25 @@ fn camel(flag: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_freshly_bootstrapped_world_activates_its_tasks_before_any_reservation() {
+        // `apps bootstrap` births both tasks idle: status 0, nothing reserved. The grain-task law lets
+        // only an attach leave status 0, and a reserve only follows an attach, so the first install's
+        // reservation on an unactivated task is law-denied. The steps the bootstrap now takes:
+        let idle = json!({"generation":"0","status":"0","remaining":"1000000","reserved":"0"});
+        let attached = json!({"generation":"1","status":"1","remaining":"1000000","reserved":"0"});
+        let reserved = json!({"generation":"2","status":"3","remaining":"999999","reserved":"1"});
+        assert!(activation_needed("tool-attach", &idle) && activation_needed("parent-attach", &idle));
+        assert!(!activation_needed("parent-reserve", &idle), "a reserve before the attach is the law-denied step");
+        assert!(activation_needed("parent-reserve", &attached));
+        // A rerun finds every step done and submits nothing.
+        for step in ["tool-attach", "parent-attach", "parent-reserve"] {
+            assert!(!activation_needed(step, &reserved), "{step}");
+        }
+        assert!(!activation_needed("tool-attach", &attached), "an attached tool is left alone");
+        assert_eq!(ACTIVATION_STEPS.iter().map(|s| s.0).collect::<Vec<_>>(), ["tool-attach", "parent-attach", "parent-reserve"], "attach precedes reserve");
+    }
     use super::*;
 
     const FIXTURE: &[u8] = include_bytes!("../tests/fixtures/sandstorm-index-2026-10-27.json");
