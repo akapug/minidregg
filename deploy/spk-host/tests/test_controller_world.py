@@ -207,6 +207,24 @@ class ControllerWorldTests(unittest.TestCase):
             private.chmod(0o710)
             with self.assertRaisesRegex(ValueError,'mode refused'):c.operator_endpoint_upgrade(record['store'],'helper',str(endpoint))
 
+    def test_stopped_failed_units_preserve_diagnostics_but_refuse_live_processes(self):
+        r = self.worker_record()
+        state = {'ActiveState': 'failed', 'MainPID': '0', 'ControlPID': '0'}
+        def properties(unit):
+            return {'LoadState': 'loaded', 'Transient': 'no', 'FragmentPath': str(c.UNITS / unit),
+                    'User': str(r['uid'] if unit == r['units'][0] else r['operatorUid']), **state}
+        with patch.object(c, 'manager_properties', side_effect=properties), patch.object(c, 'no_processes') as quiet:
+            c.stopped_controller_units(r)
+            quiet.assert_called_once_with(r['uid'])
+            for field, value in [('MainPID', '42'), ('ControlPID', '42'), ('ActiveState', 'active'), ('ActiveState', 'activating')]:
+                before = state[field]; state[field] = value
+                with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                    c.stopped_controller_units(r)
+                state[field] = before
+            quiet.side_effect = ValueError('controller account still has a process')
+            with self.assertRaisesRegex(ValueError, 'still has a process'):
+                c.stopped_controller_units(r)
+
     def test_api_recovery_and_reconciliation_are_fixed_native_admin_commands(self):
         r = self.record(); base = self.root / 'base'; request = 'ab' * 16
         with patch.object(c, 'load', return_value=({}, base, r)), patch.object(c, 'checked_units'), patch.object(c, 'controller_child', return_value=0) as child:

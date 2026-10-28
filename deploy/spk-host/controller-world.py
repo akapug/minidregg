@@ -1324,7 +1324,8 @@ def stopped_controller_units(r):
         value = manager_properties(unit)
         require(value.get('LoadState') == 'loaded' and value.get('Transient') == 'no'
                 and value.get('FragmentPath') == str(UNITS / unit), 'stopped controller unit identity differs')
-        require(value.get('ActiveState') == 'inactive' and value.get('MainPID', '0') == '0'
+        # A failed unit can be physically stopped; keep its diagnostic state.
+        require(value.get('ActiveState') in ('inactive', 'failed') and value.get('MainPID', '0') == '0'
                 and value.get('ControlPID', '0') == '0', 'controller units must be stopped before storage upgrade')
         if unit.endswith('.service'):
             require(value.get('User') == str(r['uid'] if unit == r['units'][0] else r['operatorUid']),
