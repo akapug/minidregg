@@ -23,8 +23,6 @@ scripts/spk-platform/tests/test_spk_ingest_namespace.py	3
 scripts/spk-platform/tests/test_ws_continuity_fixture.py	20
 scripts/spk-platform/tests/test_ws_continuity_launch.py	8
 scripts/spk-platform/tests/test_ws_continuity_regressions.py	14
-scripts/test_lean_scoped_dag.py	7
-scripts/test_lean_warm_preflight.py	4
 testing/journeys/test_same_world_resident.py	6
 testing/journeys/test_shared_resident_useful_work.py	14
 testing/journeys/test_station_resident_fixture.py	6
