@@ -348,6 +348,7 @@ impl Pool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::DirBuilderExt;
     #[test]
     fn descriptor_is_bounded_and_method_shape_is_closed() {
         let valid = br#"{"version":1,"op":"send","channel":"c-1","text":"{\"msg\":\"ping\"}"}"#;
@@ -485,6 +486,10 @@ mod tests {
                     .unwrap()
                     .as_nanos()
             ));
+            std::fs::DirBuilder::new()
+                .mode(0o700)
+                .create(&directory)
+                .unwrap();
             crate::dispatch_native::private_dir(&directory).unwrap();
             let custody = Custody {
                 directory: directory.clone(),
