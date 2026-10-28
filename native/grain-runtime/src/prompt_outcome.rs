@@ -360,6 +360,33 @@ fn resolution_result(state: &Path, target: &Path, resolved: &Record) -> Result<V
         "resolutionSha256":sha256_file(target)?,"resolutionPath":target}))
 }
 
+/// Administrative success reports the completed audit, not a successful
+/// model turn. Keep this typed boundary separate from the refusal outcome.
+pub(crate) fn successful_admin_reply(id: &str, response: &str) -> bool {
+    #[derive(Deserialize)]
+    #[serde(rename_all="camelCase", deny_unknown_fields)]
+    struct Reply {
+        #[serde(rename="type")] kind: String,
+        prompt_operation_id: String,
+        resident_prompt_id: String,
+        prompt_sha256: String,
+        state: String,
+        result_ready: bool,
+        original_sha256: String,
+        resolution_sha256: String,
+        resolution_path: PathBuf,
+    }
+    let Ok(op)=id.parse::<u64>() else { return false };
+    if op == 0 || op.to_string() != id || response.len() > 65_536 { return false; }
+    let Ok(reply)=serde_json::from_str::<Reply>(response) else { return false };
+    reply.kind == "mini-prompt-audited-resolution-result-v1" && reply.prompt_operation_id == id
+        && reply.state == "refused" && !reply.result_ready
+        && [&reply.resident_prompt_id,&reply.prompt_sha256,&reply.original_sha256,&reply.resolution_sha256]
+            .into_iter().all(|v| resident_origin::valid_digest(v))
+        && reply.resolution_path.is_absolute()
+        && reply.resolution_path.file_name().and_then(|v|v.to_str()) == Some(format!("prompt-resolution-{op:016}.json").as_str())
+}
+
 /// A consumer receipt must name both the original decision and the optional
 /// validated resolution. The immutable original still says Undecided.
 pub(crate) fn evidence(state: &Path, prompt: u64) -> Result<Value> {
@@ -583,6 +610,53 @@ pub(crate) mod tests {
         let reserve=validate_reserve(&identity,&audit,&original,capture["source"].as_str().unwrap(),
             capture["reserveOutcome"].as_str().unwrap()).unwrap();
         assert_eq!(reserve, capture["reserveOperationId"].as_u64().unwrap());
+    }
+
+    fn admin_reply() -> Value {
+        json!({"type":"mini-prompt-audited-resolution-result-v1","promptOperationId":"67",
+            "residentPromptId":"a".repeat(64),"promptSha256":"b".repeat(64),"state":"refused",
+            "resultReady":false,"originalSha256":"c".repeat(64),"resolutionSha256":"d".repeat(64),
+            "resolutionPath":"/private/state/prompt-resolution-0000000000000067.json"})
+    }
+
+    #[test]
+    fn audited_admin_reply_classifies_command_success_without_claiming_turn_success() {
+        let good=admin_reply(); assert!(successful_admin_reply("67",&good.to_string()));
+        for id in ["0","067","68"] { assert!(!successful_admin_reply(id,&good.to_string())); }
+        for (field,bad) in [("state",json!("admitted")),("resultReady",json!(true)),
+            ("originalSha256",json!("")),("resolutionPath",json!("relative.json")),("noDispatch",json!(true))] {
+            let mut reply=good.clone();reply[field]=bad;
+            assert!(!successful_admin_reply("67",&reply.to_string()),"{field}");
+        }
+        let duplicate=good.to_string().replacen('{',"{\"resultReady\":false,",1);
+        assert!(!successful_admin_reply("67",&duplicate));
+        assert!(!successful_admin_reply("67","error: audit incomplete"));
+    }
+
+    #[test]
+    #[ignore = "requires a separately built runtime executable for actual CLI reception"]
+    fn audited_admin_actual_cli_preserves_stdout_and_exit_status() {
+        use std::os::unix::net::UnixListener;
+        let binary=std::env::var_os("MINI_GRAIN_RUNTIME_CLI").expect("qualified runtime path required");
+        let root=std::env::temp_dir().join(format!("gpa-cli-{}",std::process::id()));
+        fs::create_dir(&root).unwrap();
+        let good=admin_reply().to_string();
+        for (index,reply,success) in [(0,good.clone(),true),
+            (1,good.replace("\"67\"","\"68\""),false),(2,"error: audit incomplete".into(),false)] {
+            let socket=root.join(format!("{index}.sock"));let listener=UnixListener::bind(&socket).unwrap();
+            let expected=reply.clone();
+            let server=thread::spawn(move || {
+                let (mut stream,_)=listener.accept().unwrap();
+                assert_eq!(control::admin_read_frame(&mut stream).unwrap(),"reconcile prompt audited 67");
+                control::admin_write_frame(&mut stream,&reply).unwrap();
+            });
+            let output=Command::new(&binary).args(["admin",socket.to_str().unwrap(),"reconcile prompt audited 67"])
+                .output().unwrap();server.join().unwrap();
+            assert_eq!(output.status.success(),success,"{}",String::from_utf8_lossy(&output.stderr));
+            if success { assert_eq!(String::from_utf8(output.stdout).unwrap(),format!("{expected}\n"));assert!(output.stderr.is_empty()); }
+            else { assert!(output.stdout.is_empty());assert!(String::from_utf8_lossy(&output.stderr).contains(&expected)); }
+        }
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
