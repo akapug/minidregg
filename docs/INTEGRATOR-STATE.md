@@ -83,7 +83,7 @@ delegated consent, hermes-b 5422506f, the world/ pack 1b870fbdd). On READY the c
 report "candidate <sha> at <path>: gate <verdict>, reds by name" to the coordinator, and the sha + path to the rows
 validator (aeee8349c191e8506, the app tables wait on 25cfb86bd) and L4b (ad81db6d6fd317d3a). Pending lands:
 lean-audit-c only on L1d's warm-tree green sha; iter-speed successor's census re-pin (a0fd127abfb9aac75) only
-after that candidate is reported. Transitive bumps through registry constants: closed by ruling (no).
+after that candidate is reported.
 
 Red routing: lean-audit-c is L1d's (ad6d6eff243f32816): its green sha comes from and its reds go to L1d directly; Hermes to L4b (ad81db6d6fd317d3a); L13 a1618140607ac439b; un-stream-continuity reds
 (ApplicationStreamContinuityFresh pole proofs, NativeHostReplay.lean:3816) to the deputy a308118209b4a48ea; all
@@ -96,6 +96,21 @@ Rules now in force: the Mac runs cargo check and filtered Rust tests only, never
 itself: box only). Lanes may build and run again (ember, baef327e4), but only in warm, incremental trees on
 dregg-ref or hbox, never a fresh tree and never a search from / or ~. The integrator still merges, builds and
 gates main and fixes reds itself.
+
+## Rulings (do not re-ask)
+
+- Intent.credit (L1d item 5, ops 244-247) persists in IntentRecord: durable log frame v3 and
+  `DREGG.DURABLE.IMAGE` v3, shipped with the module conversion's re-genesis so the StoreEpoch moves once. Pending
+  the auditor's acceptance; L1d (ad6d6eff243f32816) coordinates the order with the integrator and the iter-speed
+  successor (a0fd127abfb9aac75).
+- closure.pid on dregg-ref (empty for jobs started before lanes joined group `closure`) is infra's
+  (aed5ecf506cf840af), not the integrator's.
+- Transitive bumps through registry constants: closed, no. Nesting already propagates through the regen's round
+  loop; both stops were spelling forms, now handled.
+- Owner-less pins: the census refuses a registered DREGG identity no definition spells or names, landed once
+  A9/A10's pins show none left (the Mac worktree's uncommitted `ownerless` check; through a box build only).
+- The module conversion's census change (option A, structure-not-name for compiler auxiliaries) is the one planned
+  re-pin; it lands from a0fd127abfb9aac75 after the next candidate is reported.
 
 ## Cut 9's red, and its cause
 
