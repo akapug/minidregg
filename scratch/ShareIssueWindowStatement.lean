@@ -124,7 +124,7 @@ def lemma_plan_height_determined : Prop :=
     descriptorPlannedAt ready record authority p payer funding aux =
       descriptorPlannedAt ready record authority q payer funding aux → p = q
 
-/-- App-delegation leg. `ApplicationShareIssueDelegation.appRequestFromSourceBytes` puts `height`
+/- App-delegation leg. `ApplicationShareIssueDelegation.appRequestFromSourceBytes` puts `height`
 into the signed request (`height := height`, ApplicationShareIssueSource.lean, field `height`), and
 `Prepared`/`Checked` are built at `ambient.height` (Accepted.appPrepared/appChecked, lines 69-72 of
 ApplicationShareIssueGrainAdmission.lean). The signature in `ingress.appEnvelope` was made over the
@@ -132,9 +132,8 @@ request at the PLAN height, so this leg has the same submit-height equality: it 
 the plan height p as well. The policy epoch and revision of that request come from the authority
 at the loaded image (`authority.policyEpoch`, `.policyRevision`) and are checked current at submit,
 not at p; that part stays as it is. -/
-def app_delegation_uses_plan_height : Prop := True
 
-/-- The real change to `Accepted`. In `ApplicationShareIssueGrainAdmission.Accepted` three fields
+/- The real change to `Accepted`. In `ApplicationShareIssueGrainAdmission.Accepted` three fields
 read `ambient.height`: `sourceDescriptor` (byte equality of the ticket descriptor), `appPrepared`
 (the delegation request) and, through it, `appChecked`. They are replaced by the fields below, with
 `planHeight` existential in `Accepted` itself (no wire change, no new signed field); the rest of
@@ -157,6 +156,5 @@ read `ambient.height`: `sourceDescriptor` (byte equality of the ticket descripto
 `admitNative` finds `planHeight` by reading the grants' `notBefore` of the decoded birth (the
 determinacy lemma above makes it the only candidate), then tests the three conditions.
 `PlannedWithinWindow` is the corresponding predicate on the descriptor. -/
-def admission_relaxed_statement : Prop := True
 
 end Minidregg.Kernel.ApplicationShareIssueGrainAdmission
