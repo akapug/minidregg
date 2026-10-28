@@ -542,7 +542,7 @@ to a candidate whose host carries bc88a5ab, and add `J14_AWAIT=1` for the bridge
   8,700 inodes; what compaction keeps there is about 5.4 MiB and 770 inodes, growing about
   40 inodes per prompt (room-operations, requests, resident records) plus about 80 KiB per prompt
   of `state.db` and history lines. **Owed: measure it** (footprint.tsv on the v8 candidate run;
-  the target is 32 MiB and about 2,000 inodes over a full summon budget), then send infra one
+  the target is 32 MiB and about 2,000 inodes over a full summon budget), then send infra (ae95a4eac63b0715e; aed5ecf506cf840af is stopped) one
   batch: the figure, the unit text above, and its four items (controller-entry per-registration
   serviceUid with `User=`/`Group=`/`Requires=user@UID`/`Environment=MINI_OPERATOR_PEER_UID=0` for a
   resident registration; the resident uids as broker provider peers; per uid the user@ drop-in
