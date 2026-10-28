@@ -9,18 +9,14 @@ The twin half is `noTwin` at code 1.  The ghost half compares the host dispatch 
 ghost handler's firing at the blinded cell of `ContentProofs` (a link admitted): the
 dispatch's post blinding is one ratchet step of the pre blinding
 (`StoreCodec.Blinding.run_leg_blinding`), the ghost's is the pre blinding unchanged.  That the
-step MOVES the blinding is a fact about cSHAKE256, so it is the one compiled evaluation here
-(`ratchet_moves`, pinned `#assert_compiled`; law 9's confessed form); everything else is a
-kernel proof.
+step MOVES the blinding is a fact about cSHAKE256 (`ratchet_moves`), decided by the kernel
+(`decide +kernel`, one cSHAKE step over a 32-byte key, well under a minute); every proof here
+is kernel-checked.
 -/
 module
 
 public import Effects.Revival.ContentProofs
 public import Theory.AssertAxioms
-public import Theory.AssertCompiled
-meta import Effects.Revival.ContentProofs
-meta import Theory.AssertAxioms
-meta import Theory.AssertCompiled
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -58,7 +54,7 @@ def zeroBlindingKey : List UInt8 :=
 /-- **The one hash fact**: a ratchet step at height 0 moves the zero blinding. -/
 theorem ratchet_moves :
     (HyperdocumentCell.contentBlinding.step 0 zeroBlindingKey != zeroBlindingKey) = true := by
-  native_decide
+  decide +kernel
 
 theorem blindedStore_key :
     StoreCodec.blindingKey HyperdocumentCell.contentWire blindedStore = some zeroBlindingKey := by
@@ -187,9 +183,7 @@ theorem hostTeeth : HostTeeth := ⟨hostGhost_disagrees, hostTwin_refuted⟩
 #assert_axioms sampleLinkOps_key
 #assert_axioms ghost_exec_blinded
 #assert_axioms hostTwin_refuted
-set_option maxHeartbeats 4000000 in
-#assert_compiled ratchet_moves
-set_option maxHeartbeats 4000000 in
-#assert_compiled hostTeeth
+#assert_axioms ratchet_moves
+#assert_axioms hostTeeth
 
 end Minidregg.Effects.Revival
