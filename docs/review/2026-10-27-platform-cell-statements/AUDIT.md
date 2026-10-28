@@ -959,3 +959,13 @@ every other family, this costs them nothing.
   It is sufficient only if replay compares each record's `credit` with its arm's re-admitted intent.
   State that link: a record whose credit differs from its arm's intent is refused (the `sameCheck` credit
   clause). Then an IO receiver cannot commit a credit the arm would not reproduce.
+
+**Correction to the twenty-first pass: the overflow finding is withdrawn, and option (A) is chosen.** I
+checked on main. `ResourceCost.WordLayout` is referenced nowhere in `Kernel/`, `Compiler/` or `Host/`
+except `PlatformCell.RefillContext.layout`. The meter persists only through
+`DurableReceiverCodec.chargeStream` (ten unbounded `StreamCodec.nat`). So the deployed meter is an
+unbounded `Nat` end to end, and no record becomes unencodable. A fit check would guard nothing (and
+this pass's own pass-2 overflow pole asked for one on that same false premise). Drop
+`RefillContext.layout`, the `fitsCheck` conjunct and `overflow_refused`. The remaining M2 statements
+stand. Record in `PlatformCell.lean`'s header that the meter is unbounded by design: any future
+fixed-width emitter of `available` must carry its own bound at that emitter (law 3).
