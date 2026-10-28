@@ -88,7 +88,7 @@ units=/run/user/$op_uid/systemd/user
 store=$("$host" "$config" profile | jq -er '.storeTag | select(test("^[0-9a-f]{16}$"))')
 grains=/var/lib/mini-spk-worlds/$store
 [[ ! -e $grains ]] || refuse "a grain world for store $store already exists at $grains"
-mkdir -m 700 -p "$units" "$out/bin"
+mkdir -m 700 -p "$units" "$out/bin" "$out/evidence"
 for binary in spk-host mini-spk-broker mini-spk-volume-helper; do install -m 755 "$cand/bin/$binary" "$out/bin/$binary"; done
 install -m 755 "$repo/deploy/spk-host/spk-ingest" "$out/bin/spk-ingest"
 runid=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
