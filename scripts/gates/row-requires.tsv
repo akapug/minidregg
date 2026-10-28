@@ -14,3 +14,8 @@ story-join	0d7af4da91f3d45dc001ae3ec86b8c5ce47459c5	web-parity: story-join posts
 story-move	0d7af4da91f3d45dc001ae3ec86b8c5ce47459c5	web-parity: follows the page-form join (the row predates it; its join does not)
 story-refused	0d7af4da91f3d45dc001ae3ec86b8c5ce47459c5	web-parity: follows the page-form join (the row predates it; its join does not)
 JP2	eda65ced87871db5e4a60a924698ac0d2a2abb8a	thin-birth: the friend's thin birth (Kernel.NativeThinBirth) and the swapped-plan refusal
+hermes-tools-none	588855a7114dc794e0fac256d86ea106e535a41c	web-parity 588855a71: the grant form on room-new rooms and the JWF helper fix this row needs
+story-join	588855a7114dc794e0fac256d86ea106e535a41c	web-parity 588855a71: the grant form on room-new rooms and the JWF helper fix this row needs
+story-page-joined	588855a7114dc794e0fac256d86ea106e535a41c	web-parity 588855a71: the grant form on room-new rooms and the JWF helper fix this row needs
+story-move	588855a7114dc794e0fac256d86ea106e535a41c	web-parity 588855a71: the grant form on room-new rooms and the JWF helper fix this row needs
+story-refused	588855a7114dc794e0fac256d86ea106e535a41c	web-parity 588855a71: the grant form on room-new rooms and the JWF helper fix this row needs
