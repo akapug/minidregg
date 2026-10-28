@@ -18,11 +18,13 @@ buffer is retained in memory.
 | Profile | Compressed input | Decoded archive | Decoder memory |
 | --- | ---: | ---: | ---: |
 | `standard-v1` | 256 MiB | 768 MiB | 128 MiB |
+| `market-large-v1` | 512 MiB | 2 GiB | 128 MiB |
 | `operator-appliance-v1` | 8 GiB | 20 GiB | 128 MiB |
 
 Only the trusted caller selects a profile. Limits also bound extracted bytes
-(including aliased file pointers), 100,000 entries, 64 directory levels, 4,096
-segments per message, 4,096 bytes per path, and 16 MiB total retained path and
+(including aliased file pointers), 100,000 entries, 64 directory levels, a
+per-profile Cap'n Proto segment bound (512 for `standard-v1`, 4,096 for the large
+profiles), 4,096 bytes per path, and 16 MiB total retained path and
 symlink bytes. Signed manifests are limited to 1 MiB and bridge configs to 64 KiB.
 Unknown union tags, invalid names, duplicate names, escaping links, and reserved
 mountpoint substitutions fail before publication. This reader accepts one archive
