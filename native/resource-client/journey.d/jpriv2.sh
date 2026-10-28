@@ -194,7 +194,10 @@ check friend "workspace pins socket ssh:box, no Host image, the Host digest, the
 # storeless provider re-authors the friend's own source at the coordinates the box's draft
 # carries, checks the plan's finalized descriptor against that draft and every header against
 # its own derivation, and shows what it signs (thin-display.json beside the plan).
-run friend "create notes declared all[] (remote shell, thin birth)" 0 fshell 'create notes declared {"type":"all","predicates":[]}'
+# The cell declares field 2, the field every later row writes and reads: since
+# K-FIELD-CLOSURE a declared cell born without a field list holds none, and the write
+# below is refused at prepare (undeclaredField 2).
+run friend "create notes declared all[] (remote shell, thin birth)" 0 fshell 'create notes declared {"type":"all","predicates":[]} 2'
 NOTES_ATTEMPT=$FWS/attempts/create-notes
 check friend "  thin consent showed the birth: draft, coordinates and the finalized descriptor it signs" \
   jq -e '.birth.draft != null and (.birth.finalized | length > 0) and (.birth.coordinates.height | length > 0)' "$NOTES_ATTEMPT/thin-display.json"
