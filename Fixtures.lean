@@ -14,3 +14,4 @@ and `TokenCensus.Fixtures` runs the token census over its modules.
 -/
 import Fixtures.NativeAcceptedFixture
 import Fixtures.NativeDocWriteFixture
+import Fixtures.BirthPlanPoles

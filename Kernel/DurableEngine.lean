@@ -157,7 +157,7 @@ def install (engine : Engine) (intent : DataIntent rootBytes) : Engine where
   -- Keep the ten remaining allowances as values. Retaining the subtraction
   -- closure would re-evaluate every prior intent's charge on each later check.
   available := (Charge.materialize fun lane =>
-    engine.available lane - intent.exactCharge lane).toCharge
+    engine.available lane - intent.exactCharge lane + intent.credit lane).toCharge
   spentBefore := engine.spentBefore
   spent := intent.nullifiers.foldl (fun spent nullifier => spent.insert nullifier) engine.spent
   journal := Thunk.mk fun _ => (intent.transactionId, intent.erase) :: engine.journal.get
@@ -181,7 +181,7 @@ def install (engine : Engine) (intent : DataIntent rootBytes) : Engine where
 exhaustion and natural-number subtraction at zero. -/
 theorem available_install (engine : Engine) (intent : DataIntent rootBytes) :
     (engine.install rootBytes intent).available =
-      fun lane => engine.available lane - intent.exactCharge lane :=
+      fun lane => engine.available lane - intent.exactCharge lane + intent.credit lane :=
   Charge.materialize_eq _
 
 theorem get_foldr (writes : List DataWrite) (table : CellTable) (cellId : CellId) :

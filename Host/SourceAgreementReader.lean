@@ -158,7 +158,13 @@ def profileDescription (config : NativeHost.Config)
      ("nativeChecked", toJson true), ("succinctProofDeployment", toJson false)]
   Lean.Json.mkObj base
 
-def descriptionLoaded (config : NativeHost.Config) : Lean.Json := Id.run do
+/-- The deployment's description on the loaded image. A grain birth is offered while that
+image's platform record prices it (`record.grainBirth`), the same record the grain receiver
+reads (`GrainResourceBirthAdmission.grainTariffAt`). -/
+def descriptionLoaded (config : NativeHost.Config) (opened : NativeHost.Opened config) :
+    Lean.Json := Id.run do
+  let grainBirth := ((PlatformCellDomain.recordOn config.deployment opened.durable.snapshot).bind
+    (·.grainBirth)).isSome
   let n := fun value : Nat => toJson (toString value)
   return Lean.Json.mkObj
     [("runtime", toJson "minidregg-native"),
@@ -171,7 +177,7 @@ def descriptionLoaded (config : NativeHost.Config) : Lean.Json := Id.run do
      ("operations", toJson
        ((["birth", "invoke", "install", "delegate", "revoke", "renounce",
           "source-agreement-reader"] : List String) ++
-         if config.grainBirthTariff.isSome then ["grain-birth"] else [])),
+         if grainBirth then ["grain-birth"] else [])),
      ("nockFSync", n config.nockFSync),
      ("jointInvocation", toJson true), ("typedContent", toJson true),
      ("authorizedQueries", toJson true), ("delegation", toJson true)]
@@ -249,8 +255,7 @@ def dispatch (config : NativeHost.Config) (operation : UInt8)
   match operation with
   | 0 =>
       unless payload.isEmpty do throw (RequestRefusal.malformed "describe does not accept a payload")
-      discard <| opened config
-      return (0, (descriptionLoaded config).compress.toUTF8.toList)
+      return (0, (descriptionLoaded config (← opened config)).compress.toUTF8.toList)
   | 1 =>
       match ← NativeHost.prepareAuthorizedLoaded config (← opened config)
           (← IO.ofExcept (← NativeHostLight.start config)) payload with

@@ -332,6 +332,13 @@ def AdmittedTurn.finalIntent {rootBytes : Bytes → Digest} {config : Config} {s
   | .failed request _ =>
       intentOf rootBytes request.transaction posts extra [] sealing
 
+/-- An activity turn's intent credits no meter (M2: only the refill family carries credit). -/
+theorem AdmittedTurn.finalIntent_credit {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} (sealing : Seal) (posts : List Post)
+    (extra : List ReadGuard) (turn : AdmittedTurn config snapshot height) :
+    (AdmittedTurn.finalIntent sealing posts extra turn).credit = 0 := by
+  cases turn <;> rfl
+
 /-- A cell an intent GUARDS: a read guard on it at the snapshot's root, or the intent writes it. -/
 def Guarded {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (intent : DataIntent rootBytes)
     (cell : CellId) : Prop :=

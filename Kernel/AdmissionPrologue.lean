@@ -117,8 +117,8 @@ def SamePayload (left right : Request rootBytes) : Prop :=
     request.sameCheck request = true := by
   rw [sameCheck_eq_true_iff]
   exact ⟨rfl, rfl, rfl,
-    ⟨rfl, rfl, rfl, rfl⟩,
-    ⟨rfl, rfl, rfl, rfl⟩⟩
+    ⟨rfl, rfl, rfl, rfl, rfl⟩,
+    ⟨rfl, rfl, rfl, rfl, rfl⟩⟩
 
 end Request
 
@@ -357,7 +357,8 @@ theorem fee_and_nonce_persist_on_body_failure
     (reason : DurableDataIntent.RejectReason)
     (body : executeStage (DataSnapshot.install before.data admitted.request.prologue)
       admitted.request.body = .rejected reason)
-    (funded : admitted.request.prologue.exactCharge <= before.data.model.available) :
+    (funded : admitted.request.prologue.exactCharge <= before.data.model.available)
+    (uncredited : admitted.request.prologue.credit = 0) :
     ((execute before admitted).storeAfter before).data.model.consumed
         admitted.request.nonce = true /\
       admitted.request.prologue.exactCharge +
@@ -377,8 +378,8 @@ theorem fee_and_nonce_persist_on_body_failure
       (DataSnapshot.install before.data admitted.request.prologue).model.available =
         before.data.model.available
     rw [DataSnapshot.install_model]
-    exact DurableCommitProtocol.Snapshot.install_exact_debit
-      before.data.model admitted.request.prologue.erase funded
+    exact DurableCommitProtocol.Snapshot.install_exact_debit_uncredited
+      before.data.model admitted.request.prologue.erase funded uncredited
 
 /-- Recording a terminal receipt makes every exact retry an identity operation.
 This is the outer half of no-double-charge; the inner stage journals provide
@@ -626,10 +627,9 @@ theorem concrete_fee_and_nonce_persist :
       request.prologue.exactCharge +
         ((execute beforeAdmission admitted).storeAfter beforeAdmission).data.model.available =
           beforeAdmission.data.model.available := by
-  apply fee_and_nonce_persist_on_body_failure beforeAdmission admitted
+  exact fee_and_nonce_persist_on_body_failure beforeAdmission admitted
     (by rfl) prologue_ready (.durable .stalePreRoot) body_really_rejects
-  intro lane
-  cases lane <;> decide
+    (by intro lane; cases lane <;> decide) rfl
 
 end Witness
 

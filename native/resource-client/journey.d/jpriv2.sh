@@ -199,8 +199,10 @@ check friend "workspace pins socket ssh:box, no Host image, the Host digest, the
 # below is refused at prepare (undeclaredField 2).
 run friend "create notes declared all[] (remote shell, thin birth)" 0 fshell 'create notes declared {"type":"all","predicates":[]} 2'
 NOTES_ATTEMPT=$FWS/attempts/create-notes
-check friend "  thin consent showed the birth: draft, coordinates and the finalized descriptor it signs" \
-  jq -e '.birth.draft != null and (.birth.finalized | length > 0) and (.birth.coordinates.height | length > 0)' "$NOTES_ATTEMPT/thin-display.json"
+check friend "  thin consent showed the birth: draft, coordinates, money terms and the finalized descriptor it signs" \
+  jq -e '.birth.draft != null and (.birth.finalized | length > 0) and (.birth.coordinates.height | length > 0)
+    and (.birth.terms.fee.amount | length > 0) and (.birth.terms.ownerBudget | length > 0)
+    and (.birth.terms.lifetime | length > 0)' "$NOTES_ATTEMPT/thin-display.json"
 run friend "invoke first-write notes create 2 1" 0 fshell 'invoke first-write notes create 2 1'
 run friend "submit first-write" 0 fshell 'submit first-write'
 check friend "write installed" jq -e '.type == "confirmed" and .confirmation == "installed"' "$LAST"

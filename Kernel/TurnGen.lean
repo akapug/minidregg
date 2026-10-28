@@ -232,7 +232,7 @@ def nullifier (n : Nat) : StableNullifier :=
 `feeDebit`, nothing else. -/
 def assemble (w : DWorld) (tx : Nat) (writes : List DataWrite) (guards : List ReadGuard)
     (nulls : List StableNullifier) (fee : Nat) : Option (DataIntent RB) := do
-  let pre ← (IntentRecord.mk ⟨tx⟩ writes guards nulls 0 (event tx) none).bind? RB
+  let pre ← (IntentRecord.mk ⟨tx⟩ writes guards nulls 0 (event tx) none (fun _ => 0)).bind? RB
   let t := turnOf bridge history (fun c => w.cells c) pre
   let storage := storageOf history t.creates t.legs t.event
   return { pre with exactCharge := fun l =>

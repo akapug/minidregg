@@ -39,12 +39,15 @@ write_SandCal() {
   jreq GET /export.ics; local got=$JS
   [[ $post =~ ^(200|302|303)$ && $got == 200 ]] && grep -q 'planned by a resident' "$body" && echo "1 POST /import $post (file input $fname); GET /export.ics $got"
 }
-# ExpenseOwl: upstream API (tanq16/expenseowl): POST /expense JSON {name,category,amount,date}, GET /expenses lists JSON.
-# Row evidence: the first attempt (negative amount) left GET /expenses at [], so the amount is sent positive.
+# ExpenseOwl (package 07a8207b, /opt/app/main, tanq16/expenseowl internal/api, data in /var/data). The route
+# table is in the binary's embedded page script (the add-expense form): fetch('/expense', {method: 'PUT', body:
+# JSON {name, category, amount, date}}), and GET /expenses lists JSON. The method is PUT in this build; the run on
+# e89fe7b8b answered POST /expense 405 (the handler allows only PUT), with GET /expenses 200 and [] left.
+# Amount stays positive (an earlier negative amount left the list empty).
 write_ExpenseOwl() {
-  local p; p=$(req POST /expense -H 'Content-Type: application/json' \
+  local p; p=$(req PUT /expense -H 'Content-Type: application/json' \
     -d '{"name":"featured by a resident","category":"Other","amount":3.5,"date":"2026-10-27T12:00:00Z"}')
   local g; g=$(req GET /expenses)
-  [[ $p =~ ^20 && $g == 200 ]] && grep -q 'featured by a resident' "$body" && echo "1 POST /expense $p; GET /expenses $g" \
-    || echo "0 POST /expense $p, GET /expenses $g: expense not in the list"
+  [[ $p =~ ^20 && $g == 200 ]] && grep -q 'featured by a resident' "$body" && echo "1 PUT /expense $p; GET /expenses $g" \
+    || echo "0 PUT /expense $p, GET /expenses $g: expense not in the list"
 }

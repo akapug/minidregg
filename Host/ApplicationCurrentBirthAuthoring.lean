@@ -1,8 +1,9 @@
 /-
 Source-owned application and session birth authoring against one verified native
 image. The JSON parser supplies typed identities and funding; the loaded image
-supplies current height and authority epochs. A genesis description is checked
-against the pinned seed but never used as today's authority state.
+supplies current height, authority epochs and the platform record (creation tariff,
+grain-birth tariff, grant window). A genesis description is checked against the pinned
+seed but never used as today's authority state or prices.
 -/
 module
 
@@ -37,22 +38,31 @@ private def checkSource (config : NativeHost.Config) (opened : NativeHost.Opened
   unless context.height == NativeHost.logicalHeight config opened.durable do
     throw "application birth height is stale"
 
-private def checkCompositeTariff (config : NativeHost.Config)
+/-- The platform record the loaded image holds: the birth's creation tariff, grain-birth
+tariff and grant window are its (the receiver prices from the same record and refuses any
+other, `platformStale`). -/
+private def platformRecord (config : NativeHost.Config) (opened : NativeHost.Opened config) :
+    Except String PlatformCellLayout.Platform :=
+  match PlatformCellDomain.recordOn config.deployment opened.durable.snapshot with
+  | some record => pure record
+  | none => throw "application birth: platform cell unavailable"
+
+private def checkCompositeTariff (record : PlatformCellLayout.Platform)
     (selected : Option NativeHost.GrainBirthTariffPin) : Except String Unit := do
-  let _ ← config.grainBirthTariffValue
-  unless selected == config.grainBirthTariff do
-    throw "application grain birth tariff differs from the pinned runtime"
+  unless selected == record.grainBirth do
+    throw "application grain birth tariff differs from the platform record"
 
 private def appDraft (config : NativeHost.Config) (opened : NativeHost.Opened config)
     (path : String) (source : Lean.Json)
     (tariff : Option NativeHost.GrainBirthTariffPin) : Except String Draft := do
-  checkCompositeTariff config tariff
+  let record ← platformRecord config opened
+  checkCompositeTariff record tariff
   let (context, specJson) ← Json.applicationBirthContext path "application" source tariff
     (some (NativeHost.logicalHeight config opened.durable)) (some config)
   checkSource config opened context
   let spec ← Json.applicationSpec (path ++ ".application") specJson
   let ready ← ApplicationGrainBirth.prepare spec
-  let descriptor := ready.descriptorCurrent config.profile context.source
+  let descriptor := ready.descriptorCurrent config.profile context.source record
     opened.authority.snapshot.authState context.height context.creator context.nonce
     context.feePayer context.funding
   pure (.birth ((ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode
@@ -61,13 +71,14 @@ private def appDraft (config : NativeHost.Config) (opened : NativeHost.Opened co
 private def sessionDraft (config : NativeHost.Config) (opened : NativeHost.Opened config)
     (path : String) (source : Lean.Json)
     (tariff : Option NativeHost.GrainBirthTariffPin) : Except String Draft := do
-  checkCompositeTariff config tariff
+  let record ← platformRecord config opened
+  checkCompositeTariff record tariff
   let (context, specJson) ← Json.applicationBirthContext path "session" source tariff
     (some (NativeHost.logicalHeight config opened.durable)) (some config)
   checkSource config opened context
   let spec ← Json.applicationSessionSpec (path ++ ".session") specJson
   let ready ← ApplicationGrainSessionBirth.prepare spec
-  let descriptor := ready.descriptorCurrent config.profile context.source
+  let descriptor := ready.descriptorCurrent config.profile context.source record
     opened.authority.snapshot.authState context.height context.creator context.nonce
     context.feePayer context.funding
   pure (.birth ((ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode
