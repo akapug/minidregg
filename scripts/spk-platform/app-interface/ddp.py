@@ -10,12 +10,13 @@ from binding import Refusal, Uncertain, resolve
 
 
 class DDP:
-    def __init__(self, channel, limit=1000, seconds=30):
+    def __init__(self, channel, limit=1000, seconds=30, diagnostic=None):
         self.channel, self.limit, self.seconds = channel, limit, seconds
         self.documents = {}
         self.result = {}
         self.updated = set()
         self.received_bytes = 0
+        self.diagnostic = diagnostic or (lambda event: None)
 
     def send(self, value):
         self.channel.send(json.dumps(value, separators=(',', ':')))
@@ -103,17 +104,49 @@ class DDP:
             raise
 
     def authenticate(self, auth, post):
+        if auth['kind'] == 'credential-resume':
+            status, headers, body = post({'method': 'GET', 'path': auth['credentialsPath'].lstrip('/'),
+                                         'query': '', 'headers': {}, 'body': b''})
+            if status != 200 or 'json' not in headers.get('content-type', '').lower():
+                raise Refusal('auth-credentials-refused', str(status))
+            try:
+                credentials = json.loads(body)
+            except ValueError:
+                raise Refusal('auth-credentials-invalid') from None
+            token = credentials.get(auth['tokenField']) if isinstance(credentials, dict) else None
+            if not isinstance(token, str) or not token or len(token) > 4096:
+                raise Refusal('auth-member-required')
+            info = self.finish(self.begin(auth['method'], [{'resume': token}]))
+            if not isinstance(info, dict) or not isinstance(info.get(auth['userIdField']), str) or not info[auth['userIdField']]:
+                raise Refusal('auth-member-required')
+            return info[auth['userIdField']]
         token = uuid.uuid4().hex + uuid.uuid4().hex
+        started = time.monotonic()
         mid = self.begin(auth['method'], [token])
+        self.diagnostic({'auth': {'event': 'method-sent', 'elapsedMs': round(1000 * (time.monotonic() - started))}})
         # Upstream client.js delays 10ms and retries rendezvous XHRs (NOT the DDP
         # method) when HTTP beats registration. Keep a bounded version of that.
         for attempt in range(4):
             time.sleep(0.01 if attempt == 0 else 1)
+            post_started = time.monotonic()
             status, _, _ = post({'method': 'POST', 'path': auth['postPath'].lstrip('/'), 'query': '',
                                  'headers': {'content-type': auth['contentType']}, 'body': token.encode()})
+            self.diagnostic({'auth': {'event': 'rendezvous-post', 'attempt': attempt + 1,
+                             'status': status, 'elapsedMs': round(1000 * (time.monotonic() - started)),
+                             'durationMs': round(1000 * (time.monotonic() - post_started))}})
             if status == 204:
                 break
             if status != 500 or attempt == 3:
+                # Drain the bounded method result: the HTTP endpoint hides its cause.
+                # Only the app error code is retained, never its private reason/details.
+                try:
+                    self.finish(mid)
+                except Refusal as error:
+                    if error.name == 'ddp-method-refused':
+                        self.diagnostic({'auth': {'event': 'method-refused', 'code': error.detail[:80],
+                                         'elapsedMs': round(1000 * (time.monotonic() - started))}})
+                except (OSError, EOFError):
+                    pass
                 raise Refusal('auth-rendezvous-refused', str(status))
         info = self.finish(mid)
         if not isinstance(info, dict) or not isinstance(info.get(auth['userIdField']), str) or not info[auth['userIdField']]:

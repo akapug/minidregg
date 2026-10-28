@@ -7,6 +7,9 @@ No HTML, app-specific executable branches, direct database access, or shell reci
 import argparse
 import base64
 import http.client
+import http.cookiejar
+import urllib.request
+from http.cookies import SimpleCookie
 import json
 import os
 from pathlib import Path
@@ -30,28 +33,51 @@ class UnixHTTP(http.client.HTTPConnection):
         self.sock.connect(str(self.route / 'http.sock'))
 
 
+class MemberCookiePolicy(http.cookiejar.DefaultCookiePolicy):
+    def set_ok(self, cookie, request):
+        return (cookie.name != '__Host-mini_spk_session' and
+                cookie.domain.lstrip('.') == 'grain.test' and super().set_ok(cookie, request))
+
+
 class Route:
     def __init__(self, route, d, journal):
         self.route, self.d, self.journal = route, d, journal
+        self.cookies = http.cookiejar.CookieJar(MemberCookiePolicy())
+        self.retain_app_cookies = d.get('auth', {}).get('appCookies', 'omit') == 'retain'
         self.cookie = (route / 'browser.token').read_text().strip()
         if not self.cookie or any(ord(c) < 33 or ord(c) > 126 or c in ';,' for c in self.cookie):
             raise Refusal('route-token-invalid')
 
     def retain(self, request):
-        # Exact binding preimage retained locally for diagnosis. It is NOT a Mini permit.
+        # Private diagnostics exclude credentials/prepared bodies; NOT a Mini permit journal.
         self.journal.write(json.dumps(request, separators=(',', ':')) + '\n')
         self.journal.flush()
         os.fsync(self.journal.fileno())
 
+    def cookie_values(self, path=''):
+        if not self.retain_app_cookies:
+            return {}
+        request = urllib.request.Request('https://grain.test/' + path.lstrip('/'))
+        self.cookies.add_cookie_header(request)
+        parsed = SimpleCookie()
+        parsed.load(request.get_header('Cookie', ''))
+        return {name: morsel.value for name, morsel in parsed.items()}
+
     def http(self, request):
         body = request['body']
-        if request['path'] != self.d.get('auth', {}).get('postPath', '').lstrip('/'):
+        secret = request.get('redact', False) or request['path'] in {
+            self.d.get('auth', {}).get(key, '').lstrip('/') for key in ('postPath', 'credentialsPath')}
+        if not secret:
             self.retain({'http': {**request, 'body': base64.b64encode(body).decode()}})
-        headers = {**request['headers'], 'Cookie': '__Host-mini_spk_session=' + self.cookie,
-                   'Origin': 'https://grain.test'}
+        path = '/' + request['path'] + ('?' + request['query'] if request['query'] else '')
+        cookie_request = urllib.request.Request('https://grain.test' + path)
+        if self.retain_app_cookies:
+            self.cookies.add_cookie_header(cookie_request)
+        app_cookie = cookie_request.get_header('Cookie', '')
+        headers = {**request['headers'], 'Cookie': '__Host-mini_spk_session=' + self.cookie +
+                   ('; ' + app_cookie if app_cookie else ''), 'Origin': 'https://grain.test'}
         conn = UnixHTTP(self.route, self.d['limits']['seconds'])
         try:
-            path = '/' + request['path'] + ('?' + request['query'] if request['query'] else '')
             try:
                 conn.request(request['method'], path, body=body, headers=headers)
                 response = conn.getresponse()
@@ -62,7 +88,9 @@ class Route:
                 raise EOFError('invalid HTTP response') from e
             if len(data) > self.d['limits']['replyBytes']:
                 raise Refusal('reply-over-bound')
-            if request['path'] != self.d.get('auth', {}).get('postPath', '').lstrip('/'):
+            if self.retain_app_cookies:
+                self.cookies.extract_cookies(response, cookie_request)
+            if not secret:
                 self.retain({'response': {'status': response.status,
                              'contentType': response.getheader('content-type', ''),
                              'bodyBase64': base64.b64encode(data).decode()}})
@@ -83,7 +111,7 @@ class Route:
             ws = websocket.create_connection('ws://grain.test' + auth['websocket'], socket=s,
                     origin='https://grain.test', cookie='__Host-mini_spk_session=' + self.cookie,
                     timeout=self.d['limits']['seconds'])
-            ddp = DDP(ws, self.d['limits']['snapshotDocuments'], self.d['limits']['seconds'])
+            ddp = DDP(ws, self.d['limits']['snapshotDocuments'], self.d['limits']['seconds'], diagnostic=self.retain)
             ddp.connect()
             uid = ddp.authenticate(auth, self.http)
             local = {**context, 'userId': uid, 'nowMs': int(time.time() * 1000), 'operationId': uuid.uuid4().hex}
@@ -113,7 +141,7 @@ class Route:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=['tools', 'qualify', 'call'])
-    parser.add_argument('app', choices=['gogs', 'wekan', 'davros'])
+    parser.add_argument('app', help='package-pinned declaration name under apps/interfaces')
     parser.add_argument('--route', type=Path, help='member route directory holding http.sock and browser.token')
     parser.add_argument('--package-id', help='installed package identity from verified lifecycle evidence')
     parser.add_argument('--out', type=Path, help='new private run directory (never reused)')

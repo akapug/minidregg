@@ -29,19 +29,7 @@ write_FileDrop() {
 # (one article, 650 bytes). LIMIT: the page's own uploader chunks at 10 MiB (main.js maxChunkSize), over
 # the 8 MiB request bound, so real ZIMs through the page need the above-8-MiB body (APP-MARKET 2b);
 # this recipe sends the one small chunk. nginx's client_max_body_size is 50M and the Flask limit 15 MiB.
-write_Kiwix() {
-  local zim="$out/bodies/featured.zim" n
-  n=$(python3 -I "$b5_here/b5-mkzim.py" "$zim" 'served by a resident') || { echo "0 b5-mkzim.py failed"; return; }
-  local up; up=$(req POST /upload -F "contentRange=bytes 0-$((n - 1))/$n" -F "file=@$zim;filename=featured.zim;type=application/octet-stream")
-  [[ $up == 200 ]] && ! grep -q '"error"' "$body" || { echo "0 POST /upload $up: $(head -c 160 "$body" | tr -d '\n')"; return; }
-  local i got=000
-  for i in $(seq 1 40); do
-    got=$(req GET /kiwix/A/Hello)
-    [[ $got == 200 ]] && grep -q 'served by a resident' "$body" && { echo "1 POST /upload $up (ZIM $n bytes); kiwix-serve GET /kiwix/A/Hello $got (poll $i)"; return; }
-    sleep 3
-  done
-  echo "0 upload $up accepted but GET /kiwix/A/Hello stayed $got (kiwix-serve did not serve the ZIM)"
-}
+
 
 # Groove Basin 2016.06.25 (dwrensha/groovebasin as packaged: lib/server.js, lib/player_server.js,
 # lib/web_socket_api_client.js, config.json, start.sh). HTTP authorisation is the `token` COOKIE of a
