@@ -1045,6 +1045,10 @@ fn oracle_reply_for(request: &Value, log: &Path) -> Option<Result<(Value, &'stat
     let brief: Value = serde_json::from_str(text.rsplit_once("Assignment: ").map_or(text.as_str(), |(_, r)| r).trim()).ok()?;
     let ask = brief["selectedRequest"]["text"].as_str().unwrap_or("");
     let question = ask.split_once("oracle:")?.1.trim().to_owned();
+    // The same room ask keeps its application request identity across a
+    // transport retry; a later ask (even with identical text) has a new one.
+    use sha2::{Digest, Sha256};
+    let request_id = format!("j14-oracle-{:x}", Sha256::digest(brief["selectedRequest"].to_string().as_bytes()));
     let discover = room_tool(request, "mini_oracle_discover")?;
     let invoke = room_tool(request, "mini_oracle_call")?;
     let application = request["tools"].as_array()?.iter()
@@ -1062,17 +1066,19 @@ fn oracle_reply_for(request: &Value, log: &Path) -> Option<Result<(Value, &'stat
     }
     if !issued.iter().any(|id| id == "or-call") {
         let found = content("or-discover");
-        let _ = log_event(&log.with_extension("oracle.jsonl"), &json!({"id":"or-discover","content":found}).to_string());
+        let _ = log_event(&log.with_extension("oracle.jsonl"), &json!({"id":"or-discover","content":found,
+            "question":question,"selectedRequest":brief["selectedRequest"],"requestId":request_id}).to_string());
         // This deterministic question fixture exercises the declared general
         // query contract. Catalogue search is a metadata substring match, not
         // question routing, and a missing catalogue result cannot invent an ID.
         // Calling after a denied discovery also tests the call's room refusal.
-        return calls(vec![call(invoke, "or-call", json!({"application":application,"requestId":"j14-oracle-1",
+        return calls(vec![call(invoke, "or-call", json!({"application":application,"requestId":request_id,
             "conversationId":"j14-oracle","operationId":"core.query","arguments":{"text":question}}))], "oracle-call");
     }
     let answer = content("or-call");
     let result = room_result(current, "or-call");
-    let _ = log_event(&log.with_extension("oracle.jsonl"), &json!({"id":"or-call","content":answer,"result":result}).to_string());
+    let _ = log_event(&log.with_extension("oracle.jsonl"), &json!({"id":"or-call","content":answer,"result":result,
+        "question":question,"selectedRequest":brief["selectedRequest"],"requestId":request_id}).to_string());
     let spoken = result.as_ref().and_then(|r| oracle_answer(r, 0)).unwrap_or(answer);
     Some(Ok((json!({"role":"assistant","content":format!("oracle: {}", clip(&spoken, 1500))}), "stop", "oracle-done".into())))
 }
@@ -1615,7 +1621,7 @@ mod tests {
         let mut request = json!({"tools": [
             {"function":{"name":"mini_oracle_discover","parameters":{"properties":{"application":{"enum":["oracle-app"]}}}}},
             {"function":{"name":"mini_oracle_call"}}],
-            "messages":[{"role":"user","content":r#"Assignment: {"selectedRequest":{"text":"oracle: Who wrote Leaves of Grass?"}}"#}]});
+            "messages":[{"role":"user","content":r#"Assignment: {"selectedRequest":{"n":"1","text":"oracle: Who wrote Leaves of Grass?"}}"#}]});
         let discover = oracle_reply_for(&request, &log).unwrap().unwrap().0;
         let args: Value = serde_json::from_str(discover["tool_calls"][0]["function"]["arguments"].as_str().unwrap()).unwrap();
         assert_eq!(args, json!({"application":"oracle-app","operationId":"core.query"}));
@@ -1625,6 +1631,12 @@ mod tests {
         let args: Value = serde_json::from_str(invoke["tool_calls"][0]["function"]["arguments"].as_str().unwrap()).unwrap();
         assert_eq!(args["operationId"], "core.query");
         assert_eq!(args["arguments"], json!({"text":"Who wrote Leaves of Grass?"}));
+        assert_eq!(oracle_reply_for(&request, &log).unwrap().unwrap().0, invoke);
+        let mut later_ask = request.clone();
+        later_ask["messages"][0]["content"] = json!(r#"Assignment: {"selectedRequest":{"n":"2","text":"oracle: Who wrote Leaves of Grass?"}}"#);
+        let later = oracle_reply_for(&later_ask, &log).unwrap().unwrap().0;
+        let later_args: Value = serde_json::from_str(later["tool_calls"][0]["function"]["arguments"].as_str().unwrap()).unwrap();
+        assert_ne!(later_args["requestId"], args["requestId"]);
         let body = json!({"outcome":"completed","operation_id":"core.query","reply":{"status":"answered","response":"Walt Whitman."}});
         let http = json!({"protocol":"mini-spk-agent-api-v3","type":"http-v3","status":200,
             "bodyText":body.to_string(),"committedReceipt":{"large": "x".repeat(2000)}});
@@ -1633,6 +1645,11 @@ mod tests {
             invoke, json!({"role":"tool","tool_call_id":"or-call","content":wrapped})]);
         let answer = oracle_reply_for(&request, &log).unwrap().unwrap().0;
         assert_eq!(answer["content"], "oracle: Walt Whitman.");
+        let transcript = std::fs::read_to_string(log.with_extension("oracle.jsonl")).unwrap();
+        let recorded: Value = serde_json::from_str(transcript.lines().last().unwrap()).unwrap();
+        assert_eq!(recorded["question"], "Who wrote Leaves of Grass?");
+        assert_eq!(recorded["selectedRequest"]["n"], "1");
+        assert_eq!(recorded["requestId"], args["requestId"]);
         let mut refused = http.clone(); refused["status"] = json!(403);
         assert!(oracle_answer(&refused, 0).is_none());
         assert!(oracle_answer(&json!({"isError":true,"result":http.clone()}), 0).is_none());
