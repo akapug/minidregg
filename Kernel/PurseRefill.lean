@@ -1,5 +1,5 @@
 /-
-# Kernel.PurseRefill — a Book burn funds an AgentGrain purse (PAY §2.7, lane P6)
+# Kernel.PurseRefill — a Book burn funds an AgentGrain purse (docs/PAY.md §2.7, lane P6)
 
 A friend's Book account `A` funds the purse of an AgentGrain task `T` in one
 joint turn over two cells:

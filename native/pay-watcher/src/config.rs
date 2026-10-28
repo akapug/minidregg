@@ -8,14 +8,14 @@
 //!   "receiptsDir": "receipts" }
 //! ```
 //!
-//! `enrol` (optional; PAY §11.2/§11.9) names the book row reserved for first contact. Its
+//! `enrol` (optional; docs/PAY.md §11.2/§11.9) names the book row reserved for first contact. Its
 //! observations carry the transaction's memo; a credit under `journalFloor` (atomic units; PAY
 //! §11.8 sets 1 DREGG) is not emitted. It is paged WITHOUT the `maxPages` bound, back to a
 //! persistent cursor kept in `cursorFile` (default `enrol-cursor.json`, relative to this
 //! file's directory). `index` must name a row of `book`: the address has one home.
 //!
 //! RPC endpoints are deliberately NOT here: they carry provider credentials and come from the
-//! `PAY_RPC_ENDPOINTS` environment (PAY §3.5), or from `--rpc-fixture` in fixture mode.
+//! `PAY_RPC_ENDPOINTS` environment (docs/PAY.md §3.5), or from `--rpc-fixture` in fixture mode.
 //! A relative `receiptsDir` resolves against the config file's directory.
 
 use std::collections::BTreeSet;

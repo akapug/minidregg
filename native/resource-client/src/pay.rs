@@ -1,4 +1,4 @@
-//! PAY P4: the client side of the payment rail (PAY §2.2–§2.5, §3.4, §5).
+//! PAY P4: the client side of the payment rail (docs/PAY.md §2.2–§2.5, §3.4, §5).
 //!
 //! Every verb runs through a participant workspace (`mini workspace --action init`) whose
 //! session socket reaches the Host's pay operations:
@@ -25,7 +25,7 @@
 //!   This is the directory the watcher reads as its receipts (`pay-watcher` `load_receipts`);
 //! - `pay/quarantine/SIGNATURE.ADDRESS.json`: a record the kernel refused on its own merits.
 //!
-//! Records at the tariff's enrollment index (PAY §11) never go into a report: the observation
+//! Records at the tariff's enrollment index (docs/PAY.md §11) never go into a report: the observation
 //! receiver refuses them (`enrolIndexNeedsReceiver`). Each one is submitted ALONE through ops
 //! 117-120 under the observer's `C_enrol`, and the kernel's `decideEnrol` decides enrol, renew or
 //! journal. The client carries bytes and reads the answer; it decides nothing about the payment.
@@ -979,7 +979,7 @@ struct Tally {
     already: usize,
     quarantined: usize,
     waiting: Option<String>,
-    /// Self-enrollment submissions and the kernel's decisions (PAY §11).
+    /// Self-enrollment submissions and the kernel's decisions (docs/PAY.md §11).
     enrol_submissions: usize,
     enrolled: usize,
     renewed: usize,
@@ -1388,7 +1388,7 @@ fn observe(
     Ok(())
 }
 
-// ---------------------------------------------------------------- self-enrollment (PAY §11)
+// ---------------------------------------------------------------- self-enrollment (docs/PAY.md §11)
 
 /// The tariff's enrollment index, from the public pay view; `None` = self-enrollment off.
 fn enrol_index_of(view: &Value) -> Result<Option<u128>> {
@@ -1888,7 +1888,7 @@ fn observe_records(
 
 /// The credit a confirmed report minted, from its retained records and the tariff of the view
 /// it pinned (the report's expected pay root fixes the tariff it was decided under):
-/// `creditFor amount = min amount maxPerObservation * creditPerAtomic` (PAY §2.3).
+/// `creditFor amount = min amount maxPerObservation * creditPerAtomic` (docs/PAY.md §2.3).
 fn report_credit(attempt: &Path) -> Result<(u128, u128, usize)> {
     let view = workspace::bounded_json(&attempt.join("view.json"))?;
     let tariff = view

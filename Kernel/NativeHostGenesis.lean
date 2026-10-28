@@ -82,7 +82,7 @@ capability, and the identifier of the factory controller's control
 capability on the pay cell (`payControlCapability`), through which the
 observer is replaced at runtime (`observer_replaceable`), and the identifier
 of the observer's self-enrollment capability on the factory
-(`enrolCapability`, `C_enrol` of PAY §11.4), exercised only through
+(`enrolCapability`, `C_enrol` of docs/PAY.md §11.4), exercised only through
 `PayEnrolReceiver` under the clause `authority/operation/pay-self-enrol` of
 the confined factory law (`factoryLaw`, `observer_control_confined`). -/
 structure PayObserver where
@@ -583,7 +583,7 @@ def policy {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
   audience := none
   objectDescriptor := none
 
-/-- The factory law with the payment observer confined (PAY §11.4): the
+/-- The factory law with the payment observer confined (docs/PAY.md §11.4): the
 observer is admitted only on a self-enrollment request (the receiver projects
 `ClockLaw.paySelfEnrolSlot = 1`), and every clause of the deployment's own factory law is
 reached only by a request that is neither the observer's nor a
@@ -752,7 +752,7 @@ def clockControlCapability {F : Type} [Field F]
     config.factoryController.subject (clockTarget config)
     {.observeProgram, .installPolicy, .revokeCapability, .delegateProgram}
 
-/-- `C_enrol` (PAY §11.4): the observer's capability on the factory, verb
+/-- `C_enrol` (docs/PAY.md §11.4): the observer's capability on the factory, verb
 `installPolicy` only.  The scope alone would be the whole factory control;
 the confined factory law (`factoryLaw`) narrows it to self-enrollment. -/
 def enrolCapability {F : Type} [Field F]
@@ -1192,7 +1192,7 @@ theorem sponsor_factory_admitted :
 /-- info: 'Minidregg.Kernel.NativeHostGenesis.v3_config_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms v3_config_refused
 
-/-! ## The pay cell's control (PAY §11.4, observer replacement) -/
+/-! ## The pay cell's control (docs/PAY.md §11.4, observer replacement) -/
 
 /-- **The pay law, exactly**: on any request naming a subject and a verb, it
 admits the observer's `observePayment` (6), the observer's self-enrollment
@@ -1371,7 +1371,7 @@ theorem observer_self_enrol (controller : SubjectId) (observer : PayObserver)
   (payLaw_eval controller observer old new observer.subject.value 4 named verbed).mpr
     (Or.inr (Or.inl ⟨rfl, rfl, enrol⟩))
 
-/-! ## The confined factory law (PAY §11.4, P3b-2) -/
+/-! ## The confined factory law (docs/PAY.md §11.4, P3b-2) -/
 
 /-- **`observer_control_confined`**: under the confined factory law, every
 admitted request whose subject is the observer is a self-enrollment

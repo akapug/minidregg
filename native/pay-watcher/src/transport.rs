@@ -62,7 +62,7 @@ pub fn rpc_result(resp: Value) -> Result<Value, Refusal> {
 ///
 /// Keys and signatures are the base58 text the watcher sent. Each file holds a whole JSON-RPC
 /// response envelope (`{"jsonrpc":"2.0","id":1,"result":…}` or `…"error":…`). Before looking a
-/// call up, the request is checked for the commitment and encoding PAY §3.2 requires, so a
+/// call up, the request is checked for the commitment and encoding docs/PAY.md §3.2 requires, so a
 /// fixture run also proves every request asks for `finalized`.
 pub fn fixture_key(method: &str, params: &Value) -> Result<String, String> {
     let arr = params.as_array().ok_or("params not an array")?;

@@ -112,7 +112,7 @@ inductive Reject where
   deriving DecidableEq, Repr
 
 /-- A tariff that turns self-enrollment on names an index already assigned
-(to the enrollment float, PAY §11.2); `none` is always ready. -/
+(to the enrollment float, docs/PAY.md §11.2); `none` is always ready. -/
 def enrolReady (store : PayStore) (next : Tariff) : Bool :=
   match next.enrolIndex with
   | none => true
