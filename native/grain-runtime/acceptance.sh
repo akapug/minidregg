@@ -7,18 +7,14 @@ if [ "$#" -ne 2 ]; then
   exit 2
 fi
 
-# A hosted bootstrap may supply the exact task namespace, provider capacity,
-# tariff, and genesis policy as one operator-owned profile.  This mode stops
-# before the historical 700x end-to-end journey below.
-PROFILE=${BIRTH_BOOTSTRAP_PROFILE:-}
 # ACCEPTANCE_TASK_BASE moves the four task IDs to BASE+1..BASE+4 so a
 # bootstrap-only Store can run beside a live controller unit for 7001.
 TASK_BASE=${ACCEPTANCE_TASK_BASE:-7000}
 case $TASK_BASE in
   7000) ;;
   [1-9][0-9][0-9]0|[1-9][0-9][0-9][0-9]0)
-    [ "${BOOTSTRAP_ONLY:-0}" = 1 ] && [ -z "$PROFILE" ] || {
-      echo 'ACCEPTANCE_TASK_BASE requires BOOTSTRAP_ONLY=1 and no profile' >&2; exit 2;
+    [ "${BOOTSTRAP_ONLY:-0}" = 1 ] || {
+      echo 'ACCEPTANCE_TASK_BASE requires BOOTSTRAP_ONLY=1' >&2; exit 2;
     } ;;
   *) echo 'ACCEPTANCE_TASK_BASE must be a multiple of ten from 1000 to 99990' >&2; exit 2 ;;
 esac
@@ -27,50 +23,6 @@ TOOL_TASK=$((TASK_BASE + 2))
 PUBLICATION_TARGET=$((TASK_BASE + 3))
 PROVIDER_TASK=$((TASK_BASE + 4))
 PROVIDER_BUDGET=50
-if [ -n "$PROFILE" ]; then
-  [ "${BOOTSTRAP_ONLY:-0}" = 1 ] && [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ] || {
-    echo 'profiled bootstrap requires BOOTSTRAP_ONLY=1 PROVIDER_BOOTSTRAP=1' >&2
-    exit 2
-  }
-  [ -f "$PROFILE" ] || { echo 'bootstrap profile is absent' >&2; exit 2; }
-  jq -e '
-    type == "object" and
-    (((keys - ["miniWrapper"]) | sort) == ["controllerTask","factoryPredicate","operator","providerBudget",
-                       "providerTask","publicationTarget","runtimeTemplate","toolTask"]) and
-    (.miniWrapper == null or
-      (.miniWrapper | type == "string" and test("^[A-Za-z0-9_-][A-Za-z0-9._-]*$") and . != "..")) and
-    ([.controllerTask,.toolTask,.publicationTarget,.providerTask] |
-      all(type == "string" and test("^[1-9][0-9]{0,8}$")) and (unique | length) == 4) and
-    (.providerBudget | type == "string" and test("^[1-9][0-9]{0,8}$")) and
-    (.providerBudget | tonumber >= 67) and
-    (.factoryPredicate | type == "object") and
-    (.operator | type == "object" and
-      ((keys | sort) == ["grainBirthTariff","providerServices"])) and
-    (.operator.providerServices | type == "array" and length == 1) and
-    (.operator.providerServices[0].providerResourceId | tostring) == .providerTask and
-    (.operator.grainBirthTariff.base | type == "number" and . >= 0 and . == floor) and
-    (.operator.grainBirthTariff.perBirth | type == "number" and . >= 0 and . == floor) and
-    (.runtimeTemplate | type == "string" and startswith("/"))
-  ' "$PROFILE" >/dev/null || { echo 'bootstrap profile is invalid' >&2; exit 2; }
-  CONTROLLER_TASK=$(jq -er .controllerTask "$PROFILE")
-  TOOL_TASK=$(jq -er .toolTask "$PROFILE")
-  PUBLICATION_TARGET=$(jq -er .publicationTarget "$PROFILE")
-  PROVIDER_TASK=$(jq -er .providerTask "$PROFILE")
-  PROVIDER_BUDGET=$(jq -er .providerBudget "$PROFILE")
-  [ -f "$(jq -er .runtimeTemplate "$PROFILE")" ] || {
-    echo 'runtime template is absent' >&2; exit 2;
-  }
-  jq -e --slurpfile p "$PROFILE" '
-    .task == $p[0].controllerTask and
-    .toolTask.task == $p[0].toolTask and
-    .providerTask.task == $p[0].providerTask and
-    (.toolTask.reserve | type == "string" and test("^[1-9][0-9]*$") and tonumber <= 50) and
-    (.providerTask.reserve | type == "string" and test("^[1-9][0-9]*$") and tonumber <= ($p[0].providerBudget | tonumber)) and
-    (.stateDir | type == "string" and test("^/.+/runtime-state$"))
-  ' "$(jq -er .runtimeTemplate "$PROFILE")" >/dev/null || {
-    echo 'runtime template task IDs or reserve disagree with bootstrap profile' >&2; exit 2;
-  }
-fi
 
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 REPO=$(CDPATH='' cd -- "$HERE/../.." && pwd)
@@ -101,11 +53,6 @@ if [ -e "$EVIDENCE" ]; then
 fi
 mkdir -m 700 "$EVIDENCE"
 EVIDENCE=$(CDPATH='' cd -- "$EVIDENCE" && pwd)
-if [ -n "$PROFILE" ]; then
-  cp "$PROFILE" "$EVIDENCE/bootstrap-profile.json"
-  chmod 600 "$EVIDENCE/bootstrap-profile.json"
-  PROFILE="$EVIDENCE/bootstrap-profile.json"
-fi
 SERVICE_PID=
 GRAIN_SERVICE_PID=
 RUNTIME_PID=
@@ -183,14 +130,14 @@ CONTROLLER_PUBLIC=$(od -An -tx1 -v "$EVIDENCE/controller.pub" | tr -d ' \n')
 TOOL_PUBLIC=$(od -An -tx1 -v "$EVIDENCE/tool.pub" | tr -d ' \n')
 test "$CONTROLLER_PUBLIC" != "$TOOL_PUBLIC"
 
-# OPERATOR_PROVIDER_PINS (a JSON file, non-profiled provider bootstraps only)
+# OPERATOR_PROVIDER_PINS (a JSON file, provider bootstraps only)
 # adds the Host's provider pins before genesis, so the provider purse is born
 # under the per-route tariff it names (HERMES-TARIFF): exactly
 # {providerServices: [one entry naming the provider task]} (continuity and
 # metering share the one service list).
 if [ -n "${OPERATOR_PROVIDER_PINS:-}" ]; then
-  [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ] && [ -z "$PROFILE" ] || {
-    echo 'OPERATOR_PROVIDER_PINS requires PROVIDER_BOOTSTRAP=1 and no profile' >&2; exit 2;
+  [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ] || {
+    echo 'OPERATOR_PROVIDER_PINS requires PROVIDER_BOOTSTRAP=1' >&2; exit 2;
   }
   jq -e --arg p "$PROVIDER_TASK" 'type == "object" and
     (keys == ["providerServices"]) and
@@ -200,9 +147,8 @@ if [ -n "${OPERATOR_PROVIDER_PINS:-}" ]; then
 fi
 # The genesis through the one template (native/resource-client/scenario-genesis.sh): only what this
 # world differs by. The controller is the sponsor; the tool (and, for a provider bootstrap, the
-# provider) are further enrollments. A profiled bootstrap pins the profile's grain birth tariff as the
-# world's grain platform (lifecycle management and the completion custodian as `run.sh init` makes
-# them), its provider service and its factory predicate; OPERATOR_PROVIDER_PINS pins its provider service.
+# provider) are further enrollments; OPERATOR_PROVIDER_PINS pins its provider service. The world has no
+# grain platform.
 jq -n --arg tool "$TOOL_PUBLIC" --arg provider "${PROVIDER_PUBLIC:-}" --arg withProvider "${PROVIDER_BOOTSTRAP:-0}" '
   [{subject: 8, keyId: 8008, publicKey: $tool, accountId: 8, spendCapabilityId: 42,
     controlCapabilityId: 52, factoryObserveCapabilityId: 55, initialBalance: 100}]
@@ -217,13 +163,7 @@ jq -n --arg tool "$TOOL_PUBLIC" --arg provider "${PROVIDER_PUBLIC:-}" --arg with
 overlay='.sponsor.initialBalance = 100
   | .clock += {tickCapabilityId: 4071, spendCapabilityId: 4072, controlCapabilityId: 4073,
                factoryObserveCapabilityId: 4074}'
-if [ -n "$PROFILE" ]; then
-  overlay="$overlay | .grainPlatform.grainBirthTariff = $(jq -c .operator.grainBirthTariff "$PROFILE")
-    | .providerServices = $(jq -c .operator.providerServices "$PROFILE")
-    | .factoryPredicate = $(jq -c .factoryPredicate "$PROFILE")"
-else
-  overlay="del(.grainPlatform) | $overlay"
-fi
+overlay="del(.grainPlatform) | $overlay"
 if [ -n "${OPERATOR_PROVIDER_PINS:-}" ]; then
   overlay="$overlay | .providerServices = $(jq -c .providerServices "$OPERATOR_PROVIDER_PINS")"
 fi
@@ -276,13 +216,6 @@ if [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ]; then
         owner:"9",ownerCapability:"101",controlCapability:"102",budget:$providerBudget}]' \
     "$EVIDENCE/birth-intent.json" >"$EVIDENCE/birth-provider-intent.json"
   mv "$EVIDENCE/birth-provider-intent.json" "$EVIDENCE/birth-intent.json"
-fi
-if [ -n "$PROFILE" ]; then
-  jq --slurpfile profile "$PROFILE" \
-    '.birth.grainBirthTariff = ($profile[0].operator.grainBirthTariff |
-      with_entries(.value |= tostring))' \
-    "$EVIDENCE/birth-intent.json" >"$EVIDENCE/birth-profiled-intent.json"
-  mv "$EVIDENCE/birth-profiled-intent.json" "$EVIDENCE/birth-intent.json"
 fi
 "$MINI" submit --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
   --intent "$EVIDENCE/birth-intent.json" --intent-kind birth-intent \
@@ -455,40 +388,6 @@ query_task delegated-read 8 "$PUBLICATION_TARGET" 94 "$EVIDENCE/tool.key" 31022
 test "$(jq -er '.cell.root' "$EVIDENCE/delegated-read/view.json")" = "$PUBLICATION_ROOT"
 
 if [ "${BOOTSTRAP_ONLY:-0}" = 1 ]; then
-  if [ -n "$PROFILE" ]; then
-    template=$(jq -er .runtimeTemplate "$PROFILE")
-    template_root=$(jq -er '.stateDir | sub("/runtime-state$"; "")' "$template")
-    case "$template_root" in
-      /*) [ "$template_root" != / ] || { echo 'runtime template root is empty' >&2; exit 2; } ;;
-      *) echo 'runtime template root is not absolute' >&2; exit 2 ;;
-    esac
-    mini_wrapper=$(jq -r '.miniWrapper // empty' "$PROFILE")
-    derived_mini=$MINI
-    if [ -n "$mini_wrapper" ]; then derived_mini=$EVIDENCE/$mini_wrapper; fi
-    jq -e --arg old "$template_root" --arg new "$EVIDENCE" \
-      --arg host "$HOST" --arg mini "$derived_mini" --arg newTask "$CONTROLLER_TASK" \
-      --arg newTool "$TOOL_TASK" --arg newProvider "$PROVIDER_TASK" \
-      --slurpfile genesis "$EVIDENCE/genesis.json" '
-      def replace_root:
-        if type == "string" and (. == $old or startswith($old + "/")) then
-          $new + .[($old | length):]
-        else . end;
-      walk(replace_root) |
-      .mini = $mini |
-      .host = $host |
-      .toolTask.allowedApplicationFamilies |= map(.profile.genesis = $genesis[0]) |
-      .toolTask.allowedSessionFamilies |= map(.profile.genesis = $genesis[0]) |
-      select(.task == $newTask and .toolTask.task == $newTool and
-        .providerTask.task == $newProvider)
-    ' "$template" \
-      >"$EVIDENCE/runtime-config.json" || {
-        echo 'derived runtime config does not match bootstrap tasks' >&2
-        exit 2
-      }
-    test -s "$EVIDENCE/runtime-config.json" || {
-      echo 'derived runtime config is empty' >&2; exit 2;
-    }
-  fi
   printf 'signed grain bootstrap ready: %s\n' "$EVIDENCE"
   exit 0
 fi
