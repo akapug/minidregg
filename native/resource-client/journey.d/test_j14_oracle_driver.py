@@ -101,6 +101,42 @@ class RefusalContinuationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'no provider dispatch'):
             driver.Journey.validate_refusal_resume(good,['{"id":"or-call"}'])
 
+class SelectedRequestTests(unittest.TestCase):
+    def test_native_oldest_selection_wins_over_latest_matching_text(self):
+        row={'author':'20','cell':'90','sequence':2,'height':124,'n':2,'text':'oracle: question','to':'8','kind':'say'}
+        newer={**row,'n':4,'sequence':4,'height':130}
+        call={'selectedRequest':{'binding':{'task':'7'},'author':'20','cell':'90','sequence':2},'selectedEntry':row}
+        self.assertEqual(driver.Journey.selected_ask(call,[row,newer],'20','8','question'),row)
+        call['selectedEntry']=newer
+        with self.assertRaisesRegex(ValueError,'exact native'):driver.Journey.selected_ask(call,[row,newer],'20','8','question')
+
+    def test_native_completed_count_bounds_exactly_one_new_prompt(self):
+        import base64,hashlib
+        def exported(state):
+            raw=driver.json.dumps(state).encode()
+            return {'files':{'resident/resident.json':{'base64':base64.b64encode(raw).decode(),'sha256':hashlib.sha256(raw).hexdigest()}}}
+        self.assertEqual(driver.Journey.completed_prompts(exported({'completed':7,'pending':None})),7)
+        for state in [{'completed':7,'pending':{'requestId':2}},{'completed':7,'returnPending':True},{'completed':True}]:
+            with self.assertRaises(ValueError):driver.Journey.completed_prompts(exported(state))
+
+    def test_unadmitted_old_ask_prevents_a_fresh_duplicate(self):
+        ask={'author':'20','to':'8','kind':'say','text':'oracle: question','cell':'90','sequence':2,'n':2}
+        self.assertEqual(driver.Journey.unanswered_asks([ask],'20','8','question'),[ask])
+        unrelated={'author':'8','to':'20','kind':'say','re':2,'reCell':'91','reSequence':2}
+        self.assertEqual(driver.Journey.unanswered_asks([ask,unrelated],'20','8','question'),[ask])
+        exact={**unrelated,'reCell':'90'}
+        self.assertEqual(driver.Journey.unanswered_asks([ask,exact],'20','8','question'),[])
+
+    def test_started_native_custody_blocks_another_probe_and_no_text_guessing(self):
+        import base64,hashlib
+        value={'selected':{'identity':{},'entry':{},'started':{'residentPromptId':'original'}},'pending':[]}
+        raw=driver.json.dumps(value).encode()
+        exported={'files':{'resident/requests.json':{'base64':base64.b64encode(raw).decode(),'sha256':hashlib.sha256(raw).hexdigest()}}}
+        with self.assertRaisesRegex(ValueError,'started retained'):driver.Journey.retained_requests(exported)
+        value['selected']['started']=None;raw=driver.json.dumps(value).encode()
+        exported['files']['resident/requests.json']={'base64':base64.b64encode(raw).decode(),'sha256':hashlib.sha256(raw).hexdigest()}
+        self.assertEqual(len(driver.Journey.retained_requests(exported)),1)
+
 class ApplicationClosureTests(unittest.TestCase):
     def test_uncertain_custody_preserves_app_and_settled_stop_requires_exact_unit(self):
         with tempfile.TemporaryDirectory() as directory:
