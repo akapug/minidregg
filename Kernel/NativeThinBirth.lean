@@ -48,7 +48,7 @@ open Minidregg.Compiler
 open Minidregg.Theory
 open Minidregg.Theory.ResourceBirth
 open Minidregg.Theory.TypedAuthorization
-open Minidregg.Kernel.NativeThinConsent (Refusal checkHeader)
+open Minidregg.Kernel.NativeThinConsent (checkHeader)
 open Minidregg.Kernel.ResourceBirthPolicyController.Concrete (Branch PolicyBranch policyBranches branchRequest creation)
 
 set_option autoImplicit false
@@ -180,7 +180,7 @@ def birthSlotPlan (pins : PublicPins) (descriptor : Descriptor Registry) :
 /-- Every slot is the expected branch, in order, and its header signs the member's derivation. -/
 def checkSlots (marker : Nat) :
     Nat → List NativeHostCodec.SigningSlot → List (Nat × Nat × AuthorizationDeclaration.SomeRequest) →
-      Except Refusal Unit
+      Except NativeThinConsent.Refusal Unit
   | _, [], [] => .ok ()
   | position, slot :: slots, (role, index, values) :: expected =>
       if slot.role = role ∧ slot.index = index then
@@ -208,7 +208,7 @@ the deployed authoring of the member's source at the draft's own coordinates is 
 intent. Returns the draft bytes, source capabilities and decoded draft. -/
 def checkBirthIntentThin (author : BirthCoordinates → Option NativeObservationCodec.Intent)
     (wanted : NativeObservationCodec.Intent) :
-    Except Refusal (List UInt8 × List CapabilityId × Descriptor Registry) :=
+    Except NativeThinConsent.Refusal (List UInt8 × List CapabilityId × Descriptor Registry) :=
   match wanted.purpose with
   | .prepare (.birth draftBytes capabilities) =>
     if (GrainResourceBirthHostCodec.sourceCodec.decode draftBytes).isSome then
@@ -229,7 +229,7 @@ grants, the draft's descriptor bytes and source capabilities) must be the author
 the headers to sign and the display. -/
 def checkBirthThin (pins : PublicPins) (author : BirthCoordinates → Option NativeObservationCodec.Intent)
     (wanted : NativeObservationCodec.Intent) (planBytes : List UInt8) :
-    Except Refusal (List (List UInt8) × BirthDisplay) :=
+    Except NativeThinConsent.Refusal (List (List UInt8) × BirthDisplay) :=
   match checkBirthIntentThin author wanted with
   | .error refusal => .error refusal
   | .ok (draftBytes, capabilities, draft) =>
@@ -617,7 +617,7 @@ end Proofs
 
 section Completeness
 
-open private slot from Minidregg.Kernel.NativeHost
+open private Minidregg.Kernel.NativeHost.slot from Kernel.NativeHost
 
 variable {F : Type} [Field F] {profile : CanonicalRuntimeProfile.Profile F}
   {deployment : CanonicalCellRegistry.Deployment} {pins : FactoryPins}
@@ -669,7 +669,8 @@ theorem signedRequest_requestBytes (request : AuthorizationDeclaration.SomeReque
       some (TypedAuthorizationRequestCodec.planOf request) := by
   unfold NativeThinConsent.signedRequest CredentialSignatureAdmission.requestBytes
     TypedAuthorizationRequestCodec.signedRequestBytes
-  simp [TypedAuthorizationRequestCodec.someRequestCodec, List.take_left', List.drop_left']
+  simp only [List.take_left', List.drop_left', if_true]
+  exact TypedAuthorizationRequestCodec.someRequestCodec.decode_encode _
 
 /-- **A slot the honest planner built passes `checkHeader`** against the member's derivation. -/
 theorem slot_checked
@@ -751,29 +752,48 @@ theorem validateChecks_pins {config : NativeHost.Config} {seed : DurableReceiver
     (validated : NativeHost.validateChecks config seed logStart directory? logical? lawful? = .ok built) :
     built.federation = config.federation ∧ built.policyId = ⟨config.deployment.factoryId⟩ := by
   unfold NativeHost.validateChecks at validated
-  simp only [bind, Except.bind, pure, Except.pure, NativeHost.check, NativeHost.need] at validated
+  simp only [bind, Except.bind, pure, Except.pure] at validated
   repeat' split at validated
   all_goals first
     | (simp only [Except.ok.injEq] at validated; subst validated; exact ⟨rfl, rfl⟩)
     | cases validated
+    | skip
+
+private theorem map_ok {α β ε : Type} {f : α → β} {value : Except ε α} {result : β}
+    (mapped : value.map f = .ok result) : ∃ a, value = .ok a ∧ f a = result := by
+  cases value with
+  | error e => cases mapped
+  | ok a => exact ⟨a, rfl, by simpa [Except.map] using mapped⟩
+
+theorem validateCore_pins {D A : Type} {config : NativeHost.Config} {seed : DurableReceiver.Seed}
+    {logStart : Digest} {directory? : Option D} {authority? : Option A}
+    {directoryOf : D → CellRegistry.Directory Nat CanonicalCellRegistry.registry}
+    {logicalOf : A → Store.Store CredentialAuthorityState.layout} {lawfulCheck : D → Bool}
+    {parts : {parts : D × A × FactoryPins // lawfulCheck parts.1 = true}}
+    (validated : NativeHost.validateCore config seed logStart directory? authority? directoryOf
+      logicalOf lawfulCheck = .ok parts) :
+    parts.1.2.2.federation = config.federation ∧
+      parts.1.2.2.policyId = ⟨config.deployment.factoryId⟩ := by
+  unfold NativeHost.validateCore at validated
+  cases checked : NativeHost.validateChecks config seed logStart (directory?.map directoryOf)
+      (authority?.map logicalOf) (directory?.map lawfulCheck) with
+  | error detail => simp [checked, bind, Except.bind] at validated
+  | ok built =>
+    simp only [checked, bind, Except.bind] at validated
+    repeat' split at validated
+    all_goals first
+      | (simp only [pure, Except.pure, Except.ok.injEq] at validated; subst validated;
+          exact validateChecks_pins checked)
+      | cases validated
+      | skip
 
 theorem opened_pins_public : OpenedPinsPublicStatement := by
   intro config durable opened validated
-  unfold NativeHost.validateLoaded NativeHost.validateParts NativeHost.validatePartsWith
-    NativeHost.validatePartsVia NativeHost.validateCore at validated
-  cases checked : NativeHost.validateChecks config durable.image.seed durable.logStart
-      ((CredentialAuthorityDomainReceiver.loadDirectory durable).map (·.directory))
-      ((CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot).map
-        (·.snapshot.logical))
-      ((CredentialAuthorityDomainReceiver.loadDirectory durable).map
-        (fun loaded => NativeHost.cellsLawful config durable loaded.directory)) with
-  | error detail => simp [checked, bind, Except.bind, Except.map] at validated
-  | ok built =>
-    simp only [checked, bind, Except.bind, Except.map, NativeHost.need, pure, Except.pure] at validated
-    repeat' split at validated
-    all_goals first
-      | (simp only [Except.ok.injEq] at validated; subst validated; exact validateChecks_pins checked)
-      | cases validated
+  unfold NativeHost.validateLoaded at validated
+  obtain ⟨parts, partsOk, rfl⟩ := map_ok validated
+  unfold NativeHost.validateParts NativeHost.validatePartsWith NativeHost.validatePartsVia at partsOk
+  obtain ⟨core, coreOk, rfl⟩ := map_ok partsOk
+  exact validateCore_pins coreOk
 
 /-- The executor's pins against the config's public pins, on the Host's own open. -/
 theorem publicPins_exact {config : NativeHost.Config} {durable' : ResourceBirthController.Concrete.Durable}
