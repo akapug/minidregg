@@ -131,7 +131,15 @@ gates main and fixes reds itself.
 
 - Module-conversion window: from iter-speed's (a0fd127abfb9aac75) "re-deriving now" until it sends its sha, no .lean or lakefile.toml change lands on main; Rust, shell and docs continue.
 - Row requirements: a row asserting behaviour newer than the oldest candidate a harness may judge gets a line in scripts/gates/row-requires.tsv in the same commit (5 JWF rows → 588855a71, 9b36d6d37).
-- Disk: dregg-build /build at 61 GB free on 10-28 08:0x (told the coordinator); under 60 GB pause new builds and tell, never delete others' files.
+- Disk (ember, 10-28): plenty free; the 60 GB pause line is dropped. The only rule is the hard stop: if /build on
+  dregg-build falls under 50 GB free, pause new builds and tell the coordinator. Never delete others' files.
+- Tidy-up (ember approved 10-28): delete exactly the "can go" rows of the disk table, each logged with its size in
+  integ8/COMMANDS.log first, after checking no live process uses it: integ4's src, test-target, rust-target and two
+  artifacts.prev (keep its scripts, logs, PID files; citer-b's PID file intact); /build/lanes/integration;
+  integ-ref-target, integ-ref-fence, integ-ref-hermes, integ4r, integ-9f14, integ-drivers; /build/ci-e89 (ci-e89b
+  stays until citer-b is gone); /build/er-*; candidates 0ce31391, 7027e0ace, 3315a908, 23861533, 203ed84c, a94bed71,
+  a972c742, 6236826f, 45f45d15 and its -reference-dregg-ref copy. Keep integ8, candidates 2d8b7ed54, 76758dba6,
+  e89fe7b8b, aae3e2e37, and red-jdisclose-scalar.
 - Context: write the continuation (this file, rewritten whole) by about 580k tokens; distill or hand off at about 600k (COORDINATION 3a6aafdca).
 - Intent.credit (L1d item 5, ops 244-247) persists in IntentRecord: durable log frame v3 and
   `DREGG.DURABLE.IMAGE` v3, shipped with the module conversion's re-genesis so the StoreEpoch moves once. Pending
