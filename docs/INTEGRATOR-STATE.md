@@ -129,7 +129,7 @@ main's tip with land.py and sends its sha (one planned StoreEpoch move; the next
 sends a green sha; all of it rides one codec regen. The uncommitted `ownerless` census check merges 3-way onto
 iter-speed's PersistedCodecTagCensus.lean, never overwriting it. lane/thin-birth 1e0f741d3 LANDED on main eda65ced8 (after the 7027e0ace report, before the conversion; so land.py converts its Lean (Kernel/NativeThinBirth, NativeThinConsent, Host/ThinBirthConsent, ClientConsentCore, SourceAgreementJson, HostOperations) and it rides the one regen; told a0fd127abfb9aac75 and L1e. On the first built main carrying it, run `journey.sh --only JP2` (row 19 thin birth succeeds; the swapped-plan row refused birthSourceChanged). After it lands, delete dregg-ref:/build/lanes/thin-birth-scratch/ and /build/lanes/thin-birth (finished session lane), listed in COMMANDS.log first.
 
-Red routing: lean-audit-c and lean-audit-c-m2 are L1e's (a58f907aef8926430; L1d ad6d6eff243f32816 has stopped): its green sha comes from and its reds go to L1e directly; when the module conversion lands on main, tell L1e (it merges the conversion into lean-audit-c and sends a green sha) and L1d's old address; Hermes to L4b (ad81db6d6fd317d3a); L13 a1618140607ac439b; un-stream-continuity reds
+Infra is a298031c78e86d651 (10-28; older mentions of ae95a4eac63b0715e/aed5ecf506cf840af in the table are history). Red routing: lean-audit-c and lean-audit-c-m2 are L1e's (a58f907aef8926430; L1d ad6d6eff243f32816 has stopped): its green sha comes from and its reds go to L1e directly; when the module conversion lands on main, tell L1e (it merges the conversion into lean-audit-c and sends a green sha) and L1d's old address; Hermes to L4b (ad81db6d6fd317d3a); L13 a1618140607ac439b; un-stream-continuity reds
 (ApplicationStreamContinuityFresh pole proofs, NativeHostReplay.lean:3816) to the deputy a308118209b4a48ea; all
 others through the coordinator. Expected reds, not new: the eight hand-rolled genesis writers (acceptance.sh,
 application-acceptance.sh, authority-acceptance.sh, selected-release-acceptance.sh, grain-runtime/acceptance.sh,
@@ -150,7 +150,7 @@ gates main and fixes reds itself.
   re-qualifies on the candidate carrying it; deputy a308118209b4a48ea). Land after the conversion, re-converted if
   its header conflicts.
 - Rehearsal (ember, 10-28): the conversion candidate ships from its gate (tour + composed on EDGE_REV 7d2c765);
-  build at 22G; candidate line and verdict to the coordinator and infra ae95a4eac63b0715e. un-ingest-stale-stage
+  build at 22G; candidate line and verdict to the coordinator and infra a298031c78e86d651 (infra handed off from ae95a4eac63b0715e, 10-28). un-ingest-stale-stage
   1f9a757de is in (256a98cbd).
 - Not held, nothing coming: lane/un-ns-owner 587c5acbd is the superseded work-in-progress branch; its clean
   form lane/un-ns-owner-clean (3a8109059, box-elaborated, plus e80f56422 and cf3c5d433) is on main (coordinator 10-28).
@@ -177,7 +177,7 @@ gates main and fixes reds itself.
   the auditor's acceptance; L1d (ad6d6eff243f32816) coordinates the order with the integrator and the iter-speed
   successor (a0fd127abfb9aac75).
 - closure.pid on dregg-ref (empty for jobs started before lanes joined group `closure`) is infra's
-  (ae95a4eac63b0715e), not the integrator's.
+  (a298031c78e86d651), not the integrator's.
 - Transitive bumps through registry constants: closed, no. Nesting already propagates through the regen's round
   loop; both stops were spelling forms, now handled.
 - Owner-less pins: the census refuses a registered DREGG identity no definition spells or names, landed once
