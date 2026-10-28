@@ -121,6 +121,10 @@ the newest built main that passed the gate; each is reported in one line, and in
 | full (rehearsal) | 349e59ef1 | 13:27 `integ4/main-full2.sh` (main-full.pid 552038; build.pid, then gate.pid + enrol-resume.pid under integ8); outputs moved aside. Host stage = first incremental number under modules (to the coordinator and a0fd127abfb9aac75) |
 | 349e59ef1 progress | — | tests green 13:30; host stage CLEAN 13:41 (660 s, incremental under modules after the A12d regen); consent clean 13:43 (133 s); umbrellas from 13:43. Main since: iter-speed f42e3bfbf (mk-lane real-copy build dir; docs/BUILD-INVERSION-2026-10-28.md), app-market-b5-featured, b7 4ce6c29a3, b8 d5d54d835 (dc4a2f3b5; FEATURED 27, apps_search 1/1 on the Mac) |
 | 349e59ef1 result | — | CANDIDATE /build/candidates/349e59ef1647fb04bd9cb051012d14f6bf86d271 14:35 (host 660 s incremental, consent 133 s, umbrellas rc=1 2950 s non-fatal, rust 166 s, pack 12 s); enrol-resume PASS; gate (tour + composed, harness f018af241, gate.pid 621988) from 14:35:50. Named READY to the coordinator, infra, L4c, the deputy; fixture re-record asked of effects. Umbrella reds: the two Fixtures (expected) and TokenCensus.lean:34 (21: unlisted private .mk in CompletionCustodianKey/MeterRefillReceiver/PlatformInstallReceiver/PlatformCellDomain, DurableHistory RawEntry/RawNode.ofStore bare tokens, receiverVerifier called outside its allow-list from NativeHostReplay.derive*, NativeHost.receivingOutcome*, PayEnrolProofs.intentOf, PayObservationReceiver.prepare); owner L1e's successor via the coordinator |
+| 349e59ef1 gate | — | FAIL 14:58 (harness f018af241): tour 69/69 PASS; enrol-resume PASS; composed rooms/churn/documents pass, apps:sheet stopped: hook 117 `mini grain-share-issue-submit` (app 930001, resource 930006) "share issue outcome did not confirm"; the Host's OUTCOME/v8 is refused/undisclosed, phase admission, detail "request refused", no-record (the same red as b26630168; evidence /build/c-349e59/inputs/evidence/app-930001/hooks/1793199287686501200-e0a8df66/113-ticket-issue/). Named to the coordinator, infra, L4c, the deputy (asked whether the share-issue path is its) 15:0x |
+| full | 68cf4ba7a | 15:00 `integ4/main-full2.sh` (main-full.pid; integ8/build.pid 663964); outputs moved aside; 34 commits past 349e59ef1, no .lean/lakefile change: keeps the post-M2 genesis |
+| 68cf4ba7a progress | — | tests green 15:02; host clean 15:08 (321 s, incremental), consent clean 15:09 (98 s); umbrellas from 15:09 (non-fatal), then rust, pack, gate-cut6 + enrol-resume |
+| main since 68cf4ba7a | b3caf5117 | un-share-issue-reason 9c4db6a19 (4b3101fc8; Kernel/ApplicationShareIssueGrainAdmission.lean: each admitNative refusal names its stage; NOT yet elaborated anywhere: the next build's host stage is its check, reds to the B3 faerie a85d12892ea6de3ca with file:line; once a candidate carries it, send that faerie the composed run's store.log refusal line), un-deputy 22ccb5d15 and 4ba6b6fdf (state) |
 Gate harness rule (coordinator, 10-28): the tour and composed harness (scripts/, native/resource-client/*.sh|*.py, journey.d/) come from main at gate time over the candidate's source.tar and binaries (`integ4/harness-overlay.sh DEST SHA`; `HARNESS=<sha>` in tour-run2.sh and composed-full2.sh; gate-cut4.sh resolves main's tip, adds `harnessCommit` to the gate file after gate-from-runs.py, which binds only the candidate's SHA256SUMS). Infra was asked to copy harnessCommit in gate-from-runs.py itself (optional).
 Runner rule (coordinator, 10-28): launch builds with `integ4/main-full2.sh`, which gates with `gate-cut5.sh`: it copies tour-run2.sh, composed-full2.sh and harness-overlay.sh into `$G/runner` at gate start, runs only from that copy and writes `runnerSha256sums` beside `harnessCommit` in the gate file. Never edit a script a running job reads; change it under a new name.
 Merge-subject slip: 8e7940fea and 1a3240483 name the un-deputy sha in their subjects; their parents are un-story-install 733dd948f and red-authority-zero-field 108083a35. 733dd948f was a red-first test (shared_names.rs:1144), cleared by a8376ce8f (d2b639068).
@@ -141,7 +145,7 @@ elaboration of the fix pending NativeHostReplay.olean). L1d (formerly L1c; lean-
 constructors with pricedAt, drops e7958d3b9's arms on merge; unbuilt, not to merge until its warm-tree build
 elaborates) seeds its dregg-ref tree from the integ8 copy; tell it when the copy lands.
 
-Next steps (10-28, 14:40): 349e59ef1 is READY and its gate is running. (1) done. (2) READY sent; on the gate's end send
+Next steps (10-28, 15:15): 349e59ef1 gate FAIL reported (row above); 68cf4ba7a building (wait armed on integ8/build.pid); after it, build main tip (carries 9c4db6a19, Lean): on READY name it with its verdict to the coordinator, infra, L4c and the deputy. Earlier: (1) done. (2) READY sent; on the gate's end send
 "candidate <sha> at <path>: gate <verdict>, reds by name" to the coordinator; the sha + full /build/candidates/<sha>
 path to infra a298031c78e86d651 (demo-dry, then the rehearsal), L4c a6c2f758a0dac46fe and the deputy
 a308118209b4a48ea. (3) Re-record Fixtures.NativeAcceptedFixture and NativeDocWriteFixture from that candidate and
@@ -177,6 +181,12 @@ gates main and fixes reds itself.
 - Fixtures (coordinator 10-28): the integrator re-records BOTH Fixtures.NativeAcceptedFixture and
   NativeDocWriteFixture from the A12c build, then sends that sha to effects (a26c13b24522dee35) and L1e
   (a58f907aef8926430). After that, the umbrellas stage blocks again (reds the candidate) from the next build on.
+- Fixture charge lanes (integrator 10-28, coordinator may overrule): NativeDocWriteFixture's turnBytes/storageBytes
+  vary per run (variable-length nonces/keys/signatures; 1013 vs 1015 call bytes on one candidate). Ruling (c): the
+  shared Fixtures/NativeAcceptedFixtureProjection states those two lanes as relations to the run (call length + 32;
+  legs + post image + event), one reviewed Authority-Change commit with an off-by-one teeth case; both fixtures
+  re-recorded from 349e59ef1; by effects (a26c13b24522dee35), handing off from EFFECTS-REVIVAL §8 if capped. The
+  umbrellas stage blocks again only after that sha lands.
 - Held until their owners report (codex workers, shas via the coordinator): cx-oracle, cx-store-sweep,
   un-route-latency. oracle-grant-factory b81a38663 came in by codex's own push to main (9bed7b1e0 row).
 - Held: lane/cx-app-interface (codex lead still running). The coordinator reviews the design and shows ember
