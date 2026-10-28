@@ -1014,6 +1014,31 @@ class ControllerWorldTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,'config differs'):c.enroll(r['store'],'/unused',str(source))
                 child.assert_not_called()
 
+    def test_enroll_resident_selector_is_bounded_to_retained_controller_state(self):
+        with self.storage_upgrade_fixture('enroll-resident') as (base,r,units,old_stage,old_unit):
+            c.consent_storage_upgrade(r['store'],'/unused')
+            home=Path(r['home']);state=home/'state'
+            config=c.encoded({'stateDir':str(state)})
+            for path in (home/'controller.json',base/'configs'/(c.sha(config)+'.json')):
+                path.write_bytes(config);path.chmod(0o600)
+            source=self.file('enroll-resident-request.json')
+            def manager(unit):
+                return {'LoadState':'loaded','Transient':'no','FragmentPath':str(units/unit),
+                        'ActiveState':'inactive','MainPID':'0','ControlPID':'0','User':str(self.uid)}
+            request={'protocol':'mini-controller-application-enrollment-v1','mode':'application',
+                'expectedBindingSha256':'ab'*32,'targetConfigSha256':c.sha(config)}
+            for selected in (str(state/'resident'),str(home/'foreign'),str(state/'nested/resident'),
+                             str(state)+'/../elsewhere',str(state)+'/./resident',None,{'path':str(state/'resident')}):
+                source.write_bytes(c.encoded({**request,'residentState':selected}))
+                with patch.object(c,'manager_properties',side_effect=manager),patch.object(c,'run'), \
+                     patch.object(c,'controller_child',return_value=0) as child:
+                    if selected==str(state/'resident'):
+                        self.assertEqual(c.enroll(r['store'],'/unused',str(source)),0)
+                        self.assertEqual(child.call_count,1)
+                    else:
+                        with self.assertRaisesRegex(ValueError,'resident state'):c.enroll(r['store'],'/unused',str(source))
+                        child.assert_not_called()
+
     def test_enroll_retains_exclusive_lifecycle_lock_after_releasing_allocator(self):
         lock=self.file('allocator.lock');lifecycle=self.file('lifecycle.lock',b'controller lifecycle lock\n')
         opened=open

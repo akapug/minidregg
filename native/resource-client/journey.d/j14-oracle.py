@@ -4,6 +4,7 @@
 Every transition uses native Mini; the fixed installer handles cross-UID
 transport. Retained command outputs and exact native attempts survive failure.
 """
+import hashlib
 import importlib.util
 import json
 import os
@@ -61,6 +62,56 @@ class Journey:
         (self.root/'subjects').mkdir()
         self.subjects={}
         self.pin_candidate()
+
+    @classmethod
+    def resume_transport(cls):
+        """Resume only the proved pre-provision transport cutover boundary.
+
+        No genesis, enrollment, provision, room write or application attempt is
+        repeated. Other failure phases need their exact native recovery path.
+        """
+        os.umask(0o077)
+        j=cls.__new__(cls);j.root=Path(os.environ['JOURNEY_STEP_DIR'])/'oracle';j.logs=j.root/'commands'
+        failure=read(j.root/'failure.json')
+        if failure['phase']!='world' or (j.root/'context-after-world.json').exists() or (j.root/'broker').exists():
+            raise ValueError('transport continuation requires the uncompleted world cutover boundary')
+        last=failure['lastCommand'];result=j.logs/f'{last:04d}-lifetime-target.result.json'
+        if not result.is_file() or read(result)!={'exitCode':0}:
+            raise ValueError('transport continuation requires retained successful target metadata rendering')
+        j.c=read(j.root/'allocation-context.json');j.c['manifest']=str(j.root/'candidate.json')
+        if Path(j.c['root'])!=j.root:raise ValueError('retained root differs')
+        j.bins=Path(need('J14_ORACLE_BIN'));j.mini=need('MINI');j.host=need('HOST');j.runtime=need('GRAIN_RUNTIME')
+        j.provider=need('TEST_PROVIDER');j.hermes_root=need('J14_HERMES_ROOT');j.spk=need('J14_ORACLE_SPK')
+        j.data=need('J14_ORACLE_DATA_SOURCE');j.inventory=need('J14_ORACLE_INVENTORY')
+        candidate=read(j.c['manifest'])
+        for role,path in [('mini',j.mini),('host',j.host),('spkHost',str(j.bins/'spk-host')),('store',need('STORE')),('verifier',need('VERIFIER'))]:
+            if sha(path)!=candidate['sha256'][role]:raise ValueError('continuation binary pin changed: '+role)
+        if sha(j.runtime)!=candidate['overlays']['grainRuntime'] or sha(j.provider)!=candidate['overlays']['testProvider']:
+            raise ValueError('continuation runtime/provider changed before explicit release')
+        j.installer=REPO/'deploy/spk-host/install-user-world';j.sockets=Path(j.c['socketDirectory'])
+        j.homes=j.root/'homes';j.workspaces=j.root/'workspaces'
+        j.subjects={name:read(j.root/'subjects'/f'{name}.json')['subject'] for name in ['alice','bob','hermes','hhost','hprov','hdisp']}
+        w=j.root/'world';h=read(w/'handoff.json');j.sponsor=str(read(w/'genesis-params.json')['sponsor']['subject'])
+        j.c.update(repo=str(REPO),world=str(w),hostConfig=h['config'],sponsorWorkspace=h['sponsorWorkspace'],
+                   operatorSocket=str(j.sockets/'operator-v2.sock'),publicSocket=str(j.sockets/'participant.sock'),allocation=str(j.root/'allocation.json'))
+        room=read(Path(j.c['sponsorWorkspace'])/'refs/oracle-room.json');j.c['room']={'target':room['target'],'capability':room['observeCapability']}
+        if read(j.c['allocation'])!=inputs.allocation(j.c) or sha(j.c['hostConfig'])!=sha(j.root/'operator-with-oracle.json'):
+            raise ValueError('continuation allocation or installed metadata differs')
+        j.counter=last;j.processes=[];j.controller=False;j.world_pid=None
+        record=j.root/'transport-continuation.json'
+        if record.exists():raise ValueError('transport continuation already attempted; inspect its retained commands')
+        write(record,{'previousSource':candidate['orchestrationSource'],'sourceCommit':os.environ.get('J14_ORACLE_ORCHESTRATION_COMMIT'),
+            'driverSha256':sha(HERE/'j14-oracle.py'),'installerSha256':sha(j.installer),'helperSha256':sha(REPO/'deploy/spk-host/controller-world.py'),
+            'previousOperatorSocket':str(j.sockets/'operator.sock'),'operatorSocket':j.c['operatorSocket'],
+            'hostConfigSha256':sha(j.c['hostConfig']),'lastCompletedCommand':last})
+        return j
+
+    def resume_world(self):
+        self.spawn('operator-v2',[self.mini,'serve-operator','--host',self.host,'--config',self.c['hostConfig'],'--socket',self.c['operatorSocket']])
+        self.wait_socket(self.c['operatorSocket'])
+        self.spawn('participant-v2',[self.mini,'serve-public-proxy','--socket',self.c['publicSocket'],'--upstream',self.c['operatorSocket'],'--config',self.c['hostConfig']])
+        self.wait_socket(self.c['publicSocket'])
+        self.c['nativeProfile']=str(self.run('native-profile',[self.host,self.c['hostConfig'],'profile']))
 
     def pin_candidate(self):
         candidate=read(self.candidate_manifest)
@@ -167,7 +218,10 @@ class Journey:
         while Path('/proc',str(self.world_pid)).exists() and time.monotonic()<deadline:time.sleep(.1)
         if Path('/proc',str(self.world_pid)).exists():raise RuntimeError('own operator did not stop before settings update')
         shutil.copyfile(fresh,self.c['hostConfig'])
-        self.spawn('operator',[self.mini,'serve-operator','--host',self.host,'--config',self.c['hostConfig'],'--socket',sock]);self.world_pid=None
+        # Retained endpoint config pins are immutable. Preserve the old pin
+        # and expose revised transport metadata on a fresh same-Store endpoint.
+        sock=self.sockets/'operator-v2.sock';self.c['operatorSocket']=str(sock)
+        self.spawn('operator-v2',[self.mini,'serve-operator','--host',self.host,'--config',self.c['hostConfig'],'--socket',sock]);self.world_pid=None
         self.wait_socket(sock)
         self.spawn('participant',[self.mini,'serve-public-proxy','--socket',self.c['publicSocket'],'--upstream',sock,'--config',self.c['hostConfig']]);self.wait_socket(self.c['publicSocket'])
         native=self.run('native-profile',[self.host,self.c['hostConfig'],'profile']);self.c['nativeProfile']=str(native)
@@ -299,7 +353,7 @@ class Journey:
                     'reserveSigner':{'role':'4','index':'0','publicKey':(self.homes/'hdisp/keys/mini.key.pub').read_bytes().hex(),
                                      'keyId':read(self.root/'subjects/hdisp.json')['keyId'],'keyEpoch':'1'}}},
             'room':{'mini':str(base/'bin/mini'),'host':str(base/'bin/minidregg-host'),'hostConfig':str(home/'host-config.json'),
-                'socket':str(home/'operator/mini.sock'),'workspace':str(grain/'state/resource-workspace'),'home':str(grain/'state/room-home'),
+                'socket':self.c['publicSocket'],'workspace':str(grain/'state/resource-workspace'),'home':str(grain/'state/room-home'),
                 'room':'lab','account':'unsummoned'}}
         # Public Host frames use the public endpoint; reserve authoring uses
         # the separate, controller-only operator proxy.
@@ -354,6 +408,8 @@ class Journey:
         self.inbox=read(dispatched)['inbox'];self.prompts=0
 
     def attach(self):
+        grain=Path(self.c['controllerRoot'])
+        self.controller_run('grain-runtime',['hermes-room','resident-init',grain/'controller.json',grain/'state/resident'])
         contract=self.root/'attachment-input.json';write(contract,inputs.attachment(self.c));self.contract=contract
         def phase(name,*extra):
             return self.run('attachment-'+name,['python3',REPO/'scripts/application-attachment.py',contract,name,*extra],timeout=3600)
@@ -373,6 +429,7 @@ class Journey:
         if value.get('type')!='tool-complete' or value.get('isError') is not False:raise ValueError('session tool not complete; retain request ID for native tool-result')
         retained=self.fixed('controller-tool-result',request)
         if session.read_bytes()!=retained.read_bytes():raise ValueError('session retained result differs')
+        self.fixed('controller-tool-ack',request)
         self.fixed('controller-stop')
         phase('issue-grant','--input',session)
         layout=dict(self.layout,controllerHome=self.c['controllerRoot'])
@@ -382,10 +439,24 @@ class Journey:
         start=self.run('app-start',[self.bins/'spk-host','grain','start',self.profile,'9890001'],timeout=2400)
         self.application_unit=read(start)['unit']
         activated=result(phase('activate','--input',start))
-        self.fixed('controller-config',activated['bundle']);self.controller_config()
+        self.enroll(activated['bundle'],'application')
         self.fixed('controller-start')
-        self.fixed('controller-tool-ack',request)
         self.application_unit=read(start)['unit']
+
+    def enroll(self,bundle,mode):
+        before=read(self.fixed('controller-journal'))
+        canonical=json.dumps(before['binding'],sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()
+        target=Path(bundle)/'controller.json'
+        request=self.root/f'enrollment-{self.counter:04d}.json'
+        write(request,{'protocol':'mini-controller-application-enrollment-v1','mode':mode,
+            'expectedBindingSha256':hashlib.sha256(canonical).hexdigest(),'targetConfigSha256':sha(target),
+            'residentState':str(Path(self.c['controllerRoot'])/'state/resident')})
+        self.fixed('controller-config',bundle)
+        result=read(self.fixed('controller-enroll',request))
+        after=read(self.fixed('controller-journal'))
+        if result.get('status')!='enrolled' or {k:v for k,v in before.items() if k!='binding'}!={k:v for k,v in after.items() if k!='binding'}:
+            raise ValueError('native enrollment did not preserve settled journal')
+        self.controller_config()
 
     def resident(self,label):
         home=Path(self.layout['controllerHome']);grain=Path(self.c['controllerRoot']);self.prompts+=1
@@ -475,14 +546,15 @@ class Journey:
 
 
 def main():
-    j=Journey()
+    resume=os.environ.get('J14_ORACLE_RESUME_WORLD')=='1'
+    j=Journey.resume_transport() if resume else Journey()
     try:
         for phase in ['world','application','worker','room','attach','probe']:
             if phase=='worker':j.await_worker_release()
-            getattr(j,phase)()
+            (j.resume_world if resume and phase=='world' else getattr(j,phase))()
             write(j.root/('context-after-'+phase+'.json'),j.c)
     except Exception as error:
-        write(j.root/'failure.json',{'phase':phase,'error':str(error),'passed':False,'lastCommand':j.counter,
+        write(j.root/('failure-transport-continuation.json' if resume else 'failure.json'),{'phase':phase,'error':str(error),'passed':False,'lastCommand':j.counter,
             'recovery':'Inspect retained exact native attempts; do not repeat an uncertain submission as new work.'})
         raise
     finally:j.cleanup()
