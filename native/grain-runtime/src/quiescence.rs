@@ -546,9 +546,10 @@ impl Runtime {
     }
 
     fn quiescence_physical_stop_proof(&self) -> Result<()> {
-        // Fresh, not the cached startup boolean. Includes custody clients in
-        // the controller cgroup; a missing journal child alone proves nothing.
-        prove_prior_run_stopped(&self.config.task)?;
+        // Fresh, not the cached startup boolean. Effect-capable custody
+        // clients still refuse; only the exact pinned stateless codec pair may
+        // remain. A missing journal child alone proves nothing.
+        cgroup_stop::prove_quiescent_controller(&self.config)?;
         if self.current_pgid.load(Ordering::SeqCst) != 0 {
             return Err("controller retains an owned process group".into());
         }
