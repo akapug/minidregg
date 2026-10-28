@@ -442,6 +442,17 @@ def scenario_assertions(step, value, context, results):
             raise Refusal('readback-mismatch', step['id'])
 
 
+def require_write_readback(d):
+    """Qualification is stricter than offering useful read-only tools."""
+    wrote = False
+    for step in d['qualification']:
+        if d['operations'][step['op']]['write']:
+            wrote = True
+        elif wrote and step.get('assert'):
+            return
+    raise Refusal('qualification-write-readback-absent')
+
+
 def run_scenario(engine):
     results = {}
     for step in engine.d['qualification']:
