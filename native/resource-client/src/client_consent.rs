@@ -140,6 +140,16 @@ pub(crate) fn full_ready(host: &Path, config: &Path) -> Result<()> {
     let settings = PINS.get().map(|pins|pins.config.clone())
         .or_else(||std::env::var_os("MINI_CONSENT_CONFIG").map(PathBuf::from))
         .unwrap_or_else(||config.to_path_buf());
+    if !executable.is_absolute() || !settings.is_absolute() {
+        return Err("local consent executable/settings must be absolute".into());
+    }
+    let delegated = match PINS.get() {
+        Some(pins) => pins.delegated.clone(),
+        None => crate::consent_proxy::Selection::from_env()?,
+    };
+    if delegated.is_none() && !resident_enabled() {
+        return Err("full consent readiness requires a retained resident or delegated provider".into());
+    }
     let features = Command::new(&executable).arg(&settings).arg("features").output()
         .map_err(|e|format!("consent readiness feature probe: {e}"))?;
     if !features.status.success() || features.stdout != b"mini-consent-full-ready-v1\n" {
