@@ -56,6 +56,7 @@ impl Paths {
     /// root 0600 files named by the SHA-256 of the code, read and deleted by `mini-web-spawn`.
     fn web_logins(&self) -> PathBuf { self.at("/var/lib/mini-web-spawn/logins") }
     fn config(&self) -> PathBuf { self.node().join("deployment/pinned-config.json") }
+    fn node_state(&self) -> PathBuf { self.node().join("state.json") }
     fn socket(&self) -> PathBuf { self.node().join("public/mini.sock") }
 }
 
@@ -441,6 +442,21 @@ fn web_login_code() -> Result<String, String> {
         }
     }
     Ok(out)
+}
+
+/// A world's identity. `run.sh upgrade` rewrites the pinned config (new binary bindings, same Store),
+/// so the config digest names a world only until the next in-place upgrade; the node's `state.json`
+/// carries `createdUtc`, written once by `run.sh init` and kept by every upgrade, and a re-genesis
+/// writes a new one. That stamp names the world; the config digest is the fallback for a node whose
+/// state file is unreadable.
+fn world_id(config: &[u8], state: Option<&[u8]>) -> String {
+    let created = state
+        .and_then(|bytes| serde_json::from_slice::<Value>(bytes).ok())
+        .and_then(|v| v["createdUtc"].as_str().filter(|c| !c.is_empty()).map(str::to_owned));
+    match created {
+        Some(stamp) => sha256_hex(format!("minidregg-world-v1\n{stamp}").as_bytes()),
+        None => sha256_hex(config),
+    }
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -1175,8 +1191,8 @@ impl<O: BoxOps> Processor<O> {
     /// recorded on the request and its status and never touches enrolment; the next run retries.
     fn welcome_story(&mut self) -> Result<(), String> {
         let Some(story) = self.cfg.story.clone() else { return Ok(()) };
-        let world = match std::fs::read(self.p.config()) {
-            Ok(bytes) => sha256_hex(&bytes),
+        let world = match std::fs::read(self.p.config()).map(|config| world_id(&config, std::fs::read(self.p.node_state()).ok().as_deref())) {
+            Ok(id) => id,
             Err(e) => {
                 self.say(format!("story {}: no world to join ({}: {e})", story.name, self.p.config().display()));
                 return Ok(());
@@ -1416,6 +1432,20 @@ mod tests {
     fn run(w: &mut Processor<Fake>) {
         w.sponsor = None;
         w.run_once().unwrap();
+    }
+
+    #[test]
+    fn a_world_survives_an_in_place_upgrade_and_changes_at_a_regenesis() {
+        let state = |stamp: &str| format!(r#"{{"type":"minidregg-candidate-state-v1","pinnedConfigSha256":"x","createdUtc":"{stamp}"}}"#);
+        let one = world_id(b"config before upgrade", Some(state("2026-10-28T01:00:00Z").as_bytes()));
+        // upgrade: config rewritten, createdUtc and the rest of the state kept
+        assert_eq!(one, world_id(b"config AFTER upgrade", Some(state("2026-10-28T01:00:00Z").as_bytes())));
+        // re-genesis: a new stamp
+        assert_ne!(one, world_id(b"config before upgrade", Some(state("2026-10-28T09:00:00Z").as_bytes())));
+        // no readable state: the config digest, as before
+        assert_eq!(world_id(b"c", None), sha256_hex(b"c"));
+        assert_ne!(world_id(b"c", None), world_id(b"d", None));
+        assert_eq!(world_id(b"c", Some(b"not json")), sha256_hex(b"c"));
     }
 
     #[test]
