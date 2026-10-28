@@ -25,7 +25,7 @@ def sourceWireStream : StreamCodec SourceWire :=
       (StreamCodec.list IntStream.intStream))
 
 def sourceFrame : List UInt8 :=
-  "DREGG/GRAIN-RESOURCE-BIRTH/HOST-SOURCE/v5".toUTF8.toList
+  "DREGG/GRAIN-RESOURCE-BIRTH/HOST-SOURCE/v6".toUTF8.toList
 
 def toWire (source : Source) : SourceWire :=
   ((ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode source.birth,

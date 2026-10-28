@@ -990,3 +990,90 @@ shape and not keystones, pointing to K2/K3**, exactly as pass 18 did for `Births
 the teeth onto the deployed type**: `IsEmpty (AcceptedRefill …)` when the marker is spent (replay) and
 when the sponsor is not the platform cell's controller (forgery). K3's own statement already refutes a
 non-refill arm carrying credit.
+
+## 2026-10-28, twenty-second pass: thin-consent birth (lane/thin-birth 7410dd6d9, statement text)
+
+**Verdict: REVISE, two statements. The rest is accepted.**
+
+1. **`EffectsBinds` as a premise: change it to the compared-pair collision disjunct.** As a hypothesis,
+   `effectsDigest signed = effectsDigest d → signed = d` is supplied by the caller, and its inhabitation
+   pole `∀ d, EffectsBinds d d` is the trivial case (the conclusion is `d = d`). The case the teeth
+   need is the other one: in `SwapAfterConsentRefused` the premises `signed ≠ d'` and
+   `EffectsBinds signed d'` together just say "their digests differ", and nothing inhabits that. Use
+   the pattern already accepted for `PinCollision`/`ArgumentCollision`: drop the premise, and conclude
+   `… ∨ EffectsCollision signed d`, with `EffectsCollision := signed ≠ d ∧ effectsDigest signed =
+   effectsDigest d`. Both theorems then stand unconditionally, and the collision is a named event on
+   exactly the two descriptors compared. Stating it over descriptors rather than bytes is fine, because
+   `sourceEncoding` is canonical (the plan check already pins `encode finalized = finalBytes`).
+2. **`HonestPlanAccepted`'s pins premises: require the lemma.** `opened.pins.federation =
+   config.federation` and `opened.pins.policyId = ⟨factoryId⟩` are premises no theorem inhabits. That
+   makes the satisfiable pole conditional on unproved facts, which is the shape the satisfiable field
+   exists to rule out. `validateLoaded` builds `Opened` from `parts.pins` after `validateChecks`. Prove
+   `Opened.pins_federation`/`pins_policyId` from that construction (or the checked parts' exactness), and
+   drop the premises.
+
+Accepted:
+- **(2) Conjuncts 3 to 7** are true of every `PreparedBirth`, and they gain their force from conjunct 2
+  (`encode (userPart d) = shown.draft`) and conjunct 4 (auxiliary creates are the kernel's). That is the
+  `delegate_display_is_commit` pattern, and it is fine as stated. A one-line corollary with `userPart d`
+  rewritten to `decode shown.draft` would make "commit = f(shown, kernel-owned, pre)" literal; it is
+  optional.
+- **(3) `author` as a Host-instantiated parameter**, with Host-side completeness witnessed by the journey
+  row: accepted, provided the label says the re-authoring fixed point is a row, not a theorem.
+  Soundness of display-is-commit does not depend on `author` being correct.
+- **(5) Coordinates shown, not judged**, gated at admission (`RootGrantShape`, `BirthWindow`, policy epoch 0,
+  `BornLineage`), with the window shift named in the display: accepted.
+- `SwappedPlanRefused`'s two refusals are general and named.
+
+**Addendum, thin-birth 909de2bca: ACCEPT.** `EffectsCollision` is a compared-pair event on exactly the
+two descriptors, and it cannot be proved without an actual cSHAKE collision. Neither theorem now takes a
+hash premise, so the disjunct is no escape hatch. In `DisplayIsCommit` the consented-header premises force
+equal digests, so either `signed = d` (the conjuncts) or the collision holds. `OpenedPinsPublicStatement`
+replaces the uninhabited premises with a statement about every `Opened`. Carrying the invariant as a field
+built at `Opened`'s three construction sites is the right realisation. The re-authoring fixed point is
+labelled as jpriv2 row 19.
+
+## 2026-10-28, twenty-third pass: the World carries M2's credit (L1e, design, before proofs)
+
+**Ruling: option (A).** Option (B) (`intent.credit = 0` on the four `SnapRepresents` theorems) would cut
+whole-World equality on every log containing a refill, which passes 6 to 9 rest on. It is a weakening.
+Under (A):
+- `World.Turn.credit : Charge := 0`;
+- `meterPatch` writes `avail - charge + credit` on lanes where either term is nonzero, which is exact,
+  since `fundedCheck charge` is unchanged;
+- `turnOf` sets `credit := intent.credit`.
+
+The four refinement theorems keep their statements, plus a `credited` sibling of `charged`. This
+section corrects pass 21, which missed the World side. Conditions for the stated text:
+1. **Regression pole:** `meterPatch lanes charge 0 avail = debits lanes charge avail` (or the same as an
+   equality of `World.step` on credit-0 turns), so every pre-M2 turn provably steps as before.
+2. **Satisfiable pole:** a credited turn's post-meter on a lane is `avail - charge + credit`, with
+   `credit > 0` raising it.
+3. **Say where confinement lives.** The World admits `credit` as turn data without deciding it, as it does
+   subject and capability. Its docstring must say minting is confined only by K3 (`credit_confined` over
+   the replay arms), so no one reads the World law as a meter-safety statement. I found no World-level
+   theorem on main claiming the meter never increases. Any future one must carry the credit term.
+
+**Addendum, L1e's exact text for (A): ACCEPT.** All three conditions are met:
+- the credit-0 regression poles (`meteredLanes_uncredited`, `meterPatch_uncredited`, `sysPatch_uncredited`);
+- the satisfiable pole `step_meter` on every lane, with the concrete refill turn taking 0 to 5, which is
+  item 7's World-level half;
+- the docstring placing confinement in K3.
+
+`sysPost_allowance`'s case split agrees with `step_meter`, because an untouched lane has
+`charge = credit = 0`. `turnCheck`'s unchanged `fundedCheck` keeps the subtraction exact. `turnOf_credit`
+and `ofIntent_credit` give the `credited` sibling. The four `SnapRepresents` statements are unchanged.
+
+On the World-level tooth: `decodeTurn_encodeTurn`, with `decodeTurn` reading the credit, already makes
+`encodeTurn` injective in it. Add the one-line corollary `encodeTurn_credit_ne`, turns differing only in
+credit having different bytes, as the stated tooth. Then a future codec that drops the field fails a
+named theorem instead of passing silently through a roundtrip on a defaulted value.
+
+**Addendum, `SnapRepresents.meter` strengthened (L1e): ACCEPT.** A credited lane at an exhausted meter may
+hold `none`, so the World's guarded allowance write would refuse the very refill the 0→5 pole admits. The
+`getD 0` field cannot distinguish `none` from `some 0`. Strengthening the field in place to
+`w.allowanceOf l = some (snap.model.available l)`, with `meter_eq` as the old field for current readers,
+is the right fix. It is a stronger premise every producer inhabits, not a new hypothesis, and deployed
+genesis records every lane (`TurnLog.genesisSystem`), which writes preserve. `representsCheck_sound`
+moving to the `some` comparison keeps the open deciding it. Restating `charge_le_allowance`'s second
+conjunct as `step_meter` is required by the credit and accepted.

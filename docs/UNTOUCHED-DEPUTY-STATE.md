@@ -1,4 +1,4 @@
-# Untouched-areas deputy: state (rewritten whole; 2026-10-28 04:00Z)
+# Untouched-areas deputy: state (rewritten whole; 2026-10-28 morning, quiet)
 
 Inputs: docs/review/2026-10-27-untouched-areas/{LEAN,NATIVE}.md, docs/review/2026-10-27-blind-spots/BLIND-SPOTS.md Sweep 1.
 Each lane: /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>.
@@ -16,7 +16,7 @@ un-verify (Generic Simplex gate), un-bend (bend verb + lost reply), un-world (Ta
 - World apps native on candidate 0ce31391 (un-effects-rows; commons split into app + scenarios, policy bound kept): effect 19/19, dues 17/17, bounty 21/21, play 27/27, ballot 27/27, story 25/25, commons 20/20; cohort gates ballot 37/37, dues 49/49, commons 64/64. README native lines + evidence at 20f28ac31 (docs only, sent to the integrator a34bdb948f1cf4796).
 
 ## In flight
-- lane/un-shared-names (Sonnet a852f5df40229de24): a room bind judges its room pointer, index names and target in ONE opened snapshot (coordinator steer: snapshot is the default, bounded re-discover only where the protocol cannot pin, refusal names exactly what changed; say so if a Host read-at-height is missing); jtemplates background writer; seed.sh error tail plus explicit 600 s limits on story new/seal and template births (infra measured the 19-line story birth at 128 s vs as()'s 120 s default). Not yet merged; the faerie sends the integrator its sha.
+- lane/un-shared-names (Sonnet a852f5df40229de24): 179494a88 on main (room bind reads room pointer, index and target in ONE batched signed view; jtemplates background writer + split tenancy; seed errtail_ and 600 s story limits). The rebased e4acc9df0 (only jtemplates.sh, strictly stronger rows: exact-ID bindings, one exact backlink) went to the integrator. All 13 jtemplates reds are explained: 12 stale expectations (90562d76c, 1a9ce0663, 433d5bc38, 37ffc2706), and backlinks=0 was the regression 621aded18 fixes. The faerie runs the row on the candidate carrying 25cfb86bd + 621aded18.
 
 ## Waiting on others
 - Codec pin re-emit (ACTIVITY-RECORD v9): the integrator's full build runs the regen once (its state file).
@@ -37,14 +37,17 @@ Sources: docs/APP-MARKET-2026-10-27.md "State at hand-off"; docs/ROWS-OWED.md §
 - Every install on 0ce31391 was refused (op69 claim plan vs BEGIN); the fix 25cfb86bd is on main (81bca08c6), not in 1af366fe9; the first candidate carrying it is the build after 1af366fe9. On it: the batch tables run on fresh worlds (validator), and I own the reds.
 - app-writes-2 (Kimi) landed only Etherpad 956b91bff and Hacker Slides 8a3682c3e (merged); HakyllCMS, HackerCMS and OrgTodo are covered by faerie app-market-fixups.
 - Tale invite (the demo seed's item 4, decided): the door processor joins every enrolled member to `tale` once per world (lane/un-tale-welcome 19bb968e0, 4/4 filtered on dregg-build, sent to the integrator). Infra seam: story.author is the seed's SEED_HOST (demo: house), README bc6c837ba on main. Infra is now ae95a4eac63b0715e.
-- Faeries (Sonnet, recipes now, one run on the candidate): lane/app-market-b3 6f2bfd3bc pushed (DiagramsNet, EtherDraw, Scrumblr, SwaggerEditor; agent a85d12892ea6de3ca), lane/app-market-b7 d8ee43cdb pushed (2048, PerplexitySudoku, 3DBlockstack, SimpleChat; agent abf203f357754001b; its spk-rpc get_view_info UNIMPLEMENTED = empty ViewInfo change reviewed and accepted), lane/app-market-fixups (OrgTodo manifest, HakyllCMS START exit, HackerCMS write; not yet pushed). Shared brief: scratchpad market-common.txt.
+- Faeries (Sonnet, recipes now, one run on the candidate): lane/app-market-b5 (agent a0ef59eabda7075b4: FileDrop, Kiwix, Groove Basin, Tube; streamed bodies under the 8 MiB bound or the exact missing method named) and lane/app-market-b8 (agent a13f0bc9626b1320a: IPython kept, Mercurial, MediaWiki, Firefly III) started; briefs scratchpad brief-b5.txt/brief-b8.txt. lane/app-market-b3 6f2bfd3bc pushed (DiagramsNet, EtherDraw, Scrumblr, SwaggerEditor; agent a85d12892ea6de3ca), lane/app-market-b7 d8ee43cdb pushed (2048, PerplexitySudoku, 3DBlockstack, SimpleChat; agent abf203f357754001b; its spk-rpc get_view_info UNIMPLEMENTED = empty ViewInfo change reviewed and accepted), lane/app-market-fixups 299c0cb98 (on main). b3 and b7 reviewed and sent to the integrator for main. Shared brief: scratchpad market-common.txt.
 - japps co-edit row: faerie a4e312352a7091f59 runs it on the same candidate (stream-continuity 6544ea37 + 25cfb86bd), then L13's DDP rerun is mine to report.
-- Later: B5 (FileDrop, Kiwix; Groove Basin and Tube need streaming), B8 rest (Mercurial, MediaWiki, Firefly III; IPython recipe written), bodies > 8 MiB (designed §2b), the member install debit (apps-e2e.sh) into INSTALL.md §4. Each green app (lifecycle + write) goes into FEATURED in native/resource-client/src/apps.rs; target 2-3 dozen.
+- Later: bodies > 8 MiB (designed §2b), the member install debit (apps-e2e.sh) into INSTALL.md §4. Each green app (lifecycle + write) goes into FEATURED in native/resource-client/src/apps.rs; target 2-3 dozen.
 
 ## Decided
 fn out; private-backend stays; Effects/ registry is Phase 3 (EFFECTS.md); dues and six more ride the effect Plan; DreggNet lease cluster parked; Contracts Cuts/Snapshot/Refinements/Futures kept; Pred BoundedQuantifiedView/CoordinationDial kept; twin conflict on un-pb-twins resolved to un-pb-wal 68d9f28e's design (82f3710b).
 
+## Coordinator status
+The coordinator has the whole batch (b3/b5/b7/b8 recipes, app-market-w11 d5b8b7ac6 on main 1b2764235, shared-names e4acc9df0 on main 18f44f8db, tale-welcome, un-effects-rows 20f28ac31, un-pb-helpers 353a6d11d); do not resend it. Ruling: quiet, no faeries running, until the integrator names the candidate carrying 25cfb86bd and 621aded18; the next report carries that run's results.
+
 ## Next three
 1. On the first candidate carrying 25cfb86bd: tell the three market faeries and a4e312352a7091f59 to run; read the validator's batch tables; fix reds; add every green app to FEATURED.
-2. Review b3/b7/fixups recipes as they land; then B5 and B8 faeries (2-3 at a time).
+2. b5 (e1458689a) and b8 (bec955336) recipes are on main; they run on the candidate along with jtemplates (e4acc9df0) and japps.
 3. Owed after the demo: revive Effects/ so transfer/commit come from the derivation engine (EFFECTS.md); private-backend P6 lost reply; the child() twin check.

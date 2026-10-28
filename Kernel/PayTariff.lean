@@ -167,7 +167,7 @@ theorem framed_decode {α : Type} (frame : List UInt8) (stream : StreamCodec α)
       StreamCodec.product, StreamCodec.literal, prefixed]
   cases stream.decodePrefix (bytes.drop frame.length) <;> simp
 
-def tariffFrame : List UInt8 := "DREGG/PAY/TARIFF/v7".toUTF8.toList
+def tariffFrame : List UInt8 := "DREGG/PAY/TARIFF/v8".toUTF8.toList
 
 def tariffCodec : LawfulCodec Tariff := framed tariffFrame tariffStream
 

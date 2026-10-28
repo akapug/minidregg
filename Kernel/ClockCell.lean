@@ -167,7 +167,7 @@ def wire : Wire layout where
     | .clock => "unit"
     | .maxStepSeconds => "unit"
   valueCodecId
-    | .clock => "DREGG/CLOCK/NOW-SLOT/v4"
+    | .clock => "DREGG/CLOCK/NOW-SLOT/v5"
     | .maxStepSeconds => "positive-nat/max-step-seconds/v1"
 
 def materializer : Materializer layout Digest := StoreCodec.materializer wire

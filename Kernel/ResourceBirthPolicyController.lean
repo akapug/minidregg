@@ -2295,7 +2295,7 @@ def ownerConsentRequest
     target := ⟨item.create.cellId⟩
     verb := reserveVerb item.resourceKind
     argsDigest := CanonicalCellRegistry.sourceEncoding.hashBytes
-      ("DREGG/RESOURCE-RESERVE-BIRTH/OWNER-CONSENT/v4".toUTF8.toList ++
+      ("DREGG/RESOURCE-RESERVE-BIRTH/OWNER-CONSENT/v5".toUTF8.toList ++
         CanonicalCellRegistry.sourceEncoding.codec.encode descriptor ++
         Tower256ConcreteBackend.StreamCodec.nat.encode position.val)
     effectsDigest := CanonicalCellRegistry.sourceEncoding.effectsDigest descriptor

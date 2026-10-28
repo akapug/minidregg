@@ -292,8 +292,9 @@ cp "$OUT" "$SD/lab-wall.read"
 ok workroom alice "doc show lab/index"
 cp "$OUT" "$SD/lab-index.show"
 check workroom "doc show lab/index: the map's line" grep -q "workroom lab: wall is what we say" "$OUT"
-check workroom "doc show lab/index: the room's shared names (wall, notes, tasks)" \
-  sh -c "grep -q 'wall → object:' '$OUT' && grep -q 'notes → object:' '$OUT' && grep -q 'tasks → object:' '$OUT'"
+WALLID=$(jq -r .target "$AW/lab.wall.json"); NOTESID=$(jq -r .target "$AW/lab.notes.json"); TASKSID=$(jq -r .target "$AW/lab.tasks.json")
+check workroom "doc show lab/index: the room's shared names, each bound to its exact ID, and no others" \
+  sh -c "grep -qxF '  wall → object:$WALLID' '$OUT' && grep -qxF '  notes → object:$NOTESID' '$OUT' && grep -qxF '  tasks → object:$TASKSID' '$OUT' && test \$(grep -c '^  [a-z]* → ' '$OUT') = 3"
 ok workroom alice "doc links lab/index"
 cp "$OUT" "$SD/lab-index.links"
 check workroom "doc links lab/index: a link to lab/wall by name (a stream is a cell: a document target)" \
@@ -312,8 +313,8 @@ check workroom "doc links lab/notes links back to lab/index" \
 ok workroom alice "doc show lab/tasks"
 cp "$OUT" "$SD/lab-tasks.show"
 ok workroom alice "doc backlinks lab/wall"
-check workroom "doc backlinks lab/wall: the index links to the wall" \
-  sh -c "grep -q '^lab/index link ' '$OUT' && grep -q '^# 1 backlink' '$OUT'"
+check workroom "doc backlinks lab/wall: exactly one backlink, from lab/index, to the wall's exact target" \
+  sh -c "grep -q '^lab/index link ' '$OUT' && grep -q 'target document $WALLID' '$OUT' && grep -q '^# 1 backlink' '$OUT'"
 ok workroom alice "doc backlinks lab/index"
 check workroom "doc backlinks lab/index: notes links back" sh -c "grep -q '^lab/notes link ' '$OUT'"
 ok workroom alice "room list"
@@ -350,7 +351,8 @@ INDEX=$(jq -r .target "$AW/lab.index.json"); NOTES=$(jq -r .target "$AW/lab.note
 ok member bob "import lab/index object $INDEX $BOBCAP"
 ok member bob "import lab/notes object $NOTES $BOBCAP"
 ok member bob "doc show lab/index"
-check member "bob reads the map: the line" grep -q "workroom lab: wall is what we say" "$OUT"
+check member "bob reads the map: the line, and notes bound to the exact ID his lab/notes reference holds" \
+  sh -c "grep -q 'workroom lab: wall is what we say' '$OUT' && grep -qxF '  notes → object:$NOTES' '$OUT'"
 ok member bob "doc links lab/index"
 check member "bob reads the map: three links" test "$(grep -cE '^link [0-9]+ -> document ' "$OUT")" = 3
 check member "bob's map names lab/notes by bob's own reference" grep -qE -- "lab/notes \(target $NOTES\)" "$OUT"
@@ -394,6 +396,8 @@ for leaf in pub pub.index pub.wall pub.intro; do
 done
 check social "pub/wall is a stream" jq -e '.storage == "stream"' "$WS/alice/sources/create-pub.wall.request.json"
 ok social alice "doc show pub/index"
+check social "pub's map binds wall and intro to their exact IDs" \
+  sh -c "grep -qxF '  wall → object:$(jq -r .target "$AW/pub.wall.json")' '$OUT' && grep -qxF '  intro → object:$(jq -r .target "$AW/pub.intro.json")' '$OUT'"
 ok social alice "doc links pub/index"
 check social "pub's map links pub/wall and pub/intro by name" \
   sh -c "grep -qE -- '^link [0-9]+ -> document pub/wall \(target [0-9]+\) ' '$OUT' && grep -qE -- '^link [0-9]+ -> document pub/intro \(target [0-9]+\) ' '$OUT'"
@@ -427,6 +431,8 @@ done
 check story "tale/scenes is a stream; chapters a note" \
   sh -c "jq -e '.storage == \"stream\"' '$WS/alice/sources/create-tale.scenes.request.json' && jq -e '.predicate.predicates[1].predicates[1].slot == \"content/atom-edits\"' '$WS/alice/sources/create-tale.chapters.request.json'"
 ok story alice "doc show tale/index"
+check story "tale's map binds chapters, scenes and cast to their exact IDs" \
+  sh -c "for l in chapters scenes cast; do grep -qxF \"  \$l → object:\$(jq -r .target '$AW/tale.'\$l'.json')\" '$OUT' || exit 1; done"
 ok story alice "doc links tale/index"
 check story "tale's map links chapters, scenes and cast by name" \
   sh -c "grep -qE -- '^link [0-9]+ -> document tale/chapters \(target [0-9]+\) ' '$OUT' && grep -qE -- '^link [0-9]+ -> document tale/scenes \(target [0-9]+\) ' '$OUT' && grep -qE -- '^link [0-9]+ -> document tale/cast \(target [0-9]+\) ' '$OUT'"
@@ -469,8 +475,8 @@ for leaf in tale3 tale3.chapters tale3.index; do
   check traffic "dana (split tenancy: workspace under HOME) holds a reference $leaf" test -f "$(ws_of dana)/refs/$leaf.json"
 done
 ok traffic dana "doc show tale3/index"
-check traffic "tale3's map links chapters, scenes and cast by name" \
-  sh -c "grep -qE -- '-> tale3/chapters \(document' '$OUT' && grep -qE -- '-> tale3/scenes \(object' '$OUT' && grep -qE -- '-> tale3/cast \(document' '$OUT'"
+check traffic "tale3's map binds chapters, scenes and cast to dana's exact IDs" \
+  sh -c "for l in chapters scenes cast; do grep -qxF \"  \$l → object:\$(jq -r .target '$(ws_of dana)/refs/tale3.'\$l'.json')\" '$OUT' || exit 1; done"
 
 # ------------------------------------------------ restart; a cold audit
 pidfile=$W/public/server.pid
