@@ -885,3 +885,33 @@ keystone is honest as a gate. Two notes for the proofs:
   canonical. Prove that lemma first; if it fails, the premise is false.
 - `HostTeeth`'s ghost clause needs an admitted command whose seal is non-empty, because otherwise both
   dispatchers refuse alike. Its proof therefore rests on `HostAccepted`'s owed fixture, the same object.
+
+## 2026-10-27, twentieth pass: completion custodian key from the platform cell (L1d, design, before code)
+
+**Verdict: the design is accepted, with one requirement on the light route.**
+
+The keystone is about the deployed object:
+- `keyCurrent` over each admission's private-mk `Candidate` reads the record from `ground.view`, the state
+  the completion's guards are taken on.
+- The physical report's verifying key is `custodian.key` by the type of `physical`.
+- The platform cell's exact root is in `Core.intent`'s read guards, so a key-rotating install between
+  prepare and commit makes the completion stale.
+
+`Read.stale` is general teeth: no `Read` carries a key other than the record's, which refutes the
+`config.completionCustodianKey` reader after a rotation. `select_unavailable` names absence. One shared
+module, with `platformRecordAt := recordOn … durable.snapshot` by `rfl`, avoids a four-way copy.
+Historical re-admission reading the record in force at that height is what replay agreement needs.
+
+- **(a) `platformReadOnly` as a checked refusal: accepted.** It fails safe, refusing by name rather than
+  admitting, the same shape as `packageGuardReadOnly`. The theorem form can come second. The owed
+  concrete accepted `Candidate` must also show the check passes on an honest completion, so it is not a
+  liveness trap.
+- **(b) Pre-platform worlds refuse every completion with `platformUnavailable`: accepted.** It is
+  consistent with births and with the one re-genesis.
+- **(c) Host pre-checks reading the opened image: accepted**, as diagnostics only, since admission
+  re-reads.
+- **Requirement, the light route.** A served ground's `canonicalBytes` covers the ids its basis
+  *served*. Light plans request keyed bases (`light.basis keys`, as `prepareInstallLight` does). Unless
+  the completion's basis keys include `cellIdOf deployment`, the platform cell reads as `absentBytes`,
+  `load` is `none`, and every light-route completion refuses `platformUnavailable`. State, and prove, that
+  each completion family's light key set contains the platform cell id.
