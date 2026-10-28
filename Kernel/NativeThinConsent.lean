@@ -767,7 +767,8 @@ theorem shown_agrees {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L)
         have inE := sublist.subset member
         rw [hE] at inE
         have stored := StoreHiding.mem_entries wire inE
-        rw [keyed, present] at stored
+        subst keyed
+        rw [present] at stored
         cases stored
     | some value =>
         have inE := mem_entries_of_present wire actual present
@@ -797,9 +798,10 @@ theorem shown_agrees {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L)
     rw [List.getElem?_eq_getElem bound] at atEntry
     have sameEntry := Option.some.inj atEntry
     have samePosition : position' = position := by
-      apply (List.Nodup.getElem_inj_iff distinctE).mp
-      simp only [List.getElem_map]
-      rw [found', sameEntry, keyOther, keyed]
+      have keys : (E.map Sigma.fst)[position']'(by simpa using bound') =
+          (E.map Sigma.fst)[position]'(by simpa using bound) := by
+        simp only [List.getElem_map, found', sameEntry, keyOther, keyed]
+      exact (List.Nodup.getElem_inj_iff distinctE).mp keys
     subst samePosition
     rw [isOpened] at sealed
     cases sealed
@@ -864,7 +866,8 @@ theorem opened_display_is_commit : OpenedDisplayIsCommitStatement := by
       have inE := List.mem_of_getElem? atEntry
       have stored := StoreHiding.mem_entries (targetWire target) inE
       intro absent
-      rw [← keyed, absent] at stored
+      subst keyed
+      rw [absent] at stored
       cases stored
     exact Patch.run_frame _ _ _ (untouched_of_both_valid address patch cell.logical
       prepared.pre.logical (sealedEmpty address sealed) present valid actualValid)
