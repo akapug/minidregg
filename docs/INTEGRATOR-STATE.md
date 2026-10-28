@@ -143,7 +143,7 @@ main's tip with land.py and sends its sha (one planned StoreEpoch move; the next
 sends a green sha; all of it rides one codec regen. The `ownerless` census check is on main (9bed7b1e0), merged onto
 iter-speed's PersistedCodecTagCensus.lean. lane/thin-birth 1e0f741d3 LANDED on main eda65ced8 (after the 7027e0ace report, before the conversion; so land.py converts its Lean (Kernel/NativeThinBirth, NativeThinConsent, Host/ThinBirthConsent, ClientConsentCore, SourceAgreementJson, HostOperations) and it rides the one regen; told a0fd127abfb9aac75 and L1e. On the first built main carrying it, run `journey.sh --only JP2` (row 19 thin birth succeeds; the swapped-plan row refused birthSourceChanged). After it lands, delete dregg-ref:/build/lanes/thin-birth-scratch/ and /build/lanes/thin-birth (finished session lane), listed in COMMANDS.log first.
 
-Infra is a298031c78e86d651 (10-28; older mentions of ae95a4eac63b0715e/aed5ecf506cf840af in the table are history). Red routing: lean-audit-c and lean-audit-c-m2 are L1e's (a58f907aef8926430; L1d ad6d6eff243f32816 has stopped): its green sha comes from and its reds go to L1e directly; when the module conversion lands on main, tell L1e (it merges the conversion into lean-audit-c and sends a green sha) and L1d's old address; Hermes to L4b (ad81db6d6fd317d3a); L13 a1618140607ac439b; un-stream-continuity reds
+Infra is a298031c78e86d651 (10-28; older mentions of ae95a4eac63b0715e/aed5ecf506cf840af in the table are history). Red routing: lean-audit-c and lean-audit-c-m2 are L1e's (a58f907aef8926430; L1d ad6d6eff243f32816 has stopped): its green sha comes from and its reds go to L1e directly; when the module conversion lands on main, tell L1e (it merges the conversion into lean-audit-c and sends a green sha) and L1d's old address; Hermes to L4c (a6c2f758a0dac46fe; L4b ad81db6d6fd317d3a has stopped); L13 a1618140607ac439b; un-stream-continuity reds
 (ApplicationStreamContinuityFresh pole proofs, NativeHostReplay.lean:3816) to the deputy a308118209b4a48ea; all
 others through the coordinator. Expected reds, not new: the eight hand-rolled genesis writers (acceptance.sh,
 application-acceptance.sh, authority-acceptance.sh, selected-release-acceptance.sh, grain-runtime/acceptance.sh,
@@ -159,8 +159,12 @@ gates main and fixes reds itself.
 
 - thin-birth: landed after the conversion at fb0acbfbe (main 6fd993d43); its lane-check on dregg-ref was still running at landing, reds come back to ad0906325ab57d1c3. lane/thin-birth Phase-3 work lands only on a sha its owner sends after the auditor accepts.
 - effects-revival LANDED 10-28 at 65b813888 (main 4d059a29b) and ae0c78a01 (main ac4247487, HostTeeth proved; converted, `lake build Effects` green on hbox);
-  owner a26c13b24522dee35 still owes Fixtures/NativeDocWriteFixture.lean regenerated from the conversion(+M2)
-  candidate after READY. Its reds from the next build go to that owner.
+  Its reds from the next build go to a26c13b24522dee35.
+- Fixtures (coordinator 10-28): the integrator re-records BOTH Fixtures.NativeAcceptedFixture and
+  NativeDocWriteFixture from the A12c build, then sends that sha to effects (a26c13b24522dee35) and L1e
+  (a58f907aef8926430). After that, the umbrellas stage blocks again (reds the candidate) from the next build on.
+- Held until their owners report (codex workers, shas via the coordinator): cx-oracle, cx-store-sweep,
+  un-route-latency. oracle-grant-factory b81a38663 came in by codex's own push to main (9bed7b1e0 row).
 - Held for the build after the conversion candidate (one .lean file): lane/app-market-b5 84938f78c
   (Kernel/ApplicationSpkPackageIdentity.lean, safeApiTail admits a final segment with no trailing slash; OwnTracks
   re-qualifies on the candidate carrying it; deputy a308118209b4a48ea). Land after the conversion, re-converted if
