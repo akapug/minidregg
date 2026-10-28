@@ -390,6 +390,12 @@ structure Turn (R : Registry) (TxId Ev D : Type) where
   A derived turn's pins are its intent's `expectedPre`/`expectedRoot` claims
   (`TurnOfIntent.turnOf`), in intent order, duplicates kept. -/
   pins : List (CellId × D) := []
+  /-- The meter credit the turn adds back after its debit (M2). Turn data: `admit` decides
+  nothing about it, as it decides nothing about `subject` or `capability`. Minting meter is
+  confined only by K3, `NativeAdmission.credit_confined` over the replay arms: a nonzero
+  credit is exactly an `AcceptedRefill`'s intent. No World theorem claims the meter never
+  increases; any future one must carry this term. -/
+  credit : Charge := 0
 
 /-- The `(cell, room)` rows a turn's creates record. -/
 def Turn.parentRows {R : Registry} {TxId Ev D : Type} (t : Turn R TxId Ev D) :
@@ -504,13 +510,25 @@ def debits (lanes : List Lane) (charge avail : Charge) : Patch (sysLayout TxId D
   lanes.map fun lane =>
     Op.write (L := sysLayout TxId D) SysSpace.allowance lane (avail lane) (avail lane - charge lane)
 
+/-- The lanes a turn's meter patch writes: those it charges or credits. -/
+def meteredLanes (charge credit : Charge) : List Lane :=
+  meterLanes.filter fun lane => charge lane ≠ 0 ∨ credit lane ≠ 0
+
+/-- The meter patch: each listed lane goes from `avail` to `avail - charge + credit`.
+Exact, because `turnCheck` funds `charge` from the meter first (`fundedCheck`). With no
+credit it is `debits` (`meterPatch_uncredited`). -/
+def meterPatch (lanes : List Lane) (charge credit avail : Charge) : Patch (sysLayout TxId D) :=
+  lanes.map fun lane =>
+    Op.write (L := sysLayout TxId D) SysSpace.allowance lane (avail lane)
+      (avail lane - charge lane + credit lane)
+
 /-- The system half of a turn, as one guarded patch on the system cell: the
-core, then the spent marks, then the meter debit from `avail` (the world's
-`meter`). -/
+core, then the spent marks, then the meter patch from `avail` (the world's
+`meter`): debit the charge, add the credit. -/
 def sysPatch (t : Turn R TxId Ev D) (height : Nat) (logRoot : D) (avail : Charge) :
     Patch (sysLayout TxId D) :=
   sysCore H t height logRoot ++ spentAllocs t.nullifiers ++
-    debits (chargedLanes t.charge) t.charge avail
+    meterPatch (meteredLanes t.charge t.credit) t.charge t.credit avail
 
 /-- The patch bytes of a turn: the bytes its legs write, plus the bytes its
 births' images write (T3b), plus the bytes its event retains. -/
@@ -1417,13 +1435,92 @@ theorem mem_chargedLanes {charge : Charge} {l : Lane} : l ∈ chargedLanes charg
 theorem chargedLanes_nodup (charge : Charge) : (chargedLanes charge).Nodup :=
   meterLanes_nodup.filter _
 
+theorem mem_meteredLanes {charge credit : Charge} {l : Lane} :
+    l ∈ meteredLanes charge credit ↔ charge l ≠ 0 ∨ credit l ≠ 0 := by
+  simp [meteredLanes, mem_meterLanes]
+
+theorem meteredLanes_nodup (charge credit : Charge) : (meteredLanes charge credit).Nodup :=
+  meterLanes_nodup.filter _
+
+/-- **Regression pole: an uncredited turn meters the lanes it charges.** -/
+theorem meteredLanes_uncredited (charge : Charge) : meteredLanes charge 0 = chargedLanes charge := by
+  simp [meteredLanes, chargedLanes]
+
+/-- **Regression pole: an uncredited meter patch is the debit.** -/
+theorem meterPatch_uncredited (lanes : List Lane) (charge avail : Charge) :
+    meterPatch (TxId := TxId) (D := D) lanes charge 0 avail = debits lanes charge avail := by
+  simp [meterPatch, debits]
+
+theorem run_meterPatch_ne (s : Store (sysLayout TxId D)) (lanes : List Lane)
+    (charge credit avail : Charge) (a : Address (sysLayout TxId D)) (ha : a.1 ≠ SysSpace.allowance) :
+    Patch.run s (meterPatch lanes charge credit avail) a = s a := by
+  induction lanes generalizing s with
+  | nil => rfl
+  | cons l rest ih =>
+      show Patch.run (s.set ⟨SysSpace.allowance, l⟩ (some (avail l - charge l + credit l)))
+        (meterPatch rest charge credit avail) a = s a
+      rw [ih]
+      exact Store.set_ne _ _ _ _ (fun e => ha (congrArg Sigma.fst e))
+
+theorem run_meterPatch_at (s : Store (sysLayout TxId D)) (lanes : List Lane)
+    (charge credit avail : Charge) (l : Lane) :
+    Patch.run s (meterPatch lanes charge credit avail) ⟨SysSpace.allowance, l⟩ =
+      if l ∈ lanes then some (avail l - charge l + credit l) else s ⟨SysSpace.allowance, l⟩ := by
+  induction lanes generalizing s with
+  | nil => simp only [List.not_mem_nil, if_false]; rfl
+  | cons l0 rest ih =>
+      show Patch.run (s.set ⟨SysSpace.allowance, l0⟩ (some (avail l0 - charge l0 + credit l0)))
+        (meterPatch rest charge credit avail) _ = _
+      rw [ih]
+      by_cases hr : l ∈ rest
+      · simp [hr]
+      · by_cases e : l = l0
+        · subst e
+          simp only [hr, if_false, List.mem_cons, true_or, if_true]
+          exact Store.set_eq _ _ _
+        · simp only [hr, if_false, List.mem_cons, e, false_or]
+          exact Store.set_ne _ _ _ _ (sys_key_ne e)
+
+/-- The meter patch over distinct lanes is valid exactly when each lane holds
+the quoted allowance. -/
+theorem validFrom_meterPatch (s : Store (sysLayout TxId D)) (lanes : List Lane)
+    (charge credit avail : Charge) (nodup : lanes.Nodup) :
+    Patch.ValidFrom s (meterPatch lanes charge credit avail) ↔
+      ∀ l ∈ lanes, s ⟨SysSpace.allowance, l⟩ = some (avail l) := by
+  induction lanes generalizing s with
+  | nil => exact ⟨fun _ _ m => absurd m (by simp), fun _ => trivial⟩
+  | cons l rest ih =>
+      simp only [List.nodup_cons] at nodup
+      show (Op.Enabled s (Op.write (L := sysLayout TxId D) SysSpace.allowance l (avail l)
+          (avail l - charge l + credit l)) ∧
+        Patch.ValidFrom (s.set ⟨SysSpace.allowance, l⟩ (some (avail l - charge l + credit l)))
+          (meterPatch rest charge credit avail)) ↔ _
+      rw [ih _ nodup.2]
+      simp only [Op.Enabled, List.mem_cons, forall_eq_or_imp]
+      have frame : ∀ x ∈ rest, (s.set ⟨SysSpace.allowance, l⟩ (some (avail l - charge l + credit l)))
+          ⟨SysSpace.allowance, x⟩ = s ⟨SysSpace.allowance, x⟩ := fun x mx =>
+        Store.set_ne _ _ _ _ (sys_key_ne (fun e => nodup.1 (e ▸ mx)))
+      constructor
+      · rintro ⟨⟨_, here⟩, rest_ok⟩
+        exact ⟨here, fun x mx => (frame x mx) ▸ rest_ok x mx⟩
+      · rintro ⟨here, rest_ok⟩
+        exact ⟨⟨rfl, here⟩, fun x mx => (frame x mx).symm ▸ rest_ok x mx⟩
+
+/-- **Regression pole: an uncredited turn's system patch is the pre-M2 one.** -/
+theorem sysPatch_uncredited (t : Turn R TxId Ev D) (height : Nat) (logRoot : D) (avail : Charge)
+    (uncredited : t.credit = 0) :
+    sysPatch H t height logRoot avail =
+      sysCore H t height logRoot ++ spentAllocs t.nullifiers ++
+        debits (chargedLanes t.charge) t.charge avail := by
+  rw [sysPatch, uncredited, meteredLanes_uncredited, meterPatch_uncredited]
+
 /-- Off the T1 namespaces, the system patch is its core. -/
 theorem run_sysPatch_core (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev D)
     (height : Nat) (logRoot : D) (avail : Charge) (a : Address (sysLayout TxId D))
     (hs : a.1 ≠ SysSpace.spent) (ha : a.1 ≠ SysSpace.allowance) :
     Patch.run s (sysPatch H t height logRoot avail) a = Patch.run s (sysCore H t height logRoot) a := by
   simp only [sysPatch, Patch.run_append]
-  rw [run_debits_ne _ _ _ _ _ ha, run_spentAllocs_ne _ _ _ hs]
+  rw [run_meterPatch_ne _ _ _ _ _ _ ha, run_spentAllocs_ne _ _ _ hs]
 
 /-- The system patch's validity, block by block. -/
 theorem validFrom_sysPatch (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev D)
@@ -1432,7 +1529,8 @@ theorem validFrom_sysPatch (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev D)
       Patch.ValidFrom s (sysCore H t height logRoot) ∧
         Patch.ValidFrom (Patch.run s (sysCore H t height logRoot)) (spentAllocs t.nullifiers) ∧
         Patch.ValidFrom (Patch.run (Patch.run s (sysCore H t height logRoot))
-          (spentAllocs t.nullifiers)) (debits (chargedLanes t.charge) t.charge avail) := by
+          (spentAllocs t.nullifiers))
+          (meterPatch (meteredLanes t.charge t.credit) t.charge t.credit avail) := by
   simp only [sysPatch, Patch.validFrom_append, Patch.run_append, and_assoc]
 
 /-- The core never touches the spent marks. -/
@@ -1462,19 +1560,21 @@ theorem sysPost_spent (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev D)
     Patch.run s (sysPatch H t height logRoot avail) ⟨SysSpace.spent, n⟩ =
       if n ∈ t.nullifiers then some () else s ⟨SysSpace.spent, n⟩ := by
   simp only [sysPatch, Patch.run_append]
-  rw [run_debits_ne _ _ _ _ _ (fun e => SysSpace.noConfusion e), run_spentAllocs_at,
+  rw [run_meterPatch_ne _ _ _ _ _ _ (fun e => SysSpace.noConfusion e), run_spentAllocs_at,
     run_sysCore_spent]
 
-/-- **The meter after a turn**: each charged lane is debited from `avail`. -/
+/-- **The meter after a turn**: each charged or credited lane goes from `avail` to
+`avail - charge + credit`. -/
 theorem sysPost_allowance (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev D)
     (height : Nat) (logRoot : D) (avail : Charge) (l : Lane) :
     Patch.run s (sysPatch H t height logRoot avail) ⟨SysSpace.allowance, l⟩ =
-      if t.charge l ≠ 0 then some (avail l - t.charge l) else s ⟨SysSpace.allowance, l⟩ := by
+      if t.charge l ≠ 0 ∨ t.credit l ≠ 0 then some (avail l - t.charge l + t.credit l)
+      else s ⟨SysSpace.allowance, l⟩ := by
   simp only [sysPatch, Patch.run_append]
-  rw [run_debits_at]
-  by_cases hl : t.charge l ≠ 0
-  · rw [if_pos (mem_chargedLanes.mpr hl), if_pos hl]
-  · rw [if_neg (fun m => hl (mem_chargedLanes.mp m)), if_neg hl,
+  rw [run_meterPatch_at]
+  by_cases hl : t.charge l ≠ 0 ∨ t.credit l ≠ 0
+  · rw [if_pos (mem_meteredLanes.mpr hl), if_pos hl]
+  · rw [if_neg (fun m => hl (mem_meteredLanes.mp m)), if_neg hl,
       run_spentAllocs_ne _ _ _ (fun e => SysSpace.noConfusion e), run_sysCore_allowance]
 
 theorem sysPost_parent (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev D)
@@ -1542,7 +1642,7 @@ theorem sysPatch_valid_plain {s : Store (sysLayout TxId D)} {t : Turn R TxId Ev 
     (hj : s ⟨SysSpace.journal, t.txId⟩ = none)
     (hh : s ⟨SysSpace.head, ()⟩ = some (height, logRoot))
     (hn : t.nullifiers.Nodup ∧ ∀ n ∈ t.nullifiers, s ⟨SysSpace.spent, n⟩ = none)
-    (hm : ∀ l, t.charge l ≠ 0 → s ⟨SysSpace.allowance, l⟩ = some (avail l)) :
+    (hm : ∀ l, t.charge l ≠ 0 ∨ t.credit l ≠ 0 → s ⟨SysSpace.allowance, l⟩ = some (avail l)) :
     Patch.ValidFrom s (sysPatch H t height logRoot avail) := by
   rw [validFrom_sysPatch]
   refine ⟨?_, ?_, ?_⟩
@@ -1554,10 +1654,10 @@ theorem sysPatch_valid_plain {s : Store (sysLayout TxId D)} {t : Turn R TxId Ev 
     rfl
   · rw [validFrom_spentAllocs]
     exact ⟨hn.1, fun n m => (run_sysCore_spent H s t height logRoot n).trans (hn.2 n m)⟩
-  · rw [validFrom_debits _ _ _ _ (chargedLanes_nodup _)]
+  · rw [validFrom_meterPatch _ _ _ _ _ (meteredLanes_nodup _ _)]
     intro l m
     rw [run_spentAllocs_ne _ _ _ (fun e => SysSpace.noConfusion e), run_sysCore_allowance]
-    exact hm l (mem_chargedLanes.mp m)
+    exact hm l (mem_meteredLanes.mp m)
 
 end Decompose
 
@@ -2183,10 +2283,10 @@ theorem spent_refused {w : World R TxId D} {t : Turn R TxId Ev D} {n : D}
       cases this
 
 /-- **The charge stays within the allowance**, and the meter is debited by
-exactly the charge. -/
+exactly the charge and credited by exactly the credit. -/
 theorem charge_le_allowance {w w' : World R TxId D} {t : Turn R TxId Ev D}
     (h : World.step H w t = some w') :
-    t.charge ≤ w.meter ∧ ∀ l, w'.meter l = w.meter l - t.charge l := by
+    t.charge ≤ w.meter ∧ ∀ l, w'.meter l = w.meter l - t.charge l + t.credit l := by
   have ha := (step_eq_some H).1 h
   obtain ⟨height, logRoot, hh, hk⟩ := admit_ok_turnCheck H ha
   obtain ⟨_, height', logRoot', hh', _, _, _, hsys⟩ := admit_ok H ha
@@ -2194,11 +2294,18 @@ theorem charge_le_allowance {w w' : World R TxId D} {t : Turn R TxId Ev D}
   obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Option.some.inj hh')
   refine ⟨((turnCheck_eq_none_iff H).1 hk).2.2.2.2.2, fun l => ?_⟩
   rw [meter_system, meter_system (w := w), hsys, sysPost_allowance]
-  by_cases hl : t.charge l ≠ 0
+  by_cases hl : t.charge l ≠ 0 ∨ t.credit l ≠ 0
   · rw [if_pos hl]; rfl
   · rw [if_neg hl]
-    simp only [not_not] at hl
-    rw [hl, Nat.sub_zero]
+    simp only [not_or, not_not] at hl
+    rw [hl.1, hl.2, Nat.sub_zero, Nat.add_zero]
+
+/-- **Satisfiable pole: the meter after a step**, on every lane: debited by the charge,
+credited by the credit (an untouched lane has both zero). -/
+theorem step_meter {w w' : World R TxId D} {t : Turn R TxId Ev D}
+    (stepped : World.step H w t = some w') (l : Lane) :
+    w'.meter l = w.meter l - t.charge l + t.credit l :=
+  (charge_le_allowance H stepped).2 l
 
 /-- **The storage charge is the patch bytes** (D2's
 `storage_charge_is_written_bytes`, as SURPASS §2(b).6's `charge_is_patch_bytes`). -/
@@ -2962,5 +3069,14 @@ end RomExample
 #assert_axioms run_sysCore_allowance
 #assert_axioms sysPost_spent
 #assert_axioms sysPost_allowance
+#assert_axioms mem_meteredLanes
+#assert_axioms meteredLanes_nodup
+#assert_axioms meteredLanes_uncredited
+#assert_axioms meterPatch_uncredited
+#assert_axioms run_meterPatch_ne
+#assert_axioms run_meterPatch_at
+#assert_axioms validFrom_meterPatch
+#assert_axioms sysPatch_uncredited
+#assert_axioms step_meter
 
 end Minidregg.Kernel.World

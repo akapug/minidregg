@@ -45,15 +45,24 @@ structure SnapRepresents (B : Bridge R D) (snap : DataSnapshot rootBytes) (heigh
   journal : ∀ x, (w.journal x).isSome = (Snapshot.lookupRecorded x snap.model.journal).isSome
   /-- The clock: the head height is the deployed height. -/
   head : ∃ r, w.head = some (height, r)
-  /-- Every meter lane, storage included, is the deployed allowance: the Host
-  debits the derived turn's charge (G-CHARGE, the append path refuses any
-  other). -/
-  meter : ∀ l, w.meter l = snap.model.available l
+  /-- Every meter lane, storage included, is recorded and is the deployed allowance:
+  the Host debits the derived turn's charge (G-CHARGE, the append path refuses any
+  other) and credits its credit. Recorded, not read through `getD 0`, so the World's
+  guarded allowance write is valid on a credited lane at an exhausted meter. -/
+  meter : ∀ l, w.allowanceOf l = some (snap.model.available l)
   /-- A cell is retired exactly when its deployed bytes are the retirement. -/
   retired : ∀ c, (w.retired c).isSome = B.codec.retires (snap.canonicalBytes ⟨c⟩)
   /-- No parent rows: the present Host keeps parentage in the authority
   cell's plane 13, inside a cell's bytes (G-PARENT, T7). -/
   parent : ∀ c, w.parent c = none
+
+/-- The meter reading of a represented World is the deployed allowance. -/
+theorem SnapRepresents.meter_eq {B : Bridge R D} {snap : DataSnapshot rootBytes} {height : Nat}
+    {w : World R TransactionId D} (rep : SnapRepresents B snap height w) (l : Lane) :
+    w.meter l = snap.model.available l := by
+  show (w.allowanceOf l).getD 0 = _
+  rw [rep.meter l]
+  rfl
 
 theorem cellsOf_eq {B : Bridge R D} {snap : DataSnapshot rootBytes} {height : Nat}
     {w : World R TransactionId D} (rep : SnapRepresents B snap height w) (c : CellId) :
@@ -244,13 +253,13 @@ theorem ofIntent_run_pinned (B : Bridge R D) (H : History R TransactionId Stable
         cases hc
   have fundedL : ∀ l, l ≠ .storageBytes → intent.exactCharge l ≤ w.meter l := by
     intro l _
-    rw [rep.meter l]
+    rw [rep.meter_eq l]
     exact funded l
   have fundedS : intent.exactCharge .storageBytes ≤ w.meter .storageBytes := by
-    rw [rep.meter]
+    rw [rep.meter_eq]
     exact funded _
   obtain ⟨w', hs, hcells, hsys⟩ := ofCells_step B H (fun _ => rfl) (fun _ => rfl) derived hh jfresh
-    nodup unspent fundedL fundedS pinsHold
+    nodup unspent fundedL fundedS (fun l _ => ⟨_, rep.meter l⟩) pinsHold
   have derived' : ofCells B H (fun c => w.cells c) (fun c => (w.retired c).isSome) intent = .ok t := derived
   obtain ⟨htx, hret, hrows, hnull, -, -⟩ := ofCells_fields derived
   have d := ofCells_ok derived
@@ -310,15 +319,16 @@ theorem ofIntent_run_pinned (B : Bridge R D) (H : History R TransactionId Stable
     show w'.system ⟨SysSpace.head, ()⟩ = _
     rw [hsys, sysPost_head]
   · -- meter
-    rw [meter_system, hsys, sysPost_allowance]
-    show _ = snap.model.available l - intent.exactCharge l
-    rw [← charged, ← rep.meter l]
+    have credited : t.credit = intent.credit := ofIntent_credit derived
+    show w'.system ⟨SysSpace.allowance, l⟩ =
+      some (snap.model.available l - intent.exactCharge l + intent.credit l)
+    rw [hsys, sysPost_allowance, ← charged, ← credited, ← rep.meter_eq l]
     split
     · rfl
     · rename_i z
-      simp only [not_not] at z
-      rw [z, Nat.sub_zero]
-      rfl
+      simp only [not_or, not_not] at z
+      rw [z.1, z.2, Nat.sub_zero, Nat.add_zero, rep.meter_eq l]
+      exact rep.meter l
   · -- retired
     show (w'.system ⟨SysSpace.retired, c⟩).isSome =
       B.codec.retires ((DataSnapshot.install snap intent).canonicalBytes ⟨c⟩)

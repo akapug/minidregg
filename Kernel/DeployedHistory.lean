@@ -69,7 +69,8 @@ def turnFields (t : DTurn deployedR Digest) : List (List UInt8) :=
    (StreamCodec.option digestStream).encode t.capability,
    StreamCodec.nat.encode t.notBefore,
    (StreamCodec.option StreamCodec.nat).encode t.validUntil,
-   (StreamCodec.list (StreamCodec.product StreamCodec.nat digestStream)).encode t.pins]
+   (StreamCodec.list (StreamCodec.product StreamCodec.nat digestStream)).encode t.pins,
+   DurableReceiverCodec.chargeStream.encode t.credit]
 
 /-- Greenfield v2 turn shape: absence pins are in the digest preimage. -/
 def encodeTurn (t : DTurn deployedR Digest) : List UInt8 :=

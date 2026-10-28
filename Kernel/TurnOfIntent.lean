@@ -754,7 +754,13 @@ def turnOf (B : Bridge R D) (H : History R TransactionId StableEvent D)
     charge := chargeOf H (createsOf B.codec cells intent) (legsOf B.codec cells intent)
       intent.event intent.exactCharge
     subject := intent.subject
-    pins := pinsOf B intent }
+    pins := pinsOf B intent
+    credit := intent.credit }
+
+/-- The derived turn carries the intent's meter credit (M2). -/
+theorem turnOf_credit (B : Bridge R D) (H : History R TransactionId StableEvent D)
+    (cells : CellId → Option (Cell R)) (intent : DataIntent rootBytes) :
+    (turnOf B H cells intent).credit = intent.credit := rfl
 
 /-- **The derived turn** against held cells and the retired set.  Every check
 is named; the first two groups are the expressibility refusals, the last five
@@ -1099,7 +1105,7 @@ theorem sysCore_unroomed (H : History R TransactionId StableEvent D) {t : DTurn 
 /-- The system patch of a turn whose creates name no room and which retires
 nothing is valid when the journal id is fresh, the head is where the patch
 quotes it, the created ids are unretired, the nullifiers are fresh and
-distinct, and every charged lane holds the meter value. -/
+distinct, and every charged or credited lane holds the meter value. -/
 theorem sysPatch_valid_unroomed (H : History R TransactionId StableEvent D)
     {s : Store (sysLayout TransactionId D)} {t : DTurn R D}
     {height : Nat} {logRoot : D} {avail : Charge}
@@ -1108,7 +1114,7 @@ theorem sysPatch_valid_unroomed (H : History R TransactionId StableEvent D)
     (hj : s ⟨SysSpace.journal, t.txId⟩ = none)
     (hh : s ⟨SysSpace.head, ()⟩ = some (height, logRoot))
     (hn : t.nullifiers.Nodup ∧ ∀ n ∈ t.nullifiers, s ⟨SysSpace.spent, n⟩ = none)
-    (hm : ∀ l, t.charge l ≠ 0 → s ⟨SysSpace.allowance, l⟩ = some (avail l)) :
+    (hm : ∀ l, t.charge l ≠ 0 ∨ t.credit l ≠ 0 → s ⟨SysSpace.allowance, l⟩ = some (avail l)) :
     Patch.ValidFrom s (sysPatch H t height logRoot avail) := by
   have hrows : t.parentRows = [] := by
     unfold Turn.parentRows
@@ -1126,10 +1132,10 @@ theorem sysPatch_valid_unroomed (H : History R TransactionId StableEvent D)
     rfl
   · rw [validFrom_spentAllocs]
     exact ⟨hn.1, fun n m => (run_sysCore_spent H s t height logRoot n).trans (hn.2 n m)⟩
-  · rw [validFrom_debits _ _ _ _ (chargedLanes_nodup _)]
+  · rw [validFrom_meterPatch _ _ _ _ _ (meteredLanes_nodup _ _)]
     intro l m
     rw [run_spentAllocs_ne _ _ _ (fun e => SysSpace.noConfusion e), run_sysCore_allowance]
-    exact hm l (mem_chargedLanes.mp m)
+    exact hm l (mem_meteredLanes.mp m)
 
 omit [DecidableEq D] in
 theorem patchOk_of_mem {B : Bridge R D} {H : History R TransactionId StableEvent D}
@@ -1198,7 +1204,7 @@ theorem validFrom_retireAllocs (s : Store (sysLayout TransactionId D)) (rs : Lis
 /-- The system patch of a derived turn (creates naming no room, any retires) is
 valid when the journal id is fresh, the head is where the patch quotes it, the
 created and retired ids are unmarked and the retired ones distinct, the
-nullifiers are fresh and distinct, and every charged lane holds the meter value. -/
+nullifiers are fresh and distinct, and every charged or credited lane holds the meter value. -/
 theorem sysPatch_valid_derived (H : History R TransactionId StableEvent D)
     {s : Store (sysLayout TransactionId D)} {t : DTurn R D}
     {height : Nat} {logRoot : D} {avail : Charge}
@@ -1208,7 +1214,7 @@ theorem sysPatch_valid_derived (H : History R TransactionId StableEvent D)
     (hr : t.retires.Nodup ∧ ∀ c ∈ t.retires, s ⟨SysSpace.retired, c⟩ = none)
     (hh : s ⟨SysSpace.head, ()⟩ = some (height, logRoot))
     (hn : t.nullifiers.Nodup ∧ ∀ n ∈ t.nullifiers, s ⟨SysSpace.spent, n⟩ = none)
-    (hm : ∀ l, t.charge l ≠ 0 → s ⟨SysSpace.allowance, l⟩ = some (avail l)) :
+    (hm : ∀ l, t.charge l ≠ 0 ∨ t.credit l ≠ 0 → s ⟨SysSpace.allowance, l⟩ = some (avail l)) :
     Patch.ValidFrom s (sysPatch H t height logRoot avail) := by
   rw [validFrom_sysPatch]
   refine ⟨?_, ?_, ?_⟩
@@ -1229,10 +1235,10 @@ theorem sysPatch_valid_derived (H : History R TransactionId StableEvent D)
       rfl
   · rw [validFrom_spentAllocs]
     exact ⟨hn.1, fun n m => (run_sysCore_spent H s t height logRoot n).trans (hn.2 n m)⟩
-  · rw [validFrom_debits _ _ _ _ (chargedLanes_nodup _)]
+  · rw [validFrom_meterPatch _ _ _ _ _ (meteredLanes_nodup _ _)]
     intro l m
     rw [run_spentAllocs_ne _ _ _ (fun e => SysSpace.noConfusion e), run_sysCore_allowance]
-    exact hm l (mem_chargedLanes.mp m)
+    exact hm l (mem_meteredLanes.mp m)
 
 theorem applyRetires_exists : ∀ (cells : Cells R) (rs : List CellId), rs.Nodup →
     (∀ c ∈ rs, ∃ cell, cells c = some cell ∧ cell.store = 0) →
@@ -1272,6 +1278,7 @@ theorem ofCells_step (B : Bridge R D) (H : History R TransactionId StableEvent D
     (unspent : ∀ n ∈ intent.nullifiers, w.spent (B.key n) = none)
     (funded : ∀ l, l ≠ .storageBytes → intent.exactCharge l ≤ w.meter l)
     (fundedStorage : intent.exactCharge .storageBytes ≤ w.meter .storageBytes)
+    (recorded : ∀ l, intent.credit l ≠ 0 → ∃ a, w.allowanceOf l = some a)
     (pinsHold : ∀ p ∈ t.pins, w.retired p.1 = none ∧ H.cellDigest (w.cells p.1) = p.2) :
     ∃ w', World.step H w t = some w' ∧
       (∀ c, w'.cells c = postCell B.codec cells intent c) ∧
@@ -1457,12 +1464,20 @@ theorem ofCells_step (B : Bridge R D) (H : History R TransactionId StableEvent D
       obtain ⟨n0, m0, rfl⟩ := List.mem_map.mp m
       exact unspent n0 m0
     · intro l hl
-      have pos : 0 < w.meter l := lt_of_lt_of_le (Nat.pos_of_ne_zero hl) (funded' l)
-      rw [meter_system] at pos ⊢
-      revert pos
-      cases w.system ⟨SysSpace.allowance, l⟩ with
-      | none => intro pos; exact absurd pos (lt_irrefl 0)
-      | some a => intro _; rfl
+      rcases hl with hl | hl
+      · have pos : 0 < w.meter l := lt_of_lt_of_le (Nat.pos_of_ne_zero hl) (funded' l)
+        rw [meter_system] at pos ⊢
+        revert pos
+        cases w.system ⟨SysSpace.allowance, l⟩ with
+        | none => intro pos; exact absurd pos (lt_irrefl 0)
+        | some a => intro _; rfl
+      · have hcredit : t.credit = intent.credit := by rw [teq]; rfl
+        rw [hcredit] at hl
+        obtain ⟨a, ha⟩ := recorded l hl
+        rw [meter_system]
+        change w.system ⟨SysSpace.allowance, l⟩ = some a at ha
+        rw [ha]
+        rfl
   have ha : absentCheck w t = none := by
     rw [absentCheck_eq_none_iff]
     intro c m
@@ -1571,6 +1586,7 @@ theorem ofIntent_step (B : Bridge R D) (H : History R TransactionId StableEvent 
     (unspent : ∀ n ∈ intent.nullifiers, w.spent (B.key n) = none)
     (funded : ∀ l, l ≠ .storageBytes → intent.exactCharge l ≤ w.meter l)
     (fundedStorage : intent.exactCharge .storageBytes ≤ w.meter .storageBytes)
+    (recorded : ∀ l, intent.credit l ≠ 0 → ∃ a, w.allowanceOf l = some a)
     (pinned : ∀ wr ∈ intent.writes, H.cellDigest (w.cells wr.cellId.value) = B.pin wr.expectedPre)
     (guarded : ∀ g ∈ intent.readGuards,
       H.cellDigest (w.cells g.cellId.value) = B.pin g.expectedRoot) :
@@ -1578,7 +1594,15 @@ theorem ofIntent_step (B : Bridge R D) (H : History R TransactionId StableEvent 
       (∀ c, w'.cells c = postCell B.codec (fun c => w.cells c) intent c) ∧
       w'.system = Patch.run w.system (sysPatch H t height logRoot w.meter) :=
   ofCells_step B H (fun _ => rfl) (fun _ => rfl) derived hh fresh nodup unspent funded fundedStorage
-    (pinsHold_of_intent derived pinned guarded)
+    recorded (pinsHold_of_intent derived pinned guarded)
+
+/-- A derived turn carries its intent's meter credit (M2): the World credits what the
+Host's install credits. -/
+theorem ofIntent_credit {B : Bridge R D} {H : History R TransactionId StableEvent D}
+    {w : World R TransactionId D} {intent : DataIntent rootBytes} {t : DTurn R D}
+    (derived : Turn.ofIntent B H w intent = .ok t) : t.credit = intent.credit := by
+  rw [(ofCells_ok derived).eq]
+  rfl
 
 /-- A derived turn is well-shaped (`World.Shaped`): every shape refusal of
 `admit` is one `ofCells` already made. -/
@@ -1692,6 +1716,8 @@ end Derive
 #assert_axioms ofIntent_minimal
 #assert_axioms turnOf_absentShaped
 #assert_axioms ofCells_step
+#assert_axioms turnOf_credit
+#assert_axioms ofIntent_credit
 #assert_axioms ofIntent_step
 #assert_axioms derived_shaped
 #assert_axioms pinsHold_of_intent

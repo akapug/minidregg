@@ -333,6 +333,8 @@ theorem policy_source_birth_is_turn {D' : Type} [DecidableEq D']
         exact unretired)
       fresh hh ⟨by simp [sourceBirth], by simp [sourceBirth]⟩ ?_
     intro l hl
+    replace hl : (sourceBirth H x c record ev).charge l ≠ 0 :=
+      hl.resolve_right (by simp [sourceBirth])
     have pos : 0 < w.meter l := lt_of_lt_of_le (Nat.pos_of_ne_zero hl) (funded' l)
     rw [meter_system] at pos ⊢
     revert pos
@@ -738,9 +740,14 @@ def toyH : History toyR TransactionId StableEvent Nat where
   eventBytes := fun _ => 0
   cellDigest := fun _ => 0
 
+/-- The toy genesis system cell: the head, and every meter lane recorded at `0` (the seed's
+allowance), as the deployed genesis records every lane (`TurnLog.genesisSystem`). -/
+def toySystem : Store (sysLayout TransactionId Nat) :=
+  meterLanes.foldr (fun l s => s.set ⟨SysSpace.allowance, l⟩ (some (0 : Nat))) (genesisSystem toyH)
+
 /-- Cell 0 holds `log = 1, heap = 5`. -/
 def w0 : World toyR TransactionId Nat :=
-  ⟨(0 : Cells toyR).update 0 (some (toyCell 1 5)), genesisSystem toyH⟩
+  ⟨(0 : Cells toyR).update 0 (some (toyCell 1 5)), toySystem⟩
 
 def toyRoot (_ : List UInt8) : Theory.TypedAuthorization.Digest := ⟨0⟩
 
@@ -799,6 +806,31 @@ theorem genesis_sys_none (a : Address (sysLayout TransactionId Nat)) (ne : a.1 �
   rw [Store.set_ne _ _ _ _ (fun e => ne (by rw [e]))]
   rfl
 
+theorem lanesSet_ne (s : Store (sysLayout TransactionId Nat)) (lanes : List Lane)
+    (a : Address (sysLayout TransactionId Nat)) (ne : a.1 ≠ SysSpace.allowance) :
+    lanes.foldr (fun l s => s.set ⟨SysSpace.allowance, l⟩ (some (0 : Nat))) s a = s a := by
+  induction lanes with
+  | nil => rfl
+  | cons l rest ih =>
+      rw [List.foldr_cons, Store.set_ne _ _ _ _ (fun e => ne (congrArg Sigma.fst e)), ih]
+
+theorem lanesSet_at (s : Store (sysLayout TransactionId Nat)) (lanes : List Lane) (l : Lane)
+    (m : l ∈ lanes) :
+    lanes.foldr (fun l s => s.set ⟨SysSpace.allowance, l⟩ (some (0 : Nat))) s ⟨SysSpace.allowance, l⟩ =
+      some (0 : Nat) := by
+  induction lanes with
+  | nil => cases m
+  | cons l0 rest ih =>
+      rw [List.foldr_cons]
+      by_cases e : l = l0
+      · subst e; exact Store.set_eq _ _ _
+      · rw [Store.set_ne _ _ _ _ (sys_key_ne e)]
+        exact ih (by simpa [e] using m)
+
+theorem toySys_none (a : Address (sysLayout TransactionId Nat)) (ne : a.1 ≠ SysSpace.head)
+    (na : a.1 ≠ SysSpace.allowance) : toySystem a = none := by
+  exact (lanesSet_ne _ _ _ na).trans (genesis_sys_none _ ne)
+
 /-- **`Represents` is satisfiable**: the seed snapshot represents `w0`. -/
 theorem toy_represents : SnapRepresents toyB toySnap 0 w0 := by
   refine ⟨fun c => ?_, fun d => ?_, fun x => ?_, ⟨0, rfl⟩, fun l => ?_, fun c => ?_,
@@ -811,20 +843,17 @@ theorem toy_represents : SnapRepresents toyB toySnap 0 w0 := by
       show some none = some (((0 : Cells toyR).update 0 (some (toyCell 1 5))) c)
       rw [cells_update_ne _ _ e]
       rfl
-  · show (genesisSystem toyH ⟨SysSpace.spent, d⟩).isSome = true ↔ _
-    rw [genesis_sys_none _ (fun e => SysSpace.noConfusion e)]
+  · show (toySystem ⟨SysSpace.spent, d⟩).isSome = true ↔ _
+    rw [toySys_none _ (fun e => SysSpace.noConfusion e) (fun e => SysSpace.noConfusion e)]
     simp [toySnap, DurableReceiver.Seed.snapshot]
-  · show (genesisSystem toyH ⟨SysSpace.journal, x⟩).isSome = _
-    rw [genesis_sys_none _ (fun e => SysSpace.noConfusion e)]
+  · show (toySystem ⟨SysSpace.journal, x⟩).isSome = _
+    rw [toySys_none _ (fun e => SysSpace.noConfusion e) (fun e => SysSpace.noConfusion e)]
     rfl
-  · rw [meter_system]
-    show Option.getD (α := Nat) (genesisSystem toyH ⟨SysSpace.allowance, l⟩) 0 = _
-    rw [genesis_sys_none _ (fun e => SysSpace.noConfusion e)]
+  · exact lanesSet_at _ _ _ (mem_meterLanes l)
+  · show (toySystem ⟨SysSpace.retired, c⟩).isSome = false
+    rw [toySys_none _ (fun e => SysSpace.noConfusion e) (fun e => SysSpace.noConfusion e)]
     rfl
-  · show (genesisSystem toyH ⟨SysSpace.retired, c⟩).isSome = false
-    rw [genesis_sys_none _ (fun e => SysSpace.noConfusion e)]
-    rfl
-  · exact genesis_sys_none _ (fun e => SysSpace.noConfusion e)
+  · exact toySys_none _ (fun e => SysSpace.noConfusion e) (fun e => SysSpace.noConfusion e)
 
 /-- The toy root is constant, and so is the toy slot digest: pins agree. -/
 theorem toy_pinCoherent : PinCoherent toyB toyH toyRoot := fun _ _ _ _ => rfl
