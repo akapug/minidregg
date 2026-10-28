@@ -1,4 +1,4 @@
-# Untouched-areas deputy: state (2026-10-28 late morning: public-reader red is PRIORITY; market runs park for the module-conversion candidate)
+# Untouched-areas deputy: state (2026-10-28 midday: public-reader + poisoned-consent are PRIORITY; module conversion b26630168 on main, its candidate building; market runs park for it)
 
 Inputs: docs/review/2026-10-27-untouched-areas/{LEAN,NATIVE}.md, docs/review/2026-10-27-blind-spots/BLIND-SPOTS.md Sweep 1.
 Each lane: /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>.
@@ -113,6 +113,14 @@ Its hbox worlds: /tank/rows-2d8b7ed5-apps/w-{featured,b1,b2,b4,b6,rt,fixups}. Mi
 - Davros write, HledgerWeb write and sntfy lifecycle: ONE cause (B7 abf203f357754001b): featured-qualify gave the owner session role 0, the package's weakest (sntfy `api` lacks administration -> 401/400; Davros and hledger-web `viewer`). Fixed at 817e8c7f1 (owner basis allAccess, which a grain owner holds and the Lean enrollment admits; failing write rows now print status + 160 body bytes; failing lifecycle rows name the phase). Rerun of l/m/o queued behind the B7 table (job2.pid under /tank/lanes/app-market-b7). Sha to the integrator once green.
 - TextEditor write (b1 on 76758dba6, 7/8): `Client did not complete authentication handshake` (Meteor DDP). Given to B7 (abf203f357754001b) after its l/m/o rerun: reuse the japps DDP client, fix recipe or spk-host and say which, one row on a fresh hbox world.
 - spk-host io errors name operation + path: DONE (coordinator). lane/un-spk-ioctx 5cb33bbdf, IoContext::ctx at ~365 sites in 49 files, red-proofed on the final tip, 231/0 filtered; merged by the integrator into main 7280f9db8 (building). Nothing remains for a6603277e4ffe2d70 on it.
+
+## Market on e89fe7b8b (validator a373556d56d56744d; owners recorded ROWS-OWED §0 938e7bbf0)
+- b2 3/6: YetAnotherTODO l+w PASS, ExpenseOwl l PASS; ExpenseOwl write 405 -> B5 faerie a0ef59eabda7075b4. OrgTodo install ingest timeout (starvation; not raised). SandCal "SPK staging remains after unit success" (also HackerCMS/HakyllCMS in the fixups world while they passed in b4): load/concurrency-sensitive; un-ingest-stale-stage 1f9a757de is on main and is expected to close it; recheck on the conversion candidate, one world at a time.
+- b4 6/8: Hugo l+w, WordPress l, HackerCMS l, HakyllCMS l+w PASS. WordPress write (no REST nonce) and HackerCMS write (www /featured.html 404) -> B5 faerie.
+- b6 4/6: SandForms l+w, Badgepack l+w PASS. OwnTracks install = the Lean safeApiTail fix (on main 3a943f85e, re-qualify). Hummingbird lifecycle get-m 22 -> B5 faerie (check owner allAccess first).
+- rt 5/8: WBO l, HedgeDocRT l, Wekan l, Gogs l+w PASS. WBO write (no detail) and Wekan DDP login "Unrecognized options" -> B7 faerie abf203f357754001b. HedgeDocRT close frame -> B8 (IPython family).
+- B7 on 76758dba6: 13/14; 2048, Perplexity Sudoku, 3D Blockstack, Simple Chat, Davros, sntfy l+w PASS -> FEATURED commits asked of B7. HledgerWeb (tsourcepos shape) and TextEditor (/.sandstorm-login 500) fixed/diagnosed at 53cb4abda, rerunning.
+- FEATURED target 2-3 dozen: 21 on main + 6 from B7 = 27 once landed.
 
 ## Next three
 0. PRIORITY: the public-reader 403 and the poisoned consent transport (abe65d70bd4f62538): review each sha against the code, send it to the integrator and infra.
