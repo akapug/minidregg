@@ -1144,3 +1144,26 @@ general non-leak results for raw laws then carry over to every installed law, an
   not claimed.
 - *B:* `narrowed_installed_le` is false (the installed leaf path differs) and unnecessary, because
   `narrowed_congr` already quantifies over every law, installed ones included. Withdrawn.
+
+## 2026-10-28, twenty-sixth pass: thin consent over salted openings (lane/thin-birth, invocation arm, statements)
+
+**Verdict: ACCEPT, with one strengthening of the keystone.** The replacement removes the defect JP2 row 22
+measured: re-encoding a blinded cell can never reproduce its signed root, because salts derive from a key
+the Host never serves. It also removes `RootBinds`, the caller-supplied carrier of the kind refused in
+pass 22, in favour of a named collision. No twin is kept.
+
+- **(a) The sealed exclusion: strengthen it, do not just exclude.** As stated, the keystone says nothing at
+  `SealedIn` addresses, so a Host that seals more leaves those commits unconstrained by the claim. The
+  owner's own argument (patch ops carry explicit before values, so a member patch cannot write an address
+  it was not shown) proves something stronger, and that is what should be stated: for an address that is
+  `SealedIn` and not `KernelOwned`, `prepared.post address = prepared.pre.logical address`. What the member
+  did not see is left exactly as it was. Then "a Host can narrow what is shown but cannot change what
+  commits" is a theorem, not prose.
+- **(b) The collision disjunct is shaped correctly.** It is a compared-pair event at both layers of the
+  commitment, at the actual pre-state, not an arbitrary one: equal list roots over different leaves
+  (length differences included), or equal leaves over different openings at one position. Neither layer
+  can be inhabited without a hash collision.
+- **(c) The satisfiable pole at declared-object scope is accepted as the first scope.** The label must say
+  "declared-object scalar targets", and since `checkServed` is deleted for every kind, the other kinds'
+  acceptance must be listed as owed (a pole or a journey row each). They go through the same
+  `resourceView`, but that is a reading, not yet a witness.
