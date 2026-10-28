@@ -28,7 +28,8 @@ authored grants. Require a sponsor-signed factory resource observation against
 this exact opened image before deriving or returning those bytes. -/
 def intentLoadedAuthorized (config : NativeHost.Config)
     (opened : NativeHost.Opened config) (signedObservationBytes : List UInt8)
-    (json : Lean.Json) : IO (Except String (List UInt8)) := do
+    (json : Lean.Json) (providerRoutes : List (Nat × ProviderMetering.Schedule) := []) :
+    IO (Except String (List UInt8)) := do
   let refused := "resource birth observation refused"
   let some signed := signedCodec.decode signedObservationBytes
     | return .error refused
@@ -51,7 +52,7 @@ def intentLoadedAuthorized (config : NativeHost.Config)
             (NativeHost.logicalHeight config opened.durable)
             opened.authority.snapshot.authState
             (ResourceBirthPolicyController.Concrete.placementLineage opened.authority.snapshot.cell)
-            current) with
+            current providerRoutes) with
       | .error reason => return .error reason
       | .ok intent =>
           if intent.subject != signed.challenge.intent.subject then
