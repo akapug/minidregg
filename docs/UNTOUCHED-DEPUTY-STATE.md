@@ -1,4 +1,4 @@
-# Untouched-areas deputy: state (rewritten whole; 2026-10-28 morning, after the 2d8b7ed54 runs; SQLite cause corrected)
+# Untouched-areas deputy: state (rewritten whole; 2026-10-28 morning, candidate 76758dba6 named)
 
 Inputs: docs/review/2026-10-27-untouched-areas/{LEAN,NATIVE}.md, docs/review/2026-10-27-blind-spots/BLIND-SPOTS.md Sweep 1.
 Each lane: /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>.
@@ -54,11 +54,18 @@ fn out; private-backend stays; Effects/ registry is Phase 3 (EFFECTS.md); dues a
 - Box hygiene: hbox staging (candidate copies, worlds, grain installs) under /tank, never / (85% used); each faerie deletes its own staging dirs when its run ends.
 
 ## Story law install red (lane/un-story-install, Sonnet acf88647b53657831)
-- On 2d8b7ed54 (demo-dry, fresh genesis, SEED_HOST=house), `story new tale --from tale --gm SAGE` installs the 19 template lines, then the GM law install is refused: PolicyInstallReceiver.Reject.semantic (PolicyInstallController.Reject.capability; Kernel/PolicyInstallController.lean:412-425 demands the target cell's stored control capability with installPolicy in scope). house's story list is then empty, so story invite, narrate and door step 3a0 fail. Faerie decides (a) wrong target cell, (b) capability scope lacks installPolicy, or (c) wrong evidence; fixes at the cause; Host change statement-first to the auditor. Sha goes to infra (ae95a4eac63b0715e) for the demo-dry seed rerun, and to the integrator.
+- On 2d8b7ed54 (demo-dry), the GM law install was refused with Reject.capability. Cause found in the CLIENT: shared_names `existing_authority` returned the room's cloned reference for `ROOM/leaf`, so `story new --gm` presented the room's control capability on the scenes stream. Fixed at a8376ce8f (copies observe/operation/control/sealedIn from the member's own reference); red first at 733dd948f; shared_names 22/22 on dregg-build. Sha sent to the integrator and infra (demo-dry seed rerun). Next: the faerie's JSLK story run with the `--gm` row on a fresh world.
+
+## Market reds on 2d8b7ed54 (beyond the resident-start and op 7 reds)
+- B8 (a13f0bc9626b1320a): IPython "583 segments > 512" is a harness red: grain-journey wrote grain-host.json without importProfile, so Class L installs ran at standard-v1. Fixed at 50ec8de76 (sent to the integrator); affects every large-profile table. Mercurial/MediaWiki/Firefly III stopped at resident start. Parked for the 76758dba6-or-later candidate.
+- B3 (a85d12892ea6de3ca): EtherDraw/Scrumblr/SwaggerEditor stopped at op 7 (fixed by 507d6ce78). DiagramsNet: `resident bootstrap refused: running app ViewInfo differs from signed bridge schema`; it is a non-bridge package (root /server speaks WebSession). The faerie now owns the fix on lane/un-spk-nonbridge (compare against the bridge schema only when the manifest declares a bridge, or a named unsupported refusal), red-first tests.
+- SQLite failure-15 findings so far (a6603277e4ffe2d70): no shared SQLite state across worlds (each DB, head anchor and lock sit under the world's store root); residents already idle-exit and write a PID file, but in the shared $HOME anchor dir where world-down cannot see it; 24 concurrent readers at load 50 did not reproduce. A two-worlds-at-once start under /tank is next.
 
 ## Coordinator status
-Candidates since: 7027e0ace (/build/candidates/7027e0ace4bf5763dd1d78b47380dfe4ceb15b57, 06:21; composed-inputs fix; carries un-ns-owner 125927331+29d3152d3 and un-stream-continuity a971a649d). The 76758dba6 full build (op-7 bound 507d6ce78) is running; the integrator names it to me on READY, and japps, the market batches and the validator's app worlds run on it.
-Candidate 2d8b7ed54 (/build/candidates/2d8b7ed544100acfaeb9ff2f9b597c31b8cb81e6, READY 05:48) carries 25cfb86bd, 621aded18, e4acc9df0, b3/b5/b7/b8, un-tale-welcome. Runs on it (fresh worlds, one at a time from now): b3 a85d12892ea6de3ca, b5 a0ef59eabda7075b4, b7 abf203f357754001b, b8 a13f0bc9626b1320a, jtemplates a852f5df40229de24 (green, 196/196). japps co-edit (a4e312352a7091f59) is parked with world w2 kept as evidence; it reruns once on the 76758dba6 candidate.
+Candidate 76758dba6 READY 06:41 (/build/candidates/76758dba687cde9447bc45d77931bb7d57527e56): carries 507d6ce78, 125927331, 29d3152d3, stream-continuity; keeps the 2d8b7ed54 genesis. Does NOT carry 50ec8de76, a8376ce8f, 129c04e38, but all three (and 8ef4c65a9) are on main 455f59d57: runs use main's scripts over its binaries.
+Runs on it: japps co-edit (a4e312352a7091f59, dregg-build, once, no overlay); hbox world starts strictly in order B8 (a13f0bc9626b1320a) -> B5 (a0ef59eabda7075b4) -> B3 (a85d12892ea6de3ca, + its nonbridge spk-host overlay), each handing a "world up" line to the next.
+Story: JSLK 23/23 on a fresh world with the a8376ce8f mini (2 of 23 red on the unfixed candidate); two regression rows in jstorylaw.sh. `story invite` on a GM story not yet covered.
+Older: 2d8b7ed54 (jtemplates 196/196 there), 7027e0ace.
 
 ## Rows validator (a373556d56d56744d)
 Its hbox worlds: /tank/rows-2d8b7ed5-apps/w-{featured,b1,b2,b4,b6,rt,fixups}. Mine: b3 /tank/lanes/app-market-b3, b5 /tank/rows-b5, b7 and b8 under /tank; japps /build/lanes/un-stream-continuity-runs/w*, jtemplates /build/t/uns-run* (dregg-build). Verdicts go to it for ROWS-OWED section 0.
