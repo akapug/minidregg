@@ -315,7 +315,8 @@ pub(crate) fn reconcile_failed_start(
     const PLAN: &[u8] = b"DREGG/APPLICATION/FAILED-START-RECOVERY-PLAN/v1";
     const INGRESS: &[u8] = b"DREGG/APPLICATION/FAILED-START-RECOVERY-INGRESS/v1";
     const OUTCOME: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v8";
-    let config: Value = serde_json::from_slice(&recovery_read(resident_config, MAX_MANIFEST)?)?;
+    let config: Value = serde_json::from_slice(&recovery_read(
+        resident_config, crate::agent_route_profile::MAX_RESIDENT_CONFIG)?)?;
     if text(&config, "protocol")? != "mini-spk-resident-start-v3" {
         return Err(invalid("recovery resident protocol refused"));
     }

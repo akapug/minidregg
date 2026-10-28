@@ -57,7 +57,7 @@ def exact(value, required, optional, what):
 
 # The selection's field sets, one spelling for every producer and consumer:
 # composed-inputs.sh writes a selection, `selection_shape` is what it must satisfy.
-SELECTION_FIELDS = (["protocol", "evidence", "grainsRoot", "brokerSocket", "package", "app"], ["leaseSeconds", "sizeClass", "connector"])
+SELECTION_FIELDS = (["protocol", "evidence", "grainsRoot", "brokerSocket", "package", "app"], ["leaseSeconds", "sizeClass", "connector", "agentRouteProfile"])
 PACKAGE_FIELDS = (["path", "sha256"], [])
 APP_FIELDS = (["owner", "room", "members", "resources", "capabilities"], ["lifecycleRequestId"])
 MEMBER_FIELDS = (["subject", "expectedHost"], [])
@@ -226,7 +226,8 @@ def profile(world):
         "management": {"subject": manager["subject"], "keyId": manager["keyId"], "keyEpoch": manager["keyEpoch"],
                        "seedPath": manager["seed"], "publicKeyPath": manager["publicKey"]},
         "completionPublicKey": world.custody["completionPublic"], "completionSeed": world.custody["completionSeed"],
-        "bwrap": world.manifest["bwrap"], "leaseSeconds": world.selection.get("leaseSeconds", 120)}
+        "bwrap": world.manifest["bwrap"], "leaseSeconds": world.selection.get("leaseSeconds", 120),
+        "agentRouteProfile": world.selection.get("agentRouteProfile", "standard-v1")}
 
 
 def attach(world):

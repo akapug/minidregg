@@ -189,6 +189,8 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 export ORACLE_IMPORT_PROFILE=${ORACLE_IMPORT_PROFILE:-operator-appliance-v1}
 case "$ORACLE_IMPORT_PROFILE" in standard-v1|market-large-v1|operator-appliance-v1) ;; *) fail 'unknown operator import profile';; esac
+export MINI_AGENT_ROUTE_PROFILE=${ORACLE_AGENT_ROUTE_PROFILE:-shared-64-v1}
+case "$MINI_AGENT_ROUTE_PROFILE" in standard-v1|shared-64-v1) ;; *) fail 'unknown operator agent route profile';; esac
 controller_create_verb=controller-create
 if [[ $mode == recover-foreground ]]; then
   world_recover_foreground "$run" "$repo"

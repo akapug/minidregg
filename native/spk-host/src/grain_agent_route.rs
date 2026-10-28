@@ -7,8 +7,7 @@ use crate::agent_api_lifetime_custody_v3::LifetimeCustodyV3;
 use std::collections::{BTreeMap, BTreeSet};
 use std::os::fd::AsRawFd;
 
-const MAX_ROUTES: usize = 8;
-const MAX_REVISIONS: usize = 64;
+use crate::agent_route_profile::AgentRouteProfile;
 const MAX_CUSTODY: u64 = 16 * 1024;
 const MAX_REGISTRATION: u64 = 8 * 1024;
 
@@ -142,19 +141,25 @@ pub(super) fn lock(app_dir: &Path) -> io::Result<File> {
     }
     Ok(f)
 }
-fn retained(app_dir: &Path, app: &str, app_uid: u32) -> io::Result<BTreeMap<String, Retained>> {
+fn retained(app_dir: &Path, app: &str, app_uid: u32, policy: AgentRouteProfile) -> io::Result<BTreeMap<String, Retained>> {
     let root = app_dir.join("agent-routes");
     if !exists(&root)? {
         return Ok(BTreeMap::new());
     }
     private_dir(&root)?;
     let mut records = BTreeMap::new();
+    let mut history_bytes = 0u64;
     for (index, entry) in fs::read_dir(&root).ctx("list", &root)?.enumerate() {
-        if index >= MAX_REVISIONS {
+        if index >= policy.revisions() {
             return Err(invalid("agent route revision bound exceeded"));
         }
         let path = entry?.path();
-        let r: Retained = serde_json::from_slice(&read_private(&path, MAX_JSON)?)?;
+        let bytes = read_private(&path, MAX_JSON)?;
+        history_bytes += bytes.len() as u64;
+        if history_bytes > policy.history_bytes() {
+            return Err(invalid("agent route history byte budget exceeded"));
+        }
+        let r: Retained = serde_json::from_slice(&bytes)?;
         shape(&r.registration, app_uid)?;
         if path.file_name().and_then(|p| p.to_str())
             != Some(&format!("{}.json", r.registration.name))
@@ -168,7 +173,7 @@ fn retained(app_dir: &Path, app: &str, app_uid: u32) -> io::Result<BTreeMap<Stri
     }
     Ok(records)
 }
-fn selected(records: &BTreeMap<String, Retained>) -> io::Result<Vec<&Retained>> {
+fn selected(records: &BTreeMap<String, Retained>, policy: AgentRouteProfile) -> io::Result<Vec<&Retained>> {
     let mut replaced = BTreeSet::new();
     for r in records.values() {
         if let Some(old) = &r.registration.replaces {
@@ -191,7 +196,7 @@ fn selected(records: &BTreeMap<String, Retained>) -> io::Result<Vec<&Retained>> 
         .values()
         .filter(|r| !replaced.contains(&r.registration.name))
         .collect();
-    if active.len() > MAX_ROUTES {
+    if active.len() > policy.active() {
         return Err(invalid("active lifetime route bound exceeded"));
     }
     for (i, r) in active.iter().enumerate() {
@@ -276,14 +281,15 @@ pub(super) fn register(host: &Host, app: &str, request: &Path) -> io::Result<Val
     if r.signed_api_path != signed_path(&placement)? {
         return Err(invalid("agent route differs from signed API path"));
     }
-    let mut records = retained(&app_dir, app, placement.app_uid)?;
-    if records.len() >= MAX_REVISIONS || records.contains_key(&r.name) {
+    let policy = host.profile.agent_route_profile.unwrap_or_default();
+    let mut records = retained(&app_dir, app, placement.app_uid, policy)?;
+    if records.len() >= policy.revisions() || records.contains_key(&r.name) {
         return Err(invalid(
             "agent route name already registered or revision bound exceeded",
         ));
     }
     if let Some(old) = &r.replaces {
-        if !selected(&records)?
+        if !selected(&records, policy)?
             .iter()
             .any(|p| &p.registration.name == old)
         {
@@ -298,7 +304,7 @@ pub(super) fn register(host: &Host, app: &str, request: &Path) -> io::Result<Val
             custody_hex: bytes.iter().map(|b| format!("{b:02x}")).collect(),
         },
     );
-    authority_coordinates(&selected(&records)?, app)?;
+    authority_coordinates(&selected(&records, policy)?, app)?;
     let root = app_dir.join("agent-routes");
     private_directory(&root)?;
     let record = root.join(format!("{name}.json"));
@@ -316,9 +322,10 @@ pub(super) fn configs(
     app: &str,
     placement: &Placement,
     journal: &Path,
+    policy: AgentRouteProfile,
 ) -> io::Result<Vec<Value>> {
-    let records = retained(app_dir, app, placement.app_uid)?;
-    let active = selected(&records)?;
+    let records = retained(app_dir, app, placement.app_uid, policy)?;
+    let active = selected(&records, policy)?;
     if active.is_empty() {
         return Ok(vec![]);
     }
@@ -482,25 +489,25 @@ mod tests {
         let mut all = records(&[("one", None)]);
         let original = serde_json::to_vec(&all["one"]).unwrap();
         all.insert("two".into(), record("two", Some("one")));
-        assert_eq!(selected(&all).unwrap()[0].registration.name, "two");
+        assert_eq!(selected(&all, AgentRouteProfile::Standard).unwrap()[0].registration.name, "two");
         assert_eq!(serde_json::to_vec(&all["one"]).unwrap(), original);
         all.insert("three".into(), record("three", Some("one")));
-        assert!(selected(&all).is_err());
-        assert!(selected(&records(&[("one", Some("missing"))])).is_err());
-        assert!(selected(&records(&[("one", Some("two")), ("two", Some("one"))])).is_err());
+        assert!(selected(&all, AgentRouteProfile::Standard).is_err());
+        assert!(selected(&records(&[("one", Some("missing"))]), AgentRouteProfile::Standard).is_err());
+        assert!(selected(&records(&[("one", Some("two")), ("two", Some("one"))]), AgentRouteProfile::Standard).is_err());
     }
 
     #[test]
     fn agent_route_parallel_routes_refuse_duplicate_transport_and_authority() {
         let mut all = records(&[("one", None), ("two", None)]);
-        assert!(selected(&all).is_err()); // Same controller identity.
+        assert!(selected(&all, AgentRouteProfile::Standard).is_err()); // Same controller identity.
         all.get_mut("two").unwrap().registration.controller_uid = 1002;
-        let active = selected(&all).unwrap();
+        let active = selected(&all, AgentRouteProfile::Standard).unwrap();
         assert_eq!(active.len(), 2);
         assert!(authority_coordinates(&active, "800").is_err()); // Same session/ticket/purses.
         let second = &mut all.get_mut("two").unwrap().registration;
         second.socket = "/operator/one/api.sock".into();
-        assert!(selected(&all).is_err());
+        assert!(selected(&all, AgentRouteProfile::Standard).is_err());
     }
 
     #[test]
@@ -529,16 +536,16 @@ mod tests {
         let path = dir.join("one.json");
         let bytes = serde_json::to_vec(&record("one", None)).unwrap();
         derived_file(&path, &bytes).unwrap();
-        assert_eq!(retained(&f.0, "800", 100000).unwrap().len(), 1);
+        assert_eq!(retained(&f.0, "800", 100000, AgentRouteProfile::Standard).unwrap().len(), 1);
         assert!(derived_file(&path, b"replacement").is_err());
         assert_eq!(read_private(&path, MAX_JSON).unwrap(), bytes);
         fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
-        assert!(retained(&f.0, "800", 100000).is_err());
+        assert!(retained(&f.0, "800", 100000, AgentRouteProfile::Standard).is_err());
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
         let external = f.0.join("source.json");
         fs::rename(&path, &external).unwrap();
         symlink(&external, &path).unwrap();
-        assert!(retained(&f.0, "800", 100000).is_err());
+        assert!(retained(&f.0, "800", 100000, AgentRouteProfile::Standard).is_err());
     }
 
     fn placement() -> Placement {
@@ -575,19 +582,46 @@ mod tests {
     }
 
     #[test]
+    fn shared_agent_route_profile_accepts_dozen_controllers_without_weakening_isolation() {
+        let mut all = BTreeMap::new();
+        for i in 0..64 {
+            let n = format!("shared-{i}");
+            let mut r = record(&n, None);
+            r.registration.controller_uid = 1001 + i;
+            let mut c: Value = serde_json::from_slice(&decode(&r).unwrap()).unwrap();
+            for (offset, field) in ["sessionResource", "ticketResource", "parentTask", "purseTask"].into_iter().enumerate() {
+                c["lineage"][field] = json!((10_000 + i as usize * 10 + offset).to_string());
+            }
+            c["lineage"]["originalParentTask"] = c["lineage"]["parentTask"].clone();
+            r.custody_hex = serde_json::to_vec(&c).unwrap().iter().map(|b| format!("{b:02x}")).collect();
+            all.insert(n, r);
+        }
+        assert!(selected(&all, AgentRouteProfile::Standard).is_err());
+        assert_eq!(selected(&all, AgentRouteProfile::Shared64).unwrap().len(), 64);
+        authority_coordinates(&selected(&all, AgentRouteProfile::Shared64).unwrap(), "800").unwrap();
+        all.get_mut("shared-1").unwrap().registration.controller_uid = 1001;
+        assert!(selected(&all, AgentRouteProfile::Shared64).is_err());
+        all.get_mut("shared-1").unwrap().registration.controller_uid = 1002;
+        let mut extra = record("extra", None);
+        extra.registration.controller_uid = 2000;
+        all.insert("extra".into(), extra);
+        assert!(selected(&all, AgentRouteProfile::Shared64).is_err());
+    }
+
+    #[test]
     fn agent_route_active_and_revision_counts_are_bounded() {
         let mut all = BTreeMap::new();
-        for i in 0..=MAX_ROUTES {
+        for i in 0..=AgentRouteProfile::Standard.active() {
             let n = format!("route-{i}");
             let mut r = record(&n, None);
             r.registration.controller_uid = 1001 + i as u32;
             all.insert(n, r);
         }
-        assert!(selected(&all).is_err());
+        assert!(selected(&all, AgentRouteProfile::Standard).is_err());
         let f = Fixture::new();
         let dir = f.0.join("agent-routes");
         private_directory(&dir).unwrap();
-        for i in 0..=MAX_REVISIONS {
+        for i in 0..=AgentRouteProfile::Standard.revisions() {
             let n = format!("revision-{i}");
             derived_file(
                 &dir.join(format!("{n}.json")),
@@ -595,7 +629,7 @@ mod tests {
             )
             .unwrap();
         }
-        assert!(retained(&f.0, "800", 100000)
+        assert!(retained(&f.0, "800", 100000, AgentRouteProfile::Standard)
             .err()
             .unwrap()
             .to_string()

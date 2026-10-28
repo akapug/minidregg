@@ -790,6 +790,10 @@ write_profile() {
     printf '%s\n' "$PROFILE_RESULT"
     return 0
   fi
+  case "${MINI_AGENT_ROUTE_PROFILE:-standard-v1}" in
+    standard-v1|shared-64-v1) ;;
+    *) fail "unknown operator agent route profile" ;;
+  esac
   [ ! -e "$EV/init-store.json" ] || fail "Store init already attempted; inspect retained evidence"
   if [ -n "${BROKER_SOCKET:-}" ]; then
     [ "$BROKER_SOCKET" = "$GRAINS_ROOT/runtime-${GRAINS_ROOT##*/}/broker.sock" ] || fail "isolated broker must belong to grains root"
@@ -814,7 +818,8 @@ write_profile() {
     --arg seed "$WR/tool.key" --arg completion "$STORE/custody/completion.seed" \
     --arg semantics "$semantics" --arg bwrap "$BWRAP" --arg bwrapSha "$(sha "$BWRAP")" \
     --arg spkHost "$SPK_HOST" --arg spkHostSha "$(sha "$SPK_HOST")" \
-    --arg importProfile "${MINI_IMPORT_PROFILE:-standard-v1}" '
+    --arg importProfile "${MINI_IMPORT_PROFILE:-standard-v1}" \
+    --arg agentRouteProfile "${MINI_AGENT_ROUTE_PROFILE:-standard-v1}" '
     {protocol:"mini-spk-grain-host-v2",stateRoot:$root,grainsRoot:$grains,
      miniHost:$host,miniHostSha256:$hostSha,miniConfig:$config,miniConfigSha256:$configSha,
      miniOperatorSocket:$socket,managementSubject:"8",managementKeyEpoch:"2",
@@ -822,7 +827,8 @@ write_profile() {
      completionCustodianSeed:$completion,completionSemantics:$semantics,
      bwrap:$bwrap,bwrapSha256:$bwrapSha,spkHost:$spkHost,spkHostSha256:$spkHostSha} +
     {brokerSocket:$broker} +
-    (if $importProfile == "standard-v1" then {} else {importProfile:$importProfile} end)' >"$PROFILE"
+    (if $importProfile == "standard-v1" then {} else {importProfile:$importProfile} end) +
+    (if $agentRouteProfile == "standard-v1" then {} else {agentRouteProfile:$agentRouteProfile} end)' >"$PROFILE"
   chmod 600 "$PROFILE"
   jq -n --arg profile "$PROFILE" --arg state "$STATE" --arg grains "$GRAINS_ROOT" --arg broker "$broker" \
     --arg config "$CONFIG" --arg configSha "$(sha "$CONFIG")" \

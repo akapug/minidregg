@@ -138,6 +138,7 @@ mod stream_continuity;
 mod route_admission;
 #[cfg(target_os = "linux")]
 pub mod resident_route_control;
+mod agent_route_profile;
 
 #[cfg(target_os = "linux")]
 mod canonical;

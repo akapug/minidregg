@@ -92,6 +92,18 @@ these are measurements under shared host load, not latency guarantees.
 
 ## Checked state — 28 October 2026
 
+For new shared deployments, the operator can select `agentRouteProfile:
+"shared-64-v1"` in the private SPK host profile. It allows 64 active controller
+routes and 1,024 retained route revisions per app, with at most 64 MiB of route
+history. Existing profiles default to eight active routes and 64 revisions.
+The Oracle shared-data provisioner selects the shared profile; its
+`ORACLE_AGENT_ROUTE_PROFILE=standard-v1` override retains the smaller budget.
+Same-Store provisioning accepts the same explicit `agentRouteProfile` input.
+These are controller routes, not individual queries or people in a room.
+Each controller still needs its own UID, sockets, native session and grant;
+the larger budget grants no additional authority and creates no extra Oracle
+Engine. It is a configuration capacity, not a measured concurrency guarantee.
+
 The earlier v4 receiving run installed and started two grains, answered through
 Mini's admitted API, demonstrated independent conversation state and exact reply
 replay, and completed a clean STOP and missing-data refusal. Its full recovery

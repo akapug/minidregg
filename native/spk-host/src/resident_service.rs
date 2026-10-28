@@ -67,7 +67,7 @@ use crate::canonical::{hex as hex_bytes, hex64};
 const MAX_CONFIG: u64 = 16 * 1024;
 // Retained routes must remain loadable after the live registry grows. Keep
 // individual custody bounds small while bounding the whole resident config.
-const MAX_RESIDENT_CONFIG: u64 = MAX_CONFIG * (resident_route_control::MAX_ROUTES as u64 + 1);
+use crate::agent_route_profile::{AgentRouteProfile, MAX_RESIDENT_CONFIG};
 const MAX_LIFECYCLE: u64 = 12_102_759;
 
 fn invalid(reason: &'static str) -> io::Error {
@@ -165,6 +165,8 @@ fn default_stream_lease_seconds() -> u64 {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ResidentConfig {
+    #[serde(default)]
+    agent_route_profile: AgentRouteProfile,
     #[serde(skip)]
     loaded_sha256: String,
     protocol: String,
@@ -1174,7 +1176,7 @@ impl ResidentConfig {
             || config.app_gid == 0
             || config.entrances.is_empty()
             || config.entrances.len() > resident_route_control::MAX_ROUTES
-            || config.agents.len() > 8
+            || config.agents.len() > config.agent_route_profile.active()
             || config.persistent_var_max_bytes == 0
             || crate::broker::class(&config.size_class).is_err()
             || crate::web_socket::StreamLease::begin(Duration::from_secs(
@@ -2432,6 +2434,37 @@ mod tests {
             &[first],
             Path::new("/run/mini-spk/agent-b/api.sock")
         ));
+    }
+
+    #[test]
+    fn shared_agent_route_profile_reaches_resident_parser() {
+        let (journal, path, mut config) = resident_config_fixture();
+        let template = config["agents"][0].clone();
+        config["agents"] = Value::Array((0..64).map(|i| {
+            let mut agent = template.clone();
+            let name = format!("controller-{i}");
+            agent["socket"] = json!(format!("/run/mini-spk/{name}/api.sock"));
+            agent["reverseSocket"] = json!(format!("/run/mini-spk/{name}-reverse.sock"));
+            agent["controllerUid"] = json!(1001 + i);
+            agent["custody"] = json!(format!("/var/lib/mini-spk/{name}-{}.json", "c".repeat(180)));
+            agent["routeName"] = json!(name);
+            agent["attemptDir"] = json!(journal.join(format!("attempt-{i}-{}", "a".repeat(180))));
+            agent["displayName"] = json!("d".repeat(256));
+            agent["preferredHandle"] = json!("h".repeat(256));
+            agent
+        }).collect());
+        fs::write(&path, serde_json::to_vec(&config).unwrap()).unwrap();
+        assert!(ResidentConfig::load(&path).is_err());
+        config["agentRouteProfile"] = json!("shared-64-v1");
+        let bytes = serde_json::to_vec(&config).unwrap();
+        assert!(bytes.len() > 64 * 1024);
+        assert!(bytes.len() as u64 <= MAX_RESIDENT_CONFIG);
+        fs::write(&path, bytes).unwrap();
+        assert_eq!(ResidentConfig::load(&path).unwrap().agents.len(), 64);
+        config["agents"][1]["controllerUid"] = json!(1001);
+        fs::write(&path, serde_json::to_vec(&config).unwrap()).unwrap();
+        assert!(ResidentConfig::load(&path).is_err());
+        fs::remove_dir_all(journal).unwrap();
     }
 
     fn resident_config_fixture() -> (PathBuf, PathBuf, Value) {

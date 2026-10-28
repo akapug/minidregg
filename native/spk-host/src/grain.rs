@@ -193,6 +193,9 @@ fn pinned_executable(path: &Path, sha: &str) -> io::Result<()> {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct HostProfile {
+    /// Per-app physical controller capacity, selected only by the operator.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    agent_route_profile: Option<crate::agent_route_profile::AgentRouteProfile>,
     /// Operator-selected input budget; never supplied by a grain request.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     import_profile: Option<String>,
@@ -1171,9 +1174,11 @@ fn start_inner(host: &Host, app: &str, prepare_only: bool) -> io::Result<Value> 
     let journal = app_dir.join(format!("g{generation}"));
     private_directory(&journal)?;
     let config_path = journal.join("resident.json");
-    let agents = agent_route::configs(&app_dir, app, &placement, &journal)?;
+    let route_profile = host.profile.agent_route_profile.unwrap_or_default();
+    let agents = agent_route::configs(&app_dir, app, &placement, &journal, route_profile)?;
     let mut resident = json!({
         "protocol":"mini-spk-resident-start-v3",
+        "agentRouteProfile":route_profile,
         "journalDir":journal,
         "imageDir":install_config["imageDir"],
         "expectedRawSha256":placement.raw_sha256,

@@ -131,6 +131,9 @@ class InputTests(unittest.TestCase):
         self.assertEqual(value["management"], {"subject": MANAGER, "keyId": "90812", "keyEpoch": "2",
             "seedPath": str(self.w.root / "tool.key"), "publicKeyPath": str(self.w.root / "tool.pub")})
         self.assertEqual((value["semantics"], value["bwrap"], value["expectedSourceCommit"]), ("445566", str(self.w.root / "bwrap"), "d" * 40))
+        self.assertEqual(value["agentRouteProfile"], "standard-v1")
+        self.w.selection["agentRouteProfile"] = "shared-64-v1"
+        self.assertEqual(inputs.profile(self.w.build())["agentRouteProfile"], "shared-64-v1")
         self.run.assert_not_called()
 
     def test_member_owned_attachment_satisfies_the_attach_adapter(self):

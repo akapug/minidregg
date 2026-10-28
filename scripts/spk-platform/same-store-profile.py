@@ -14,6 +14,8 @@ def prepare(path):
     c=f.load(path);f.require(c['protocol']=='mini-spk-same-store-profile-input-v1','wrong profile contract')
     import_profile=c.get('importProfile','standard-v1')
     f.require(import_profile in ['standard-v1','market-large-v1','operator-appliance-v1'],'unknown import profile')
+    agent_route_profile=c.get('agentRouteProfile','standard-v1')
+    f.require(agent_route_profile in ['standard-v1','shared-64-v1'],'unknown agent route profile')
     m=f.load(c['manifest']);f.require(m['sourceCommit']==c['expectedSourceCommit'],'manifest source differs')
     for role in ['host','mini','spkHost']:
         f.require(f.sha(m[role])==m['sha256'][role],'candidate image differs')
@@ -47,6 +49,8 @@ def prepare(path):
     host['brokerSocket']=broker
     # Native importer enforces the selected policy; this only carries its name.
     host['importProfile']=import_profile
+    if agent_route_profile != 'standard-v1':
+        host['agentRouteProfile']=agent_route_profile
     f.save(destination,host);os.chmod(destination,0o600)
     result={'protocol':'mini-spk-grain-profile-result-v1','profilePath':str(destination),'stateRoot':str(state),'grainsRoot':str(grains),
             'miniConfig':str(config),'miniConfigSha256':c['miniConfigSha256'],'initStoreResult':str(root/'init-store.json'),'brokerSocket':broker}
