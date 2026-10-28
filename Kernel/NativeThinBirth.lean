@@ -188,18 +188,21 @@ def checkSlots (marker : Nat) :
 
 /-! ## The arm -/
 
-/-- What thin consent shows for a birth: the member-authored descriptor bytes, the coordinates
-the Host's authoring read, and the finalized bytes the headers sign (the authored bytes plus the
-kernel-owned auxiliary creates). -/
+/-- What thin consent shows for a birth: the member-authored descriptor bytes and source
+capabilities, the coordinates the Host's authoring read, and the finalized bytes the headers sign
+(the authored bytes plus the kernel-owned auxiliary creates). -/
 structure BirthDisplay where
   draft : List UInt8
+  capabilities : List CapabilityId
   coordinates : BirthCoordinates
   finalized : List UInt8
   deriving DecidableEq, Repr
 
 /-- **Thin birth consent.** `author` is the deployed authoring of the member's own source at
-given coordinates (instantiated once, in `Host`). Returns the headers to sign and the display. -/
-def checkBirthThin (pins : PublicPins) (author : BirthCoordinates → Option (List UInt8))
+given coordinates (instantiated once, in `Host`): the whole intent (subject, nonce, observe
+grants, the draft's descriptor bytes and source capabilities) must be the authored one. Returns
+the headers to sign and the display. -/
+def checkBirthThin (pins : PublicPins) (author : BirthCoordinates → Option NativeObservationCodec.Intent)
     (wanted : NativeObservationCodec.Intent) (planBytes : List UInt8) :
     Except Refusal (List (List UInt8) × BirthDisplay) :=
   match wanted.purpose with
@@ -211,7 +214,7 @@ def checkBirthThin (pins : PublicPins) (author : BirthCoordinates → Option (Li
     | none => .error .birthMalformed
     | some draft =>
       if draft.auxiliaryCreates.isEmpty then
-        if author (coordinatesOf draft) = some draftBytes then
+        if author (coordinatesOf draft) = some wanted then
           match NativeHostCodec.signingPlanCodec.decode planBytes with
           | none => .error .planMalformed
           | some plan =>
@@ -229,7 +232,7 @@ def checkBirthThin (pins : PublicPins) (author : BirthCoordinates → Option (Li
                           (birthSlotPlan pins finalized) with
                       | .error refusal => .error refusal
                       | .ok () => .ok (plan.slots.map NativeHostCodec.SigningSlot.header,
-                          ⟨draftBytes, coordinatesOf draft, finalBytes⟩)
+                          ⟨draftBytes, capabilities, coordinatesOf draft, finalBytes⟩)
                     else .error .birthSourceChanged
                   else .error .planMalformed
               else .error .planCoordinates
@@ -254,9 +257,12 @@ signature the receiver admitted for one of its branches
 (`CredentialSignatureAdmission.Prepared`) whose header is one thin consent accepted. Under the
 carrier, at the descriptor the headers sign:
 
-* the deployed authoring of the member's source at the shown coordinates is the shown draft;
+* the deployed authoring of the member's source at the shown coordinates is the intent, whose
+  draft is the shown draft and capabilities;
 * the executed descriptor's member-authored part is exactly the shown draft;
 * its auxiliary creates are the kernel's (the grant batch's recomputation);
+* the prepared writes are the newborn allocations, the factory's (unchanged) and the Book's, and
+  the authority's, and nothing else;
 * the newborn writes are the shown creates, then the kernel's;
 * the authority post is the shown authority entries over the pre-state;
 * the Book's logical post is the shown resource batch applied to the pre-Book. -/
@@ -266,7 +272,7 @@ def DisplayIsCommitStatement : Prop :=
     {durable : ResourceBirthController.Concrete.Durable} {d : Descriptor Registry}
     (prepared : ResourceBirthController.Concrete.PreparedBirth profile.compilerProfile deployment
       pins durable d)
-    (height : Height) (deployed : PublicPins) (author : BirthCoordinates → Option (List UInt8))
+    (height : Height) (deployed : PublicPins) (author : BirthCoordinates → Option NativeObservationCodec.Intent)
     (wanted : NativeObservationCodec.Intent) (planBytes : List UInt8)
     (headers : List (List UInt8)) (shown : BirthDisplay) (signed : Descriptor Registry)
     (branch : Branch d) (snapshot : CredentialAuthorityDomain.Snapshot) (nullifier : Nat)
@@ -279,9 +285,12 @@ def DisplayIsCommitStatement : Prop :=
       some admitted.controller.envelope.header →
     CanonicalCellRegistry.sourceEncoding.codec.decode shown.finalized = some signed →
     EffectsBinds signed d →
-    author shown.coordinates = some shown.draft ∧
+    author shown.coordinates = some wanted ∧
+    wanted.purpose = .prepare (.birth shown.draft shown.capabilities) ∧
     CanonicalCellRegistry.sourceEncoding.codec.encode (userPart d) = shown.draft ∧
     d.auxiliaryCreates = prepared.grants.auxiliaryCreates ∧
+    prepared.writes = ResourceBirthController.Concrete.planWrites deployment d
+      prepared.factory.payload prepared.book.payload prepared.resources.post prepared.grants.writes ∧
     ResourceBirthController.allocationWrites d =
       (userPart d).createRequests.map ResourceBirthController.birthWrite ++
         prepared.grants.auxiliaryCreates.map ResourceBirthController.birthWrite ∧
@@ -301,7 +310,7 @@ def SwapAfterConsentRefusedStatement : Prop :=
     {durable : ResourceBirthController.Concrete.Durable} {d' : Descriptor Registry}
     (prepared : ResourceBirthController.Concrete.PreparedBirth profile.compilerProfile deployment
       pins durable d')
-    (height : Height) (deployed : PublicPins) (author : BirthCoordinates → Option (List UInt8))
+    (height : Height) (deployed : PublicPins) (author : BirthCoordinates → Option NativeObservationCodec.Intent)
     (wanted : NativeObservationCodec.Intent) (planBytes : List UInt8)
     (headers : List (List UInt8)) (shown : BirthDisplay) (signed : Descriptor Registry),
     checkBirthThin deployed author wanted planBytes = .ok (headers, shown) →
@@ -320,7 +329,7 @@ intent's draft is refused `birthSourceChanged`, before anything is signed. (2) A
 that is not the deployed authoring of the member's source at its own coordinates is refused
 `draftNotAuthored`. -/
 def SwappedPlanRefusedStatement : Prop :=
-  (∀ (deployed : PublicPins) (author : BirthCoordinates → Option (List UInt8))
+  (∀ (deployed : PublicPins) (author : BirthCoordinates → Option NativeObservationCodec.Intent)
       (wanted : NativeObservationCodec.Intent) (planBytes draftBytes finalBytes : List UInt8)
       (capabilities : List CapabilityId) (draft finalized : Descriptor Registry)
       (plan : NativeHostCodec.SigningPlan),
@@ -328,7 +337,7 @@ def SwappedPlanRefusedStatement : Prop :=
     GrainResourceBirthHostCodec.sourceCodec.decode draftBytes = none →
     CanonicalCellRegistry.sourceEncoding.codec.decode draftBytes = some draft →
     draft.auxiliaryCreates = [] →
-    author (coordinatesOf draft) = some draftBytes →
+    author (coordinatesOf draft) = some wanted →
     NativeHostCodec.signingPlanCodec.decode planBytes = some plan →
     plan.finalizedDraft = .birth finalBytes capabilities →
     plan.domain = deployed.domain → plan.semantics = deployed.semantics →
@@ -336,14 +345,14 @@ def SwappedPlanRefusedStatement : Prop :=
     CanonicalCellRegistry.sourceEncoding.codec.encode finalized = finalBytes →
     CanonicalCellRegistry.sourceEncoding.codec.encode (userPart finalized) ≠ draftBytes →
     checkBirthThin deployed author wanted planBytes = .error .birthSourceChanged) ∧
-  (∀ (deployed : PublicPins) (author : BirthCoordinates → Option (List UInt8))
+  (∀ (deployed : PublicPins) (author : BirthCoordinates → Option NativeObservationCodec.Intent)
       (wanted : NativeObservationCodec.Intent) (planBytes draftBytes : List UInt8)
       (capabilities : List CapabilityId) (draft : Descriptor Registry),
     wanted.purpose = .prepare (.birth draftBytes capabilities) →
     GrainResourceBirthHostCodec.sourceCodec.decode draftBytes = none →
     CanonicalCellRegistry.sourceEncoding.codec.decode draftBytes = some draft →
     draft.auxiliaryCreates = [] →
-    author (coordinatesOf draft) ≠ some draftBytes →
+    author (coordinatesOf draft) ≠ some wanted →
     checkBirthThin deployed author wanted planBytes = .error .draftNotAuthored)
 
 /-- **Satisfiable: the honest Host passes.** For a canonical ordinary birth draft that is the
@@ -353,7 +362,7 @@ sign are exactly the plan's. The pins premise is the shape every opened image's 
 (`NativeHostContext.validateChecks`). -/
 def HonestPlanAcceptedStatement : Prop :=
   ∀ (config : NativeHost.Config) (opened : NativeHost.Opened config)
-    (author : BirthCoordinates → Option (List UInt8)) (wanted : NativeObservationCodec.Intent)
+    (author : BirthCoordinates → Option NativeObservationCodec.Intent) (wanted : NativeObservationCodec.Intent)
     (draftBytes : List UInt8) (capabilities : List CapabilityId) (draft : Descriptor Registry)
     (plan : NativeHostCodec.SigningPlan),
     opened.pins.federation = config.federation →
@@ -362,7 +371,7 @@ def HonestPlanAcceptedStatement : Prop :=
     GrainResourceBirthHostCodec.sourceCodec.decode draftBytes = none →
     CanonicalCellRegistry.sourceEncoding.codec.decode draftBytes = some draft →
     CanonicalCellRegistry.sourceEncoding.codec.encode draft = draftBytes →
-    author (coordinatesOf draft) = some draftBytes →
+    author (coordinatesOf draft) = some wanted →
     NativeHost.prepareLoaded config opened (.birth draftBytes capabilities) = .ok plan →
     ∃ shown, checkBirthThin (publicPins config) author wanted
         (NativeHostCodec.signingPlanCodec.encode plan) =

@@ -65,9 +65,10 @@ member's own `source.json`. In order:
    inputs this arm does not check yet; each is a later arm of the same shape.
 2. `draftBytes` decodes to a descriptor with no auxiliary creates (`birthMalformed`).
 3. **Authoring check.** The coordinates are read off the draft (`coordinatesOf`). The provider runs
-   the deployed authoring of the member's own source at those coordinates and requires the exact
-   bytes (`draftNotAuthored`). So the draft is the member's source, authored by the member's own
-   image, at the shown coordinates.
+   the deployed authoring of the member's own source at those coordinates and requires exactly the
+   retained intent: subject, nonce, observe grants, the draft's descriptor bytes and its source
+   capabilities (`draftNotAuthored`). So the intent is the member's source, authored by the
+   member's own image, at the shown coordinates.
 4. **Plan check.** The plan is this deployment's (`planCoordinates`): its finalized draft is
    `.birth finalBytes caps` with the same capabilities, and `finalBytes` decodes. Its user part
    (`{F with auxiliaryCreates := []}`) re-encodes to exactly `draftBytes` (`birthSourceChanged`).
@@ -77,8 +78,8 @@ member's own `source.json`. In order:
    public pins and `F` (`headerMismatch`).
 
 What it shows (`BirthDisplay`): the user-part bytes (born cells, grants, policies, funding, fee,
-which the client renders), the coordinates, and the finalized bytes the headers sign (which add
-only the kernel-owned auxiliary creates).
+which the client renders) and source capabilities, the coordinates, and the finalized bytes the
+headers sign (which add only the kernel-owned auxiliary creates).
 
 ## 4. What it signs
 
@@ -128,16 +129,24 @@ before. Full and delegated full consent (220 to 222 and the delegated socket) ar
 
 | pole | statement | what it says |
 |---|---|---|
-| **keystone** | `DisplayIsCommitStatement` | For the executor's own `PreparedBirth` of descriptor `d`, if thin consent accepted `(headers, shown)` and admission matched one accepted header to one of the executor's branch requests, then under `EffectsBinds`: the authoring at the shown coordinates gives the shown draft; `userPart d` is the shown draft; the auxiliary creates are the grant batch's (kernel-owned); the newborn writes are the shown creates followed by the kernel's; the authority post is the shown entries over the pre-state; the Book's logical post is the shown batch applied to the pre-Book |
+| **keystone** | `DisplayIsCommitStatement` | For the executor's own `PreparedBirth` of descriptor `d`, if thin consent accepted `(headers, shown)` and admission matched one accepted header to one of the executor's branch requests, then under `EffectsBinds`: the authoring at the shown coordinates gives the intent, whose draft is the shown draft and capabilities; `userPart d` is the shown draft; the auxiliary creates are the grant batch's (kernel-owned); the prepared writes are exactly the allocations, the factory's (unchanged), the Book's and the authority's; the newborn writes are the shown creates followed by the kernel's; the authority post is the shown entries over the pre-state; the Book's logical post is the shown batch applied to the pre-Book |
 | **teeth** (after consent) | `SwapAfterConsentRefusedStatement` | For an executor birth of any `d'` whose bytes differ from the consented `finalized`, under `EffectsBinds`: no signature the receiver admits for any branch of `d'` carries a header the member consented to |
 | **teeth** (before consent) | `SwappedPlanRefusedStatement` | A plan whose finalized user part differs from the intent's draft is refused `birthSourceChanged`; an intent draft that is not the authoring of the member's source at its coordinates is refused `draftNotAuthored` |
 | **satisfiable** | `HonestPlanAcceptedStatement` | Completeness: for an ordinary canonical draft the member authored (`author (coordinatesOf draft) = some draftBytes`), the plan the honest planner builds (`NativeHost.prepareLoaded … (.birth draftBytes caps) = .ok plan`) is accepted |
 | **premise inhabitation** | `EffectsBindsInhabitedStatement` | `EffectsBinds hash finalized finalized`: the honest Host's carrier |
 
 The authoring function is a parameter of the Kernel check (`author : BirthCoordinates → Option
-(List UInt8)`), since the Kernel cannot import `Host.Json`. The Host instantiates it exactly once,
-at the deployed authoring of the member's source (`Host/ThinBirthConsent.lean`), and the frames
-call only that instance.
+Intent`), since the Kernel cannot import `Host.Json`. The Host instantiates it exactly once, at
+the deployed authoring of the member's source (`Host/ThinBirthConsent.lean`: `Json.birthIntentFrom`
+over `Json.birth` with the coordinates as its height, epochs and lineage), and the frames call only
+that instance. The Host-side completeness (an intent the Store-reading authoring produced
+re-authors to itself at its own coordinates) runs through the JSON parser. It is witnessed by the
+journey's successful thin birth (row 19), and I do not claim it as a theorem.
+
+Two carriers bound the claims. `EffectsBinds` at the honest pair is inhabited (the premise pole).
+At a swapped pair (`signed ≠ d'`), the teeth's `EffectsBinds signed d'` is a cSHAKE
+non-collision at those two encodings, the same kind of carrier as `RootBinds` in the
+invocation arm.
 
 ## 8. Relation to DEMO-PREFIX:190 (the "O(1) provider" switch)
 
