@@ -804,6 +804,60 @@ def leavesUnder (key : Option (List UInt8)) (entryList : List (Entry L)) : List 
     let bytes := entryBytes W entry
     (⟨salt key bytes, bytes⟩ : Opening).leaf
 
+/-- The kernels read what they are proved to compute, over buffers. -/
+theorem cshake256Kernel_data (customization input : ByteArray) :
+    (Sp800185Cshake256.Native.cshake256Kernel customization input).data.toList =
+      Sp800185Cshake256.cshake256Bytes customization.data.toList input.data.toList := by
+  unfold Sp800185Cshake256.Native.cshake256Kernel
+  rw [Sp800185Cshake256.Native.bytesOfList_toList, Sp800185Cshake256.Fast.cshake256Fast_eq]
+
+theorem kmac256Kernel_data (key customization input : ByteArray) :
+    (Sp800185Cshake256.kmac256Kernel key customization input).data.toList =
+      Sp800185Cshake256.kmac256Bytes key.data.toList customization.data.toList input.data.toList := by
+  unfold Sp800185Cshake256.kmac256Kernel
+  rw [Sp800185Cshake256.Native.bytesOfList_toList, Sp800185Cshake256.kmac256Fast_eq]
+
+/-- One leaf from the entry's WRITTEN bytes: the salt is the kernel over that buffer, and
+the preimage (length-prefixed salt, then the entry) is written into one buffer and hashed
+by the kernel. No entry list is built, appended or copied back into a buffer. -/
+def leafOfWritten (key : Option ByteArray) (entry : ByteArray) : List UInt8 :=
+  let saltBytes : List UInt8 := match key with
+    | none => []
+    | some key =>
+        (Sp800185Cshake256.kmac256Kernel key (Sp800185Cshake256.Native.bytesOfList saltCustomization)
+          entry).data.toList
+  (Sp800185Cshake256.Native.cshake256Kernel (Sp800185Cshake256.Native.bytesOfList leafCustomization)
+    (bytesStream.encodeInto ByteArray.empty saltBytes ++ entry)).data.toList
+
+/-- `leavesUnder` as compiled: the key converted once, each entry written once. -/
+def leavesUnderWritten (key : Option (List UInt8)) (entryList : List (Entry L)) : List (List UInt8) :=
+  let keyBytes := key.map Sp800185Cshake256.Native.bytesOfList
+  entryList.map fun entry => leafOfWritten keyBytes ((entryStream W).encodeBytes entry)
+
+theorem leafOfWritten_eq (key : Option (List UInt8)) (entry : Entry L) :
+    leafOfWritten (key.map Sp800185Cshake256.Native.bytesOfList) ((entryStream W).encodeBytes entry) =
+      (⟨salt key (entryBytes W entry), entryBytes W entry⟩ : Opening).leaf := by
+  have salted : (match key.map Sp800185Cshake256.Native.bytesOfList with
+      | none => []
+      | some key =>
+          (Sp800185Cshake256.kmac256Kernel key (Sp800185Cshake256.Native.bytesOfList saltCustomization)
+            ((entryStream W).encodeBytes entry)).data.toList) = salt key (entryBytes W entry) := by
+    cases key with
+    | none => rfl
+    | some key =>
+        simp only [Option.map_some, salt, kmac256Kernel_data, Sp800185Cshake256.Native.bytesOfList_toList,
+          StreamCodec.encodeBytes_data, entryBytes]
+  unfold leafOfWritten Opening.leaf Opening.preimage
+  simp only []
+  rw [salted, cshake256Kernel_data, Sp800185Cshake256.Native.bytesOfList_toList, ByteArray.data_append,
+    Array.toList_append, bytesStream.encodeInto_spec, ByteArray.data_empty, Array.toList_empty,
+    List.nil_append, StreamCodec.encodeBytes_data, entryBytes]
+
+@[csimp] theorem leavesUnder_eq_written : @leavesUnder = @leavesUnderWritten := by
+  funext L W key entryList
+  unfold leavesUnder leavesUnderWritten
+  exact List.map_congr_left fun entry _ => (leafOfWritten_eq W key entry).symm
+
 def leavesFast (store : Store L) : List (List UInt8) :=
   leavesUnder W (blindingKey W store) (entries W store)
 
@@ -812,6 +866,26 @@ def leavesFast (store : Store L) : List (List UInt8) :=
 /-- The root of a frame and a leaf sequence: what a reader recomputes. -/
 def rootOfLeaves (leafList : List (List UInt8)) : Digest :=
   (Sp800185Cshake256.hash rootCustomization (frame W ++ leafList.flatten)).digest
+
+theorem foldl_pushOctets_data (out : ByteArray) (leafList : List (List UInt8)) :
+    (leafList.foldl pushOctets out).data.toList = out.data.toList ++ leafList.flatten := by
+  induction leafList generalizing out with
+  | nil => simp
+  | cons leaf leafList ih => rw [List.foldl_cons, ih, pushOctets_data, List.flatten_cons, List.append_assoc]
+
+/-- `rootOfLeaves` as compiled: the frame and the leaves written into one buffer, hashed by
+the kernel. -/
+def rootOfLeavesWritten (leafList : List (List UInt8)) : Digest :=
+  Sp800185Cshake256.digestOfBytesLE
+    (Sp800185Cshake256.Native.cshake256Kernel (Sp800185Cshake256.Native.bytesOfList rootCustomization)
+      (leafList.foldl pushOctets (pushOctets ByteArray.empty (frame W)))).data.toList
+
+@[csimp] theorem rootOfLeaves_eq_written : @rootOfLeaves = @rootOfLeavesWritten := by
+  funext L W leafList
+  unfold rootOfLeaves rootOfLeavesWritten
+  rw [cshake256Kernel_data, Sp800185Cshake256.Native.bytesOfList_toList, foldl_pushOctets_data,
+    pushOctets_data, ByteArray.data_empty, Array.toList_empty, List.nil_append]
+  rfl
 
 def rootPreimage (store : Store L) : List UInt8 :=
   frame W ++ (leaves W store).flatten
