@@ -2239,6 +2239,9 @@ def main(args):
         elif action == 'controller-recover-api-unreserved' and len(extra) == 1:
             fcntl.flock(lock, fcntl.LOCK_UN)
             return recover_api_unreserved(store, helper, extra[0])
+        elif action == 'controller-prepare-idle' and not extra:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            return controller_admin_fixed(store, helper, 'prepare idle')
         elif action == 'controller-reconcile' and len(extra) == 1:
             fcntl.flock(lock, fcntl.LOCK_UN)
             return reconcile_controller(store, helper, extra[0])

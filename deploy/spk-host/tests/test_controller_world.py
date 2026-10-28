@@ -215,6 +215,9 @@ class ControllerWorldTests(unittest.TestCase):
             for selector, command in (('parent', 'reconcile parent'), ('effects', 'reconcile effects'), ('foreground-audited', 'reconcile foreground audited')):
                 c.reconcile_controller(r['store'], 'helper', selector)
                 self.assertEqual(child.call_args.args[1][-1], command)
+            c.controller_admin_fixed(r['store'], 'helper', 'prepare idle')
+            self.assertEqual(child.call_args.args[1][-1], 'prepare idle')
+            self.assertEqual(child.call_args.kwargs['timeout'], 1800)
             for bad in ('', '../x', request + ' reconcile', 'AB' * 16):
                 with self.assertRaises(ValueError): c.recover_api_unreserved(r['store'], 'helper', bad)
             for bad in ('foreground', 'attach', 'parent;stop', ''):
