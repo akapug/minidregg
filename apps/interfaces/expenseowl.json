@@ -20,11 +20,13 @@
         "properties": {
           "name": {
             "type": "string",
-            "maxLength": 1024
+            "maxLength": 1024,
+            "minLength": 1
           },
           "category": {
             "type": "string",
-            "maxLength": 128
+            "maxLength": 128,
+            "minLength": 1
           },
           "amount": {
             "type": "number",
@@ -46,16 +48,34 @@
       "output": {
         "type": "object",
         "properties": {
-          "status": {
-            "type": "integer",
-            "minimum": 100,
-            "maximum": 599
+          "id": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "category": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "amount": {
+            "type": "number"
+          },
+          "date": {
+            "type": "string",
+            "maxLength": 64
           }
         },
         "required": [
-          "status"
+          "id",
+          "name",
+          "category",
+          "amount",
+          "date"
         ],
-        "additionalProperties": false
+        "additionalProperties": true
       },
       "write": true,
       "binding": {
@@ -64,11 +84,9 @@
         "path": [
           "expense"
         ],
-        "decode": "status",
+        "decode": "json",
         "status": [
-          200,
-          201,
-          204
+          200
         ],
         "json": {
           "name": {
@@ -120,6 +138,7 @@
             }
           },
           "required": [
+            "id",
             "name",
             "category",
             "amount",
@@ -166,7 +185,13 @@
             "name": {
               "context": "runId"
             },
-            "amount": 3.5
+            "amount": 3.5,
+            "id": {
+              "result": [
+                "create",
+                "id"
+              ]
+            }
           }
         }
       ]
@@ -177,7 +202,9 @@
   },
   "sources": [
     "https://github.com/ocdtrekkie/ExpenseOwl",
-    "scripts/spk-platform/market-writes/b2.sh"
+    "scripts/spk-platform/market-writes/b2.sh",
+    "https://github.com/ocdtrekkie/ExpenseOwl/blob/main/internal/api/handlers.go",
+    "https://github.com/ocdtrekkie/ExpenseOwl/blob/main/internal/config/config.go"
   ],
   "$defs": {}
 }
