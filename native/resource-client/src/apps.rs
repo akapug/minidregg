@@ -290,6 +290,10 @@ pub(crate) const FEATURED: &[(&str, &str)] = &[
     ("1gda5n8p8zsc0r9pcana2yjgtvsq169068k4ve8mk68z4x9fvzuh", "drawings over socket.io: draw:progress and draw:end add a stroke to a room; a subscriber's project:load reads it back"),
     ("w544a46cjwtje73rfearjvszwa3nhjtxjanu5s83qkdutx6k0nz0", "sticky notes over socket.io: joinRoom then createCard; initializeMe answers initCards from the board's redis"),
     ("1d3umpx9ug1jv5stepvqfrucx3yr8n2a4gd7y5cud2vsq6mmj8uh", "the spec is one file: PUT /editor/spec, GET it back"),
+    ("nn7axgy3y8kvd0m1mtk3cwca34t916p5d7m4j1j2e874nuz3t8y0", "files over HTTP: PUT /file/<name> uploads, GET /file/ lists, GET /file/<name> reads"),
+    ("5uh349d0kky2zp5whrh2znahn27gwha876xze3864n0fu9e5220h", "POST /upload a ZIM (multipart file + contentRange), then GET /kiwix/A/<article> reads it"),
+    ("wfg1r0qra2ewyvns05r0rddqttt57qxurz3nz5z95rjnm63et7e0", "a websocket gives the session token; POST /upload an audio file with it as the token cookie; the track appears in the library subscription and GET /library/<file>"),
+    ("70xjeuj6t85v3s9a3up583q97wu044mnt8aekf3pqs41e3ct2v70", "POST /upload a video (multipart video_file, video_title); GET / redirects to /v/<id>, which shows it"),
 ];
 
 pub(crate) fn featured(app_id: &str) -> Option<(usize, &'static str)> {
@@ -1537,7 +1541,7 @@ mod tests {
         assert_eq!(all.len(), entries.len());
         let names: Vec<&str> = all.iter().take(FEATURED.len()).map(|e| e.name.as_str()).collect();
         assert_eq!(names[0], "Etherpad");
-        assert_eq!(names.len(), 17, "every featured appId is in the recorded index: {names:?}");
+        assert_eq!(names.len(), 21, "every featured appId is in the recorded index: {names:?}");
         assert!(all[FEATURED.len()..].iter().all(|e| featured(&e.app_id).is_none()));
         let pad = entry_json(all[0], &Verdict { state: "unverified".into(), reason: None, raw_bytes: None, signed_app_id: None, running: 0 });
         assert_eq!(pad["featured"]["rank"], 1);
