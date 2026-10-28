@@ -28,6 +28,7 @@
 #                      placeholder-filled form plans through the shell (/verb/NAME/dry)          -> none missing, 0 refusals
 #   parity-redproof    a verb the shell lacks has no face                                          -> 404
 #   publish / public-read-published / public-front-doc / public-read-unpublished / unpublish / public-read-revoked
+#   / public-house-name-reserved (a member's `operations` is handed over as operations-MEMBER, never the box's room)
 #                      the member publishes a document to a second member (the public reader); an anonymous GET
 #                      reads its text (200) and the front page shows it; an unpublished document is refused;
 #                      after Unpublish the Host refuses the visitor (403)
@@ -158,7 +159,7 @@ if [ -n "${SPONSOR_WS:-}" ] && [ -f "$SPONSOR_WS/workspace.json" ]; then
     --arg psub "${PUBREAD_SUBJECT:-}" --arg front "$DOC" \
     '{mini:$mini,host:$host,config:$config,socket:$socket,wrapper:$wrapper,
       sessions:{alice:{workspace:$aws,home:$ahome}}, public:{workspace:$pws,home:$phome}}
-     + (if $psub == "" then {} else {publicSubject:$psub,frontDoc:$front} end)' >"$R/dev.json"
+     + (if $psub == "" then {} else {publicSubject:$psub,frontDoc:$front,housePublications:{($front):"alice"}} end)' >"$R/dev.json"
   HSOCK=$RUNDIR/spawn.sock
   nohup "$HELPER" --dev "$R/dev.json" --socket "$HSOCK" --state "$R/state" --run "$RUNDIR" >"$R/helper.log" 2>&1 &
   echo $! >"$R/helper.pid"; PIDS+=("$R/helper.pid")
@@ -264,6 +265,18 @@ else
   page=$(req POST "/doc/$DOC/publish" --data-urlencode "csrf=$CSRF")
   pstatus=0; for _ in $(seq 1 24); do anon / >/dev/null; pstatus=$(anon "/doc/$DOC"); [ "$pstatus" = 200 ] && break; sleep 5; done
   row public-republish "$(grep -q 'outcome admitted' <<<"$page" && [ "$pstatus" = 200 ] && grep -q "$TEXT" "$R/anon.body" && echo 1 || echo 0)" "republish then anonymous GET /doc/$DOC -> $pstatus"
+  # A house name is the operator's to give (/etc/mini/house-publications; here frontDoc is alice's and
+  # `operations` is nobody's): alice's own document named `operations` reaches the public reader as
+  # operations-alice, and the public index's operations room does not show it as the box's.
+  req POST /doc/new --data-urlencode "csrf=$CSRF" --data-urlencode "name=operations" --data-urlencode "law=note" >/dev/null
+  TEXT3="squatted operations $(date +%s)"
+  req POST /doc/operations/append --data-urlencode "csrf=$CSRF" --data-urlencode "text=$TEXT3" >/dev/null
+  page=$(req POST /doc/operations/publish --data-urlencode "csrf=$CSRF")
+  qstatus=0; for _ in $(seq 1 24); do anon /doc >/dev/null; qstatus=$(anon /doc/operations-alice); [ "$qstatus" = 200 ] && break; sleep 5; done
+  qread=$(grep -c "$TEXT3" "$R/anon.body")
+  istatus=$(anon /doc)
+  row public-house-name-reserved "$([ "$qstatus" = 200 ] && [ "$qread" -gt 0 ] && [ "$istatus" = 200 ] && ! grep -q "$TEXT3" "$R/anon.body" && echo 1 || echo 0)" \
+    "member-published operations: GET /doc/operations-alice -> $qstatus (text $qread); GET /doc -> $istatus, operations room shows it: $(grep -c "$TEXT3" "$R/anon.body")"
 fi
 # Research consent (ember's ruling): the door wrote the member's fact at enrolment (ticked: CC0);
 # /export shows it with the sentence; the member flips it there (a write on their own cell); the
