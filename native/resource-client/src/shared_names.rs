@@ -377,8 +377,17 @@ fn existing_authority(root: &Path, opened: &Value) -> Result<Value> {
     // grant is the authority. Another reference to the same cell (an older
     // grant, revoked by a kick before a rejoin) must never replace it.
     if let Some(name) = opened.get("name").and_then(Value::as_str) {
-        if super::local_reference(root, name).is_ok_and(|local| local["target"].as_str() == Some(target)) {
-            return Ok(result);
+        if let Ok(local) = super::local_reference(root, name) {
+            if local["target"].as_str() == Some(target) {
+                // `opened` carries the ROOM's capabilities (resolve_with clones the room reference);
+                // this reference's own are the ones that cover this target, control included.
+                for field in ["observeCapability", "operationCapability", "controlCapability", "sealedIn"] {
+                    if let Some(value) = local.get(field) {
+                        result[field] = value.clone();
+                    }
+                }
+                return Ok(result);
+            }
         }
     }
     if let Some(local) = super::reference_for_target(root, target)? {
