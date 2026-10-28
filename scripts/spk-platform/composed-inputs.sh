@@ -56,7 +56,9 @@ management_subject=$(jq -r .lifecycleManagement.managementSubject "$config")
 management_key=$(jq -r .lifecycleManagement.managementKeyId "$config")
 # The management custody: the operator's key for the pinned management subject, beside the node.
 for candidate_key in "$node/keys/management.key" "$node/tool.key" "$node/keys/tool.key"; do
-  [[ -f $candidate_key ]] && mgmt_seed=$candidate_key && break
+  # A world may name the management key as an alias (management.key -> sponsor.key); the attach
+  # protocol takes custody only of a regular file, so the alias resolves to the file it names.
+  [[ -f $candidate_key ]] && mgmt_seed=$(readlink -e "$candidate_key") && break
 done
 [[ -n ${mgmt_seed:-} ]] || refuse "managementCustodyRequired: no management seed beside the node for subject $management_subject (keys/management.key)"
 mgmt_pub=${mgmt_seed%.key}.pub
