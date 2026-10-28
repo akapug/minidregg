@@ -1306,8 +1306,11 @@ mod tests {
         Arc,
     };
     fn scratch() -> PathBuf {
+        // Short on purpose: this scratch binds a Unix socket, and macOS caps a
+        // socket path at 104 bytes (`SUN_LEN`), which a long `$TMPDIR` already
+        // spends most of.
         let p =
-            std::env::temp_dir().join(format!("mini-pq-{}", crate::hex(&random::<16>().unwrap())));
+            std::env::temp_dir().join(format!("mini-pq-{}", crate::hex(&random::<8>().unwrap())));
         crate::fsio::ensure_private_dir_all(&p).unwrap();
         p
     }
