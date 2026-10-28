@@ -288,11 +288,16 @@ class Journey:
         return stem.with_suffix('.stdout')
 
     def spawn(self,label,args):
-        out=(self.logs/(label+'.stdout')).open('w');err=(self.logs/(label+'.stderr')).open('w')
-        p=subprocess.Popen(list(map(str,args)),stdout=out,stderr=err);out.close();err.close();self.processes.append(p)
+        stem=self.logs/label;generation=0
+        while any(Path(str(stem)+suffix).exists() for suffix in ['.stdout','.stderr','.process.json']):
+            generation+=1;stem=self.logs/f'{label}-{generation:02d}'
+        output=Path(str(stem)+'.stdout');error=Path(str(stem)+'.stderr')
+        with output.open('x') as out,error.open('x') as err:
+            p=subprocess.Popen(list(map(str,args)),stdout=out,stderr=err)
+        self.processes.append(p);p.journey_stdout=output
         argv=list(map(str,args))
-        write(self.logs/(label+'.process.json'),{'pid':p.pid,'argv':argv})
-        daemon={'label':label,'argv':argv,'executableSha256':sha(argv[0]),'pid':p.pid}
+        write(Path(str(stem)+'.process.json'),{'pid':p.pid,'argv':argv})
+        daemon={'label':stem.name,'argv':argv,'executableSha256':sha(argv[0]),'pid':p.pid}
         if '--socket' in argv:daemon['socket']=argv[argv.index('--socket')+1]
         self.daemons.append(daemon)
         return p
@@ -526,7 +531,7 @@ class Journey:
             'endpoint':f'http://127.0.0.1:{port}/v1/chat/completions','models':['mini-hermes-protocol-fixture'],'credential':'user'}]})
         self.provider_process=self.spawn('provider',[self.provider,f'127.0.0.1:{port}',self.root/'provider.log','--room-librarian'])
         deadline=time.monotonic()+30
-        while f'http://127.0.0.1:{port}/v1' not in (self.logs/'provider.stdout').read_text():
+        while f'http://127.0.0.1:{port}/v1' not in self.provider_process.journey_stdout.read_text():
             if self.provider_process.poll() is not None or time.monotonic()>=deadline:raise RuntimeError('selected provider did not bind its loopback port')
             time.sleep(.1)
         self.keyroot=self.sockets/'provider';self.keyroot.mkdir(mode=0o711);self.keyroot.chmod(0o711)
@@ -690,7 +695,8 @@ class Journey:
         return len([e for e in result['entries'] if e.get('subject')==self.subjects['hermes'] and e.get('amount')=='10'])
 
     def web(self,label,granted):
-        output=self.logs/f'web-{label}.stdout';p=self.spawn('web-'+label,[self.mini,'web','--dir',self.workspaces/'bob','--home',self.homes/'bob','--listen','127.0.0.1:0'])
+        p=self.spawn('web-'+label,[self.mini,'web','--dir',self.workspaces/'bob','--home',self.homes/'bob','--listen','127.0.0.1:0'])
+        output=p.journey_stdout
         try:
             deadline=time.monotonic()+30;url=None
             while time.monotonic()<deadline:

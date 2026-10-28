@@ -6,6 +6,7 @@ import tempfile
 import threading
 import time
 import unittest
+import sys
 from unittest.mock import patch
 from types import SimpleNamespace
 
@@ -111,5 +112,16 @@ class RuntimeReleaseTests(unittest.TestCase):
                 self.assertEqual((root/'worker-runtime-successor.json').read_bytes(),record)
                 current.write_bytes(b'foreign')
                 with self.assertRaisesRegex(ValueError,'initial runtime changed'):j.await_worker_release()
+
+class ProcessEvidenceTests(unittest.TestCase):
+    def test_repeated_service_keeps_prior_process_and_output_bytes(self):
+        with tempfile.TemporaryDirectory(prefix='j14-process-',dir='/tmp') as temp:
+            root=Path(temp);j=driver.Journey.__new__(driver.Journey);j.logs=root;j.processes=[];j.daemons=[]
+            for suffix in ['stdout','stderr','process.json']:(root/('provider.'+suffix)).write_text('prior evidence')
+            process=j.spawn('provider',[sys.executable,'-c','print("new process")'])
+            self.assertEqual(process.wait(timeout=5),0)
+            self.assertEqual(process.journey_stdout.read_text(),'new process\n')
+            for suffix in ['stdout','stderr','process.json']:self.assertEqual((root/('provider.'+suffix)).read_text(),'prior evidence')
+            self.assertEqual(j.daemons[0]['label'],'provider-01')
 
 if __name__=='__main__':unittest.main()
