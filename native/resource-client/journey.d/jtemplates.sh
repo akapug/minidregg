@@ -49,7 +49,12 @@ TABLE=$SD/jtemplates.tsv
 printf 'n\tstep\twho\tline\texpect\trc\tverdict\tnote\n' >"$TABLE"
 N=0; FAILED=0; FIRST_FAIL=""
 
-ws_of() { if [ "$1" = sponsor ]; then echo "$SPONSOR_WS"; else echo "$WS/$1"; fi; }
+# dana is the split-tenancy member: HOME is a session dir and the workspace sits
+# beneath it, as deploy/shell/mini-shell-ssh passes them (--workspace
+# SESSIONS/NAME/workspace --home SESSIONS/NAME); the others keep sibling dirs.
+ws_of() {
+  case "$1" in sponsor) echo "$SPONSOR_WS" ;; dana) echo "$H/dana/workspace" ;; *) echo "$WS/$1" ;; esac
+}
 
 say() {
   local who=$1 line=$2
@@ -213,7 +218,7 @@ printf '%s\n' '{"type":"all","predicates":[]}' >"$SD/permit-all.json"
 
 # ------------------------------------------------ friends: enroll, provision, init
 declare -A SUBJ
-for f in alice bob carl; do
+for f in alice bob carl dana; do
   mkdir -p -m 700 "$H/$f"
   ok setup "$f" "keygen mini.key"
   operator setup "CUSTODY: copy $f's secret into the sponsor home (enroll plan+seal sign with both keys)" \
@@ -412,6 +417,44 @@ check story "tale's map links chapters, scenes and cast by name" \
   sh -c "grep -qE -- '-> tale/chapters \(document' '$OUT' && grep -qE -- '-> tale/scenes \(object' '$OUT' && grep -qE -- '-> tale/cast \(document' '$OUT'"
 ok story alice "doc show tale/chapters"
 check story "tale/chapters links tale/cast" grep -qE -- "-> tale/cast \(document" "$OUT"
+
+# ------------------------------------------------ story under live traffic, and split tenancy
+# A second member appends in a loop (bob, into lab/notes: his grant writes
+# there), so the world head moves between every two reads of a template. The
+# shared-name chain must be judged in one image, not refused for an unrelated
+# head move. The writer has a PID file and is stopped by that PID only.
+BG=$SD/bg; mkdir -p -m 700 "$BG"
+bgwriter() {
+  local i=0
+  while :; do
+    i=$((i + 1))
+    "$SHELL_BIN" shell --socket "$SOCKET" --host "$HOST" --config "$CONFIG" \
+      --workspace "$(ws_of bob)" --home "$H/bob" --line "doc append bg$i lab/notes 'traffic $i'" >/dev/null 2>&1 &&
+    "$SHELL_BIN" shell --socket "$SOCKET" --host "$HOST" --config "$CONFIG" \
+      --workspace "$(ws_of bob)" --home "$H/bob" --line "submit bg$i" >/dev/null 2>&1 &&
+      echo "$i" >"$BG/count"
+  done
+}
+bgwriter </dev/null >"$BG/writer.log" 2>&1 &
+echo $! >"$BG/writer.pid"
+for i in $(seq 1 600); do [ -s "$BG/count" ] && break; sleep 0.1; done
+check traffic "the background writer is admitting appends" test -s "$BG/count"
+BG0=$(cat "$BG/count" 2>/dev/null || echo 0)
+stderr_says traffic alice "room new tale2 --template story" 0 "template story/template.shell: 19 line(s) done"
+stderr_says traffic dana "room new tale3 --template story" 0 "template story/template.shell: 19 line(s) done"
+BG1=$(cat "$BG/count" 2>/dev/null || echo 0)
+check traffic "the head moved while the templates ran (writer admitted $BG0 -> $BG1 appends)" test "$BG1" -gt "$BG0"
+operator traffic "stop the background writer by its PID file" bash -c 'kill -TERM "$(cat "$1")"; for i in $(seq 1 100); do kill -0 "$(cat "$1")" 2>/dev/null || exit 0; sleep 0.1; done; exit 1' _ "$BG/writer.pid"
+sleep 1
+for leaf in tale2 tale2.chapters tale2.index; do
+  check traffic "alice holds a reference $leaf" test -f "$AW/$leaf.json"
+done
+for leaf in tale3 tale3.chapters tale3.index; do
+  check traffic "dana (split tenancy: workspace under HOME) holds a reference $leaf" test -f "$(ws_of dana)/refs/$leaf.json"
+done
+ok traffic dana "doc show tale3/index"
+check traffic "tale3's map links chapters, scenes and cast by name" \
+  sh -c "grep -qE -- '-> tale3/chapters \(document' '$OUT' && grep -qE -- '-> tale3/scenes \(object' '$OUT' && grep -qE -- '-> tale3/cast \(document' '$OUT'"
 
 # ------------------------------------------------ restart; a cold audit
 pidfile=$W/public/server.pid
