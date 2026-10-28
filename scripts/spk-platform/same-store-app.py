@@ -270,7 +270,7 @@ def attach(path, prepare_only=False):
         x.step(k+'package-observe',lambda d=d:x.delegate(x.package_manifest,x.pkgcap,d['pkgObserve'],d['subject']),effect_only=True)
         x.step(k+'ticket-reserve',lambda:x.reserve(3),effect_only=True)
         x.step(k+'ticket',lambda d=d:x.issue(d,reserve=False,observe=False))
-        x.step(k+'ticket-observe',lambda d=d:x.delegate(d['ticket'],d['ticketOwner'],d['ticketObserve'],d['subject']),effect_only=True)
+        x.step(k+'ticket-observe',lambda d=d:x.delegate(d['ticket'],d['ticketOwner'],d['ticketObserve'],d['subject'],by=x.creator),effect_only=True)
         x.step(k+'route',lambda label=label,d=d:x.route(route_name(label),d))
     if prepare_only:
         result=prepared_application(x)
