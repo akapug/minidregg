@@ -213,6 +213,9 @@ def unhex(text):
         return str(text)
 
 
+OWNER_BUDGET = '1000000'
+
+
 class World:
     def __init__(self, bin_dir, root, repo, second_subject='40'):
         os.umask(0o077)
@@ -292,7 +295,10 @@ class World:
                 self.mini, self.store, self.verifier, self.W, self.sock,
                 env={'OBJECTIVE_INVOCATION_POLICY': (root / 'policy.hex').read_text().strip(),
                      'NEWPARTICIPANT_EXTRA_SUBJECTS': str(root / 'enrollment-second.json'),
-                     'NEWPARTICIPANT_SPONSOR_BALANCE': sponsor_balance})
+                     'NEWPARTICIPANT_SPONSOR_BALANCE': sponsor_balance,
+                     # every owner capability's maxCost is the template's ownerBudget, and a publish costs its own
+                     # byte length: the world apps' packages (104-150 KB) exceed the default 100000 (`notAccountOwner`)
+                     'NEWPARTICIPANT_OWNER_BUDGET': OWNER_BUDGET})
         self.config = self.W / 'deployment' / 'pinned-config.json'
         self.sponsor = self.W / 'sponsor'
         self.second = root / 'second'
