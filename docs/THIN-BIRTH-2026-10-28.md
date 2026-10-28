@@ -170,6 +170,9 @@ when the arm lands.
   soundness does not). The loaded authoring now takes its two epoch projections as data
   (`SourceAgreementJson.BirthEpochs`, `birthAt`); `birthCurrent` is `birthAt` at the loaded image.
 
+* **Restored images.** `NativeHost.Opened.restorage` (dry runs, `Host.DryRun`) copies the pins
+  and changes only the Store paths, so a restored image's pins are the original's; the satisfiable
+  pole is stated over the Host's own open (`validateLoaded`, which `validateLoadedFrom` equals).
 * **No new kernel effect.** The arm is consent-side only. The receiver, planner and authoring are
   unchanged (the authoring may gain one pure entry that takes coordinates as data instead of an
   `AuthState`; it is definitionally the same function).
@@ -192,20 +195,18 @@ when the arm lands.
 
 (Kept current by the lane; read this first after a restart.)
 
-* Worktree `/Users/ember/dev/minidregg-lanes/thin-birth` (lane/thin-birth, from origin/main
-  7265c5fc6). Box tree: `dregg-ref:/build/lanes/thin-birth` (clone-warm of `/build/minidregg`).
-* Audit (af7a93e7b8ba729d4, AUDIT.md §22 on lane/audit-platform d1b348a36): REVISE 1 (carrier to
-  named-collision disjunct) and 2 (pins premises to a proved lemma) applied; the rest ACCEPTED.
-* Earlier: design and statements pushed (7410dd6d9); sent to auditor af7a93e7b8ba729d4 with five
-  questions (carrier form, conjuncts 3-7, Host authoring completeness as journey-witnessed, the
-  Opened pins premises, shown-not-judged coordinates). Elaboration of `Kernel/NativeThinBirth.lean`
-  is running on dregg-ref (`/build/lanes/thin-birth-check.{log,pid}`, lane-check; its imports
-  rebuild from da4a7645e). Rerun `scripts/pipeline/lane-check Kernel/NativeThinBirth.lean` in
-  `/build/lanes/thin-birth` after `git pull` for the revised statements.
-* Next after ACCEPT: proofs (birthValues_exact per branch, by rfl; then keystone and teeth from
-  checkHeader_binds + signedRequestBytes_eq_iff; completeness through prepareLoaded, where
-  `NativeHost.slot` is private and may need exposing); Host/ThinBirthConsent.lean (the author
-  instance over Json.birth with coordinates); frames 234/235 (protocol/host-operations.json,
-  ClientConsentCore.thin, 230/232 refuse a birth by name); mini-sdk thin_birth calls; the
-  workspace.rs birth path; jpriv2 row 19 plus restored lifecycle rows (from d79843207^) plus the
-  swapped-plan row.
+* Worktree `/Users/ember/dev/minidregg-lanes/thin-birth` (lane/thin-birth). Box tree:
+  `dregg-ref:/build/lanes/thin-birth` (as user `lanes`: `ssh lanes@dregg-ref`; `runuser` lacks the
+  user bus `swarm-build` needs). Scratch and scripts: `/build/lanes/thin-birth-scratch/`
+  (`run-scratch.sh FILE` is the seconds-long per-file check against built imports; `build.sh` is
+  the closure-locked module build).
+* Audit: af7a93e7b8ba729d4, AUDIT.md section 22 on lane/audit-platform: statements ACCEPTED after
+  two revisions (named collision instead of a carrier; opened pins from `validateLoaded`), and the
+  `validateLoaded`-scoped pins realisation ACKed (no `Opened` field; restored images: §9).
+* Proved, `#assert_axioms` clean, per-file on dregg-ref: `display_is_commit`,
+  `swap_after_consent_refused`, `swapped_plan_refused`, `honest_plan_accepted`,
+  `opened_pins_public` and their lemmas (`Kernel/NativeThinBirth.lean`).
+* Wire and client: frames 234/235 (`Host.ClientConsentCore`, `Host.ThinBirthConsent`,
+  `protocol/host-operations.json`), mini-sdk `thin_birth_intent`/`thin_birth_plan`, the workspace
+  birth path. JP2 rows: row 19 thin birth, lifecycle restored, swapped-plan row.
+* Owed: the Host consent modules' build on the box, then JP2 on a candidate world.
