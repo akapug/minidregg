@@ -18,7 +18,9 @@ Genesis writers on cut 14 (dregg-ref, run 6 at f79044d79):
   candidate that carries that commit; cut 14's mini exits 1 there.
 - **fn-e1e2 setup-mini**: out of scope (fn).
 - **jserve**: PASS on cut 14 with beb108d5f (validator, hbox).
-- Not yet run: the profiled grain bootstrap, JPAY2, JPAY6 and the jpay6 extractors.
+- **JPAY2**: PASS 18/18 on cut 14 (standalone hook, dregg-ref, lane venv for PyNaCl).
+- JPAY6 and its extractors belong to the GLM sniper (glm-red-jpay6). The profiled grain bootstrap is
+  deleted: it had no producer (see the deletion commit).
 
 Causes found (each fixed at the cause; no assertion weakened):
 - content targets carried schemaVersion "1"; `journey.d/lib/wire.sh` reads `ContentResource.commandVersion`
@@ -121,7 +123,7 @@ Abuse limits (infra's review):
 - `b085895e` the export cooldown: `world_export::tests::one_export_per_cooldown_named_by_time_and_a_failed_one_costs_nothing`.
 - `c59ab026` `python3 scripts/test-host-operations.py` (31 tests, about 72 s).
 - `0153d8ae8` + `95214d02c` genesis frame v8: the writers' state is under "Now". Not yet run by anyone:
-  the profiled grain bootstrap, journey JPAY2 and JPAY6, and the four jpay6 extractors (grain-runtime
+  journey JPAY6 and the four jpay6 extractors, now the GLM sniper's (grain-runtime
   bootstrap-native-controller and journeys/byok-native including --ssh, inference-scheduler native-journey
   and native-two-member).
 - `5e0d2cb7b` pending inbox joins on the first init: test
