@@ -703,6 +703,16 @@ pub(crate) fn decode_chunked(bytes: &[u8]) -> io::Result<Option<(Vec<u8>, usize)
     }
 }
 
+/// Sleep until `stream` is readable (data, EOF or error) or `deadline` passes, whichever is first.
+/// The caller re-reads and re-checks the deadline, so a spurious or timed-out wake is harmless.
+fn wait_readable(stream: &UnixStream, deadline: Instant) {
+    use std::os::fd::AsRawFd;
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    let millis = remaining.as_micros().div_ceil(1000).clamp(1, 1000) as libc::c_int;
+    let mut fd = libc::pollfd { fd: stream.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+    unsafe { libc::poll(&mut fd, 1, millis) };
+}
+
 fn read_until(
     stream: &mut UnixStream,
     bytes: &mut Vec<u8>,
@@ -722,7 +732,7 @@ fn read_until(
             Ok(0) => return Err(refuse("HTTP frame ended early")),
             Ok(count) => bytes.extend_from_slice(&chunk[..count]),
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                std::thread::sleep(Duration::from_millis(2))
+                wait_readable(stream, deadline)
             }
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
             Err(error) => return Err(error),
