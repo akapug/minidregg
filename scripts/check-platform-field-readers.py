@@ -16,7 +16,8 @@ status:
            takes only issuer and birthSlack from the profile).
 
 A bare `profile.template` (the whole template handed on) counts as a reader of its owner
-budget and lifetime unless the row says otherwise.
+budget and lifetime unless the row says otherwise; `templateAt profile.template` is the cell
+path and is not counted. Comments are not code and are not counted.
 
   check-platform-field-readers.py           refuse any reader not in the census, or a count
                                             above its census row (a new silent twin);
@@ -33,9 +34,41 @@ ROOT = Path(__file__).resolve().parent.parent
 CENSUS = ROOT / "scripts" / "platform-field-readers.json"
 PATTERN = re.compile(r"template\.(?:ownerBudget|lifetime)|config\.tariff\b|grainBirthTariffValue"
                      r"|config\.completionCustodianKey"
-                     r"|profile\.template\b(?!\.(?:issuer|birthSlack|ownerBudget|lifetime)\b)")
+                     r"|(?<!templateAt )profile\.template\b"
+                     r"(?!\.(?:issuer|birthSlack|ownerBudget|lifetime)\b)")
 EXCLUDED = ("Kernel/PlatformCell", "scripts/", "tests/", "Fixtures/", "Verify/", "Assurance/",
             ".lake/", "docs/")
+
+
+def code_only(text):
+    """Lean source with comments blanked (nested `/- -/` blocks and `--` lines); string
+    literals are kept. A field named in prose is not a reader."""
+    out, i, depth, n = [], 0, 0, len(text)
+    while i < n:
+        two = text[i:i + 2]
+        if depth:
+            if two == "/-":
+                depth, i = depth + 1, i + 2
+            elif two == "-/":
+                depth, i = depth - 1, i + 2
+            else:
+                out.append("\n" if text[i] == "\n" else " ")
+                i += 1
+        elif two == "/-":
+            depth, i = 1, i + 2
+        elif two == "--":
+            while i < n and text[i] != "\n":
+                i += 1
+        elif text[i] == '"':
+            j = i + 1
+            while j < n and text[j] != '"':
+                j += 2 if text[j] == "\\" else 1
+            out.append(text[i:j + 1])
+            i = j + 1
+        else:
+            out.append(text[i])
+            i += 1
+    return "".join(out)
 
 
 def readers():
@@ -45,7 +78,7 @@ def readers():
     for name in files:
         if name.startswith(EXCLUDED):
             continue
-        text = (ROOT / name).read_text(encoding="utf-8")
+        text = code_only((ROOT / name).read_text(encoding="utf-8"))
         for match in PATTERN.finditer(text):
             key = match.group(0)
             found.setdefault(name, {}).setdefault(key, 0)

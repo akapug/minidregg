@@ -468,12 +468,8 @@
   }
  },
  "Kernel/ResourceBirthPolicyController.lean": {
-  "profile.template": {
-   "count": 1,
-   "status": "cell"
-  },
   "template.lifetime": {
-   "count": 4,
+   "count": 3,
    "status": "cell"
   },
   "template.ownerBudget": {
