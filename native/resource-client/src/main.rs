@@ -2913,9 +2913,15 @@ fn run(mut args: Args) -> Result<()> {
             let image = consent_proxy::digest(args.required("consent-sha256")?.to_str().ok_or("consent digest must be UTF-8")?)?;
             let settings = consent_proxy::digest(args.required("config-sha256")?.to_str().ok_or("config digest must be UTF-8")?)?;
             let uid = args.required("controller-uid")?.to_str().and_then(|n|n.parse::<u32>().ok()).ok_or("controller UID must be a decimal u32")?;
+            // Seconds with no connection before the service ends (socket activation restarts it).
+            let idle = match args.optional("idle-seconds") {
+                Some(v) => v.to_str().and_then(|n| n.parse::<u64>().ok()).filter(|n| *n > 0)
+                    .ok_or("idle seconds must be a positive decimal")?,
+                None => mini_sdk::consent::RESIDENT_IDLE_S,
+            };
             args.finish()?;
             let socket = SOCKET.get().ok_or("serve-controller-consent requires --socket")?;
-            consent_proxy::serve(socket,&consent,&config,image,settings,uid,&anchors)
+            consent_proxy::serve(socket,&consent,&config,image,settings,uid,&anchors,std::time::Duration::from_secs(idle))
         }
         #[cfg(unix)]
         "operator-status" | "drain-operator" => {
