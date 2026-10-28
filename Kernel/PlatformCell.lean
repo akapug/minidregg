@@ -37,10 +37,13 @@ Realizer slots (law 1):
 * Births read the platform record of the image they commit against at the deployed receiver
   (`ResourceBirthReceiver.ReceiverReadsCurrent`); the client quote is
   `ResourceBirth.Descriptor.quotedFee` over that record's creation tariff (`Json.birthCurrent`).
-* The meter is `DurableCommitProtocol.Snapshot.available` under the EXTENDED install
-  (`installAvailable`: the proof phase adds `Intent.credit`, default zero, which only the
-  refill family sets); `Meter.consumed` is `Snapshot.consumed`, and every nullifier carries
+* The meter is `DurableCommitProtocol.Snapshot.available` under the extended install
+  (`Snapshot.install` adds `Intent.credit`, default zero, which only the refill family sets;
+  `protocol_install_matches`); `Meter.consumed` is `Snapshot.consumed`, and every nullifier carries
   its family tag.
+* The meter is unbounded by design: every persisted form of it is ten unbounded naturals
+  (`DurableReceiverCodec.chargeStream`), so no fit bound applies to a refill. A future
+  fixed-width emitter of `available` carries its own bound at that emitter (audit pass 21).
 
 Known boundaries (recorded by the third audit pass, not closed here):
 * the controller may name its OWN key as the first custodian (`CustodianStep none _`), so
@@ -554,9 +557,9 @@ theorem sorted_load_bearing (host : NativeHost.Config) (genesis : Config) (key :
 
 /-! ## M2: the seed-meter refill
 
-The meter is the commit protocol's `Snapshot.available`, not a cell. Today `install` sets
-`available := available - exactCharge` and no intent can raise it; the proof phase adds
-`Intent.credit` (default zero) and `installAvailable` below is the extended install's meter.
+The meter is the commit protocol's `Snapshot.available`, not a cell. `install` sets
+`available := available - exactCharge + credit` with `Intent.credit` (default zero), and
+`installAvailable` below is that install's meter as a spec.
 Only the refill family sets a nonzero credit; its exact charge is zero (a nullifier-only
 intent, which `preflight` admits), so it is admitted at an exhausted meter. -/
 
@@ -640,15 +643,12 @@ structure RefillContext where
   encode : Refill → List UInt8
   covers : ∀ r s, encode r = encode s →
     r.subject = s.subject ∧ r.capability = s.capability ∧ r.nonce = s.nonce ∧ r.amount = s.amount
-  /-- The meter's fixed-width artifact layout (`ResourceCost.WordLayout`). -/
-  layout : ResourceCost.WordLayout
 
 def RefillAdmits (ctx : RefillContext) (m : Meter) (r : Refill) : Prop :=
   r.subject = ctx.deployment.controller ∧
     ctx.deployment.verifies ctx.deployment.controller (ctx.encode r) r.envelope = true ∧
     ctx.deployment.holdsRefill ctx.deployment.controller r.capability = true ∧
-    m.consumed r.nullifier = false ∧
-    ctx.layout.fitsCheck (raised m.remaining r.amount) = true
+    m.consumed r.nullifier = false
 
 instance (ctx : RefillContext) (m : Meter) (r : Refill) : Decidable (RefillAdmits ctx m r) := by
   unfold RefillAdmits; infer_instance
@@ -727,7 +727,7 @@ theorem replay_refused (ctx : RefillContext) (post : Meter → Refill → Option
     (lawful : RefillLawful ctx post) (m : Meter) (r : Refill) (spent : m.consumed r.nullifier = true) :
     post m r = none :=
   (lawful m r).2 fun admitted => by
-    have fresh := admitted.2.2.2.1
+    have fresh := admitted.2.2.2
     rw [spent] at fresh
     cases fresh
 
@@ -738,24 +738,13 @@ theorem family_tag_separates (r : Refill) (family : Family) (other : family ≠ 
   intro same
   exact other (congrArg Nullifier.family same).symm
 
-/-- Overflow: a refill whose raised meter does not fit the layout is refused. -/
-theorem overflow_refused (ctx : RefillContext) (post : Meter → Refill → Option Meter)
-    (lawful : RefillLawful ctx post) (m : Meter) (r : Refill) (lane : ResourceCost.Lane)
-    (overflow : ctx.layout.capacity lane ≤ m.remaining lane + r.amount lane) :
-    post m r = none := by
-  apply (lawful m r).2
-  rintro ⟨-, -, -, -, fits⟩
-  have := ((ResourceCost.WordLayout.fitsCheck_eq_true_iff _ _).mp fits) lane
-  simp [raised] at this
-  omega
-
 /-! ## M2: the copy is the protocol's install
 
 `installAvailable`, `Meter` and the tagged `Nullifier` are the SPEC; the protocol is
-`DurableCommitProtocol.Snapshot.install`, instantiated at the tagged `Nullifier`. Today's
-install equals the spec at zero credit (proved); the proof phase's install, carrying
-`Intent.credit`, must equal it at every credit (`ProtocolInstallMatches`), and then a
-refill's meter IS the protocol's post-state (`refilled_is_protocol_install`). -/
+`DurableCommitProtocol.Snapshot.install`, instantiated at the tagged `Nullifier`, which
+carries `Intent.credit`. The protocol's install equals the spec at every credit
+(`protocol_install_matches`, keystone M2-d), and then a refill's meter IS the protocol's
+post-state (`refilled_is_protocol_install`). -/
 
 def meterIntentOf {TxId CellId Event : Type} (family : Family) (credit : ResourceCost.Charge)
     (intent : DurableCommitProtocol.Intent TxId CellId Nullifier Event) : MeterIntent :=
@@ -765,23 +754,17 @@ def meterOf {TxId CellId Event : Type}
     (snapshot : DurableCommitProtocol.Snapshot TxId CellId Nullifier Event) : Meter :=
   ⟨snapshot.available, snapshot.consumed⟩
 
-theorem protocol_install_is_spec_at_zero_credit {TxId CellId Event : Type} [DecidableEq CellId]
+theorem protocol_install_consumed {TxId CellId Event : Type} [DecidableEq CellId]
     (before : DurableCommitProtocol.Snapshot TxId CellId Nullifier Event)
-    (intent : DurableCommitProtocol.Intent TxId CellId Nullifier Event) (family : Family) :
-    (DurableCommitProtocol.Snapshot.install before intent).available =
-        installAvailable before.available (meterIntentOf family 0 intent) ∧
-      (DurableCommitProtocol.Snapshot.install before intent).consumed =
-        fun n => decide (n ∈ intent.nullifiers) || before.consumed n := by
-  constructor
-  · funext lane
-    simp [DurableCommitProtocol.Snapshot.install, installAvailable, meterIntentOf]
-  · funext n
-    by_cases member : n ∈ intent.nullifiers <;>
-      simp [DurableCommitProtocol.Snapshot.install, member]
+    (intent : DurableCommitProtocol.Intent TxId CellId Nullifier Event) :
+    (DurableCommitProtocol.Snapshot.install before intent).consumed =
+      fun n => decide (n ∈ intent.nullifiers) || before.consumed n := by
+  funext n
+  by_cases member : n ∈ intent.nullifiers <;>
+    simp [DurableCommitProtocol.Snapshot.install, member]
 
-/-- **M2-d, the proof phase's install is the spec.** `installed` is the extended protocol's
-meter (`fun b i => (Snapshot.install b i).available` once `Intent` carries `credit`),
-`creditOf` the new field. -/
+/-- **M2-d, the proof phase's install is the spec.** `installed` is a protocol meter,
+`creditOf` the credit it reads off an intent. -/
 def ProtocolInstallMatches {TxId CellId Event : Type}
     (installed : DurableCommitProtocol.Snapshot TxId CellId Nullifier Event →
       DurableCommitProtocol.Intent TxId CellId Nullifier Event → ResourceCost.Charge)
@@ -790,31 +773,47 @@ def ProtocolInstallMatches {TxId CellId Event : Type}
   ∀ before intent family,
     installed before intent = installAvailable before.available (meterIntentOf family (creditOf intent) intent)
 
-/-- Satisfiable: today's install matches the spec when no intent carries credit. -/
-theorem today_install_matches_zero {TxId CellId Event : Type} [DecidableEq CellId] :
+/-- **Keystone M2-d, discharged.** The deployed install, `Snapshot.install`, is the spec's
+extended install at the intent's own `credit`. -/
+theorem protocol_install_matches {TxId CellId Event : Type} [DecidableEq CellId] :
     ProtocolInstallMatches (TxId := TxId) (CellId := CellId) (Event := Event)
       (fun before intent => (DurableCommitProtocol.Snapshot.install before intent).available)
-      (fun _ => 0) :=
-  fun before intent family => (protocol_install_is_spec_at_zero_credit before intent family).1
+      (·.credit) := by
+  intro before intent family
+  funext lane
+  simp [DurableCommitProtocol.Snapshot.install, installAvailable, meterIntentOf]
 
-/-- Teeth: today's install does not match once any funded intent carries a credit, so the
-refill needs the protocol extension, not a second meter. -/
-theorem today_install_mismatch_with_credit {TxId CellId Event : Type} [DecidableEq CellId]
+/-- The install before M2 (no credit): the teeth's reference. -/
+def installUncredited {TxId CellId Event : Type}
+    (before : DurableCommitProtocol.Snapshot TxId CellId Nullifier Event)
+    (intent : DurableCommitProtocol.Intent TxId CellId Nullifier Event) : ResourceCost.Charge :=
+  fun lane => before.available lane - intent.exactCharge lane
+
+/-- Satisfiable: the uncredited install matches the spec when no intent carries credit. -/
+theorem uncredited_install_matches_zero {TxId CellId Event : Type} :
+    ProtocolInstallMatches (TxId := TxId) (CellId := CellId) (Event := Event)
+      installUncredited (fun _ => 0) := by
+  intro before intent family
+  funext lane
+  simp [installUncredited, installAvailable, meterIntentOf]
+
+/-- Teeth: the uncredited install does not match once any funded intent carries a credit,
+so the refill needs the protocol extension, not a second meter. -/
+theorem uncredited_install_mismatch_with_credit {TxId CellId Event : Type}
     (creditOf : DurableCommitProtocol.Intent TxId CellId Nullifier Event → ResourceCost.Charge)
     (before : DurableCommitProtocol.Snapshot TxId CellId Nullifier Event)
     (intent : DurableCommitProtocol.Intent TxId CellId Nullifier Event)
     (lane : ResourceCost.Lane) (positive : 0 < creditOf intent lane)
     (funded : intent.exactCharge ≤ before.available) :
-    ¬ ProtocolInstallMatches
-      (fun before intent => (DurableCommitProtocol.Snapshot.install before intent).available) creditOf := by
+    ¬ ProtocolInstallMatches installUncredited creditOf := by
   intro agrees
   have := congrFun (agrees before intent .meterRefill) lane
   have le := (ResourceCost.Charge.le_iff _ _).mp funded lane
-  simp [DurableCommitProtocol.Snapshot.install, installAvailable, meterIntentOf] at this
+  simp [installUncredited, installAvailable, meterIntentOf] at this
   omega
 
-/-- The link: under a matching extended install, a refill's protocol intent (no charge,
-the posting as credit, its one tagged nullifier) leaves exactly `refilled`. -/
+/-- The link: under a matching install, a refill's protocol intent (no charge, the posting
+as credit, its one tagged nullifier) leaves exactly `refilled`. -/
 theorem refilled_is_protocol_install {TxId CellId Event : Type} [DecidableEq CellId]
     (installed : DurableCommitProtocol.Snapshot TxId CellId Nullifier Event →
       DurableCommitProtocol.Intent TxId CellId Nullifier Event → ResourceCost.Charge)
@@ -827,13 +826,23 @@ theorem refilled_is_protocol_install {TxId CellId Event : Type} [DecidableEq Cel
     (⟨installed before intent, (DurableCommitProtocol.Snapshot.install before intent).consumed⟩ : Meter) =
       refilled (meterOf before) r := by
   have available := agrees before intent .meterRefill
-  have consumed := (protocol_install_is_spec_at_zero_credit before intent .meterRefill).2
+  have consumed := protocol_install_consumed before intent
   simp only [refilled, meterOf, available, consumed, single]
   congr 1
   · funext lane
     simp [installAvailable, meterIntentOf, free, credited, Refill.intent]
   · funext n
     simp
+
+/-- The deployed instance of the link: the protocol's own install of a refill's intent is
+`refilled`. -/
+theorem refilled_is_deployed_install {TxId CellId Event : Type} [DecidableEq CellId]
+    (before : DurableCommitProtocol.Snapshot TxId CellId Nullifier Event)
+    (intent : DurableCommitProtocol.Intent TxId CellId Nullifier Event) (r : Refill)
+    (free : intent.exactCharge = 0) (credited : intent.credit = r.amount)
+    (single : intent.nullifiers = [r.nullifier]) :
+    meterOf (DurableCommitProtocol.Snapshot.install before intent) = refilled (meterOf before) r :=
+  refilled_is_protocol_install _ _ protocol_install_matches before intent r free credited single
 
 #assert_axioms expired_refused
 #assert_axioms lawful_injective installWire_covers wireEncode_covers toy_admits premises_inhabited
@@ -843,8 +852,8 @@ theorem refilled_is_protocol_install {TxId CellId Event : Type} [DecidableEq Cel
   install_conserves_with_credit installToday_loses_credit admitted_refills_confined tagged_mint_refused
   installAvailable_refill refillReference_lawful refill_funded_at_exhaustion
   charged_refill_refused_at_exhaustion lawful_monotone replay_refused family_tag_separates
-  overflow_refused protocol_install_is_spec_at_zero_credit today_install_matches_zero
-  today_install_mismatch_with_credit refilled_is_protocol_install
+  protocol_install_consumed protocol_install_matches uncredited_install_matches_zero
+  uncredited_install_mismatch_with_credit refilled_is_protocol_install refilled_is_deployed_install
   records_push current_push chain_le_last staysSorted reachable_sorted versionMonotone recordsValid
   custodianCheck_iff decideInstall_decides decides_authenticated
 

@@ -216,7 +216,7 @@ namespace Minidregg.Compiler.PersistedCodecTags
 @[persisted_codec_tag] abbrev objective_activity_tx_abandon_v1 : String := "DREGG/OBJECTIVE/ACTIVITY/TX/ABANDON/v1"
 @[persisted_codec_tag] abbrev job_money_event_v1 : String := "DREGG.JOB.MONEY.EVENT/v1"
 @[persisted_codec_tag] abbrev joint_install_promise_request_v1 : String := "DREGG/JOINT/INSTALL-PROMISE/REQUEST/v1"
-@[persisted_codec_tag] abbrev durable_log_byte_v2 : List UInt8 := "DREGG.DURABLE.LOG".toUTF8.toList ++ [2]
+@[persisted_codec_tag] abbrev durable_log_byte_v3 : List UInt8 := "DREGG.DURABLE.LOG".toUTF8.toList ++ [3]
 @[persisted_codec_tag] abbrev fn_selected_poll_coverage_v2 : String := "DREGG/FN/SELECTED-POLL-COVERAGE/v2"
 @[persisted_codec_tag] abbrev native_host_log_leaf_v1 : String := "DREGG/NATIVE-HOST/LOG-LEAF/v1"
 @[persisted_codec_tag] abbrev objective_bend_selected_declaration_v1 : String := "DREGG.OBJECTIVE-BEND.SELECTED-DECLARATION/v1"
@@ -224,7 +224,7 @@ namespace Minidregg.Compiler.PersistedCodecTags
 @[persisted_codec_tag] abbrev application_lifecycle_completion_command_v2 : String := "DREGG/APPLICATION/LIFECYCLE-COMPLETION-COMMAND/v3"
 @[persisted_codec_tag] abbrev participant_factory_observe_identity_v1 : String := "DREGG.PARTICIPANT.FACTORY-OBSERVE.IDENTITY/v1"
 @[persisted_codec_tag] abbrev runtime_capability_delegation_scoped_parent_child_authority_curre_5e6893b4cf528357 : String := "DREGG.RUNTIME.CAPABILITY-DELEGATION.SCOPED-PARENT-CHILD-AUTHORITY.CURRENT-COMPOSED-LAW-DEPENDENCY-GUARDS/v3"
-@[persisted_codec_tag] abbrev durable_image_byte_v2 : List UInt8 := "DREGG.DURABLE.IMAGE".toUTF8.toList ++ [2]
+@[persisted_codec_tag] abbrev durable_image_byte_v3 : List UInt8 := "DREGG.DURABLE.IMAGE".toUTF8.toList ++ [3]
 @[persisted_codec_tag] abbrev well_args_v1 : String := "DREGG.WELL.ARGS/v2"
 @[persisted_codec_tag] abbrev application_lifecycle_claim_event_v1 : String := "DREGG/APPLICATION/LIFECYCLE-CLAIM-EVENT/v1"
 @[persisted_codec_tag] abbrev application_grain_share_issue_event_v1 : String := "DREGG/APPLICATION/GRAIN-SHARE-ISSUE-EVENT/v1"

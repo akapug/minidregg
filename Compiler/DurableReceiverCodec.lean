@@ -93,11 +93,11 @@ def intentStream : StreamCodec IntentRecord :=
           (StreamCodec.product (StreamCodec.list nullifierStream)
             (StreamCodec.product chargeStream
               (StreamCodec.product eventStream
-                (StreamCodec.option subjectStream)))))))
+                (StreamCodec.product (StreamCodec.option subjectStream) chargeStream)))))))
     (fun record => (record.transactionId, record.writes, record.readGuards,
-      record.nullifiers, record.exactCharge, record.event, record.subject))
+      record.nullifiers, record.exactCharge, record.event, record.subject, record.credit))
     (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2.1,
-      tuple.2.2.2.2.1, tuple.2.2.2.2.2.1, tuple.2.2.2.2.2.2⟩)
+      tuple.2.2.2.2.1, tuple.2.2.2.2.2.1, tuple.2.2.2.2.2.2.1, tuple.2.2.2.2.2.2.2⟩)
     (by intro value; cases value; rfl)
 
 def seedStream : StreamCodec Seed :=
@@ -113,9 +113,9 @@ def imageStream : StreamCodec Image :=
     (fun image => (image.seed, image.accepted))
     (fun tuple => ⟨tuple.1, tuple.2⟩) (by intro value; cases value; rfl)
 
-/-- Version 2: every record carries its signing subject. A version-1 image
-refuses (the frame is compared exactly). -/
-def wireFrame : List UInt8 := "DREGG.DURABLE.IMAGE".toUTF8.toList ++ [2]
+/-- Version 3: every record carries its signing subject and its meter credit. A
+version-1 or version-2 image refuses (the frame is compared exactly). -/
+def wireFrame : List UInt8 := "DREGG.DURABLE.IMAGE".toUTF8.toList ++ [3]
 
 /-- The frame is CHECKED: its octets (the length-prefixed `wireFrame`, as
 before) must match exactly, so a version-1 or foreign frame is refused by the
