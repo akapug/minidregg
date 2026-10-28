@@ -21,6 +21,7 @@ module
 public import Theory.ResourceBirth
 public import Compiler.CredentialAuthorityEntryCodec
 public import Compiler.Sp800185Cshake256
+public import Compiler.CompiledListOps
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -689,6 +690,32 @@ theorem ofRows_view (rows : Rows registry)
           simp [LifecycleImage.view, ofRows, found, LifecycleImage.slot, wasUsed]
       | live cell => simp [LifecycleImage.view, ofRows, found, LifecycleImage.slot]
 
+/-- `ofRows` as compiled: the rows are hashed into an identifier table once, so
+a slot read is a table probe instead of a `List.lookup` over every row, and the
+used set is a hashed dedup instead of `List.toFinset`'s quadratic one. -/
+def ofRowsVia (rows : Rows registry) (table : Std.HashMap Nat (LifecycleImage registry))
+    (exact : ∀ id, table[id]? = rows.lookup id) : Directory Nat registry where
+  slots id := LifecycleImage.slot registry (table[id]?.getD .fresh)
+  used := CompiledListOps.usedSet
+    ((rows.filter fun row => LifecycleImage.everUsed registry row.2).map Prod.fst)
+  present_used := by
+    intro id cell present
+    rw [exact] at present
+    rw [CompiledListOps.usedSet_eq]
+    exact (ofRows registry rows).present_used present
+
+def ofRowsFast (rows : Rows registry) : Directory Nat registry :=
+  ofRowsVia registry rows (CompiledListOps.rowTable rows) (CompiledListOps.rowTable_get? rows)
+
+@[csimp] theorem ofRows_eq_fast : @ofRows = @ofRowsFast := by
+  funext registry rows
+  unfold ofRowsFast ofRowsVia ofRows
+  congr 1
+  · funext id
+    rw [CompiledListOps.rowTable_get?]
+  · rw [CompiledListOps.usedSet_eq]
+    rfl
+
 def decodeRows : List (Nat × List UInt8) -> Option (Rows registry)
   | [] => some []
   | (identifier, bytes) :: rest => do
@@ -731,6 +758,22 @@ fresh; tombstones enter the permanent used set. -/
 def decode (input : List (Nat × List UInt8)) : Option (Directory Nat registry) := do
   let rows ← decodeRows registry input
   if (rows.map Prod.fst).Nodup then some (ofRows registry rows) else none
+
+/-- `decode` as compiled: the identity check is one hashed pass (`nodupNat_iff`). -/
+def decodeFast (input : List (Nat × List UInt8)) : Option (Directory Nat registry) := do
+  let rows ← decodeRows registry input
+  if CompiledListOps.nodupNat (rows.map Prod.fst) then some (ofRows registry rows) else none
+
+@[csimp] theorem decode_eq_fast : @decode = @decodeFast := by
+  funext registry input
+  unfold decode decodeFast
+  cases decodeRows registry input with
+  | none => rfl
+  | some rows =>
+      simp only [Option.bind_eq_bind, Option.bind_some]
+      by_cases unique : (rows.map Prod.fst).Nodup
+      · rw [if_pos unique, if_pos ((CompiledListOps.nodupNat_iff _).mpr unique)]
+      · rw [if_neg unique, if_neg (fun fast => unique ((CompiledListOps.nodupNat_iff _).mp fast))]
 
 theorem decode_exact {input : List (Nat × List UInt8)} {directory : Directory Nat registry}
     (decoded : decode registry input = some directory) (id : Nat) :

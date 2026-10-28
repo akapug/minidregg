@@ -461,12 +461,15 @@ theorem byteArray_beq_exact (left right : List UInt8) :
     rfl
 
 /-- Images compare by their canonical encoding (the ten-lane charge is a
-function, so there is no structural equality to derive). -/
+function, so there is no structural equality to derive), after object identity:
+a session comparing its image with the one a submit started from holds the
+same object, and the encoding of the whole history is never built for that. -/
 instance : DecidableEq Image := fun left right =>
-  decidable_of_iff ((DurableReceiverCodec.encode left).toByteArray ==
-      (DurableReceiverCodec.encode right).toByteArray)
-    ((byteArray_beq_exact _ _).trans
-      ⟨fun same => DurableReceiverCodec.encode_injective same, congrArg _⟩)
+  withPtrEqDecEq left right fun _ =>
+    decidable_of_iff ((DurableReceiverCodec.encode left).toByteArray ==
+        (DurableReceiverCodec.encode right).toByteArray)
+      ((byteArray_beq_exact _ _).trans
+        ⟨fun same => DurableReceiverCodec.encode_injective same, congrArg _⟩)
 
 /-! ## The world root, kept
 

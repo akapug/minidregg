@@ -481,6 +481,24 @@ def decodeFrom {prior : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
   let rows ← decodeRowsFrom held input
   if (rows.map Prod.fst).Nodup then some (DirectoryImage.ofRows registry rows) else none
 
+/-- `decodeFrom` as compiled: the identity check is one hashed pass. -/
+def decodeFromFast {prior : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    (held : LoadedDirectory prior) (input : List (Nat × List UInt8)) :
+    Option (Directory Nat registry) := do
+  let rows ← decodeRowsFrom held input
+  if CompiledListOps.nodupNat (rows.map Prod.fst) then some (DirectoryImage.ofRows registry rows) else none
+
+@[csimp] theorem decodeFrom_eq_fast : @decodeFrom = @decodeFromFast := by
+  funext prior held input
+  unfold decodeFrom decodeFromFast
+  cases decodeRowsFrom held input with
+  | none => rfl
+  | some rows =>
+      simp only [Option.bind_eq_bind, Option.bind_some]
+      by_cases unique : (rows.map Prod.fst).Nodup
+      · rw [if_pos unique, if_pos ((CompiledListOps.nodupNat_iff _).mpr unique)]
+      · rw [if_neg unique, if_neg (fun fast => unique ((CompiledListOps.nodupNat_iff _).mp fast))]
+
 theorem decodeFrom_eq {prior : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     (held : LoadedDirectory prior) (input : List (Nat × List UInt8)) :
     decodeFrom held input = DirectoryImage.decode registry input := by
