@@ -53,6 +53,8 @@ def check_declaration(d):
         b = op['binding']
         if b['protocol'] == 'http' and sum(k in b for k in ('json', 'text', 'base64', 'form', 'multipart')) > 1:
             raise Refusal('declaration-invalid', 'ambiguous HTTP body')
+        if 'emptyValue' in b and b.get('decode') != 'json':
+            raise Refusal('declaration-invalid', 'empty value requires JSON decoding')
         if b.get('decode') == 'json-string-fragment' and (not op.get('internal') or op['write']):
             raise Refusal('declaration-invalid', 'auth fragment must be an internal read')
         if any(name not in SAFE_RESPONSE_HEADERS for name in b.get('responseHeaders', {}).values()):
@@ -97,6 +99,18 @@ def validate(d, schema, value, phase='input'):
     def formats(s, v):
         if '$ref' in s:
             return formats(d['$defs'][s['$ref'].split('/')[-1]], v)
+        if 'uniqueBy' in s:
+            key = s['uniqueBy']
+            if not isinstance(key, str) or not key or not isinstance(v, list) or len(v) > 1000:
+                raise Refusal(phase + '-unique-key')
+            seen = set()
+            for entry in v:
+                if not isinstance(entry, dict) or key not in entry or type(entry[key]) not in (str, int):
+                    raise Refusal(phase + '-unique-key')
+                identity = (type(entry[key]), entry[key])
+                if identity in seen:
+                    raise Refusal(phase + '-unique-key')
+                seen.add(identity)
         if s.get('format') == 'relative-path':
             relative_path(v)
         if s.get('contentEncoding') == 'base64':
@@ -349,6 +363,11 @@ def decode_http_body(d, op, response):
         if mode == 'json':
             if 'json' not in headers.get('content-type', '').lower() and headers.get('content-type', '').split(';')[0].strip().lower() not in op['binding'].get('acceptedContentTypes', []):
                 raise Refusal('app-content-type')
+            if body == b'' and 'emptyValue' in op['binding']:
+                literal = json.dumps(op['binding']['emptyValue'], ensure_ascii=False).encode()
+                if len(literal) > d['limits']['replyBytes']:
+                    raise Refusal('reply-over-bound')
+                return json.loads(literal)
             return json.loads(body)
         if mode == 'text':
             return body.decode('utf-8')
@@ -446,7 +465,7 @@ class Engine:
             raise cls('dispatch-uncertain' if op['write'] else 'transport-closed') from e
         except Refusal as e:
             # A malformed success reply is not evidence that a mutation did not occur.
-            if op['write'] and e.name in ('output-schema', 'app-json-invalid', 'app-content-type', 'reply-over-bound', 'app-response-header-missing', 'app-response-header-invalid'):
+            if op['write'] and e.name in ('output-schema', 'output-unique-key', 'app-json-invalid', 'app-content-type', 'reply-over-bound', 'app-response-header-missing', 'app-response-header-invalid'):
                 raise Uncertain('reply-uninterpretable', e.name) from e
             raise
 

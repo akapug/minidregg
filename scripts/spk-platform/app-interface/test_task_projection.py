@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import unittest
 
-from binding import Engine, Refusal, resolve
+from binding import Engine, Refusal, load, resolve, validate
 
 
 class TaskProjection(unittest.TestCase):
@@ -28,6 +28,29 @@ class TaskProjection(unittest.TestCase):
                 return 200, {'content-type': 'application/json'}, b'{"entries":{"a":42}}'
         with self.assertRaises(Refusal):
             Engine(declaration, InvalidReceiver(), {}).call('file.list', {'name': 'two'})
+
+    def test_unique_by_refuses_duplicate_job_ids_before_auth_or_write(self):
+        declaration = load('prioritize')
+        class Receiver:
+            calls = 0
+            def http(self, request):
+                self.calls += 1
+                raise AssertionError('invalid IDs reached transport')
+        receiver = Receiver()
+        job = {'title': 'one', 'period': 86400000, 'lastDone': None, 'urgencyGrowth': 'linear'}
+        with self.assertRaises(Refusal):
+            Engine(declaration, receiver, {}).call('jobs.replace', {
+                'jobs': [{'k': 1, 'v': job}, {'k': 1, 'v': {**job, 'title': 'two'}}],
+                'expectedVersion': '0'})
+        self.assertEqual(receiver.calls, 0)
+
+    def test_unique_by_scalar_keys_and_malformed_entries(self):
+        declaration = load('prioritize')
+        schema = {'type': 'array', 'uniqueBy': 'id', 'maxItems': 1000}
+        validate(declaration, schema, [{'id': 1}, {'id': '1'}])
+        for entries in [[{'id': 1}, {'id': 1}], [{}], [3], [{'id': True}], [{'id': []}]]:
+            with self.assertRaises(Refusal):
+                validate(declaration, schema, entries)
 
 
 if __name__ == '__main__':

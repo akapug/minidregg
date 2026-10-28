@@ -268,7 +268,8 @@
                         "x-sandstorm-app-data-version"
                       ]
                     }
-                  }
+                  },
+                  "emptyValue": {}
                 },
                 "required": [
                   "protocol",
