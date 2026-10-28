@@ -115,7 +115,15 @@ def grant(target, cap, kind="object"):
     return {"kind": kind, "target": str(target), "capability": str(cap)}
 
 
-def discover_profile(root, config, grains, artifacts, broker="/run/mini-spk-broker.sock", result_path=None, init_path=None):
+def broker_endpoint(grains):
+    """The Store's broker socket as spk-host's broker_endpoint::resolve fixes it: <grains>/runtime-<store>/broker.sock,
+    the Store id being the grains root's own name. There is no other endpoint and no default."""
+    grains = Path(grains)
+    require(re.fullmatch("[0-9a-f]{16}", grains.name) is not None, "grains root is not named by its Store id")
+    return grains / f"runtime-{grains.name}" / "broker.sock"
+
+
+def discover_profile(root, config, grains, artifacts, broker=None, result_path=None, init_path=None):
     """Consume the retained native/profile result, without deriving Store identity."""
     result_path = result_path or root / "evidence/profile-result.json"
     result = load(result_path)
@@ -140,7 +148,9 @@ def discover_profile(root, config, grains, artifacts, broker="/run/mini-spk-brok
     for role, path_field, hash_field in [("host","miniHost","miniHostSha256"),("spkHost","spkHost","spkHostSha256")]:
         require(profile.get(path_field) == artifacts[role]["path"] and profile.get(hash_field) == artifacts[role]["sha256"],
                 "profile differs from pinned candidate artifacts")
-    require(all(value.get("brokerSocket","/run/mini-spk-broker.sock") == broker
+    broker = str(broker_endpoint(grains)) if broker is None else broker
+    require(broker == str(broker_endpoint(grains)), "fixture broker endpoint is not the Store's runtime socket")
+    require(all(value.get("brokerSocket") == broker
                 for value in [result,initialized,profile]), "retained native broker endpoint differs from fixture pin")
     return state, profile_path, profile
 
@@ -227,7 +237,7 @@ class Fixture:
         self.m = self.f["artifacts"]
         for a in self.m.values():
             require(sha(a["path"]) == a["sha256"], "candidate artifact changed")
-        self.state, self.profile, _ = discover_profile(self.root,self.config,absolute(self.f["grainsRoot"]),self.m,self.f.get("brokerSocket","/run/mini-spk-broker.sock"),
+        self.state, self.profile, _ = discover_profile(self.root,self.config,absolute(self.f["grainsRoot"]),self.m,self.f.get("brokerSocket"),
             absolute(attached["profileResult"]) if attached else None,
             absolute(attached["initStoreResult"]) if attached else None)
         require(str(self.state) == self.f["state"] and str(self.profile) == self.f["profilePath"],
@@ -655,14 +665,14 @@ def prepare(path):
     lease = int(c.get("leaseSeconds",120))
     require(lease > 0, "positive lease required")
     grains = absolute(c["grainsRoot"])
-    broker = str(absolute(c.get("brokerSocket","/run/mini-spk-broker.sock")))
-    require(broker in ("/run/mini-spk-broker.sock",str(grains/"broker.sock")), "isolated broker must belong to grains root")
+    broker = str(broker_endpoint(grains))
+    require(str(absolute(c.get("brokerSocket",broker))) == broker, "isolated broker must be the Store runtime socket")
     root.mkdir(mode=0o700)
     (root/"hooks").mkdir(mode=0o700)
     save(root/"input.json",c)
     save(root/"manifest.json",m)
     save(root/"source-inputs.json",{str(HERE/name):sha(HERE/name) for name in ["grain-journey.sh","grain-store.sh","ws-continuity-fixture.py","ws-continuity-regressions.py","ws-continuity-supervision.py"]})
-    env = dict(os.environ, BIN=str(bindir),GRAIN_HOST=m["host"],GRAINS_ROOT=str(grains),BROKER_SOCKET="" if broker == "/run/mini-spk-broker.sock" else broker,SPK=str(spk),GRAIN_A=prefix,KIND_A="web",ROLE_BASIS_A='{"type":"allAccess"}')
+    env = dict(os.environ, BIN=str(bindir),GRAIN_HOST=m["host"],GRAINS_ROOT=str(grains),BROKER_SOCKET=broker,SPK=str(spk),GRAIN_A=prefix,KIND_A="web",ROLE_BASIS_A='{"type":"allAccess"}')
     def phases(*names):
         p = root/("phase-"+"-".join(names))
         rc,_,_=logged_run([str(HERE/"grain-journey.sh"),"phase",str(root),*names],p,env=env,timeout=7200)
