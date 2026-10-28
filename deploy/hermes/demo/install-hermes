@@ -122,7 +122,8 @@ step_preflight() {
   # the broker refuses a call above the row's per-call cap.
   jq -e --arg r "$POOL_ROW" '.providers[] | select(.name == $r) | (.caps.perCall | tonumber) >= 1024' "$PTABLE" >/dev/null \
     || die "pool row $POOL_ROW caps.perCall is below the controller's maxOutputTokens 1024"
-  as_op "$GRAIN" provider-table check "$PTABLE" >/dev/null || die "grain-runtime refuses $PTABLE"
+  # As root: the table is root-owned and grain-runtime trusts its own euid as owner (production loads with owner 0).
+  "$GRAIN" provider-table check "$PTABLE" >/dev/null || die "grain-runtime refuses $PTABLE"
   [ "$("$GRAIN" --controller-manager-protocol)" = mini-controller-manager-v1 ] || die "grain-runtime lacks the controller-manager contract"
   ! grep -rqs '^RestrictSUIDSGID=yes' /etc/systemd/system/mini-grain-controller@.service /etc/systemd/system/mini-grain-controller@.service.d \
       /etc/systemd/system/mini-grain-resident@.service /etc/systemd/system/mini-grain-resident@.service.d \

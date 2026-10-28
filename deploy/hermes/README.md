@@ -621,7 +621,7 @@ tools-run.sh with `C=` that candidate, J14_TOOLS=1 J14_AWAIT=1, root `hroot-q2`;
   **Infra landed items 2-4 in demo-vm 4138262** (broker provider peers; `demo-resident-walls`
   for the user@ drop-in, slice wall and linger, run by step 9 after `install-hermes preflight`;
   /var/lib/mini/glm allowed). **Item 1 is open** (controller-entry.py per-registration service uid,
-  with the next infra lane): until it lands, registering a controller under mini-h-* is refused, so
+  with infra a298031c78e86d651, spec sent): until it lands, registering a controller under mini-h-* is refused, so
   install-hermes's `controller` step cannot pass on the box. **Infra's batch was sent to ae95a4eac63b0715e**: users, the route unit text, the four infra
   items, this measurement, and an interim quota of 48/56 MiB and 10K/12K inodes pending ember. The
   32 MiB / 2,000-inode target is not met yet. Owed: compact the room workspace residue (the latest
