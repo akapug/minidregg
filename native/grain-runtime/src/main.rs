@@ -13623,6 +13623,16 @@ impl Runtime {
         let unit = self.journal.child.as_ref().and_then(|c| c.unit.clone());
         let child = self.child.as_ref().ok_or("no live owned child")?;
         let pgid = child.id() as i32;
+        // A metered worker's gate records its CPU only when the worker exits
+        // by itself; this stop ends the unit, and the gate with it. Record the
+        // unit cgroup's CPU first, before any signal ends the unit, so the
+        // resident pays what the sandbox used rather than the pessimistic
+        // wall-time charge.
+        if let Some(unit) = &unit {
+            if let Err(error) = record_unit_cpu(&self.config.state_dir, unit) {
+                eprintln!("grain-runtime: worker {unit} CPU not recorded before stop ({error}); the pessimistic charge applies");
+            }
+        }
         // The leader remains unreaped until group cleanup, so its PID cannot
         // be recycled while signals address the process group.
         if group_has_live_member(pgid)? {
@@ -13638,13 +13648,6 @@ impl Runtime {
                 return Err("scoped worker has no durable launch gate".into());
             }
             self.launch_gate(&record.program, unit, "fence")?;
-            // A metered worker's gate records its CPU only when the worker
-            // exits by itself; this stop kills the gate with it. Record the
-            // unit's systemd CPU accounting first, so the resident pays what
-            // the sandbox used rather than the pessimistic wall-time charge.
-            if let Err(error) = record_unit_cpu(&self.config.state_dir, unit) {
-                eprintln!("grain-runtime: worker {unit} CPU not recorded before stop ({error}); the pessimistic charge applies");
-            }
             kill_unit(unit)?;
         }
         for _ in 0..10 {
