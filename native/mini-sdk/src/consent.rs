@@ -23,8 +23,8 @@
 //! a time. Each connection's first frame is preceded by 233 (`ConsentAnchor.recheckStore`), so a
 //! rolled-back Store refuses the next command as a new provider would. A refusal there, or a dead
 //! provider, ends the resident; the next command starts a new one from the retained anchor. Its
-//! socket lives in the owner-private anchor directory (or a short private runtime directory
-//! when that path is too long), and both ends check the peer is this user.
+//! socket lives in the owner-private anchor directory (Linux uses a directory descriptor
+//! when that address is too long), and both ends check the peer is this user.
 //!
 //! **The resident codec Host** ([`ResidentKind::Codec`]) is the same machinery holding the
 //! member's storeless codec image (`HOST SETTINGS codec`, [`crate::local`]) instead of a consent
@@ -280,15 +280,30 @@ fn resident_file(kind: ResidentKind, dir: &Path, binding: &[u8; 32], suffix: &st
     dir.join(format!("{}-{}.{suffix}", kind.prefix(), crate::hex::encode(&binding[..16])))
 }
 
-/// Keep persistent anchors, locks, logs and PID records in their selected directory.
-/// Only a long socket address uses a short owner-private runtime namespace.
-fn resident_socket(kind: ResidentKind, anchors: &Path, binding: &[u8; 32]) -> Result<PathBuf> {
-    use sha2::Digest;
+/// Long Linux addresses traverse an open anchor directory through procfs. The
+/// socket node stays beside the anchors, so PrivateTmp cannot split discovery.
+/// Keep the descriptor alive while binding, connecting and cleaning the socket.
+fn resident_socket(kind: ResidentKind, anchors: &Path, binding: &[u8; 32]) -> Result<(PathBuf, Option<fs::File>)> {
     use std::os::unix::ffi::OsStrExt;
-    use std::os::unix::fs::{DirBuilderExt, MetadataExt};
     let ordinary = resident_file(kind, anchors, binding, "sock");
-    // Leave room for the terminating NUL on both Linux and macOS.
-    if ordinary.as_os_str().as_bytes().len() < 100 { return Ok(ordinary); }
+    if ordinary.as_os_str().as_bytes().len() < 100 { return Ok((ordinary, None)); }
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::fs::OpenOptionsExt;
+        let directory = OpenOptions::new().read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(anchors).map_err(|e| format!("resident anchor directory: {e}"))?;
+        if !crate::private::dir_ok(&directory.metadata().map_err(|e| e.to_string())?) {
+            return Err("resident anchor directory must be owner-private".into());
+        }
+        let alias = PathBuf::from(format!("/proc/self/fd/{}", directory.as_raw_fd()));
+        return Ok((resident_file(kind, &alias, binding, "sock"), Some(directory)));
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        use sha2::Digest;
+        use std::os::unix::fs::{DirBuilderExt, MetadataExt};
     let root = PathBuf::from(format!("/tmp/mipc-{}", unsafe { libc::geteuid() }));
     let private_dir = |path: &Path| -> Result<()> {
         match fs::DirBuilder::new().mode(0o700).create(path) {
@@ -313,7 +328,8 @@ fn resident_socket(kind: ResidentKind, anchors: &Path, binding: &[u8; 32]) -> Re
     let digest = hash.finalize();
     let directory = root.join(crate::hex::encode(&digest[..16]));
     private_dir(&directory)?;
-    Ok(resident_file(kind, &directory, binding, "sock"))
+    Ok((resident_file(kind, &directory, binding, "sock"), None))
+    }
 }
 
 /// A connection to a listening resident provider of this user, or an error.
@@ -390,7 +406,7 @@ fn resident_connection(kind: ResidentKind, executable: &Path, settings_bytes: &[
     use std::os::unix::process::CommandExt;
     let dir = private_anchor_dir()?;
     let binding = binding(executable, settings_bytes)?;
-    let socket = resident_socket(kind, &dir, &binding)?;
+    let (socket, _socket_directory) = resident_socket(kind, &dir, &binding)?;
     let stream = match resident_stream(&socket) {
         Ok(stream) => stream,
         Err(_) => {
@@ -469,7 +485,7 @@ pub fn serve_resident_kind(kind: ResidentKind, dir: &Path, executable: PathBuf, 
     if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
         return Ok(()); // another resident of this kind holds this binding
     }
-    let socket = resident_socket(kind, dir, &binding)?;
+    let (socket, _socket_directory) = resident_socket(kind, dir, &binding)?;
     crate::private::clear_stale_socket(&socket)?;
     let session = kind.start(dir, executable, &settings, settings_bytes)?;
     let listener = std::os::unix::net::UnixListener::bind(&socket)
@@ -932,28 +948,65 @@ mod tests {
 
     #[test]
     fn resident_socket_namespaces_are_short_private_and_anchor_specific() {
-        use std::os::unix::ffi::OsStrExt;
-        use std::os::unix::fs::{MetadataExt, symlink};
+        use std::os::unix::fs::symlink;
         let dir = stub_dir("long-ipc");
         let first = dir.join("a".repeat(180));
         let second = dir.join("b".repeat(180));
-        fs::create_dir(&first).unwrap(); fs::create_dir(&second).unwrap();
+        for path in [&first, &second] {
+            fs::create_dir(path).unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+        }
         let binding = [7u8; 32];
-        let socket = resident_socket(ResidentKind::Codec, &first, &binding).unwrap();
-        let other = resident_socket(ResidentKind::Codec, &second, &binding).unwrap();
-        assert!(socket.as_os_str().as_bytes().len() < 100);
+        let (socket, _held) = resident_socket(ResidentKind::Codec, &first, &binding).unwrap();
+        let (other, _other_held) = resident_socket(ResidentKind::Codec, &second, &binding).unwrap();
+        assert!(socket.as_os_str().len() < 100);
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        assert!(resident_file(ResidentKind::Codec, &first, &binding, "sock").exists());
+        assert!(!resident_file(ResidentKind::Codec, &second, &binding, "sock").exists());
         assert_ne!(socket, other);
-        assert_eq!(fs::symlink_metadata(socket.parent().unwrap()).unwrap().mode() & 0o777, 0o700);
-        assert_ne!(socket, resident_socket(ResidentKind::Consent, &first, &binding).unwrap());
-        fs::set_permissions(socket.parent().unwrap(), fs::Permissions::from_mode(0o755)).unwrap();
+        drop(listener); fs::remove_file(&socket).unwrap();
+        fs::set_permissions(&first, fs::Permissions::from_mode(0o755)).unwrap();
         assert!(resident_socket(ResidentKind::Codec, &first, &binding).is_err());
-        fs::set_permissions(socket.parent().unwrap(), fs::Permissions::from_mode(0o700)).unwrap();
-        fs::remove_dir(socket.parent().unwrap()).unwrap();
-        symlink(&second, socket.parent().unwrap()).unwrap();
+        fs::remove_dir(&first).unwrap();
+        symlink(&second, &first).unwrap();
         assert!(resident_socket(ResidentKind::Codec, &first, &binding).is_err());
-        fs::remove_file(socket.parent().unwrap()).unwrap();
-        fs::remove_dir(other.parent().unwrap()).unwrap();
+        fs::remove_file(&first).unwrap();
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn resident_socket_cross_private_tmp_reaches_the_same_anchor_node() {
+        if let Some(anchors) = std::env::var_os("MINI_IPC_PRIVATE_TMP_TEST") {
+            let (socket, _held) = resident_socket(ResidentKind::Codec, Path::new(&anchors), &[9; 32]).unwrap();
+            let mut stream = resident_stream(&socket).unwrap();
+            stream.write_all(b"same-anchor").unwrap();
+            return;
+        }
+        let available = Command::new("unshare").args(["-Ur", "-m", "true"]).status();
+        if !available.is_ok_and(|status| status.success()) {
+            eprintln!("cross-PrivateTmp control unavailable: user mount namespaces refused");
+            return;
+        }
+        // Outside /tmp: the child deliberately replaces its entire /tmp mount.
+        let dir = std::env::current_dir().unwrap().join(format!(".ipc-private-tmp-{}", std::process::id()));
+        fs::create_dir(&dir).unwrap();
+        let anchors = dir.join("anchors-".to_owned() + &"long".repeat(40));
+        fs::create_dir(&anchors).unwrap();
+        fs::set_permissions(&anchors, fs::Permissions::from_mode(0o700)).unwrap();
+        let (socket, _held) = resident_socket(ResidentKind::Codec, &anchors, &[9; 32]).unwrap();
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let output = Command::new("unshare").args(["-Ur", "-m", "sh", "-c",
+            "mount --make-rprivate / && mount -t tmpfs tmpfs /tmp && exec \"$@\"", "ipc-control"])
+            .arg(std::env::current_exe().unwrap())
+            .args(["--exact", "consent::tests::resident_socket_cross_private_tmp_reaches_the_same_anchor_node", "--nocapture"])
+            .env("MINI_IPC_PRIVATE_TMP_TEST", &anchors).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut bytes = [0; 11]; stream.read_exact(&mut bytes).unwrap();
+        assert_eq!(&bytes, b"same-anchor");
+        drop(listener); fs::remove_file(&socket).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     /// One provider for every connection of its binding; each connection's first frame is
@@ -971,8 +1024,9 @@ mod tests {
         fs::write(&settings, b"{}").unwrap();
         let anchors = dir.join("anchors-".to_owned() + &"long".repeat(40));
         fs::create_dir(&anchors).unwrap();
+        fs::set_permissions(&anchors, fs::Permissions::from_mode(0o700)).unwrap();
         let binding = binding(&provider, b"{}").unwrap();
-        let socket = resident_socket(ResidentKind::Consent, &anchors, &binding).unwrap();
+        let (socket, _socket_directory) = resident_socket(ResidentKind::Consent, &anchors, &binding).unwrap();
         assert!(socket.as_os_str().len() < 100);
         let (a, p, s) = (anchors.clone(), provider.clone(), settings.clone());
         let daemon = std::thread::spawn(move || serve_resident(&a, p, s, std::time::Duration::from_millis(400)));
@@ -1024,8 +1078,9 @@ mod tests {
         fs::write(&settings, b"{}").unwrap();
         let anchors = dir.join("anchors-".to_owned() + &"long".repeat(40));
         fs::create_dir(&anchors).unwrap();
+        fs::set_permissions(&anchors, fs::Permissions::from_mode(0o700)).unwrap();
         let binding = binding(&host, b"{}").unwrap();
-        let socket = resident_socket(ResidentKind::Codec, &anchors, &binding).unwrap();
+        let (socket, _socket_directory) = resident_socket(ResidentKind::Codec, &anchors, &binding).unwrap();
         assert!(socket.as_os_str().len() < 100);
         assert_ne!(socket, resident_file(ResidentKind::Consent, &anchors, &binding, "sock"), "the codec socket is not the consent socket");
         let (a, h, s) = (anchors.clone(), host.clone(), settings.clone());
