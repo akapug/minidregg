@@ -1,4 +1,4 @@
-# Untouched-areas deputy: state (rewritten whole; 2026-10-28 morning, quiet)
+# Untouched-areas deputy: state (rewritten whole; 2026-10-28 morning, runs on 2d8b7ed54)
 
 Inputs: docs/review/2026-10-27-untouched-areas/{LEAN,NATIVE}.md, docs/review/2026-10-27-blind-spots/BLIND-SPOTS.md Sweep 1.
 Each lane: /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>.
@@ -45,9 +45,9 @@ Sources: docs/APP-MARKET-2026-10-27.md "State at hand-off"; docs/ROWS-OWED.md §
 fn out; private-backend stays; Effects/ registry is Phase 3 (EFFECTS.md); dues and six more ride the effect Plan; DreggNet lease cluster parked; Contracts Cuts/Snapshot/Refinements/Futures kept; Pred BoundedQuantifiedView/CoordinationDial kept; twin conflict on un-pb-twins resolved to un-pb-wal 68d9f28e's design (82f3710b).
 
 ## Coordinator status
-The coordinator has the whole batch (b3/b5/b7/b8 recipes, app-market-w11 d5b8b7ac6 on main 1b2764235, shared-names e4acc9df0 on main 18f44f8db, tale-welcome, un-effects-rows 20f28ac31, un-pb-helpers 353a6d11d); do not resend it. Ruling: quiet, no faeries running, until the integrator names the candidate carrying 25cfb86bd and 621aded18; the next report carries that run's results.
+Candidate 2d8b7ed54 (/build/candidates/2d8b7ed544100acfaeb9ff2f9b597c31b8cb81e6, READY 05:48) carries 25cfb86bd, 621aded18, e4acc9df0, b3/b5/b7/b8, un-tale-welcome. Running on it now (one run each, fresh worlds, off the integrator's slots): b3 a85d12892ea6de3ca, b5 a0ef59eabda7075b4, b7 abf203f357754001b, b8 a13f0bc9626b1320a, japps co-edit a4e312352a7091f59, jtemplates a852f5df40229de24. The next report carries their results and the FEATURED additions.
 
 ## Next three
-1. On the first candidate carrying 25cfb86bd: tell the three market faeries and a4e312352a7091f59 to run; read the validator's batch tables; fix reds; add every green app to FEATURED.
+1. Read the six runs on 2d8b7ed54 and the validator's batch tables; fix reds (recipes or spk-host); add every app green on lifecycle + write to FEATURED in apps.rs; tell the coordinator when DDP can rerun.
 2. b5 (e1458689a) and b8 (bec955336) recipes are on main; they run on the candidate along with jtemplates (e4acc9df0) and japps.
 3. Owed after the demo: revive Effects/ so transfer/commit come from the derivation engine (EFFECTS.md); private-backend P6 lost reply; the child() twin check.
