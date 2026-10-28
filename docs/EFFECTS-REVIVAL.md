@@ -311,27 +311,50 @@ detached.  It writes `rebuild.pid` and `rebuild.log`, builds kernels, then `lake
 Lean never runs on the Mac.
 
 **Owed, in order.**
-1. **Doc-write fixture re-recording** (the integrator reassigned it here on 10-28, from
-   candidate `349e59ef1`, the post-conversion, post-M2 build).  No Revival proof imports a
-   fixture, so `Effects` is unaffected (it is green on main `5e819cb1d`).  State:
-   - The acceptance world is recorded at `/build/lanes/effects-revival-fixture/run-349e59ef1`
-     on dregg-build, copied to `/tank/lanes/effects-revival/world-349e59ef1` on hbox.  A
-     verifier built from `native/credential-signature-verifier` is at
-     `/tank/lanes/effects-revival/target/release/`; the candidate's binary needs glibc 2.41,
-     which hbox lacks.
-   - `gen.sh` (PID `gen.pid`, log `gen.log`) runs `generate.sh` in the hbox tree, which got a
-     bare `git init` for the script's `rev-parse`.  The Lean replay is ACCEPTED, record=same,
-     root=Host's.
-   - The generator REFUSES: `write.charge.turnBytes` 1047→1045 and `storageBytes` 1474→1468.
-   - Cause: those two authority lanes are run-dependent.  A second run with the same binaries
-     (`run-349e59ef1-b`) gives a 1015-byte a2 call against 1013, and different record
-     lengths.  Per-run random values are encoded as variable-length naturals.
-   - Options: (c) the authority states those lanes as relations to the run (turnBytes = the
-     call length + 32, storageBytes from the record), a reviewed `Authority-Change` commit
-     to the shared projection; (b) new constants plus a reason (the next regen goes red
-     again); never (a), re-running until it matches.
-   - The ruling was asked of the integrator on 10-28; NativeAcceptedFixture likely shares the
-     defect.  After the fixture lands, send the integrator one sha.
+1. **Both recorded fixtures, with run-relative charge lanes** (the integrator's ruling (c),
+   10-28; the coordinator is copied).  Deliverable: ONE sha, built on a box with
+   `lake build Fixtures`, sent to the integrator (`a34bdb948f1cf4796`).  Until then the umbrellas
+   stage is non-fatal.
+   - **Why.** A second acceptance run with the same 349e59ef1 binaries gives different byte
+     counts: an a2 call of 1015 bytes against 1013, and record lengths 6396/1881/2192/2538
+     against 6394/1880/2185/2531.  Per-run random values are written as variable-length
+     naturals.  So the hand-written `write.charge.turnBytes = 1047` / `storageBytes = 1474`
+     (doc-write) and `first.charge.storageBytes = 3969` (accepted) are luck.
+     `first.charge.turnBytes = 2000000` is the signed capacity, which is deterministic; check
+     it stays exact.
+   - **The change** (one commit, trailer `Authority-Change: the turn and storage byte lanes
+     measure run-dependent encodings`):
+     - Charge lines today are built in `Fixtures/NativeAcceptedFixtureProjection.lean:169`
+       (`first.charge.*`) and `Fixtures/NativeDocWriteFixtureProjection.lean:62`
+       (`write.charge.*`), both `toString (record.exactCharge lane)` over `lanes`.  Keep every
+       lane exact except the run-dependent ones.
+     - doc-write `turnBytes` becomes a relation line, e.g. `write.charge.turnBytes = call+32`,
+       emitted only when `exactCharge .turnBytes = callBytes.length + 32` (1045 = 1013 + 32),
+       else a line naming both numbers.  The call bytes are the fixture's `callHex` (pass the
+       length into the projection).  The constant 32 must be traced to its source, the signed
+       frame overhead the Host charges.
+     - `storageBytes` (both fixtures) becomes `= legs+images+event`, checked against
+       quantities measured independently of `DeployedCharge.storageCharge`.  That function is
+       `storageOf history creates legs event` (`Kernel/DeployedCharge.lean:61-71`); re-calling it
+       would be the vacuous version.  Use the record's own byte lengths (each leg's encoded
+       bytes, each born/post image's canonical bytes, the event's canonical bytes) and say in a
+       comment which component each is.
+     - The authority texts (`Fixtures/NativeDocWriteFixtureAuthority.lean`,
+       `NativeAcceptedFixtureAuthority.lean`) change those lines to the relation spellings.
+   - **Teeth (required).**  A fixture theorem showing that a `turnBytes` off by one from
+     call+32 is refused by the projection (the relation line does not appear), and the same
+     for storageBytes.  A relation that admits any number would be the vacuous version.
+   - **Re-record both** from candidate `349e59ef1`:
+     - doc-write: the world is ready at `/tank/lanes/effects-revival/world-349e59ef1` (hbox);
+       run `/tank/lanes/effects-revival/gen.sh` again after the projection change.  It uses the
+       hbox-built verifier, because the candidate's binary needs glibc 2.41.
+     - accepted: run its acceptance driver (see `scripts/native-accepted-fixture/generate.sh`'s
+       header for the world script) from the same candidate on dregg-build in your own run
+       directory, copy the world to hbox, run that `generate.sh`.
+     - The hbox tree (main 5e819cb1d, no .lean change since 349e59ef1) has every dependency
+       built and a bare `git init` for the scripts' `rev-parse`.
+     - The re-recorded data files and the projection/authority edits are .lean changes: build
+       `Fixtures` on hbox (`rebuild.sh Fixtures`), commit named files, push, send the sha.
 2. **The migration commit** (§5 step 1; post-demo; prepare, never land without the
    coordinator's word).  The gate is `HostKeystone` and `HostLegacyCensus` (both provable
    only after it) plus the already-proved `PrepareFactors`.  Its shape:
