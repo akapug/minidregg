@@ -14512,6 +14512,9 @@ impl Runtime {
         if invocation.is_prompt() && (self.journal.resident_delivery.is_some() || self.journal.resident_completion.is_some()) {
             return Err("resident final delivery remains pending; drain it without another model turn".into());
         }
+        // The previous prompt is delivered and completed: its history may
+        // compact now (after its own record, its completion was still due).
+        if invocation.is_prompt() { self.compact_history(); }
         if let Some((resident_id,digest))=invocation.resident_identity() {
             resident_origin::validate(resident_id,digest,prompt)?;
             if self.config.state_dir.join(format!("resident-origin-id-{resident_id}.json"))
@@ -17491,11 +17494,23 @@ fn prove_controller_unit(task: &str) -> Result<()> {
 fn record_unit_cpu(state_dir: &Path, unit: &str) -> Result<()> {
     let path = state_dir.join(format!("{unit}.cpu"));
     if path.try_exists().map_err(|e| e.to_string())? { return Ok(()); }
+    // The unit cgroup's cpu.stat usage_usec, as the gate reads it (it counts
+    // every descendant, exited ones too); systemd's CPUUsageNSec is unset
+    // when the user manager keeps no CPU accounting.
     let output = deadline::output(systemd_manager::worker_command(unit)?
-        .args(["show", "-p", "CPUUsageNSec", "--value", &format!("{unit}.service")]), deadline::MANAGER_QUERY)
-        .map_err(|e| deadline::describe("worker CPU accounting", e))?;
-    let text = String::from_utf8(output.stdout).map_err(|e| e.to_string())?;
-    let nsec = text.trim().parse::<u64>().map_err(|_| format!("worker CPU accounting unavailable: {:?}", text.trim()))?;
+        .args(["show", "-p", "ControlGroup", "--value", &format!("{unit}.service")]), deadline::MANAGER_QUERY)
+        .map_err(|e| deadline::describe("worker cgroup", e))?;
+    let group = String::from_utf8(output.stdout).map_err(|e| e.to_string())?.trim().to_owned();
+    let relative = Path::new(&group).strip_prefix("/").map_err(|_| format!("worker cgroup unavailable: {group:?}"))?;
+    if relative.components().any(|c| !matches!(c, std::path::Component::Normal(_)))
+        || relative.file_name().and_then(|n| n.to_str()) != Some(&format!("{unit}.service")) {
+        return Err(format!("worker cgroup does not name its unit: {group:?}"));
+    }
+    let stat = fs::read_to_string(Path::new("/sys/fs/cgroup").join(relative).join("cpu.stat"))
+        .map_err(|e| format!("worker cpu.stat: {e}"))?;
+    let usec = stat.lines().find_map(|l| l.strip_prefix("usage_usec ")).and_then(|n| n.trim().parse::<u64>().ok())
+        .ok_or("worker cpu.stat has no usage_usec")?;
+    let nsec = usec.saturating_mul(1000);
     let temporary = path.with_extension("cpu.tmp");
     let mut file = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temporary)
         .map_err(|e| format!("cpu record: {e}"))?;

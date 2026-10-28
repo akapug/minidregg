@@ -576,13 +576,24 @@ tools-run.sh with `C=` that candidate, J14_TOOLS=1 J14_AWAIT=1, root `hroot-q2`;
   branch (hermes-test-provider `sandbox_reply_for` keys on `selectedRequest.text` containing
   "sandbox"). Look at the resident's request selection after the nogrant pass
   (`resident/requests.json` in the run's g/state).
-- run 4 (`hb-q2-4`, PID file `/build/lanes/hermes-tier-run/hb-q2-4.pid`): filtered tests, then the
-  same J14 on 1d947aa9. Its J5 red is a stale harness (a tree before rows-ledger 0a05ab6ba;
-  main's journey.sh and journey-stranger.py give J5 8/8 on 0ce31391). Read its J14 rows only.
-- From now on (coordinator): every J14 pass runs from main's scripts, and from the next candidate's
-  source (it carries the install fix 25cfb86bd and the consent fix) against that candidate's
-  binaries. lane/hermes-b equals main at bbbc8277; check the warm `hermes-tier` tree out at
-  that candidate's sha before the next run.
+- run 4 (`hb-q2-4`, 0ce31391, 132/149): the CPU record still failed (systemd CPUUsageNSec
+  "[not set]"), so the charge was again 180 turns; await rows refused "this deployment registers no
+  Objective policy"; compaction never ran (g 65 MiB / 13,745 inodes); host ops as run 2 plus nothing
+  new. Fixed in 7a831d07: J14_AWAIT pins the Objective policy, the pre-kill CPU record reads
+  the unit cgroup's cpu.stat, compaction also runs at the next prompt's start (right after a
+  record the resident completion is still due).
+  **Still open, undiagnosed:** the tools prompt's brief does not contain bob's sandbox ask at all
+  (no "sandbox" text in resident-tools.jsonl; resident/requests.json shows pending [] and three
+  completed requests), so the test provider never takes its sandbox branch. Check whether bob's
+  `ask lab ... in the sandbox` line reaches the resident's request scan (cursors per author in
+  resident/requests.json) before the tools pass.
+- run 5 (`hb-q2-5`, candidate 2d8b7ed54 = main with hermes-b, fresh genesis; tree lane/hermes-b
+  7a831d07 = main + the fixes; PID file `/build/lanes/hermes-tier-run/hb-q2-5.pid`): filtered
+  tests then J14_TOOLS+J14_AWAIT. Read every row; take footprint.tsv (post-compaction) and
+  host-ops.txt (narrow `RESIDENT_OPERATIONS` to the used set plus the await rows' ops); then the
+  infra batch to ae95a4eac63b0715e.
+- Every J14 pass runs from main's scripts and a candidate's source (coordinator); a J5 red from an
+  older tree is a stale harness.
 
 **Owed:**
 - Run J14_TOOLS and J14_AWAIT on a candidate carrying bc88a5ab and this lane (L4b quest 2:
