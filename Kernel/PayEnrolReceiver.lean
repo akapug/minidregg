@@ -641,13 +641,13 @@ structure EnrolLegs (directory : LoadedDirectory durable)
   bornLineage : ResourceBirthPolicyController.Concrete.BornLineage
     (ResourceBirthPolicyController.Concrete.placementLineage authority.snapshot.cell) descriptor
   keyFresh : KeyFresh authority.snapshot (enrolKey deployment authority plan)
-  observeReady : GrantReady authority.snapshot (enrolObserve deployment profile ambient authority plan)
+  observeReady : GrantReady authority.snapshot (enrolObserve deployment ambient authority plan)
   entriesDistinct : ((authorityEntries descriptor (enrolKey deployment authority plan)
-    (enrolObserve deployment profile ambient authority plan)).map Sigma.fst).Nodup
+    (enrolObserve deployment ambient authority plan)).map Sigma.fst).Nodup
   authorityValidated : ValidatedPatch AuthorityMaterializer authority.snapshot.cell
     authority.snapshot.cell.root
     (assignAll authority.snapshot.logical (authorityEntries descriptor
-      (enrolKey deployment authority plan) (enrolObserve deployment profile ambient authority plan)))
+      (enrolKey deployment authority plan) (enrolObserve deployment ambient authority plan)))
   allocated : ResourceBirthController.Allocated Registry directory.directory descriptor
   resources : CanonicalResourceKernel.AcceptedBatch book.payload
     (enrolBatch tariff ambient.tariff.collector plan descriptor)
@@ -661,7 +661,7 @@ theorem EnrolLegs.sound {directory : LoadedDirectory durable}
       legs.descriptor.auxiliaryCreates = legs.grants.auxiliaryCreates ∧
       KeyFresh authority.snapshot (enrolKey deployment authority plan) ∧
       ((authorityEntries legs.descriptor (enrolKey deployment authority plan)
-        (enrolObserve deployment profile ambient authority plan)).map Sigma.fst).Nodup :=
+        (enrolObserve deployment ambient authority plan)).map Sigma.fst).Nodup :=
   ⟨legs.descriptorExact, legs.auxiliaryExact, legs.keyFresh, legs.entriesDistinct⟩
 
 def prepareEnrolLegs (directory : LoadedDirectory durable)
@@ -683,12 +683,12 @@ def prepareEnrolLegs (directory : LoadedDirectory durable)
     (ResourceBirthPolicyController.Concrete.placementLineage authority.snapshot.cell) descriptor) .birthShape
   let key ← require (KeyFresh authority.snapshot (enrolKey deployment authority plan)) .keyTaken
   let observe ← require (GrantReady authority.snapshot
-    (enrolObserve deployment profile ambient authority plan)) .observeGrantTaken
+    (enrolObserve deployment ambient authority plan)) .observeGrantTaken
   let distinct ← require (((authorityEntries descriptor (enrolKey deployment authority plan)
-    (enrolObserve deployment profile ambient authority plan)).map Sigma.fst).Nodup) .authorityEntries
+    (enrolObserve deployment ambient authority plan)).map Sigma.fst).Nodup) .authorityEntries
   match validate AuthorityMaterializer authority.snapshot.cell authority.snapshot.cell.root
       (assignAll authority.snapshot.logical (authorityEntries descriptor
-        (enrolKey deployment authority plan) (enrolObserve deployment profile ambient authority plan)))
+        (enrolKey deployment authority plan) (enrolObserve deployment ambient authority plan)))
       with
   | .rejected _ => throw .validation
   | .accepted validated =>

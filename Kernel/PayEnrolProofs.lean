@@ -186,7 +186,7 @@ theorem enrol_authority_post
     legs.authorityPost.logical =
       setAll authority.snapshot.logical
         (authorityEntries legs.descriptor (enrolKey deployment authority plan)
-          (enrolObserve deployment profile ambient authority plan)) := by
+          (enrolObserve deployment ambient authority plan)) := by
   unfold EnrolLegs.authorityPost
   rw [ValidatedPatch.apply_logical]
   exact run_assignAll _ _
@@ -200,7 +200,7 @@ def enrolGrantFields (deployment : CanonicalCellRegistry.Deployment)
       (ownerGrant ambient.template authority.snapshot.cell ambient.height (enrolIds deployment plan)),
     ResourceBirthAuthority.grantField
       (controlGrant ambient.template authority.snapshot.cell ambient.height (enrolIds deployment plan)),
-    ResourceBirthAuthority.grantField (enrolObserve deployment profile ambient authority plan)]
+    ResourceBirthAuthority.grantField (enrolObserve deployment ambient authority plan)]
 
 def isCapabilityAddress : Address CredentialAuthorityState.layout → Bool
   | ⟨.capability _, _⟩ => true
@@ -211,7 +211,7 @@ grants; its other entries are the account law's policy rows and the key. -/
 theorem enrol_capability_addresses
     (legs : EnrolLegs deployment profile ambient directory authority book tariff price plan) :
     ((authorityEntries legs.descriptor (enrolKey deployment authority plan)
-        (enrolObserve deployment profile ambient authority plan)).map Sigma.fst).filter
+        (enrolObserve deployment ambient authority plan)).map Sigma.fst).filter
           isCapabilityAddress =
       enrolGrantFields deployment profile ambient authority plan := by
   have exact := enrol_descriptor_exact legs
@@ -241,7 +241,7 @@ theorem enrolled_key_has_no_grant_beyond_membership
     (∀ grant ∈ [ownerGrant ambient.template authority.snapshot.cell ambient.height
           (enrolIds deployment plan),
         controlGrant ambient.template authority.snapshot.cell ambient.height (enrolIds deployment plan),
-        enrolObserve deployment profile ambient authority plan],
+        enrolObserve deployment ambient authority plan],
       legs.authorityPost.logical (ResourceBirthAuthority.grantField grant) = some grant.capability) := by
   have exact := enrol_descriptor_exact legs
   have post := enrol_authority_post legs
@@ -259,7 +259,7 @@ theorem enrolled_key_has_no_grant_beyond_membership
     rw [post]
     exact setAll_member authority.snapshot.logical
       (authorityEntries legs.descriptor (enrolKey deployment authority plan)
-        (enrolObserve deployment profile ambient authority plan)) legs.entriesDistinct
+        (enrolObserve deployment ambient authority plan)) legs.entriesDistinct
       (ResourceBirthAuthority.grantEntry grant) (by
         simp only [List.mem_cons, List.not_mem_nil, or_false] at member
         rcases member with rfl | rfl | rfl <;>

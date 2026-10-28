@@ -243,15 +243,15 @@ structure EnrolLegs (directory : LoadedDirectory durable)
     authority.snapshot.authState ambient.height descriptor
   keyFresh : PayEnrolReceiver.KeyFresh authority.snapshot
     (enrolKey deployment authority.snapshot.revision input)
-  observeReady : GrantReady authority.snapshot (enrolObserve deployment profile ambient authority input)
+  observeReady : GrantReady authority.snapshot (enrolObserve deployment ambient authority input)
   entriesDistinct : ((PayEnrolReceiver.authorityEntries descriptor
     (enrolKey deployment authority.snapshot.revision input)
-    (enrolObserve deployment profile ambient authority input)).map Sigma.fst).Nodup
+    (enrolObserve deployment ambient authority input)).map Sigma.fst).Nodup
   authorityValidated : ValidatedPatch AuthorityMaterializer authority.snapshot.cell
     authority.snapshot.cell.root
     (assignAll authority.snapshot.logical (PayEnrolReceiver.authorityEntries descriptor
       (enrolKey deployment authority.snapshot.revision input)
-      (enrolObserve deployment profile ambient authority input)))
+      (enrolObserve deployment ambient authority input)))
   allocated : ResourceBirthController.Allocated Registry directory.directory descriptor
   resources : CanonicalResourceKernel.AcceptedBatch book.payload
     (enrolBatch tariff ambient.tariff.collector input descriptor)
@@ -294,14 +294,14 @@ def prepareEnrolLegs (directory : LoadedDirectory durable)
   let key ← require (PayEnrolReceiver.KeyFresh authority.snapshot
     (enrolKey deployment authority.snapshot.revision input)) .keyTaken
   let observe ← require (GrantReady authority.snapshot
-    (enrolObserve deployment profile ambient authority input)) .observeGrantTaken
+    (enrolObserve deployment ambient authority input)) .observeGrantTaken
   let distinct ← require (((PayEnrolReceiver.authorityEntries descriptor
     (enrolKey deployment authority.snapshot.revision input)
-    (enrolObserve deployment profile ambient authority input)).map Sigma.fst).Nodup) .authorityEntries
+    (enrolObserve deployment ambient authority input)).map Sigma.fst).Nodup) .authorityEntries
   match validate AuthorityMaterializer authority.snapshot.cell authority.snapshot.cell.root
       (assignAll authority.snapshot.logical (PayEnrolReceiver.authorityEntries descriptor
         (enrolKey deployment authority.snapshot.revision input)
-        (enrolObserve deployment profile ambient authority input))) with
+        (enrolObserve deployment ambient authority input))) with
   | .rejected _ => throw .validation
   | .accepted validated =>
     let allocated ← match ResourceBirthController.allocate? Registry directory.directory descriptor with

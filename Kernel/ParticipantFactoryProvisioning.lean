@@ -13,6 +13,7 @@ supplies the remaining permission: reading the factory, which current resource
 birth authoring requires as a signed observation.
 -/
 import Kernel.CapabilityRevocationController
+import Kernel.ResourceBirthPolicyController
 
 namespace Minidregg.Kernel.ParticipantFactoryProvisioning
 
