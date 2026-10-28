@@ -577,8 +577,12 @@ tools-run.sh with `C=` that candidate, J14_TOOLS=1 J14_AWAIT=1, root `hroot-q2`;
   "sandbox"). Look at the resident's request selection after the nogrant pass
   (`resident/requests.json` in the run's g/state).
 - run 4 (`hb-q2-4`, PID file `/build/lanes/hermes-tier-run/hb-q2-4.pid`): filtered tests, then the
-  same J14 on 1d947aa9. Read every row; the J5 red (6/8 stranger attempts rc=3, not refused) is
-  the integrator's.
+  same J14 on 1d947aa9. Its J5 red is a stale harness (a tree before rows-ledger 0a05ab6ba;
+  main's journey.sh and journey-stranger.py give J5 8/8 on 0ce31391). Read its J14 rows only.
+- From now on (coordinator): every J14 pass runs from main's scripts, and from the next candidate's
+  source (it carries the install fix 25cfb86bd and the consent fix) against that candidate's
+  binaries. lane/hermes-b equals main at bbbc8277; check the warm `hermes-tier` tree out at
+  that candidate's sha before the next run.
 
 **Owed:**
 - Run J14_TOOLS and J14_AWAIT on a candidate carrying bc88a5ab and this lane (L4b quest 2:
