@@ -1043,7 +1043,24 @@ impl ProcessWorld {
         if attempt.exists() {
             return Err(format!("birth {name} attempt is uncertain; exact recovery first"));
         }
-        self.grain_op(work, &format!("{name}-reserve"), &self.tool_task, &self.tool_capability, nonce, json!({"type":"reserve","amount":"5"}))?;
+        self.with_reserve(work, name, "5", nonce, || self.birth_session_reserved(work, name, app, session, kind, cap, nonce))
+    }
+
+    /// A reserve on the metered tool task that a refused turn gives back. The reserve law refuses a second
+    /// reserve while one is outstanding on the world's only tool task, so a decided refusal after the reserve
+    /// settles it for 0 and retires the reserve and turn attempts, and the retry plans the turn afresh.
+    fn with_reserve<T>(&self, work: &Path, name: &str, amount: &str, nonce: u64, turn: impl FnOnce() -> Result<T>) -> Result<T> {
+        let (reserve, settle) = (format!("{name}-reserve"), format!("{name}-release"));
+        guarded_reserve(
+            || self.grain_op(work, &reserve, &self.tool_task, &self.tool_capability, nonce, json!({"type":"reserve","amount":amount})),
+            turn,
+            || self.grain_op(work, &settle, &self.tool_task, &self.tool_capability, nonce + 700, json!({"type":"settle","charge":"0"})),
+            || for dir in [&reserve, &settle, &format!("{name}-submit"), &name.to_owned()] { let _ = fs::remove_dir_all(work.join(format!("{dir}-attempt"))); },
+        )
+    }
+
+    fn birth_session_reserved(&self, work: &Path, name: &str, app: &str, session: u64, kind: &str, cap: u64, nonce: u64) -> Result<Value> {
+        let attempt = work.join(format!("{name}-attempt"));
         let (tool, _) = self.query(work, &format!("{name}-tool"), &self.tool_task, &self.tool_capability, nonce + 101, "resource")?;
         let (parent, _) = self.query(work, &format!("{name}-parent"), &self.parent_task, &self.parent_capability, nonce + 102, "resource")?;
         let genesis = read_json(&self.genesis)?;
@@ -1107,6 +1124,19 @@ pub(crate) fn share_delegate_capability(delegated: &Value, app: &str, manager: &
         return Err(format!("shareDelegationRefused: the retained delegation must be a minidregg-delegated-reference-v1 of app {app} to the manager {manager}"));
     }
     Ok(field("capability").to_owned())
+}
+
+/// Reserve, run the turn, and on a refusal give the reserve back (settle for 0) and retire the attempts so a
+/// retry plans afresh. A failed release is reported by name and nothing is retired.
+pub(crate) fn guarded_reserve<T>(reserve: impl FnOnce() -> Result<()>, turn: impl FnOnce() -> Result<T>, release: impl FnOnce() -> Result<()>, retire: impl FnOnce()) -> Result<T> {
+    reserve()?;
+    match turn() {
+        Ok(done) => Ok(done),
+        Err(error) => match release() {
+            Ok(()) => { retire(); Err(format!("{error}; the tool reservation was released")) }
+            Err(failed) => Err(format!("{error}; toolReservationReleaseUndecided: {failed}")),
+        },
+    }
 }
 
 /// The genesis facts a worker session birth cites.
@@ -1202,7 +1232,7 @@ impl World for ProcessWorld {
         let t = work.join(format!("{label}-ticket"));
         private_dir(&t)?;
         if !t.join("issue").join("receipt-anchor.json").exists() {
-            self.grain_op(work, &format!("{label}-ticket-reserve"), &self.tool_task, &self.tool_capability, base + 400, json!({"type":"reserve","amount":"3"}))?;
+            self.with_reserve(work, &format!("{label}-ticket"), "3", base + 400, || -> Result<()> {
             let descriptor = read_json(&pkgdir.join("descriptor-inspection.json"))?;
             let interface = descriptor["interfaces"].as_array().and_then(|i| i.iter().find(|x| x["kind"] == "web")).cloned().ok_or("package descriptor has no web interface")?;
             let m = &self.management_subject;
@@ -1236,6 +1266,8 @@ impl World for ProcessWorld {
                 let _ = self.mini(work, &format!("{label}-ticket-submit"), &["grain-share-issue-submit", "--socket", o, "--attempt", t.join("issue").to_str().unwrap_or("")]);
             }
             self.mini(work, &format!("{label}-ticket-lookup"), &["grain-share-issue-lookup", "--socket", o, "--attempt", t.join("issue").to_str().unwrap_or("")])?;
+            Ok(())
+            }).map_err(|e| { if !t.join("issue").join("submit-marker.json").exists() { let _ = fs::remove_dir_all(t.join("issue")); } e })?;
         }
         // The route request: the management key signs for the grain's guest subject (v1).
         let session_source = work.join(format!("{label}-session-author")).join("source.json");
@@ -1408,6 +1440,21 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_refused_turn_gives_its_reservation_back_and_a_failed_release_is_named() {
+        use std::cell::Cell;
+        let (released, retired) = (Cell::new(0), Cell::new(0));
+        let refused: Result<(), String> = super::guarded_reserve(|| Ok(()), || Err("law-denied".into()), || { released.set(released.get() + 1); Ok(()) }, || retired.set(retired.get() + 1));
+        assert!(refused.unwrap_err().contains("law-denied; the tool reservation was released"));
+        assert_eq!((released.get(), retired.get()), (1, 1));
+        let ok = super::guarded_reserve(|| Ok(()), || Ok(7), || panic!("no release on success"), || panic!("no retire on success"));
+        assert_eq!(ok, Ok(7));
+        let stuck: Result<(), String> = super::guarded_reserve(|| Ok(()), || Err("refused".into()), || Err("undecided".into()), || panic!("nothing retired when the release failed"));
+        assert!(stuck.unwrap_err().contains("toolReservationReleaseUndecided: undecided"));
+        let not_reserved: Result<(), String> = super::guarded_reserve(|| Err("reserve refused".into()), || panic!("no turn"), || panic!("no release"), || {});
+        assert_eq!(not_reserved.unwrap_err(), "reserve refused");
+    }
 
     #[test]
     fn a_share_is_issued_under_the_capability_the_manager_holds() {
