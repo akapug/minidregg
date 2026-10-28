@@ -556,12 +556,12 @@ fn paused_parent_next_generation_policy_includes_three_fixed_workers() {
         local_fixture_host_network: true,
     });
     let workers = runtime.managed_worker_subjects().unwrap();
-    assert_eq!(workers, ["8", "9", "10"]);
+    assert_eq!(workers, ["8", "10", "9"]);
     let next_generation = managed_worker_policy_source("7", &workers, "2");
     assert_eq!(
         next_generation,
         json!({"owner":"7",
-        "workerSubjects":["8","9","10"],"workerGeneration":"2"})
+        "workerSubjects":["8","10","9"],"workerGeneration":"2"})
     );
     assert_ne!(
         next_generation,
@@ -614,6 +614,27 @@ fi
         .replace("\"task\":\"7102\"", "\"task\":\"7101\"");
     assert_ne!(original, patched);
     fs::write(&runtime.config.mini, patched).unwrap();
+    // Fixture authoring preserves exact source bytes; this checks orchestration,
+    // not the native policy compiler (the receiving journey supplies that proof).
+    let legacy = vec!["8".to_owned(), "9".to_owned(), "10".to_owned()];
+    assert_eq!(runtime.managed_worker_policy_orders().unwrap(), vec![workers.clone(), legacy.clone()]);
+    for order in [&workers, &legacy] {
+        let view = json!({"predicate":managed_worker_policy_source("7", order, "1")});
+        runtime.require_managed_worker_policy(&view, &workers, "0", "2").unwrap();
+    }
+    for bad in [
+        managed_worker_policy_source("77", &workers, "1"),
+        managed_worker_policy_source("7", &workers, "9"),
+        managed_worker_policy_source("7", &["10".into(), "8".into(), "9".into()], "1"),
+        managed_worker_policy_source("7", &["8".into(), "10".into()], "1"),
+        managed_worker_policy_source("7", &["8".into(), "10".into(), "9".into(), "11".into()], "1"),
+    ] {
+        assert!(runtime.require_managed_worker_policy(&json!({"predicate":bad}), &workers, "0", "2").is_err());
+    }
+    let mut policy: Value = serde_json::from_slice(&fs::read(state.join("policy-view.json")).unwrap()).unwrap();
+    policy["predicate"] = managed_worker_policy_source("7", &legacy, "1");
+    fs::write(state.join("policy-view.json"), serde_json::to_vec(&policy).unwrap()).unwrap();
+    // A recognized historical ordering is renewed into the canonical birth order.
     runtime.renew_worker_policy(true).unwrap();
     let source_path = fs::read_dir(&state)
         .unwrap()
@@ -626,7 +647,7 @@ fi
         })
         .unwrap();
     let installed: Value = serde_json::from_slice(&fs::read(source_path).unwrap()).unwrap();
-    assert_eq!(installed["workerSubjects"], json!(["8", "9", "10"]));
+    assert_eq!(installed["workerSubjects"], json!(["8", "10", "9"]));
     assert_eq!(installed["workerGeneration"], "2");
     // The re-pin carries the signed view's canonical source, so the Host
     // preserves its non-predicate metadata (30746612).

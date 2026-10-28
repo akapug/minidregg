@@ -13,7 +13,7 @@ fn fixture(tag: &str) -> (PathBuf, Runtime) {
         .unwrap()
         .replace("\"task\":\"7102\"", "\"task\":\"7101\"");
     fs::write(&rt.config.mini, mini).unwrap();
-    fs::write(root.join("sim/status"), b"1").unwrap();
+    fs::write(root.join("sim/status"), b"2").unwrap();
     rt.save().unwrap();
     (root, rt)
 }
@@ -111,7 +111,7 @@ fn startup_readiness_requires_signed_idle_state_and_admits_no_tool() {
         .unwrap();
     assert_eq!(result["type"], "mini-grain-idle-readiness-v1");
     assert_eq!(result["ready"], true);
-    assert_eq!(result["signedTask"]["grain"]["status"], "1");
+    assert_eq!(result["signedTask"]["grain"]["status"], "2");
     assert_eq!(result["signedTask"]["grain"]["reserved"], "0");
     assert!(rt.journal.foreground_attempt.is_none());
     assert!(rt.journal.application_api_attempt.is_none());
@@ -119,11 +119,23 @@ fn startup_readiness_requires_signed_idle_state_and_admits_no_tool() {
     assert!(rt.journal.pending.is_none());
     assert!(rt.journal.parent_hold.is_none());
     assert!(rt.startup_deadline.is_none());
-    fs::write(root.join("sim/status"), b"3").unwrap();
-    assert!(rt
-        .prepare_idle(Instant::now() + Duration::from_secs(30))
-        .unwrap_err()
-        .contains("signed idle"));
+    for (connection, valid_status) in [(Connection::Soft, "2"), (Connection::Hard, "1")] {
+        rt.journal.connection = connection;
+        fs::write(root.join("sim/status"), valid_status).unwrap();
+        assert!(rt.prepare_idle(Instant::now() + Duration::from_secs(30)).is_ok());
+        for wrong in ["0", "1", "2", "3", "4", "5", "6", "7"] {
+            if wrong == valid_status { continue; }
+            fs::write(root.join("sim/status"), wrong).unwrap();
+            assert!(rt.prepare_idle(Instant::now() + Duration::from_secs(30))
+                .unwrap_err().contains("signed idle"), "accepted {wrong} with {:?}", rt.journal.connection);
+        }
+    }
+    // Even an otherwise idle status cannot claim readiness with retained reserve.
+    let mini = fs::read_to_string(&rt.config.mini).unwrap().replace("reserved=0", "reserved=1");
+    fs::write(&rt.config.mini, mini).unwrap();
+    fs::write(root.join("sim/status"), b"1").unwrap();
+    assert!(rt.prepare_idle(Instant::now() + Duration::from_secs(30))
+        .unwrap_err().contains("signed idle"));
     rt.prompt_active = true;
     let before = rt.journal.next_operation_id;
     assert!(rt
