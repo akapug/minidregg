@@ -88,9 +88,13 @@ slides=$("$MINI" apps show --index "$FIXTURE" --verdicts "$W/verdicts" --meta "$
 row "a fetched package's size and class come from the fetcher's meta" "$(grep -q 'class      S' <<<"$slides" && grep -q '16778192 bytes' <<<"$slides" && echo 1 || echo 0)" "$(grep -E 'size|class' <<<"$slides" | tr -s ' ' | tr '\n' ';')"
 
 # ---- signatures: the stream reader's inspect (Mac) and spk-host qualify (box) -----------------
+# On the box the shipped verifier is spk-host qualify (below), so the operator's inspect example,
+# which the candidate does not pack, is the Mac's path only.
 INSPECT=${3:-${INSPECT:-}}
 if [ -z "$INSPECT" ] && [ -x "$BIN/inspect" ]; then INSPECT=$BIN/inspect; fi
-if [ -n "$INSPECT" ] && [ -x "$INSPECT" ]; then
+if [ "$mode" = --box ]; then
+  :
+elif [ -n "$INSPECT" ] && [ -x "$INSPECT" ]; then
   mkdir -p "$W/scratch"
   for pair in "$SLIDES_PKG:$SLIDES_APP" "$TODOS_PKG:$TODOS_APP"; do
     pkg=${pair%%:*} app=${pair##*:}
@@ -140,6 +144,11 @@ if [ "$mode" = --box ]; then
       facilities=$(grep -oE '"saveIdentityCaps":(true|false),"expectAppHooks":(true|false)' <<<"$q" | head -1)
       row "spk-host qualify $pkg -> $want" "$([ "$got" = "$want" ] && echo 1 || echo 0)" "${got:-$(tail -1 "$W/q-$pkg.err" | cut -c1-120)} ${facilities}"
     done
+    cp "$Q/$SLIDES_PKG.spk" "$Q/tampered.spk" && chmod 0600 "$Q/tampered.spk"
+    size=$(stat -c %s "$Q/tampered.spk")
+    printf '\xff' | dd of="$Q/tampered.spk" bs=1 seek=$((size / 2)) conv=notrunc 2>/dev/null
+    if "$BIN/spk-host" qualify --import-profile standard-v1 "$Q/tampered.spk" >/dev/null 2>"$W/q-tampered.err"; then ok=0; else ok=1; fi
+    row "spk-host qualify refuses a tampered copy by name" "$ok" "$(tail -1 "$W/q-tampered.err" | cut -c1-120)"
     rm -rf "$Q"
   else
     row "spk-host present for qualify" 0 "no $BIN/spk-host"
