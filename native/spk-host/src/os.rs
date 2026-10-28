@@ -2,6 +2,7 @@
 //! resident/worker switch only mapped namespace identities and drop every cap.
 //! Host-root volume operations are called by the installed one-shot helper.
 //! `fixture-os` remains disposable modeled receiving, never a release route.
+use crate::io_context::IoContext;
 
 pub(crate) use minidregg_compatible_upgrade_custody::root_owner;
 
@@ -113,7 +114,8 @@ mod real {
     }
 
     fn capability_sets_zero() -> io::Result<bool> {
-        let status = std::fs::read_to_string("/proc/thread-self/status")?;
+        use crate::io_context::IoContext;
+        let status = std::fs::read_to_string("/proc/thread-self/status").ctx("read", &"/proc/thread-self/status")?;
         for field in ["CapInh:", "CapPrm:", "CapEff:", "CapBnd:", "CapAmb:"] {
             let value = status
                 .lines()

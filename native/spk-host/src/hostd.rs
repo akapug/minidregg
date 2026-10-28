@@ -5,6 +5,7 @@
 //! receipt, exact event, and current pending query. In particular, a generic
 //! resource transaction or caller JSON is never enough to start an app.
 
+use crate::io_context::IoContext;
 use crate::agent_api_lifetime_reverse_v3::VerifiedSettlementV3;
 use crate::rpc_adapter::DispatchFence;
 use crate::sandbox::open_protected_directory;
@@ -737,9 +738,9 @@ pub(crate) fn qualification_refuse_spawn(journal: &Path) -> io::Result<()> {
     {
         return Err(invalid("qualification trigger identity refused"));
     }
-    fs::rename(&trigger, journal.join("qualification-fail-spawn-consumed-v1"))?;
-    File::open(app_dir)?.sync_all()?;
-    File::open(journal)?.sync_all()?;
+    fs::rename(&trigger, journal.join("qualification-fail-spawn-consumed-v1")).ctx("rename", &trigger)?;
+    File::open(&app_dir).ctx("open", &app_dir)?.sync_all()?;
+    File::open(&journal).ctx("open", &journal)?.sync_all()?;
     Err(io::Error::other(
         "qualification: unit ExecStart refused after Entered (failed-START fixture)",
     ))
@@ -751,11 +752,11 @@ pub(crate) fn atomic_write_locked(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let directory=path.parent().ok_or_else(|| invalid("atomic custody parent absent"))?;
     let nonce=SystemTime::now().duration_since(UNIX_EPOCH).map_err(|_| invalid("clock before epoch"))?.as_nanos();
     let temporary=directory.join(format!(".record-{}-{nonce}.tmp",std::process::id()));
-    let mut file=OpenOptions::new().write(true).create_new(true).mode(0o600).custom_flags(libc::O_NOFOLLOW).open(&temporary)?;
+    let mut file=OpenOptions::new().write(true).create_new(true).mode(0o600).custom_flags(libc::O_NOFOLLOW).open(&temporary).ctx("open", &temporary)?;
     let result=(|| {
-        file.write_all(bytes)?;file.sync_all()?;fs::rename(&temporary,path)?;File::open(directory)?.sync_all()
+        file.write_all(bytes)?;file.sync_all()?;fs::rename(&temporary,path).ctx("rename", &temporary)?;File::open(&directory).ctx("open", &directory)?.sync_all()
     })();
-    if result.is_err() { let _=fs::remove_file(&temporary); }
+    if result.is_err() { let _=fs::remove_file(&temporary).ctx("remove", &temporary); }
     result
 }
 
@@ -885,7 +886,7 @@ impl Journal {
         // Only root or this operator may own a path component. In particular,
         // an app UID cannot rename an otherwise private journal ancestor.
         for ancestor in directory.ancestors() {
-            let meta = fs::symlink_metadata(ancestor)?;
+            let meta = fs::symlink_metadata(&ancestor).ctx("inspect", &ancestor)?;
             if !meta.is_dir()
                 || meta.file_type().is_symlink()
                 || (!crate::namespace_identity::root_owned(ancestor, &meta) && meta.uid() != uid)
@@ -897,7 +898,7 @@ impl Journal {
             }
         }
         let protected = File::from(open_protected_directory(directory, u32::MAX, false)?);
-        let metadata = fs::metadata(directory)?;
+        let metadata = fs::metadata(&directory).ctx("inspect", &directory)?;
         if metadata.uid() != uid
             || metadata.permissions().mode() & 0o777 != 0o700
             || metadata.dev() != protected.metadata()?.dev()
@@ -937,7 +938,7 @@ impl Journal {
             .create(true)
             .mode(0o600)
             .custom_flags(libc::O_NOFOLLOW)
-            .open(path)?;
+            .open(&path).ctx("open", &path)?;
         let metadata = lock.metadata()?;
         if !metadata.is_file()
             || metadata.nlink() != 1
@@ -1023,11 +1024,11 @@ impl Journal {
             if !crate::dispatch_fence::undecided(&this.directory)?.is_empty() {
                 return Err(invalid("checkpoint dispatch outcome requires exact recovery"));
             }
-            for entry in fs::read_dir(&this.directory)? {
+            for entry in fs::read_dir(&this.directory).ctx("list", &this.directory)? {
                 let path = entry?.path();
                 let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
                 if name.starts_with("dispatch-op-") && name.ends_with(".json") {
-                    let file=OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW).open(&path)?;
+                    let file=OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW).open(&path).ctx("open", &path)?;
                     let mut bytes=Vec::new(); file.take(2049).read_to_end(&mut bytes)?;
                     if bytes.len()>2048 { return Err(invalid("dispatch tombstone exceeds bound")); }
                     let tombstone: DispatchTombstone=serde_json::from_slice(&bytes)?;
@@ -1076,7 +1077,7 @@ impl Journal {
                 }
                 Err(error) if error.kind() == io::ErrorKind::NotFound => {
                     // Losing an established counter must not rearm old IDs.
-                    for entry in fs::read_dir(&this.directory)? {
+                    for entry in fs::read_dir(&this.directory).ctx("list", &this.directory)? {
                         let name = entry?.file_name();
                         let name = name.to_string_lossy();
                         if name.starts_with("dispatch-op-")
@@ -1105,10 +1106,10 @@ impl Journal {
                 .create_new(true)
                 .mode(0o600)
                 .custom_flags(libc::O_NOFOLLOW)
-                .open(&allocated)?;
+                .open(&allocated).ctx("open", &allocated)?;
             writeln!(marker, "{next}")?;
             marker.sync_all()?;
-            File::open(&this.directory)?.sync_all()?;
+            File::open(&this.directory).ctx("open", &this.directory)?.sync_all()?;
             let nonce = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_err(|_| invalid("clock before epoch"))?
@@ -1121,15 +1122,15 @@ impl Journal {
                 .create_new(true)
                 .mode(0o600)
                 .custom_flags(libc::O_NOFOLLOW)
-                .open(&temporary)?;
+                .open(&temporary).ctx("open", &temporary)?;
             let result = (|| {
                 writeln!(file, "{following}")?;
                 file.sync_all()?;
-                fs::rename(&temporary, &path)?;
-                File::open(&this.directory)?.sync_all()
+                fs::rename(&temporary, &path).ctx("rename", &temporary)?;
+                File::open(&this.directory).ctx("open", &this.directory)?.sync_all()
             })();
             if result.is_err() {
-                let _ = fs::remove_file(&temporary);
+                let _ = fs::remove_file(&temporary).ctx("remove", &temporary);
             }
             result?;
             Ok(next.to_string())
@@ -1152,17 +1153,17 @@ impl Journal {
             .create_new(true)
             .mode(0o600)
             .custom_flags(libc::O_NOFOLLOW)
-            .open(self.dispatch_permit_path(identity))?;
+            .open(self.dispatch_permit_path(identity)).ctx("open", &(self.dispatch_permit_path(identity)))?;
         file.write_all(permit)?;
         file.sync_all()?;
-        File::open(&self.directory)?.sync_all()
+        File::open(&self.directory).ctx("open", &self.directory)?.sync_all()
     }
 
     fn verify_dispatch_permit_unlocked(&self, identity: &DispatchIdentity) -> io::Result<()> {
         let file = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW)
-            .open(self.dispatch_permit_path(identity))?;
+            .open(self.dispatch_permit_path(identity)).ctx("open", &(self.dispatch_permit_path(identity)))?;
         let meta = file.metadata()?;
         if !meta.is_file()
             || meta.nlink() != 1
@@ -1196,17 +1197,17 @@ impl Journal {
             .create_new(true)
             .mode(0o600)
             .custom_flags(libc::O_NOFOLLOW)
-            .open(self.active_dispatch_path())?;
+            .open(self.active_dispatch_path()).ctx("open", &(self.active_dispatch_path()))?;
         file.write_all(&bytes)?;
         file.sync_all()?;
-        File::open(&self.directory)?.sync_all()
+        File::open(&self.directory).ctx("open", &self.directory)?.sync_all()
     }
 
     fn read_active_dispatch_unlocked(&self) -> io::Result<DispatchIdentity> {
         let file = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW)
-            .open(self.active_dispatch_path())?;
+            .open(self.active_dispatch_path()).ctx("open", &(self.active_dispatch_path()))?;
         let meta = file.metadata()?;
         if !meta.is_file()
             || meta.nlink() != 1
@@ -1230,8 +1231,8 @@ impl Journal {
         if &self.read_active_dispatch_unlocked()? != identity {
             return Err(invalid("active dispatch marker coordinate drift"));
         }
-        fs::remove_file(self.active_dispatch_path())?;
-        File::open(&self.directory)?.sync_all()
+        fs::remove_file(self.active_dispatch_path()).ctx("remove", &(self.active_dispatch_path()))?;
+        File::open(&self.directory).ctx("open", &self.directory)?.sync_all()
     }
 
     fn read_dispatch_unlocked(&self, identity: &DispatchIdentity) -> io::Result<DispatchTombstone> {
@@ -1239,7 +1240,7 @@ impl Journal {
         let file = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW)
-            .open(self.dispatch_path(identity))?;
+            .open(self.dispatch_path(identity)).ctx("open", &(self.dispatch_path(identity)))?;
         let meta = file.metadata()?;
         if !meta.is_file()
             || meta.nlink() != 1
@@ -1281,10 +1282,10 @@ impl Journal {
                 .create_new(true)
                 .mode(0o600)
                 .custom_flags(libc::O_NOFOLLOW)
-                .open(path)?;
+                .open(&path).ctx("open", &path)?;
             file.write_all(&bytes)?;
             file.sync_all()?;
-            return File::open(&self.directory)?.sync_all();
+            return File::open(&self.directory).ctx("open", &self.directory)?.sync_all();
         }
         let old = self.read_dispatch_unlocked(&tombstone.identity)?;
         if !matches!(
@@ -1307,15 +1308,15 @@ impl Journal {
             .create_new(true)
             .mode(0o600)
             .custom_flags(libc::O_NOFOLLOW)
-            .open(&temporary)?;
+            .open(&temporary).ctx("open", &temporary)?;
         let result = (|| {
             file.write_all(&bytes)?;
             file.sync_all()?;
-            fs::rename(&temporary, path)?;
-            File::open(&self.directory)?.sync_all()
+            fs::rename(&temporary, path).ctx("rename", &temporary)?;
+            File::open(&self.directory).ctx("open", &self.directory)?.sync_all()
         })();
         if result.is_err() {
-            let _ = fs::remove_file(&temporary);
+            let _ = fs::remove_file(&temporary).ctx("remove", &temporary);
         }
         result
     }

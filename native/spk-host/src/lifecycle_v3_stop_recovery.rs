@@ -22,6 +22,7 @@
 //!
 //! Every decision writes `stop-submit-reconciliation-<nonce>.json`.
 
+use crate::io_context::IoContext;
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
 use crate::lifecycle_receipt_lookup::{lookup_view, outcome_receipt, retained};
 use crate::lifecycle_v3_native::{hex, text};
@@ -80,7 +81,7 @@ fn decided(view: &Value, name: String) -> io::Result<Lookup> {
 
 fn record(journal_dir: &Path, value: Value) -> io::Result<()> {
     let mut random = [0u8; 16];
-    File::open("/dev/urandom")?.read_exact(&mut random)?;
+    File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut random)?;
     write_new(
         journal_dir,
         &format!("stop-submit-reconciliation-{}.json", hex(&random)),
@@ -98,7 +99,7 @@ fn receipt_json(receipt: &ExactReceipt) -> Value {
 /// under the journal, fsynced. Nothing is deleted.
 fn set_aside(journal_dir: &Path, label: &str, paths: &[&Path]) -> io::Result<PathBuf> {
     let mut random = [0u8; 16];
-    File::open("/dev/urandom")?.read_exact(&mut random)?;
+    File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut random)?;
     let aside = journal_dir.join(format!("{label}-{}", hex(&random)));
     std::os::unix::fs::DirBuilderExt::mode(&mut fs::DirBuilder::new(), 0o700).create(&aside)?;
     for path in paths {
@@ -106,11 +107,11 @@ fn set_aside(journal_dir: &Path, label: &str, paths: &[&Path]) -> io::Result<Pat
             let name = path
                 .file_name()
                 .ok_or_else(|| invalid("STOP set-aside name absent"))?;
-            fs::rename(path, aside.join(name))?;
+            fs::rename(path, aside.join(name)).ctx("rename", &path)?;
         }
     }
-    File::open(&aside)?.sync_all()?;
-    File::open(journal_dir)?.sync_all()?;
+    File::open(&aside).ctx("open", &aside)?.sync_all()?;
+    File::open(&journal_dir).ctx("open", &journal_dir)?.sync_all()?;
     Ok(aside)
 }
 

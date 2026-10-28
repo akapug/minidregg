@@ -4,6 +4,7 @@
 //! a crash, retained artifacts may resume an already-fsynced Fenced journal
 //! or audit Stopped, but can never mint another fresh callback or fence Running.
 
+use crate::io_context::IoContext;
 use crate::completion_custodian::preflight_custodian;
 use crate::dispatch_author::private_signing_key;
 use crate::dispatch_author::SignerPin;
@@ -61,8 +62,8 @@ fn acquire_run_lock(journal_dir: &Path) -> io::Result<File> {
         .create(true)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(&path)?;
-    let named = fs::symlink_metadata(&path)?;
+        .open(&path).ctx("open", &path)?;
+    let named = fs::symlink_metadata(&path).ctx("inspect", &path)?;
     let opened = lock.metadata()?;
     if !opened.is_file()
         || named.dev() != opened.dev()
@@ -84,7 +85,7 @@ fn acquire_run_lock(journal_dir: &Path) -> io::Result<File> {
             Err(error)
         };
     }
-    let named = fs::symlink_metadata(&path)?;
+    let named = fs::symlink_metadata(&path).ctx("inspect", &path)?;
     if named.dev() != opened.dev() || named.ino() != opened.ino() {
         return Err(invalid("STOP supervisor lock path changed"));
     }
@@ -357,13 +358,13 @@ fn inspect_original(
 
 fn fresh_probe(journal_dir: &Path, label: &str) -> io::Result<PathBuf> {
     let mut random = [0u8; 16];
-    File::open("/dev/urandom")?.read_exact(&mut random)?;
+    File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut random)?;
     Ok(journal_dir.join(format!("{label}-{}", hex(&random))))
 }
 
 fn nonce() -> io::Result<String> {
     let mut bytes = [0u8; 16];
-    File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut bytes)?;
     let number = u128::from_le_bytes(bytes);
     if number == 0 {
         return Err(invalid("STOP report nonce zero"));
@@ -689,14 +690,14 @@ fn report_needs_fresh(directory: &Path) -> io::Result<bool> {
     if !absent(&directory.join("report-source.json"))? {
         return Ok(false);
     }
-    if fs::read_dir(directory)?.next().is_some() {
+    if fs::read_dir(&directory).ctx("list", &directory)?.next().is_some() {
         return Err(invalid(
             "STOP report directory has artifacts but no first source",
         ));
     }
     // An empty directory is the crash point immediately after mkdir; there
     // are no nonce or signed bytes to preserve yet.
-    fs::remove_dir(directory)?;
+    fs::remove_dir(&directory).ctx("remove", &directory)?;
     Ok(true)
 }
 
@@ -903,8 +904,8 @@ fn completion_dir(base: &Path) -> io::Result<(PathBuf, bool)> {
             current = next;
             continue;
         }
-        if fs::read_dir(&current)?.next().is_none() {
-            fs::remove_dir(&current)?;
+        if fs::read_dir(&current).ctx("list", &current)?.next().is_none() {
+            fs::remove_dir(&current).ctx("remove", &current)?;
             return Ok((current, false));
         }
         // Even a complete detached assembly may have become stale if an
@@ -1093,14 +1094,14 @@ fn set_aside_pure_begin(config: &StopConfig, journal_dir: &Path) -> io::Result<(
         return Ok(());
     }
     let mut random = [0u8; 16];
-    File::open("/dev/urandom")?.read_exact(&mut random)?;
+    File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut random)?;
     let aside = journal_dir.join(format!("stop-begin-plan-only-{}", hex(&random)));
-    fs::rename(attempt, &aside)?;
-    File::open(journal_dir)?.sync_all()?;
+    fs::rename(attempt, &aside).ctx("rename", &attempt)?;
+    File::open(&journal_dir).ctx("open", &journal_dir)?.sync_all()?;
     if !absent(&active)? {
-        fs::rename(&active, aside.join("active-marker.json"))?;
-        File::open(&aside)?.sync_all()?;
-        File::open(journal_dir)?.sync_all()?;
+        fs::rename(&active, aside.join("active-marker.json")).ctx("rename", &active)?;
+        File::open(&aside).ctx("open", &aside)?.sync_all()?;
+        File::open(&journal_dir).ctx("open", &journal_dir)?.sync_all()?;
     }
     Ok(())
 }
