@@ -11,8 +11,7 @@ use crate::{
     transition_journal::{Journal, Machine},
 };
 use std::{
-    fs::File,
-    io::{Read, Result},
+    io::Result,
     path::Path,
 };
 pub(crate) fn count(c: &mut Cursor<'_>) -> Result<usize> {
@@ -318,7 +317,7 @@ impl Store {
             }
         } else {
             let mut seed = [0; 32];
-            File::open("/dev/urandom")?.read_exact(&mut seed)?;
+            crate::entropy::os_fill(&mut seed)?;
             self.apply(&commit_event(seed, polys))?;
         }
         self.apply(&EMIT_EVENT)

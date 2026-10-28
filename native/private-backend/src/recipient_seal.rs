@@ -380,7 +380,7 @@ impl HidingDraft {
     ) -> Result<Self> {
         recipient.validate()?;
         let mut hiding_nonce = [0; 32];
-        File::open("/dev/urandom")?.read_exact(&mut hiding_nonce)?;
+        crate::entropy::os_fill(&mut hiding_nonce)?;
         Self::from_retained(party, sequence, message, recipient, hiding_nonce)
     }
     pub(crate) fn from_retained(
@@ -608,7 +608,7 @@ fn load_or_create_wrap(path: &std::path::Path) -> Result<zeroize::Zeroizing<[u8;
         return Err(bad("recipient wrap key missing for an existing key journal"));
     }
     let mut k = zeroize::Zeroizing::new([0u8; 32]);
-    File::open("/dev/urandom")?.read_exact(&mut *k)?;
+    crate::entropy::os_fill(&mut *k)?;
     let tmp = path.with_extension("wrapkey.tmp");
     let _ = std::fs::remove_file(&tmp);
     let mut f = std::fs::OpenOptions::new()
@@ -663,7 +663,7 @@ impl RecipientKeyCustody {
         let key =
             crypto_transit::generate_keypair().map_err(|_| bad("recipient key generation"))?;
         let mut nonce = [0u8; 24];
-        File::open("/dev/urandom")?.read_exact(&mut nonce)?;
+        crate::entropy::os_fill(&mut nonce)?;
         let aad = wrap_aad(&self.wal_id, &epoch, &key.public);
         let wrapped = XChaCha20Poly1305::new((&*self.wrap).into())
             .encrypt(XNonce::from_slice(&nonce), Payload { msg: &key.secret, aad: &aad })

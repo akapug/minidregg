@@ -11,8 +11,7 @@ use crate::{
     transition_journal::{Journal, Machine},
 };
 use std::{
-    fs::File,
-    io::{Read, Result},
+    io::Result,
     path::Path,
 };
 fn put_phase(p: &PhaseMessage, b: &mut Vec<u8>) {
@@ -239,7 +238,7 @@ impl Store {
                 let mut b = vec![0];
                 bytes(m, &mut b);
                 let mut coeff = vec![0u8; 2 * (self.state().f + 1) * 16];
-                File::open("/dev/urandom")?.read_exact(&mut coeff)?;
+                crate::entropy::os_fill(&mut coeff)?;
                 b.extend(coeff);
                 self.apply(&b)?;
             }

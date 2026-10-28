@@ -12,8 +12,7 @@ use crate::{
     transition_journal::{Journal, Machine},
 };
 use std::{
-    fs::File,
-    io::{Read, Result},
+    io::Result,
     path::Path,
 };
 fn put_phase(p: &PhaseMessage, b: &mut Vec<u8>) {
@@ -283,7 +282,7 @@ impl Store {
                 return Err(bad("dZK not dealer"));
             }
             let mut seed = [0; 32];
-            File::open("/dev/urandom")?.read_exact(&mut seed)?;
+            crate::entropy::os_fill(&mut seed)?;
             let mut event = vec![0];
             event.extend(seed);
             Nat::new(polys.len() as u64).put(&mut event);
