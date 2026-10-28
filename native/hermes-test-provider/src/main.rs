@@ -892,12 +892,15 @@ fn digest_covered(text: &str) -> u64 {
 /// author) and carries exactly that one entry, text included, in
 /// `recentMemberEntries` (resident_requests::select); a maintenance brief has
 /// no selection, so no text.
-fn selected_text(brief: &Value) -> &str {
+fn selected_entry(brief: &Value) -> Option<&Value> {
     let selected = &brief["selectedRequest"];
-    if !selected.is_object() { return ""; }
+    if !selected.is_object() { return None; }
     brief["recentMemberEntries"].as_array().into_iter().flatten()
         .find(|e| e["cell"] == selected["cell"] && e["sequence"] == selected["sequence"] && e["author"] == selected["author"])
-        .and_then(|e| e["text"].as_str()).unwrap_or("")
+}
+
+fn selected_text(brief: &Value) -> &str {
+    selected_entry(brief).and_then(|e| e["text"].as_str()).unwrap_or("")
 }
 
 /// The sandbox tools (docs/HERMES-TOOLS-2026-10-27.md §7): when the selected
@@ -1080,7 +1083,7 @@ fn oracle_reply_for(request: &Value, log: &Path) -> Option<Result<(Value, &'stat
     if !issued.iter().any(|id| id == "or-call") {
         let found = content("or-discover");
         let _ = log_event(&log.with_extension("oracle.jsonl"), &json!({"id":"or-discover","content":found,
-            "question":question,"selectedRequest":brief["selectedRequest"],"requestId":request_id}).to_string());
+            "question":question,"selectedRequest":brief["selectedRequest"],"selectedEntry":selected_entry(&brief),"requestId":request_id}).to_string());
         // This deterministic question fixture exercises the declared general
         // query contract. Catalogue search is a metadata substring match, not
         // question routing, and a missing catalogue result cannot invent an ID.
@@ -1091,7 +1094,7 @@ fn oracle_reply_for(request: &Value, log: &Path) -> Option<Result<(Value, &'stat
     let answer = content("or-call");
     let result = room_result(current, "or-call");
     let _ = log_event(&log.with_extension("oracle.jsonl"), &json!({"id":"or-call","content":answer,"result":result,
-        "question":question,"selectedRequest":brief["selectedRequest"],"requestId":request_id}).to_string());
+        "question":question,"selectedRequest":brief["selectedRequest"],"selectedEntry":selected_entry(&brief),"requestId":request_id}).to_string());
     let spoken = result.as_ref().and_then(|r| oracle_answer(r, 0)).unwrap_or(answer);
     Some(Ok((json!({"role":"assistant","content":format!("oracle: {}", clip(&spoken, 1500))}), "stop", "oracle-done".into())))
 }
@@ -1661,10 +1664,25 @@ mod tests {
     fn oracle_fixture_uses_the_general_query_contract_and_preserves_the_answer() {
         use super::*;
         let log = std::env::temp_dir().join(format!("mini-oracle-provider-{}-contract.log", std::process::id()));
+        let brief = |sequence: u64| json!({
+            "me":"8",
+            "selectedRequest":{"binding":{"roomCell":"99"},"cell":"201","sequence":sequence,"author":"20"},
+            "recentMemberEntries":[
+                {"cell":"201","sequence":0,"author":"20","text":"oracle: unselected question"},
+                {"cell":"201","sequence":sequence,"author":"20","text":"oracle: Who wrote Leaves of Grass?"}
+            ]});
         let mut request = json!({"tools": [
             {"function":{"name":"mini_oracle_discover","parameters":{"properties":{"application":{"enum":["oracle-app"]}}}}},
             {"function":{"name":"mini_oracle_call"}}],
-            "messages":[{"role":"user","content":r#"Assignment: {"selectedRequest":{"n":"1","text":"oracle: Who wrote Leaves of Grass?"}}"#}]});
+            "messages":[{"role":"user","content":format!("Assignment: {}", brief(1))}]});
+        let mut foreign = request.clone();
+        let mut unmatched = brief(1);
+        unmatched["selectedRequest"]["author"] = json!("foreign");
+        foreign["messages"][0]["content"] = json!(format!("Assignment: {unmatched}"));
+        assert!(oracle_reply_for(&foreign, &log).is_none());
+        let mut obsolete = request.clone();
+        obsolete["messages"][0]["content"] = json!(r#"Assignment: {"selectedRequest":{"text":"oracle: Who wrote Leaves of Grass?"}}"#);
+        assert!(oracle_reply_for(&obsolete, &log).is_none());
         let discover = oracle_reply_for(&request, &log).unwrap().unwrap().0;
         let args: Value = serde_json::from_str(discover["tool_calls"][0]["function"]["arguments"].as_str().unwrap()).unwrap();
         assert_eq!(args, json!({"application":"oracle-app","operationId":"core.query"}));
@@ -1676,7 +1694,7 @@ mod tests {
         assert_eq!(args["arguments"], json!({"text":"Who wrote Leaves of Grass?"}));
         assert_eq!(oracle_reply_for(&request, &log).unwrap().unwrap().0, invoke);
         let mut later_ask = request.clone();
-        later_ask["messages"][0]["content"] = json!(r#"Assignment: {"selectedRequest":{"n":"2","text":"oracle: Who wrote Leaves of Grass?"}}"#);
+        later_ask["messages"][0]["content"] = json!(format!("Assignment: {}", brief(2)));
         let later = oracle_reply_for(&later_ask, &log).unwrap().unwrap().0;
         let later_args: Value = serde_json::from_str(later["tool_calls"][0]["function"]["arguments"].as_str().unwrap()).unwrap();
         assert_ne!(later_args["requestId"], args["requestId"]);
@@ -1691,7 +1709,8 @@ mod tests {
         let transcript = std::fs::read_to_string(log.with_extension("oracle.jsonl")).unwrap();
         let recorded: Value = serde_json::from_str(transcript.lines().last().unwrap()).unwrap();
         assert_eq!(recorded["question"], "Who wrote Leaves of Grass?");
-        assert_eq!(recorded["selectedRequest"]["n"], "1");
+        assert_eq!(recorded["selectedRequest"], brief(1)["selectedRequest"]);
+        assert_eq!(recorded["selectedEntry"], brief(1)["recentMemberEntries"][1]);
         assert_eq!(recorded["requestId"], args["requestId"]);
         let mut refused = http.clone(); refused["status"] = json!(403);
         assert!(oracle_answer(&refused, 0).is_none());
