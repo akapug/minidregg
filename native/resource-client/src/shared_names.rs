@@ -1121,6 +1121,31 @@ mod tests {
         assert!(check_opened(&opened, &at("100")).is_err());
     }
 
+    /// `story new --gm` re-laws `ROOM/scenes`: the control capability presented must be the scenes
+    /// reference's own, not the room's that `resolve_with` copies into the opened name (demo-dry red
+    /// on 2d8b7ed54: Reject.capability).
+    #[test]
+    fn a_named_member_reference_presents_its_own_control_not_the_rooms() {
+        let root = std::env::temp_dir().join(format!("mini-shared-own-control-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        super::super::make_private_dir(&root).unwrap();
+        super::super::make_private_dir(&root.join("refs")).unwrap();
+        let write = |name: &str, target: &str, obs: &str, control: &str| {
+            crate::create_private(&root.join("refs").join(format!("{}.json", super::super::ref_file(name))),
+                &serde_json::to_vec(&json!({"type":"minidregg-participant-reference-v1","name":name,"kind":"object",
+                    "target":target,"observeCapability":obs,"operationCapability":obs,"controlCapability":control})).unwrap()).unwrap();
+        };
+        write("lab", "10", "100", "101");
+        write("lab/scenes", "12", "200", "201");
+        // what resolve_with yields: the room's capabilities on the scenes target
+        let opened = json!({"type":"minidregg-participant-reference-v1","name":"lab/scenes","kind":"object",
+            "target":"12","observeCapability":"100","operationCapability":"100","controlCapability":"101"});
+        let got = existing_authority(&root, &opened).unwrap();
+        assert_eq!(got["controlCapability"], "201");
+        assert_eq!(got["observeCapability"], "200");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
     /// After a kick and a rejoin a member holds two references to one room:
     /// the old one (revoked grant) and the new one. Naming the new one uses
     /// its own grant; a derived reference (the index) still borrows a direct
