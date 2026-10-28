@@ -77,11 +77,14 @@ def YieldInput.TransferRefused (i : YieldInput) (reason : EffectRefusal) : Prop 
 /-- **`candidate` keeps the two levels.**
 * `verdict`: an effect-level refusal is an ACCEPTED yield whose await records the refusal,
   committing no state write, no posts and no transfer;
+* `ok`: every yield today's judgment admits is admitted with the same commit (a settled
+  transfer is not turned into a rejection, the opposite collapse);
 * `turn`: every refusal of today's judgment is still a refusal of the turn, under the same
   name. -/
 structure TwoLevels (candidate : YieldInput → Except Refusal YieldCommit) : Prop where
   verdict : ∀ i reason, i.TransferRefused reason →
     candidate i = .ok ⟨i.performedAwait (.refused reason), none, [], none⟩
+  ok : ∀ i c, i.reference = .ok c → candidate i = .ok c
   turn : ∀ i r, i.reference = .error r → candidate i = .error r
 
 /-- **Satisfiable.**  Today's kernel keeps the two levels. -/
