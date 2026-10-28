@@ -4,6 +4,7 @@
 //! creator); this process writes the two broker-selected identities into it from
 //! outside and then joins it, staying the unit MainPID. Both resident and worker
 //! later drop all capability sets.
+use crate::io_context::IoContext;
 use std::fs::{self, File, Metadata, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
@@ -116,7 +117,7 @@ fn protected_handle(path: &Path) -> io::Result<File> {
     use std::os::unix::ffi::OsStrExt;
     use std::path::Component;
     if !path.is_absolute() { return Err(refused("bootstrap custody path must be absolute")); }
-    let mut current=OpenOptions::new().read(true).custom_flags(libc::O_PATH|libc::O_DIRECTORY|libc::O_CLOEXEC).open("/")?;
+    let mut current=OpenOptions::new().read(true).custom_flags(libc::O_PATH|libc::O_DIRECTORY|libc::O_CLOEXEC).open("/").ctx("open", &"/")?;
     let components:Vec<_>=path.components().skip(1).collect();
     for (index,component) in components.iter().enumerate() {
         if !host_trusted(&current.metadata()?) { return Err(refused("bootstrap custody ancestor belongs to another principal or is writable")); }
@@ -158,7 +159,7 @@ fn public_tree(path: &Path, roots: &mut Provenance, depth: usize) -> io::Result<
     if depth>MAX_CUSTODY_DEPTH { return Err(refused("bootstrap public-data tree depth exceeded")); }
     remember(path,roots)?;
     if roots.paths[path].original.is_dir() {
-        for entry in fs::read_dir(path)? {
+        for entry in fs::read_dir(&path).ctx("list", &path)? {
             public_tree(&entry?.path(),roots,depth+1)?;
         }
     }
@@ -179,7 +180,7 @@ fn remember_spk_namespace(world: &Path, roots: &mut Provenance) -> io::Result<()
         }
         remember(&store,roots)?;
         let mut seen=0;
-        for entry in fs::read_dir(&store)? {
+        for entry in fs::read_dir(&store).ctx("list", &store)? {
             seen+=1;
             if seen>MAX_CUSTODY_HANDLES { return Err(refused("bootstrap publication listing bound exceeded")); }
             let entry=entry?;
@@ -266,7 +267,7 @@ pub(crate) fn load_registered_controller(registry: &crate::volume_helper::Regist
     }
     let path=directory.join("namespace.json");
     minidregg_compatible_upgrade_custody::root_ancestors(&path)?;
-    let mut file=OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW|libc::O_CLOEXEC|libc::O_NONBLOCK).open(&path)?;
+    let mut file=OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW|libc::O_CLOEXEC|libc::O_NONBLOCK).open(&path).ctx("open", &path)?;
     let before=file.metadata()?;
     if !before.is_file() || before.uid()!=0 || before.nlink()!=1 || before.mode()&0o7777!=0o644
         || before.len()==0 || before.len()>4096 {
@@ -275,7 +276,7 @@ pub(crate) fn load_registered_controller(registry: &crate::volume_helper::Regist
     let mut bytes=Vec::new();
     Read::by_ref(&mut file).take(4097).read_to_end(&mut bytes)?;
     let after=file.metadata()?;
-    let named=fs::symlink_metadata(&path)?;
+    let named=fs::symlink_metadata(&path).ctx("inspect", &path)?;
     if bytes.len() as u64!=before.len() || stable(&before)!=stable(&after)
         || stable(&before)!=stable(&named) || (before.dev(),before.ino(),before.uid(),before.gid())!=(named.dev(),named.ino(),named.uid(),named.gid()) {
         return Err(refused("registered controller receipt changed while read"));
@@ -304,7 +305,7 @@ pub(crate) fn pinned_bwrap(path: &Path, sha256: &str) -> io::Result<crate::dispa
     if !PHYSICAL_BWRAPS.iter().any(|b| Path::new(b) == path) {
         return Err(refused("namespace bwrap is not a deployed physical bwrap"));
     }
-    let m = fs::symlink_metadata(path)?;
+    let m = fs::symlink_metadata(&path).ctx("inspect", &path)?;
     if !m.file_type().is_file() || m.uid() != 0 || m.mode() & 0o022 != 0 || m.mode() & 0o111 == 0 {
         return Err(refused("namespace bwrap must be a root-owned non-writable executable"));
     }
@@ -435,7 +436,7 @@ pub(crate) fn enter_registered(bwrap: &Path, bwrap_sha256: &str, operator_uid: u
         }
         let ns_path = format!("/proc/{pid}/ns/user");
         let ns = File::open(&ns_path).map_err(at("bwrap child namespace", &ns_path))?;
-        if ns.metadata()?.ino() == fs::metadata("/proc/self/ns/user")?.ino() {
+        if ns.metadata()?.ino() == fs::metadata("/proc/self/ns/user").ctx("inspect", &"/proc/self/ns/user")?.ino() {
             return Err(refused("namespace bwrap did not create a user namespace"));
         }
         map("/usr/bin/newuidmap", pid, operator_uid, app_uid,controller.map(|c|c.uid))?;
@@ -452,8 +453,8 @@ pub(crate) fn enter_registered(bwrap: &Path, bwrap_sha256: &str, operator_uid: u
         if unsafe { libc::setgroups(0, std::ptr::null()) } != 0 {
             return Err(io::Error::other(format!("namespace empty groups refused after gid mapping: {}", io::Error::last_os_error())));
         }
-        let uid = fs::read_to_string("/proc/self/uid_map")?;
-        let gid = fs::read_to_string("/proc/self/gid_map")?;
+        let uid = fs::read_to_string("/proc/self/uid_map").ctx("read", &"/proc/self/uid_map")?;
+        let gid = fs::read_to_string("/proc/self/gid_map").ctx("read", &"/proc/self/gid_map")?;
         if !exact_map(&uid, operator_uid, app_uid,controller.map(|c|c.uid)) || !exact_map(&gid, operator_gid, app_gid,controller.map(|c|c.gid)) {
             return Err(refused("namespace identity maps differ from broker selection"));
         }
