@@ -5,67 +5,21 @@ This is not a verifier. It retains native attempts and refuses implicit retries.
 It never writes a Store, controller journal, or a synthetic birth receipt.
 """
 import argparse
-import hashlib
 import json
 import os
 from pathlib import Path
 import secrets
-import subprocess
+
+import importlib.util
+
+_shared_spec = importlib.util.spec_from_file_location("application_attachment", Path(__file__).resolve().parents[3] / "scripts/application-attachment.py")
+_shared = importlib.util.module_from_spec(_shared_spec)
+_shared_spec.loader.exec_module(_shared)
+read, write, sha, receipt = _shared.read, _shared.write, _shared.sha, _shared.receipt
+require_current_start, controller_host_metadata = _shared.require_current_start, _shared.controller_host_metadata
 
 
-def read(path):
-    return json.loads(Path(path).read_text())
-
-
-def write(path, value):
-    data = (json.dumps(value, indent=2) + "\n").encode() if not isinstance(value, bytes) else value
-    with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as out:
-        out.write(data)
-        out.flush()
-        os.fsync(out.fileno())
-
-
-def sha(path):
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
-
-
-def receipt(value):
-    if value.get("type") != "confirmed" or value.get("confirmation") not in ("installed", "replayed"):
-        raise ValueError("native confirmation absent")
-    return {key: value[key] for key in ("transactionId", "eventId", "acceptedCount", "worldRoot")}
-
-
-def require_current_start(start, status):
-    """Reject stale caller records before using their native unit selection."""
-    if status.get("protocol") != "mini-spk-grain-status-v2" or status.get("app") != start["app"]:
-        raise ValueError("current native status names a different application")
-    running = [run for run in status["runs"] if run["state"] == "running"]
-    if len(running) != 1 or any(running[0].get(key) != start.get(key) for key in ("generation", "unit")) or running[0].get("unitActiveState") != "active":
-        raise ValueError("START record is not the current active native generation")
-
-
-def controller_host_metadata(path):
-    """Copy only the fresh world's public settings and protected-file paths."""
-    raw = Path(path).read_bytes()
-    value = json.loads(raw)
-    allowed = {"domain", "federation", "factoryId", "resourceBookId", "authorityCellId", "issuer",
-               "ownerBudget", "lifetime", "birthSlack", "tariffBase", "tariffPerBirth", "tariffPerGrant",
-               "tariffPerInitialPayloadByte", "collector", "asset", "genesisHeight", "expectedSeed",
-               "storageBinary", "storageRoot", "signatureBinary", "checkpointKey", "checkpointEvery",
-               "grainBirthTariff", "completionCustodianKey", "lifecycleManagement",
-               "agentLifetimeDispatchTargets", "nockFSync", "disabledEvaluators"}
-    if any(value[key] is not None for key in set(value) - allowed):
-        raise ValueError("fresh Host settings include unreviewed controller-visible fields")
-    for name in ("storageBinary", "storageRoot", "signatureBinary", "checkpointKey"):
-        if value.get(name) is not None and (not isinstance(value[name], str) or not Path(value[name]).is_absolute()):
-            raise ValueError("Host storage/checkpoint setting must remain an absolute path, never key bytes")
-    public = value.get("completionCustodianKey")
-    if public is not None and (not isinstance(public, str) or len(public) != 64 or bytes.fromhex(public).hex() != public):
-        raise ValueError("completion custodian public key shape differs")
-    return raw
-
-
-class Operator:
+class Operator(_shared.Attachment):
     def __init__(self, run, phase="setup"):
         self.run = run
         self.root = run / "agent-lifetime"
@@ -82,48 +36,33 @@ class Operator:
         self.agent = self.allocation["agents"][0]
         self.calls = self.root / ("native-" + phase)
         self.calls.mkdir(mode=0o700)
+        self.allocation_path = self.root / "allocation.json"
+        self.application = {
+            "birthSource": str(self.evidence / "a-app-author/source.json"),
+            "birthAttempt": str(self.evidence / "a-app-attempt"),
+            "bootstrapTicketRequest": str(self.evidence / "a-ticket-9120/request.json"),
+            "bootstrapTicketAttempt": str(self.evidence / "a-ticket-9120/issue"),
+        }
+        profile = read(self.evidence / "profile-result.json")
+        self.profile = profile["profilePath"]
+        self.application["packageDirectory"] = str(Path(profile["stateRoot"]) / "apps" / self.allocation["app"] / "install/launch-descriptor/package-v1")
+        self.spk_host = run / "bin/spk-host"
+        self.controller_stage = self.root / "controller-stage/controller.json"
+        self.names = {"application": "oracle-app", "family": "oracle-session", "route": "oracle-agent-v1",
+                      "display": "Oracle agent", "handle": "oracle-agent", "serviceProtocol": "oracle-operations-v1"}
+        self.bootstrap_name = "oracle-bootstrap-app"
+        self.grant_relative = Path("state/oracle-grant")
+        self.ticket_name = "agent-ticket.bin"
+        self.issuer = {"subject": "8", "keyPath": str(self.workroom / "tool.key"), "payer": "8", "funding": [],
+                       "sourceCapabilities": ["42"], "reserveAmount": "3",
+                       "tool": {"task": "7902", "capability": "81", "observeCapability": "81"},
+                       "parent": {"task": "7901", "capability": "73", "observeCapability": "73"}}
+        self.signers = [{"keyId": kid, "keyEpoch": "2", "algorithm": "1", "keyPath": str(directory / (role + ".key")),
+                         "publicKeyPath": str(directory / (role + ".pub"))}
+                        for kid, directory, role in [("8008", self.workroom, "tool"), ("7007", self.workroom, "controller")] +
+                        [(self.agent[role]["keyId"], self.workroom / "agents" / self.agent["route"], role)
+                         for role in ("controller", "tool", "dispatch", "provider")]]
 
-    def call(self, label, args):
-        # Logs contain native source/output, never raw signing key bytes.
-        with (self.calls / (label + ".stdout")).open("xb") as out, (self.calls / (label + ".stderr")).open("xb") as err:
-            result = subprocess.run([str(x) for x in args], stdout=out, stderr=err)
-        if result.returncode:
-            raise RuntimeError(f"{label} failed ({result.returncode}); retain attempt, do not resubmit")
-
-    def query(self, label, subject, target, capability, key, view="resource"):
-        intent = self.calls / (label + "-intent.json")
-        output = self.calls / label
-        write(intent, {"subject": subject, "nonce": str(secrets.randbits(120)),
-                       "purpose": {"type": "query", "kind": "object", "target": target, "view": view},
-                       "grants": [{"kind": "object", "target": target, "capability": capability}]})
-        self.call(label, [self.mini, "query", "--host", self.host, "--config", self.config,
-                         "--socket", self.public, "--intent", intent, "--key", key, "--view", view, "--dir", output])
-        return output
-
-    def delegate_observe(self, label, target, parent, child, holder):
-        key = self.workroom / "tool.key"
-        capability = self.query(label + "-capability", "8", target, parent, key, "capability")
-        inspected = self.calls / (label + "-capability.json")
-        self.call(label + "-inspect-capability", [self.host, self.config, "inspect", "view-object-capability",
-                                                   capability / "view.bin", inspected])
-        current = self.query(label + "-current", "8", target, parent, key)
-        head = read(inspected)["head"]
-        challenge = read(current / "challenge.json")
-        grant = dict(head, id=child, parent=head["id"], holder={"type": "subject", "subject": holder},
-                     targets=[target], verbs=["observe"], ancestors=sorted(set(head["ancestors"] + [head["id"]])))
-        intent = {"subject": "8", "nonce": str(secrets.randbits(120)),
-                  "purpose": {"type": "prepare", "draft": {"type": "delegate-source", "command": {
-                      "kind": "object", "domain": challenge["domain"], "semantics": challenge["semantics"],
-                      "subject": "8", "nonce": str(secrets.randbits(120)),
-                      "expectedTargetRoot": read(current / "view.json")["cell"]["root"],
-                      "parentId": head["id"], "target": target, "child": grant}}},
-                  "grants": [{"kind": "object", "target": target, "capability": head["id"]}]}
-        source = self.calls / (label + "-intent.json")
-        write(source, intent)
-        attempt = self.calls / (label + "-attempt")
-        self.call(label + "-submit", [self.mini, "submit", "--host", self.host, "--config", self.config,
-                                     "--socket", self.public, "--intent", source, "--key", key, "--dir", attempt])
-        return receipt(read(attempt / "outcome.json"))
 
     def dispatch_config(self, home, layout):
         a, caps = self.agent, self.agent["plannedCaps"]
@@ -311,309 +250,6 @@ class Operator:
                       "before": str(before), "after": str(after)})
         return result
 
-    def slot_signers(self, slots, header_name):
-        known = {"8008": (self.workroom / "tool.key", self.workroom / "tool.pub"),
-                 "7007": (self.workroom / "controller.key", self.workroom / "controller.pub")}
-        for role in ("controller", "tool", "dispatch", "provider"):
-            directory = self.workroom / "agents" / self.agent["route"]
-            known[self.agent[role]["keyId"]] = (directory / (role + ".key"), directory / (role + ".pub"))
-        answer = []
-        for slot in slots:
-            signing = slot["signing"]
-            if signing["decoded"] is not True or signing["algorithm"] != "1" or signing["keyEpoch"] != "2":
-                raise ValueError("source signing slot is outside enrolled custody")
-            key, public = known[signing["keyId"]]
-            if len(key.read_bytes()) != 32 or len(public.read_bytes()) != 32:
-                raise ValueError("enrolled signer key shape differs")
-            header = bytes.fromhex(slot[header_name])
-            if not header:
-                raise ValueError("empty source signing header")
-            answer.append({"role": slot["role"], "index": slot["index"], "keyId": signing["keyId"],
-                           "keyEpoch": signing["keyEpoch"], "publicKey": public.read_bytes().hex(),
-                           "headerSha256": hashlib.sha256(header).hexdigest(), "keyPath": str(key)})
-        return answer
-
-    def reserve_issuer_tool(self):
-        key = self.workroom / "tool.key"
-        current = self.query("issuer-tool", "8", "7902", "81", key)
-        view = read(current / "view.json")
-        nonce = str(secrets.randbits(120))
-        intent = {"grain": {"task": "7902", "subject": "8", "capability": "81", "observeCapability": "81",
-                  "schemaVersion": "1", "expectedTargetRoot": view["cell"]["root"],
-                  "context": {"operationId": nonce, "payload": "Oracle agent ticket issuance"},
-                  "before": {k: view["cell"]["grain"][k] for k in ("generation", "status", "remaining", "reserved")},
-                  "operation": {"type": "reserve", "amount": "3"}, "publications": []},
-                  "grants": [{"kind": "object", "target": "7902", "capability": "81"}], "intentNonce": nonce}
-        source = self.calls / "issuer-reserve.json"
-        write(source, intent)
-        attempt = self.calls / "issuer-reserve"
-        self.call("issuer-reserve", [self.mini, "submit", "--host", self.host, "--config", self.config,
-                  "--socket", self.public, "--intent", source, "--intent-kind", "grain-intent", "--key", key, "--dir", attempt])
-        receipt(read(attempt / "outcome.json"))
-
-    def issue_grant(self, session_result):
-        """Issue actual event22 and event27 from a completed runtime session tool.
-
-        The native author rereads the actual installed session; this result
-        merely selects our allocated session and links acceptance evidence.
-        """
-        result = read(session_result)
-        if result.get("type") != "tool-complete" or result.get("isError") is not False or result["result"].get("isError") is not False:
-            raise ValueError("session foreground tool did not complete")
-        body = json.loads(result["result"]["text"])
-        a, caps = self.agent, self.agent["plannedCaps"]
-        if body.get("type") != "confirmed-mini-application-birth-v1" or body.get("route") != "session":
-            raise ValueError("runtime did not return a session birth")
-        if {r["target"] for r in body["bornResources"]} != {a["session"], a["descriptor"]}:
-            raise ValueError("runtime session birth differs from allocated pair")
-        write(self.calls / "session-tool-result.json", Path(session_result).read_bytes())
-        controller_key = self.workroom / "agents" / a["route"] / "controller.key"
-        current = self.query("controller-parent", a["controller"]["subject"], a["controller"]["task"],
-                             caps["parentOwner"], controller_key)
-        generation = read(current / "view.json")["cell"]["grain"]["generation"]
-        self.query("agent-session", a["controller"]["subject"], a["session"], caps["sessionOwner"], controller_key)
-        app = read(self.evidence / "a-app-author/source.json")["applicationGrainBirth"]["applicationBirth"]["application"]
-        app_current = self.query("issuing-app", "8", app["app"], app["appOwnerCapability"], self.workroom / "tool.key")
-        entries = read(app_current / "view.json")["cell"]["entries"]
-        package_version = next(e["value"] for e in entries if e["key"]["field"] == "2")
-        state = Path(read(self.evidence / "profile-result.json")["stateRoot"])
-        package_dir = state / "apps" / app["app"] / "install/launch-descriptor/package-v1"
-        schema = read(package_dir / "schema-inspection.json")
-        interface = next(i for i in read(package_dir / "descriptor-inspection.json")["interfaces"] if i["kind"] == "api")
-        launch_root = read(package_dir.parent / "launch-inspection.json")["root"]
-        ceiling = {"basis": {"type": "role", "id": "0"}, "added": [], "removed": [],
-                   "roleSchemaRoot": schema["root"], "roleVersion": schema["version"]}
-        request = {"spec": {"ticket": {"resource": a["ticket"],
-            "scope": {"app": app["app"], "packageVersion": package_version, "packageRoot": launch_root,
-                      "interfaceId": interface["id"], "interfaceVersion": interface["version"],
-                      "interfaceRoot": interface["root"], "schemaRoot": schema["root"], "schemaVersion": schema["version"]},
-            "participant": {"session": a["session"], "descriptorResource": a["descriptor"], "kind": "api",
-                            "subject": a["controller"]["subject"], "origin": {"type": "agent", "task": a["controller"]["task"], "generation": generation},
-                            "sessionCapability": caps["sessionOwner"], "appObserveCapability": caps["controllerAppObserve"],
-                            "ticketObserveCapability": caps["ticketObserve"]},
-            "ceiling": ceiling, "issueNonce": str(secrets.randbits(120)), "notAfter": "1000000000"},
-            "issuer": "8", "appDelegateCapability": app["appOwnerCapability"],
-            "ticketOwnerCapability": caps["ticketOwner"], "ticketControlCapability": caps["ticketControl"]},
-            "payer": "8", "funding": [], "sourceCapabilities": ["42"],
-            "tool": {"task": "7902", "capability": "81", "observeCapability": "81"},
-            "parent": {"task": "7901", "capability": "73", "observeCapability": "73"}}
-        self.reserve_issuer_tool()
-        source = self.calls / "ticket-request.json"
-        write(source, request)
-        preview = self.calls / "ticket-preview"
-        self.call("ticket-plan", [self.mini, "grain-share-issue-plan", "--host", self.host, "--config", self.config,
-                                   "--socket", self.operator, "--request", source, "--dir", preview])
-        inspected = read(preview / "request-inspected.json")
-        approved = {"type": "minidregg-grain-share-issue-approval-v1", "requestSha256": sha(preview / "request.bin"),
-                    "canonicalSpec": inspected["canonicalSpec"], "issuer": inspected["spec"]["issuer"],
-                    "participantSubject": inspected["spec"]["ticket"]["participant"]["subject"],
-                    "appDelegateCapability": inspected["spec"]["appDelegateCapability"],
-                    "ticketResource": inspected["spec"]["ticket"]["resource"],
-                    **{key: inspected[key] for key in ("payer", "funding", "sourceCapabilities", "tool", "parent")},
-                    "signers": self.slot_signers(read(preview / "plan-inspected.json")["slots"], "header")}
-        approval = self.calls / "ticket-approval.json"
-        write(approval, approved)
-        ticket_attempt = self.calls / "ticket-issue"
-        self.call("ticket-prepare", [self.mini, "grain-share-issue-prepare", "--host", self.host, "--config", self.config,
-                  "--socket", self.operator, "--request", source, "--approval", approval, "--dir", ticket_attempt])
-        self.call("ticket-submit", [self.mini, "grain-share-issue-submit", "--socket", self.operator, "--attempt", ticket_attempt])
-        self.call("ticket-lookup", [self.mini, "grain-share-issue-lookup", "--socket", self.operator, "--attempt", ticket_attempt])
-        issued = read(ticket_attempt / "receipt-anchor.json")["receipt"]
-        looked_up_ticket = read(self.calls / "ticket-lookup.stdout")
-        if looked_up_ticket.get("confirmation") != "replayed" or receipt(looked_up_ticket) != issued or int(issued["acceptedCount"]) <= 0:
-            raise ValueError("ticket lookup differs from exact accepted issue receipt")
-        issue_index = str(int(issued["acceptedCount"]) - 1)
-        # Read the source-authored ticket digest; never reconstruct its hash.
-        self.call("ticket-source-plan", [self.host, self.config, "inspect", "application-share-issue-grain-plan",
-                                          ticket_attempt / "plan.bin", self.calls / "ticket-source-plan.json"])
-        spec = read(self.calls / "ticket-source-plan.json")["request"]["spec"]
-        self.delegate_observe("agent-ticket-controller", a["ticket"], caps["ticketOwner"], caps["ticketObserve"], a["controller"]["subject"])
-        self.delegate_observe("agent-ticket-tool", a["ticket"], caps["ticketOwner"], caps["agentTicketToolObserve"], a["tool"]["subject"])
-        grant_request = {"grant": {"source": {"resource": a["persistentGrant"], "issueIndex": issue_index,
-                         "issueReceipt": issued, "ticketResource": a["ticket"], "ticketDigest": spec["ticket"]["ticketDigest"]},
-                         "participant": {"app": app["app"], "session": a["session"], "subject": a["controller"]["subject"],
-                         "parentTask": a["controller"]["task"], "originalGeneration": generation, "grantObserveCapability": caps["grantObserve"]},
-                         "approval": {"issuer": spec["issuer"], "delegateCapability": spec["appDelegateCapability"],
-                                      "ceiling": ceiling, "nonce": str(secrets.randbits(120))}},
-                         "grantOwnerCapability": caps["grantOwner"], "grantControlCapability": caps["grantControl"],
-                         "payer": "8", "funding": [], "sourceCapabilities": ["42"]}
-        grant_source = self.calls / "grant-request.json"
-        write(grant_source, grant_request)
-        grant_attempt = self.calls / "grant-issue"
-        self.call("grant-plan", [self.mini, "agent-lifetime-grant-plan", "--host", self.host, "--config", self.config,
-                  "--operator-socket", self.operator, "--request", grant_source, "--dir", grant_attempt])
-        plan = read(grant_attempt / "plan-inspected.json")
-        if bytes.fromhex(plan["canonicalPlanHex"]) != (grant_attempt / "plan.bin").read_bytes():
-            raise ValueError("source grant plan bytes differ")
-        grant_approval = self.calls / "grant-approval.json"
-        write(grant_approval, {"type": "minidregg-agent-lifetime-grant-approval-v1",
-              "requestSha256": sha(grant_attempt / "request.bin"), "planSha256": sha(grant_attempt / "plan.bin"),
-              **{key: plan[key] for key in ("request", "birthBoundary", "finalizedDraftHex")},
-              "signers": self.slot_signers(plan["birthSlots"] + [plan["appSlot"]], "headerHex")})
-        self.call("grant-seal", [self.mini, "agent-lifetime-grant-seal", "--attempt", grant_attempt, "--approval", grant_approval])
-        self.call("grant-submit", [self.mini, "agent-lifetime-grant-submit", "--attempt", grant_attempt])
-        self.call("grant-lookup", [self.mini, "agent-lifetime-grant-lookup", "--attempt", grant_attempt])
-        looked_up = read(self.calls / "grant-lookup.stdout")
-        confirmed = receipt(looked_up)
-        if looked_up["confirmation"] != "replayed":
-            raise ValueError("grant lacks exact native replay confirmation")
-        write(self.root / "issued-grant.json", {"protocol": "mini-oracle-issued-agent-grant-v1", "ticketAttempt": str(ticket_attempt),
-              "ticketReceipt": issued, "grantAttempt": str(grant_attempt), "grantReceipt": confirmed,
-              "sessionToolResultSha256": sha(session_result), "originalGeneration": generation})
-        return self.root / "issued-grant.json"
-
-    def prepare_route(self, repo, layout_file):
-        layout = read(layout_file)
-        a, caps = self.agent, self.agent["plannedCaps"]
-        for field in ("controllerHome", "listenerSocket", "reverseSocket", "operatorSocket"):
-            if not Path(layout[field]).is_absolute():
-                raise ValueError("controller layout paths must be absolute")
-        if not isinstance(layout["controllerUid"], int) or layout["controllerUid"] in (0, os.getuid()):
-            raise ValueError("dedicated non-root controller UID required")
-        issued = read(self.root / "issued-grant.json")
-        grant = Path(issued["grantAttempt"])
-        lookups = sorted(grant.glob("lookup-????.outcome.json"))
-        if not lookups:
-            raise ValueError("retained native grant lookup absent")
-        identity = self.workroom / "agents" / a["route"]
-        def pin(role, index, actor):
-            return {"role": str(role), "index": str(index), "keyId": a[actor]["keyId"], "keyEpoch": "2",
-                    "publicKeyHex": (identity / (actor + ".pub")).read_bytes().hex(),
-                    "seedPath": str(identity / (actor + ".key"))}
-        # These are operator key-selection pins, not signatures or authority.
-        # NativeHost.prepareInvokeOn signs session/parent target+observation,
-        # then authority; ApplicationDispatchAuthoring adds four observations.
-        app_signers = [pin(role, index, "controller") for role, index in
-                       [(4, 0), (4, 1), (8, 0), (8, 1), (1, 0), (9, 0), (9, 1), (9, 2), (9, 3)]]
-        payer = [pin(role, 0, "dispatch") for role in (4, 8, 1)]
-        for signer in payer:
-            del signer["seedPath"]
-        pins = {"controllerRouteName": "oracle-app", "socketPath": layout["listenerSocket"],
-                "hostUid": os.getuid(), "hostUnit": None, "signedApiPath": "/",
-                "packageManifest": self.allocation["packageManifest"], "snapshotManifest": self.allocation["snapshotManifest"],
-                "sessionObserveCapability": caps["sessionOwner"], "manifestObserveCapability": caps["controllerManifestObserve"],
-                "enrollmentObserveCapability": caps["descriptorOwner"], "parentCapability": caps["parentOwner"],
-                "parentObserve": caps["parentOwner"], "purseCapability": caps["dispatchOwner"], "purseObserve": caps["dispatchOwner"],
-                "purseResource": a["dispatch"]["task"], "payerSubject": a["dispatch"]["subject"],
-                "reserveAmount": "1", "maximumCharge": "1", "appSigners": app_signers,
-                "grantSigner": pin(9, 4, "controller"), "payerPins": payer}
-        pins_file = self.calls / "operator-pins.json"
-        write(pins_file, pins)
-        route_dir = self.calls / "source-route"
-        self.call("render-custody", ["sh", repo / "scripts/spk-platform/prepare-lifetime-route.sh", "--custody-only",
-            self.host, self.config, grant, lookups[-1], pins_file, route_dir, sha(self.host),
-            self.root / "allocation.json", a["route"]])
-        request = {"protocol": "mini-spk-grain-agent-route-v1", "name": "oracle-agent-v1", "signedApiPath": "/",
-            "socket": layout["listenerSocket"], "controllerUid": layout["controllerUid"],
-            "custody": str(route_dir / "resident-custody-v3.json"), "reverseSocket": layout["reverseSocket"],
-            "routeName": "oracle-app", "displayName": "Oracle agent", "preferredHandle": "oracle-agent",
-            "reverseTimeoutSeconds": 1740, "controllerWorkerWallSeconds": 1800}
-        request_file = self.calls / "route-request.json"
-        write(request_file, request)
-        profile = read(self.evidence / "profile-result.json")["profilePath"]
-        self.call("route-register", [self.run / "bin/spk-host", "grain", "agent-route", profile, self.allocation["app"], request_file])
-        write(self.root / "registered-agent-route.json", {"protocol": "mini-oracle-registered-agent-route-v1",
-            "layout": layout, "layoutSha256": sha(layout_file), "pins": str(pins_file), "sourceRoute": str(route_dir),
-            "grantAttempt": str(grant), "lookup": str(lookups[-1]), "request": str(request_file),
-            "registration": read(self.calls / "route-register.stdout")})
-        return self.root / "registered-agent-route.json"
-
-    def activate(self, repo, start_result):
-        start = read(start_result)
-        a, caps = self.agent, self.agent["plannedCaps"]
-        if start.get("protocol") != "mini-spk-grain-start-v1" or start.get("app") != self.allocation["app"]:
-            raise ValueError("actual native START result for selected app required")
-        profile = read(self.evidence / "profile-result.json")["profilePath"]
-        def check_current(label):
-            self.call(label, [self.run / "bin/spk-host", "grain", "status", profile, self.allocation["app"]])
-            require_current_start(start, read(self.calls / (label + ".stdout")))
-        check_current("current-start-before-enrollment")
-        registration = read(self.root / "registered-agent-route.json")
-        layout = registration["layout"]
-        home = Path(layout["controllerHome"])
-        identity = self.workroom / "agents" / a["route"]
-        # Session enrollment is source-owned and generation-specific. Renew by
-        # the ordinary owner close followed by the same native event28 path.
-        observed = self.query("session-before-enrollment", a["controller"]["subject"], a["session"], caps["sessionOwner"], identity / "controller.key")
-        view = read(observed / "view.json")
-        fields = {entry["key"]["field"]: entry["value"] for entry in view["cell"]["entries"]}
-        if fields["3"] == "5":
-            nonce = str(secrets.randbits(120))
-            close = {"subject": a["controller"]["subject"], "nonce": nonce,
-                "grants": [{"kind": "object", "target": a["session"], "capability": caps["sessionOwner"]}],
-                "purpose": {"type": "prepare", "draft": {"type": "invoke", "command": {
-                    "subject": a["controller"]["subject"], "nonce": nonce, "targets": [{
-                        "kind": "object", "target": a["session"], "capability": caps["sessionOwner"],
-                        "observeCapability": caps["sessionOwner"], "schemaVersion": "1", "expectedTargetRoot": view["cell"]["root"],
-                        "payload": {"type": "scalar", "actions": [
-                            {"type": "write", "key": {"type": "object", "resource": a["session"], "field": field},
-                             "expected": fields[field], "value": str(int(fields[field]) + 1)} for field in ("2", "3")]}}]}}}}
-            write(self.calls / "session-close.json", close)
-            self.call("session-close", [self.mini, "submit", "--host", self.host, "--config", self.config,
-                "--socket", self.public, "--intent", self.calls / "session-close.json", "--key", identity / "controller.key",
-                "--dir", self.calls / "session-close"])
-            receipt(read(self.calls / "session-close/outcome.json"))
-        issued = read(self.root / "issued-grant.json")
-        ticket = read(Path(issued["ticketAttempt"]).parent / "ticket-request.json")["spec"]["ticket"]
-        request = {"issueIndex": str(int(issued["ticketReceipt"]["acceptedCount"]) - 1), "ticketResource": a["ticket"],
-                   "packageManifest": self.allocation["packageManifest"], "role": ticket["ceiling"],
-                   "descriptorCapability": caps["descriptorOwner"], "sessionObserveCapability": caps["sessionOwner"],
-                   "descriptorObserveCapability": caps["descriptorOwner"], "manifestObserveCapability": caps["controllerManifestObserve"],
-                   "nonce": str(secrets.randbits(120))}
-        request_file = self.calls / "enrollment-request.json"
-        write(request_file, request)
-        attempt = self.calls / "enrollment"
-        self.call("enrollment-plan", [self.mini, "session-enrollment-plan", "--host", self.host, "--config", self.config,
-            "--operator-socket", self.operator, "--request", request_file, "--dir", attempt])
-        plan = read(attempt / "plan-inspected.json")
-        approval = self.calls / "enrollment-approval.json"
-        write(approval, {"type": "minidregg-session-enrollment-approval-v1", "requestSha256": sha(attempt / "request.bin"),
-            "planSha256": sha(attempt / "plan.bin"), "planInspectionSha256": sha(attempt / "plan-inspected.json"),
-            "signers": self.slot_signers(plan["slots"], "headerHex")})
-        self.call("enrollment-seal", [self.mini, "session-enrollment-seal", "--attempt", attempt, "--approval", approval])
-        self.call("enrollment-submit", [self.mini, "session-enrollment-submit", "--attempt", attempt])
-        self.call("enrollment-lookup", [self.mini, "session-enrollment-lookup", "--attempt", attempt])
-        looked_up_enrollment = read(self.calls / "enrollment-lookup.stdout")
-        accepted_enrollment = read(attempt / "receipt.json")
-        if looked_up_enrollment.get("confirmation") != "replayed" or receipt(looked_up_enrollment) != {
-            key: accepted_enrollment[key] for key in ("transactionId", "eventId", "acceptedCount", "worldRoot")
-        }:
-            raise ValueError("enrollment lookup differs from exact accepted receipt")
-        pins = read(registration["pins"])
-        pins["hostUnit"] = start["unit"]
-        pins_file = self.calls / "operator-pins.json"
-        write(pins_file, pins)
-        routes = self.calls / "source-route"
-        self.call("render-controller-route", ["sh", repo / "scripts/spk-platform/prepare-lifetime-route.sh",
-            self.host, self.config, registration["grantAttempt"], registration["lookup"], pins_file,
-            routes, sha(self.host), self.root / "allocation.json", a["route"]])
-        if (routes / "resident-custody-v3.json").read_bytes() != (Path(registration["sourceRoute"]) / "resident-custody-v3.json").read_bytes():
-            raise ValueError("controller route reinspection changed registered resident custody")
-        bundle = self.calls / "controller-update"
-        bundle.mkdir(mode=0o700)
-        for path in ("state", "state/shared-app-refs", "state/oracle-grant"):
-            (bundle / path).mkdir(mode=0o700)
-        config = read(self.root / "controller-stage/controller.json")
-        reference = dict(config["toolTask"]["registeredSharedApplications"][0])
-        ticket_call = Path(issued["ticketAttempt"]) / "ingress.bin"
-        reference.update(name="oracle-app", ticketTarget=a["ticket"], ticketObserveCapability=caps["agentTicketToolObserve"],
-                         issue={**issued["ticketReceipt"], "kind": "grainBackedEvent22", "ingress": str(home / "state/shared-app-refs/agent-ticket.bin"),
-                                "ingressSha256": sha(ticket_call)})
-        config["toolTask"]["registeredSharedApplications"].append(reference)
-        write(bundle / "state/shared-app-refs/agent-ticket.bin", ticket_call.read_bytes())
-        for name in ("seal.json", "call.bin", "submit-marker.json", "receipt.json"):
-            write(bundle / "state/oracle-grant" / name, (Path(issued["grantAttempt"]) / name).read_bytes())
-        route = read(routes / "controller-route-v3.json")
-        route["grantAttemptDir"] = str(home / "state/oracle-grant")
-        config["toolTask"].update(allowedApplicationLifetimeRoutes=[route], lifetimeApiHostSha256=sha(self.host),
-                                 applicationServices=[{"application": "oracle-app", "protocol": "oracle-operations-v1"}])
-        config["dispatchTask"] = self.dispatch_config(home, layout)
-        check_current("current-start-before-publication")
-        write(bundle / "controller.json", config)
-        write(self.calls / "activation.json", {"protocol": "mini-oracle-agent-activation-v1", "bundle": str(bundle),
-            "unit": start["unit"], "generation": start["generation"], "enrollmentReceipt": read(attempt / "receipt.json"),
-            "configSha256": sha(bundle / "controller.json"), "next": "install stopped controller update, then start and probe"})
-        return self.calls / "activation.json"
 
 
 def main():

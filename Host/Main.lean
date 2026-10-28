@@ -1194,7 +1194,13 @@ def profileDescription (config : NativeHost.Config)
         [("base", n tariff.base), ("perBirth", n tariff.perBirth)])]
   Lean.Json.mkObj (base ++ grainBirthFields ++ serviceFields)
 
-def descriptionLoaded (config : NativeHost.Config) : Lean.Json := Id.run do
+/-- The deployment's description on the loaded image. A grain birth is offered while that
+image's platform record prices it (`record.grainBirth`), the same record the grain receiver
+reads (`GrainResourceBirthAdmission.grainTariffAt`). -/
+def descriptionLoaded (config : NativeHost.Config) (opened : NativeHost.Opened config) :
+    Lean.Json := Id.run do
+  let grainBirth := ((PlatformCellDomain.recordOn config.deployment opened.durable.snapshot).bind
+    (·.grainBirth)).isSome
   let n := fun value : Nat => toJson (toString value)
   return Lean.Json.mkObj
     [("runtime", toJson "minidregg-native"),
@@ -1208,14 +1214,14 @@ def descriptionLoaded (config : NativeHost.Config) : Lean.Json := Id.run do
        ((["birth", "invoke", "install", "delegate", "revoke", "renounce",
           "fn-selected-public-release", "application-lifecycle-begin",
           "selected-source-publication"] : List String) ++
-         if config.grainBirthTariff.isSome then ["grain-birth"] else [])),
+         if grainBirth then ["grain-birth"] else [])),
      ("nockFSync", n config.nockFSync),
      ("jointInvocation", toJson true), ("typedContent", toJson true),
      ("authorizedQueries", toJson true), ("delegation", toJson true)]
 
 def description (config : NativeHost.Config) : IO Lean.Json := do
-  discard <| IO.ofExcept (← NativeHost.openExisting config)
-  return descriptionLoaded config
+  let opened ← IO.ofExcept (← NativeHost.openExisting config)
+  return descriptionLoaded config opened
 
 /-- Measurement: time the per-state costs a request pays on this Store. -/
 def storeBench (config : NativeHost.Config) : IO Unit := do
@@ -1583,6 +1589,7 @@ def selectedReleaseSubmitSession (config : NativeHost.Config)
     | .contention => pure .contention
     | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
     | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  NativeHost.logOperatorRefusal outcome
   return NativeHost.publicSubmissionOutcome outcome
 
 /-- Lookup never submits missing work. An exact historical retry retains its
@@ -1810,6 +1817,7 @@ def fnConsumerNamespaceSubmitSession (config : NativeHost.Config)
   | .contention => pure .contention
   | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
   | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  NativeHost.logOperatorRefusal outcome
   return NativeHost.publicSubmissionOutcome outcome
 
 /-- Op41 is receipt-only. A missing original is never resubmitted. -/
@@ -1842,6 +1850,7 @@ def fnSelectedPollSubmitSession (config : NativeHost.Config)
   | .contention => pure .contention
   | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
   | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  NativeHost.logOperatorRefusal outcome
   return NativeHost.publicSubmissionOutcome outcome
 
 def fnSelectedPollLookupSession (config : NativeHost.Config)
@@ -1872,6 +1881,7 @@ def fnEmptyPollSubmitSession (config : NativeHost.Config)
   | .contention => pure .contention
   | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
   | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  NativeHost.logOperatorRefusal outcome
   return NativeHost.publicSubmissionOutcome outcome
 
 def fnEmptyPollLookupSession (config : NativeHost.Config)
@@ -1903,6 +1913,7 @@ def selectedSourcePublicationSubmitSession (config : NativeHost.Config)
     | .contention => pure .contention
     | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
     | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  NativeHost.logOperatorRefusal outcome
   return NativeHost.publicSubmissionOutcome outcome
 
 def selectedSourcePublicationLookupSession (config : NativeHost.Config)
@@ -1938,11 +1949,12 @@ def applicationShareIssueSubmitSession (config : NativeHost.Config)
         sessionConfirmed config state .replayed receipt.transactionId receipt.eventId
     | .confirmed kind receipt =>
         sessionConfirmed config state kind receipt.transactionId receipt.eventId
-    | .rejected _ => pure (.refused .operationRejected "application-share-issue".toUTF8.toList
-        "request refused".toUTF8.toList)
+    | .rejected reason => pure (.refused .operationRejected "application-share-issue".toUTF8.toList
+        reason.toUTF8.toList)
     | .contention => pure .contention
     | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
     | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  NativeHost.logOperatorRefusal outcome
   return NativeHost.publicSubmissionOutcome outcome
 
 def applicationShareIssueLookupSession (config : NativeHost.Config)
@@ -1984,11 +1996,12 @@ def applicationGrainShareIssueSubmitSession (config : NativeHost.Config)
         sessionConfirmed config state .replayed receipt.transactionId receipt.eventId
     | .confirmed kind receipt =>
         sessionConfirmed config state kind receipt.transactionId receipt.eventId
-    | .rejected _ => pure (.refused .operationRejected "application-grain-share-issue".toUTF8.toList
-        "request refused".toUTF8.toList)
+    | .rejected reason => pure (.refused .operationRejected "application-grain-share-issue".toUTF8.toList
+        reason.toUTF8.toList)
     | .contention => pure .contention
     | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
     | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  NativeHost.logOperatorRefusal outcome
   return NativeHost.publicSubmissionOutcome outcome
 
 /-- Receipt recovery uses the exact event-22 certificate and original receipt
@@ -2067,6 +2080,7 @@ def agentLifetimeGrantSubmitSession (config : NativeHost.Config)
     | .contention => .contention
     | .unavailable detail => .unavailable detail.toUTF8.toList
     | .uncertain detail => .uncertain detail.toUTF8.toList
+  NativeHost.logOperatorRefusal outcome
   return NativeHost.publicSubmissionOutcome outcome
 
 /-- Grant recovery selects the exact event27 original from a verified walk.
@@ -2372,8 +2386,8 @@ def dispatchSession (config : NativeHost.Config)
   match operation with
   | 0 =>
       unless payload.isEmpty do throw (RequestRefusal.malformed "describe does not accept a payload")
-      discard <| sessionOpened config state
-      return (0, (descriptionLoaded config).compress.toUTF8.toList)
+      let opened ← sessionOpened config state
+      return (0, (descriptionLoaded config opened).compress.toUTF8.toList)
   | 1 =>
       let t0 ← IO.monoMsNow
       let session ← sessionCurrent config state
@@ -2435,6 +2449,16 @@ def dispatchSession (config : NativeHost.Config)
       -- law-sat (C-SAT-2): a pure function of the request bytes; reads no Store.
       LawSatWire.lawSatSession payload
   | 151 => fnDispatch operation payload
+  | 156 =>
+      -- Same verifier-selected projection as the detached command. Refresh the
+      -- session's admitted suffix instead of auditing genesis in a new process.
+      let session ← sessionWalked config state
+      let view ← IO.ofExcept <|
+        ApplicationAgentLifetimeGrantInspection.inspectAcceptedVerified session.verified payload
+      let bytes := view.compress.toUTF8.toList
+      unless bytes.length ≤ 2 * 1024 * 1024 do
+        throw (IO.userError "accepted grant inspection exceeds native JSON budget")
+      return (156, bytes)
   | 155 =>
       -- The operator socket pins this Host image and complete configuration.
       -- Refresh the verifier-minted chronology held by op26 rather than
@@ -7485,6 +7509,33 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                             let opened ← sessionOpened pinnedConfig state
                             let outcome := NativeHost.platformLookupLoaded pinnedConfig opened payload
                             return ((243 : UInt8), outcomeCodec.encode outcome)
+                        | 244 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let plan ← IO.ofExcept (NativeHost.meterRefillPlanLoaded pinnedConfig opened payload)
+                            let bytes := PlatformCellDomain.signingPlanCodec.encode plan
+                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "meter refill plan exceeds host frame bound")
+                            return ((244 : UInt8), bytes)
+                        | 245 =>
+                            -- plan, then the controller's signature
+                            let (planBytes, signature) ← splitPair payload
+                            let some plan := PlatformCellDomain.signingPlanCodec.decode planBytes
+                              | throw (RequestRefusal.malformed "noncanonical meter refill plan")
+                            let ingress ← IO.ofExcept (NativeHost.meterRefillAssemble plan signature)
+                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "meter refill ingress exceeds host frame bound")
+                            return ((245 : UInt8), ingress)
+                        | 246 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let outcome ← NativeHost.meterRefillSubmitLoaded pinnedConfig
+                              (sessionConfirmed pinnedConfig state) opened payload
+                            -- Blind, as the platform install (242): the operator's log keeps the reason.
+                            return ((246 : UInt8),
+                              outcomeCodec.encode (NativeHost.publicSubmissionOutcome outcome))
+                        | 247 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let outcome := NativeHost.meterRefillLookupLoaded pinnedConfig opened payload
+                            return ((247 : UInt8), outcomeCodec.encode outcome)
                         | 193 =>
                             let (planBytes, signatureBytes) ← splitPair payload
                             let signatures ← decodeSignatures signatureBytes
@@ -8000,7 +8051,8 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                             let json ← IO.ofExcept (Minidregg.Host.Json.parse source)
                             let intent ← IO.ofExcept (←
                               Minidregg.Host.CurrentResourceBirthAuthoring.intentLoadedAuthorized
-                                pinnedConfig opened signedObservationBytes json)
+                                pinnedConfig opened signedObservationBytes json
+                                (← IO.ofExcept settings.providerRoutes))
                             unless intent.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "resource birth intent exceeds host frame bound")
                             return ((91 : UInt8), intent)

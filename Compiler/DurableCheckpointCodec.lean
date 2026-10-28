@@ -5,7 +5,7 @@ The host's durable store is three objects (the whole-image `DREGG.DURABLE.IMAGE`
 record is gone):
 
 * the **seed**, written once at bootstrap (`DREGG.DURABLE.SEED/v1`);
-* the **log**: entry `h` (1-based) is one accepted record (`DREGG.DURABLE.LOG/v2`: the record and its signing subject)
+* the **log**: entry `h` (1-based) is one accepted record (`DREGG.DURABLE.LOG`, frame byte 4: the record, its signing subject and its meter credit)
   and a 32-byte tag. The log is chained by C1's log root: `chain₀ = logStart seed`
   (the host passes `NativeHostCodec.logRoot0 domain semantics`), and
   `chainₕ = Kernel.WorldRoot.chainDigest chainₕ₋₁ (recordDigest recordₕ)`; the tag of
@@ -582,11 +582,25 @@ theorem seedEpoch_spentMap_refused (rest : List UInt8) :
 #assert_axioms seedEpoch_v4_refused
 #assert_axioms seedEpoch_v1_refusedFor
 #assert_axioms seedEpoch_v1_refused
-/-- Version 2: a record carries its signing subject (`IntentRecord.subject`),
-which the presence index folds. A v1 record refuses (`v1_record_refused`). -/
-def recordFrame : Framed IntentRecord := ⟨Minidregg.Compiler.PersistedCodecTags.durable_log_byte_v2, intentStream⟩
+/-- Frame byte 4: a record carries its signing subject (`IntentRecord.subject`, which the
+presence index folds) and its meter credit (`IntentRecord.credit`, the seed-meter refill's).
+Bytes 1-3 refuse (`v1_record_refused`, `v2_record_refused`, `v3_record_refused`; byte 3 is
+the subject-only record of the A11 regen). -/
+def recordFrame : Framed IntentRecord := ⟨Minidregg.Compiler.PersistedCodecTags.durable_log_byte_v4, intentStream⟩
+
+def retiredRecordFrameV3 : List UInt8 := "DREGG.DURABLE.LOG".toUTF8.toList ++ [3]
+
+theorem v3_record_refused (tail : List UInt8) :
+    recordFrame.decode (bytesStream.encode retiredRecordFrameV3 ++ tail) = none :=
+  Framed.decode_other_frame recordFrame (by decide +kernel) tail
 
 def retiredRecordFrameV1 : List UInt8 := "DREGG.DURABLE.LOG".toUTF8.toList ++ [1]
+
+def retiredRecordFrameV2 : List UInt8 := "DREGG.DURABLE.LOG".toUTF8.toList ++ [2]
+
+theorem v2_record_refused (tail : List UInt8) :
+    recordFrame.decode (bytesStream.encode retiredRecordFrameV2 ++ tail) = none :=
+  Framed.decode_other_frame recordFrame (by decide +kernel) tail
 
 theorem v1_record_refused (tail : List UInt8) :
     recordFrame.decode (bytesStream.encode retiredRecordFrameV1 ++ tail) = none :=

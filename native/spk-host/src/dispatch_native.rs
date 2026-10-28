@@ -47,6 +47,44 @@ fn read_bounded(path: &Path, bound: usize) -> io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
+/// Read a READ-ONLY pinned input (the Host config) from a parent `pinned_input_dir` admits, through ONE descriptor: opened O_NOFOLLOW, then
+/// fstat'ed on that same descriptor (a regular file owned by this user or root and writable by
+/// neither group nor others), then read from it. A symlink, a directory or a file a non-owner can
+/// alter is refused by name. The bytes returned are the bytes of that descriptor, so a digest taken
+/// over them (check_pin) pins the content the check saw; with a parent `pinned_input_dir` has
+/// admitted, no non-owner can swap the path between this check and the Host helper's own read.
+pub(crate) fn read_pinned_input(path: &Path, bound: usize) -> io::Result<Vec<u8>> {
+    let refuse = |property: &str| {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("pinned input {} refused: {property}", path.display()),
+        ))
+    };
+    pinned_input_dir(path.parent().ok_or_else(|| invalid("pinned input parent absent"))?)?;
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(path)
+        .ctx("open", &path)?;
+    let metadata = file.metadata().ctx("inspect", &path)?;
+    if !metadata.is_file() {
+        return refuse("not a regular file (a symlink or directory is refused)");
+    }
+    let uid = metadata.uid();
+    if uid != unsafe { libc::geteuid() } && uid != 0 {
+        return refuse("owned by neither this user nor root");
+    }
+    if metadata.permissions().mode() & 0o022 != 0 {
+        return refuse("writable by group or others");
+    }
+    let mut bytes = Vec::new();
+    file.take(bound as u64 + 1).read_to_end(&mut bytes)?;
+    if bytes.is_empty() || bytes.len() > bound {
+        return Err(invalid("private native artifact size refused"));
+    }
+    Ok(bytes)
+}
+
 pub(crate) fn write_new(directory: &Path, name: &str, bytes: &[u8]) -> io::Result<PathBuf> {
     if bytes.is_empty() || bytes.len() > MAX_INSPECTION {
         return Err(invalid("private native artifact size refused"));
@@ -72,6 +110,36 @@ pub(crate) fn private_dir(path: &Path) -> io::Result<()> {
         || metadata.permissions().mode() & 0o777 != 0o700
     {
         return Err(invalid("native attempt directory is not owner-private"));
+    }
+    Ok(())
+}
+
+/// A directory that holds a READ-ONLY pinned input (the operator socket's directory): absolute, a
+/// real directory (not a symlink), owned by this user or by root, and writable by neither group
+/// nor others. Unlike `private_dir`, group or other READ and SEARCH are allowed: on the hosted
+/// frame the Host's deployment directory is 0710 for the `mini-sessions` group, because every
+/// member's shell must read the pinned config there. Directories spk-host WRITES (attempt dirs,
+/// journals) keep `private_dir`. The refusal names the path and the failed property.
+pub(crate) fn pinned_input_dir(path: &Path) -> io::Result<()> {
+    let refuse = |property: &str| {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("pinned input directory {} refused: {property}", path.display()),
+        ))
+    };
+    if !path.is_absolute() {
+        return refuse("not an absolute path");
+    }
+    let metadata = fs::symlink_metadata(path).ctx("inspect", &path)?;
+    if !metadata.is_dir() {
+        return refuse("not a directory (a symlink or file is refused)");
+    }
+    let uid = metadata.uid();
+    if uid != unsafe { libc::geteuid() } && uid != 0 {
+        return refuse("owned by neither this user nor root");
+    }
+    if metadata.permissions().mode() & 0o022 != 0 {
+        return refuse("writable by group or others");
     }
     Ok(())
 }
@@ -371,7 +439,7 @@ impl PrivateOperator {
 
     fn check_pin(&self) -> io::Result<Vec<u8>> {
         self.verified_host()?;
-        let config = read_bounded(&self.config, MAX_CONFIG)?;
+        let config = read_pinned_input(&self.config, MAX_CONFIG)?;
         if self.config_sha256 != hex(&Sha256::digest(&config)) {
             return Err(invalid("selected Mini Host config SHA-256 drift"));
         }
@@ -379,7 +447,7 @@ impl PrivateOperator {
             .socket
             .parent()
             .ok_or_else(|| invalid("operator socket lacks parent"))?;
-        private_dir(parent)?;
+        pinned_input_dir(parent)?;
         let socket = fs::symlink_metadata(&self.socket).ctx("inspect", &self.socket)?;
         if !socket.file_type().is_socket()
             || socket.uid() != unsafe { libc::geteuid() }
@@ -2018,6 +2086,68 @@ mod tests {
     use super::*;
     use std::os::unix::net::UnixListener;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn dir_with_mode(label: &str, mode: u32) -> PathBuf {
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let path = std::env::temp_dir().join(format!("pinned-input-{label}-{}-{nonce}", std::process::id()));
+        DirBuilder::new().mode(0o700).create(&path).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
+        path
+    }
+
+    #[test]
+    fn read_pinned_input_reads_through_one_descriptor_and_refuses_symlinks_and_writable_files_by_name() {
+        let dir = dir_with_mode("input", 0o710);
+        let file = dir.join("pinned-config.json");
+        fs::write(&file, b"{}").unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o640)).unwrap();
+        assert_eq!(read_pinned_input(&file, 64).unwrap(), b"{}");
+        let link = dir.join("link.json");
+        std::os::unix::fs::symlink(&file, &link).unwrap();
+        let error = read_pinned_input(&link, 64).unwrap_err();
+        // O_NOFOLLOW refuses the open itself (ELOOP) and the refusal carries the path.
+        assert!(error.to_string().contains("link.json"), "{error}");
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o660)).unwrap();
+        let error = read_pinned_input(&file, 64).unwrap_err().to_string();
+        assert!(error.contains("pinned input") && error.contains("writable by group or others"), "{error}");
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o640)).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o770)).unwrap();
+        let error = read_pinned_input(&file, 64).unwrap_err().to_string();
+        assert!(error.contains("pinned input directory") && error.contains("writable by group or others"), "{error}");
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o710)).unwrap();
+        fs::remove_file(&link).unwrap();
+        fs::remove_file(&file).unwrap();
+        fs::remove_dir(&dir).unwrap();
+    }
+
+    #[test]
+    fn pinned_input_dir_accepts_a_group_readable_parent_and_refuses_a_writable_one_by_name() {
+        let hosted = dir_with_mode("hosted", 0o710);
+        pinned_input_dir(&hosted).unwrap();
+        for (mode, label) in [(0o730, "group-write"), (0o777, "world-write"), (0o702, "other-write")] {
+            let bad = dir_with_mode(label, mode);
+            let error = pinned_input_dir(&bad).unwrap_err().to_string();
+            assert!(
+                error.contains("pinned input directory") && error.contains(&bad.display().to_string()) && error.contains("writable by group or others"),
+                "{label}: {error}"
+            );
+            fs::remove_dir(&bad).unwrap();
+        }
+        let link = hosted.with_extension("link");
+        std::os::unix::fs::symlink(&hosted, &link).unwrap();
+        let error = pinned_input_dir(&link).unwrap_err().to_string();
+        assert!(error.contains("not a directory"), "{error}");
+        fs::remove_file(&link).unwrap();
+        fs::remove_dir(&hosted).unwrap();
+    }
+
+    #[test]
+    fn pinned_input_dir_does_not_relax_the_private_attempt_directory_rule() {
+        let hosted = dir_with_mode("attempt-parent", 0o710);
+        let error = private_dir(&hosted).unwrap_err().to_string();
+        assert_eq!(error, "native attempt directory is not owner-private");
+        fs::remove_dir(&hosted).unwrap();
+    }
 
     pub(super) struct BoundFixture(pub(super) PathBuf);
     impl BoundFixture {

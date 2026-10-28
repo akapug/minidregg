@@ -81,9 +81,9 @@ impl OfflineSourceHost {
         }
         if self.host_sha256 != hex(&digest.finalize())
             || self.config_sha256
-                != hex(&Sha256::digest(read_private(
+                != hex(&Sha256::digest(crate::dispatch_native::read_pinned_input(
                     &self.config,
-                    MAX_SOURCE_CONFIG,
+                    MAX_SOURCE_CONFIG as usize,
                 )?))
         {
             return Err(invalid("offline Mini Host/config SHA-256 pin drift"));
@@ -448,6 +448,19 @@ mod tests {
             config,
         };
         (root, source, input, output)
+    }
+
+    #[test]
+    fn offline_check_pin_reads_a_config_under_a_group_readable_parent_but_not_a_writable_one() {
+        let (root, source, _input, _output) = offline_fixture("#!/bin/sh\nexit 0\n");
+        // The hosted frame: the Host's deployment directory is 0710 for the mini-sessions group.
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o710)).unwrap();
+        source.check_pin().unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o770)).unwrap();
+        let error = source.check_pin().unwrap_err().to_string();
+        assert!(error.contains("pinned input directory") && error.contains("writable by group or others"), "{error}");
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

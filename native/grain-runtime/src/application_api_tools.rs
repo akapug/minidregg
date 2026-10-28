@@ -378,6 +378,91 @@ struct LifetimeBindingReply {
     binding_sha256: String,
 }
 
+// The resident's v3 wire (agent_api_lifetime_wire_v3::Reply), decoded
+// directly from bytes before Value can collapse duplicate object fields.
+#[derive(Debug, Deserialize, Serialize)]
+enum LifetimeWireProtocol {
+    #[serde(rename = "mini-spk-agent-api-v3")]
+    V3,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
+enum LifetimeHostReply {
+    BindingV3 {
+        protocol: LifetimeWireProtocol,
+        binding: Box<LifetimeBinding>,
+        #[serde(rename = "bindingSha256")]
+        binding_sha256: String,
+    },
+    HttpV3 {
+        protocol: LifetimeWireProtocol,
+        #[serde(rename = "operationId")]
+        operation_id: String,
+        #[serde(rename = "bindingSha256")]
+        binding_sha256: String,
+        #[serde(rename = "operationFingerprint")]
+        operation_fingerprint: String,
+        #[serde(rename = "responseSha256")]
+        response_sha256: String,
+        #[serde(rename = "committedReceipt")]
+        committed_receipt: SourceReceiptPin,
+        status: u16,
+        headers: Vec<HostHeader>,
+        #[serde(rename = "bodyHex")]
+        body_hex: String,
+    },
+    RefusedV3 {
+        protocol: LifetimeWireProtocol,
+        #[serde(rename = "operationId")]
+        operation_id: String,
+        #[serde(rename = "bindingSha256")]
+        binding_sha256: String,
+        #[serde(
+            rename = "operationFingerprint",
+            skip_serializing_if = "Option::is_none"
+        )]
+        operation_fingerprint: Option<String>,
+        code: String,
+    },
+    UncertainV3 {
+        protocol: LifetimeWireProtocol,
+        #[serde(rename = "operationId")]
+        operation_id: String,
+        #[serde(rename = "bindingSha256")]
+        binding_sha256: String,
+        #[serde(rename = "operationFingerprint")]
+        operation_fingerprint: String,
+        phase: String,
+    },
+    InspectionV3 {
+        protocol: LifetimeWireProtocol,
+        #[serde(rename = "operationId")]
+        operation_id: String,
+        #[serde(rename = "bindingSha256")]
+        binding_sha256: String,
+        #[serde(
+            rename = "operationFingerprint",
+            skip_serializing_if = "Option::is_none"
+        )]
+        operation_fingerprint: Option<String>,
+        state: String,
+        #[serde(
+            rename = "definiteReplySha256",
+            skip_serializing_if = "Option::is_none"
+        )]
+        definite_reply_sha256: Option<String>,
+        #[serde(
+            rename = "definiteReplyJsonHex",
+            skip_serializing_if = "Option::is_none"
+        )]
+        definite_reply_json_hex: Option<String>,
+        #[serde(rename = "retentionError", skip_serializing_if = "Option::is_none")]
+        retention_error: Option<String>,
+    },
+}
+
+
 /// Exact order mirrors the resident v3 fingerprint preimage. These values
 /// come from the source-owned reserve plan and signed task observations, not
 /// from the forward dispatch frame or a static route generation.
@@ -918,6 +1003,45 @@ pub(crate) fn validate_lifetime_routes(
     Ok(())
 }
 
+/// Read-only planning may race another Store transition. Retry only this
+/// unsigned boundary; the caller allocates custody markers and opens the
+/// protected signer only after this function returns a coherent snapshot.
+/// Logical cell roots and lifecycle physical roots are different commitments.
+/// Signed observation world roots bind the observed tasks to the native
+/// author's exact verified image without reproducing its lifecycle codec here.
+pub(crate) fn lifetime_reserve_snapshot<T>(
+    mut prepare: impl FnMut() -> Result<(Value, Value, Value, T), String>,
+) -> Result<(Value, Value, Value, T), String> {
+    for _ in 0..8 {
+        let (parent, purse, plan, retained) = prepare()?;
+        if lifetime_reserve_snapshot_matches(&parent, &purse, &plan)? {
+            return Ok((parent, purse, plan, retained));
+        }
+    }
+    Err("lifetime reserve snapshot moved during eight unsigned plans; no reserve signed".into())
+}
+
+fn lifetime_reserve_snapshot_matches(
+    parent: &Value,
+    purse: &Value,
+    plan: &Value,
+) -> Result<bool, String> {
+    let field = |value: &Value, name: &str| -> Result<String, String> {
+        let text = value
+            .get(name)
+            .and_then(Value::as_str)
+            .filter(|text| canonical_native_nat(text))
+            .ok_or_else(|| format!("lifetime snapshot {name} is absent or noncanonical"))?;
+        Ok(text.to_owned())
+    };
+    let world = field(plan, "invocationWorldRoot")?;
+    let height = field(plan, "invocationHeight")?;
+    Ok(field(parent, "worldRoot")? == world
+        && field(purse, "worldRoot")? == world
+        && field(parent, "height")? == height
+        && field(purse, "height")? == height)
+}
+
 /// The source author inspects its own canonical request and reserve plan.
 /// This check compares those decoded bytes with the controller's retained
 /// forward call and immutable route, before the private purse key is used.
@@ -931,10 +1055,8 @@ pub(crate) struct LifetimeReserveInspection<'a> {
     pub reserve_operation_id: &'a str,
     pub signed_parent_generation: &'a str,
     pub signed_purse_generation: &'a str,
-    pub signed_app_physical_root: &'a str,
-    pub signed_session_physical_root: &'a str,
-    pub signed_parent_physical_root: &'a str,
-    pub signed_purse_physical_root: &'a str,
+    pub signed_parent: &'a Value,
+    pub signed_purse: &'a Value,
     pub request: &'a Value,
     pub plan: &'a Value,
 }
@@ -949,13 +1071,19 @@ pub(crate) fn verify_lifetime_reserve_inspection(
         reserve_operation_id,
         signed_parent_generation,
         signed_purse_generation,
-        signed_app_physical_root,
-        signed_session_physical_root,
-        signed_parent_physical_root,
-        signed_purse_physical_root,
+        signed_parent,
+        signed_purse,
         request,
         plan,
     } = inspection;
+    // This boundary is exclusively v3. The shared HTTP router also serves
+    // legacy callers, whose snake_case operation_id must not stand in for a
+    // retained lifetime request's operationId.
+    if retained_forward.get("type").and_then(Value::as_str) != Some("dispatch-v3")
+        || retained_forward.get("protocol").and_then(Value::as_str) != Some(LIFETIME_PROTOCOL)
+    {
+        return Err("lifetime reserve requires a retained v3 forward request".into());
+    }
     let expected_http = routed_reserve_http(retained_forward, &route.signed_api_path)?;
     if request.get("type").and_then(Value::as_str)
         != Some("application-agent-lifetime-author-request-v3")
@@ -999,10 +1127,10 @@ pub(crate) fn verify_lifetime_reserve_inspection(
     same(
         context,
         "httpOperationId",
-        retained_forward
-            .get("operation_id")
+        expected_http
+            .get("operationId")
             .and_then(Value::as_str)
-            .ok_or("retained lifetime forward operation ID absent")?,
+            .ok_or("routed lifetime forward operation ID absent")?,
     )?;
     if context.get("requestDigest") != request.get("requestDigest") {
         return Err("lifetime reserve HTTP digest differs from source request".into());
@@ -1022,41 +1150,50 @@ pub(crate) fn verify_lifetime_reserve_inspection(
         &route.grant_initialized_root,
     )?;
     same(bindings, "grantPhysicalRoot", &route.grant_initialized_root)?;
-    for (field, expected) in [
-        ("appPhysicalRoot", signed_app_physical_root),
-        ("sessionPhysicalRoot", signed_session_physical_root),
-        ("parentPhysicalRoot", signed_parent_physical_root),
-        ("pursePhysicalRoot", signed_purse_physical_root),
+    if !lifetime_reserve_snapshot_matches(signed_parent, signed_purse, plan)? {
+        return Err(
+            "lifetime reserve source snapshot differs from signed task observations".into(),
+        );
+    }
+    for field in [
+        "appPhysicalRoot",
+        "sessionPhysicalRoot",
+        "parentPhysicalRoot",
+        "pursePhysicalRoot",
     ] {
-        if !canonical_native_nat(expected) {
-            return Err(format!("lifetime signed {field} is not canonical"));
+        if !bindings
+            .get(field)
+            .and_then(Value::as_str)
+            .is_some_and(canonical_native_nat)
+        {
+            return Err(format!("lifetime source {field} is not canonical"));
         }
-        same(bindings, field, expected)?;
     }
     Ok(())
 }
 
 /// The post-reserve purse is a different physical cell state. Compare the
 /// immutable ticket/grant, parent and exact HTTP bindings, but check the
-/// post-reserve purse root as its own current fence. The native event26
+/// post-reserve purse through its signed snapshot world root. Lifecycle roots
+/// come only from the native author over that same image. The native event26
 /// receiver still proves the exact reserve chronology and current hold.
 pub(crate) struct LifetimePaidInspection<'a> {
     pub reserve: &'a Value,
     pub paid: &'a Value,
     pub reserve_index: &'a str,
     pub reserve_receipt: &'a Value,
-    pub signed_post_purse_physical_root: &'a str,
+    pub signed_post_purse_world_root: &'a str,
 }
 
 pub(crate) fn verify_lifetime_paid_inspection(
     inspection: LifetimePaidInspection<'_>,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let LifetimePaidInspection {
         reserve,
         paid,
         reserve_index,
         reserve_receipt,
-        signed_post_purse_physical_root,
+        signed_post_purse_world_root,
     } = inspection;
     if reserve.get("type").and_then(Value::as_str)
         != Some("application-agent-lifetime-reserve-plan-v3")
@@ -1090,15 +1227,23 @@ pub(crate) fn verify_lifetime_paid_inspection(
             return Err(format!("lifetime paid {field} differs from source reserve"));
         }
     }
-    if !canonical_native_nat(signed_post_purse_physical_root)
-        || post.get("pursePhysicalRoot").and_then(Value::as_str)
-            != Some(signed_post_purse_physical_root)
+    if !canonical_native_nat(signed_post_purse_world_root)
+        || paid.get("appWorldRoot").and_then(Value::as_str) != Some(signed_post_purse_world_root)
+        || paid.get("payerWorldRoot").and_then(Value::as_str) != Some(signed_post_purse_world_root)
     {
-        return Err("lifetime paid purse root differs from signed current view".into());
+        return Err("lifetime paid snapshot differs from signed current purse view".into());
     }
-    Ok(())
+    if !post
+        .get("pursePhysicalRoot")
+        .and_then(Value::as_str)
+        .is_some_and(canonical_native_nat)
+    {
+        return Err("lifetime paid purse physical root is not canonical".into());
+    }
+    // Return the native lifecycle root only after binding its image to the
+    // signed observation. Callers must not return the view logical root here.
+    Ok(post["pursePhysicalRoot"].as_str().unwrap().to_owned())
 }
-
 pub(crate) fn validate_routes(
     routes: &[RoutePin],
     parent_task: &str,
@@ -1568,6 +1713,16 @@ fn exchange_once_guarded(
             "application API forward request exceeds frame bound".into(),
         ));
     }
+    let (lifetime, inspection) = match (
+        request.get("protocol").and_then(Value::as_str),
+        request.get("type").and_then(Value::as_str),
+    ) {
+        (Some(LIFETIME_PROTOCOL), Some("hello-v3" | "dispatch-v3")) => (true, false),
+        (Some(LIFETIME_PROTOCOL), Some("inspect-v3")) => (true, true),
+        (Some(PROTOCOL), Some("hello" | "dispatch")) => (false, false),
+        (Some(PROTOCOL), Some("inspect")) => (false, true),
+        _ => return Err(TransportError::BeforeSend("application API request protocol/type mismatch".into())),
+    };
     check_socket_ancestors(socket, expected_host_uid)?;
     let before = fs::symlink_metadata(socket)
         .map_err(|error| TransportError::BeforeSend(format!("host socket: {error}")))?;
@@ -1635,7 +1790,7 @@ fn exchange_once_guarded(
         .1
         .map_err(|error| TransportError::Uncertain(format!("host reply header: {error}")))?;
     let size = u32::from_be_bytes(size) as usize;
-    let max_reply = if request.get("type").and_then(Value::as_str) == Some("inspect") {
+    let max_reply = if inspection {
         MAX_INSPECT_REPLY_FRAME
     } else {
         MAX_FORWARD_FRAME
@@ -1653,8 +1808,13 @@ fn exchange_once_guarded(
         })?;
     // Decode against the strict tagged wire before admitting a Value. Direct
     // typed decoding rejects duplicate fields that Value would collapse.
-    serde_json::from_slice::<HostReply>(&payload)
-        .map_err(|error| TransportError::Uncertain(format!("host reply wire: {error}")))?;
+    if lifetime {
+        serde_json::from_slice::<LifetimeHostReply>(&payload)
+            .map_err(|error| TransportError::Uncertain(format!("host lifetime reply wire: {error}")))?;
+    } else {
+        serde_json::from_slice::<HostReply>(&payload)
+            .map_err(|error| TransportError::Uncertain(format!("host reply wire: {error}")))?;
+    }
     serde_json::from_slice(&payload)
         .map_err(|error| TransportError::Uncertain(format!("host reply JSON: {error}")))
 }
@@ -1912,6 +2072,78 @@ mod tests {
             fs::remove_file(path).unwrap();
         }
         fs::remove_dir(path.parent().unwrap()).unwrap();
+    }
+
+    fn socket_reply(request: &Value, reply: Vec<u8>) -> Result<Value, TransportError> {
+        let path = socket_path();
+        let listener = UnixListener::bind(&path).unwrap();
+        let expected = request.clone();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+            let mut size = [0u8; 4]; stream.read_exact(&mut size).unwrap();
+            let mut body = vec![0; u32::from_be_bytes(size) as usize];
+            stream.read_exact(&mut body).unwrap();
+            assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), expected);
+            stream.write_all(&(reply.len() as u32).to_be_bytes()).unwrap();
+            // Oversized frames are rejected before the client reads the body.
+            let _ = stream.write_all(&reply);
+        });
+        let result = exchange_once(&path, unsafe { libc::geteuid() }, request,
+            Instant::now() + Duration::from_secs(2));
+        server.join().unwrap(); remove_socket(&path); result
+    }
+
+    fn lifetime_http_wire() -> Value {
+        json!({"type":"http-v3","protocol":LIFETIME_PROTOCOL,"operationId":"9",
+            "bindingSha256":"ab".repeat(32),"operationFingerprint":"cd".repeat(32),
+            "responseSha256":"ef".repeat(32),"status":200,"headers":[],"bodyHex":"6869",
+            "committedReceipt":{"transactionId":"1","eventId":"2","acceptedCount":"3","worldRoot":"4"}})
+    }
+
+    #[test]
+    fn lifetime_transport_dispatch_and_large_inspection_use_strict_v3_wire() {
+        let dispatch = json!({"type":"dispatch-v3","protocol":LIFETIME_PROTOCOL});
+        let http = lifetime_http_wire();
+        assert_eq!(socket_reply(&dispatch, serde_json::to_vec(&http).unwrap()).unwrap(), http);
+        for kind in ["refused-v3", "uncertain-v3"] {
+            let mut reply = json!({"type":kind,"protocol":LIFETIME_PROTOCOL,
+                "operationId":"9","bindingSha256":"ab".repeat(32),"operationFingerprint":"cd".repeat(32)});
+            reply[if kind == "refused-v3" { "code" } else { "phase" }] = json!("held");
+            assert_eq!(socket_reply(&dispatch, serde_json::to_vec(&reply).unwrap()).unwrap(), reply);
+        }
+        let inspect = json!({"type":"inspect-v3","protocol":LIFETIME_PROTOCOL});
+        let reply = json!({"type":"inspection-v3","protocol":LIFETIME_PROTOCOL,"operationId":"9",
+            "bindingSha256":"ab".repeat(32),"state":"committed",
+            "definiteReplyJsonHex":"00".repeat(MAX_FORWARD_FRAME / 2),"definiteReplySha256":"cd".repeat(32)});
+        let bytes = serde_json::to_vec(&reply).unwrap();
+        assert!(bytes.len() > MAX_FORWARD_FRAME && bytes.len() < MAX_INSPECT_REPLY_FRAME);
+        assert_eq!(socket_reply(&inspect, bytes.clone()).unwrap(), reply);
+        assert!(matches!(socket_reply(&dispatch, bytes), Err(TransportError::Uncertain(_))));
+        let oversized = vec![b' '; MAX_INSPECT_REPLY_FRAME + 1];
+        assert!(matches!(socket_reply(&inspect, oversized), Err(TransportError::Uncertain(_))));
+    }
+
+    #[test]
+    fn lifetime_transport_refuses_duplicate_unknown_and_cross_protocol_frames() {
+        let request = json!({"type":"dispatch-v3","protocol":LIFETIME_PROTOCOL});
+        let valid = serde_json::to_string(&lifetime_http_wire()).unwrap();
+        for wire in [
+            valid.replacen("\"operationId\":\"9\"", "\"operationId\":\"9\",\"operationId\":\"10\"", 1),
+            valid.replacen("\"eventId\":\"2\"", "\"eventId\":\"2\",\"eventId\":\"3\"", 1),
+            valid.replacen("{", "{\"unexpected\":true,", 1),
+            valid.replace(LIFETIME_PROTOCOL, PROTOCOL),
+            serde_json::to_string(&json!({"type":"refused","protocol":PROTOCOL,
+                "operation_id":"9","binding_sha256":"ab".repeat(32),"code":"held"})).unwrap(),
+        ] {
+            assert!(matches!(socket_reply(&request, wire.into_bytes()), Err(TransportError::Uncertain(_))));
+        }
+        assert!(matches!(socket_reply(&hello_request(), valid.into_bytes()), Err(TransportError::Uncertain(_))));
+        for invalid in [json!({"type":"hello-v3","protocol":PROTOCOL}),
+            json!({"type":"hello","protocol":LIFETIME_PROTOCOL}), json!({"type":"hello-v3"})] {
+            assert!(matches!(exchange_once(Path::new("/not-a-socket"), unsafe { libc::geteuid() },
+                &invalid, Instant::now() + Duration::from_secs(1)), Err(TransportError::BeforeSend(_))));
+        }
     }
 
     fn request() -> Value {
@@ -2293,7 +2525,13 @@ mod tests {
         let sha = hex(&digest.finalize());
         let reply = json!({"type":"binding-v3","protocol":LIFETIME_PROTOCOL,
             "binding":binding,"bindingSha256":sha});
-        let (checked, invocation) = verify_lifetime_binding_reply(reply.clone(), &route).unwrap();
+        let received = socket_reply(&lifetime_hello_request(), serde_json::to_vec(&reply).unwrap()).unwrap();
+        assert_eq!(received, reply);
+        let duplicate_nested = serde_json::to_string(&reply).unwrap().replacen(
+            "\"hostUnit\":", "\"hostUnit\":\"other.service\",\"hostUnit\":", 1);
+        assert!(matches!(socket_reply(&lifetime_hello_request(), duplicate_nested.into_bytes()),
+            Err(TransportError::Uncertain(_))));
+        let (checked, invocation) = verify_lifetime_binding_reply(received, &route).unwrap();
         assert_eq!(checked, sha);
         assert_eq!(invocation, "ab".repeat(16));
         let mut changed = route.clone();
@@ -2373,10 +2611,62 @@ mod tests {
     }
 
     #[test]
+    fn lifetime_snapshot_retries_only_unsigned_planning_and_refuses_exhaustion() {
+        // Values reflect the real boundary: attach advanced the global image,
+        // and each view's logical root differs from its lifecycle commitment.
+        let parent = json!({"worldRoot":"611503", "height":"103", "targetRoot":"339410"});
+        let purse = json!({"worldRoot":"107714", "height":"104", "targetRoot":"224743"});
+        let plan = json!({"invocationWorldRoot":"107714", "invocationHeight":"104",
+                    "bindings":{"parentPhysicalRoot":"233679", "pursePhysicalRoot":"737131"}});
+        assert!(!lifetime_reserve_snapshot_matches(&parent, &purse, &plan).unwrap());
+        let mut current_parent = parent.clone();
+        current_parent["worldRoot"] = purse["worldRoot"].clone();
+        current_parent["height"] = purse["height"].clone();
+        assert!(lifetime_reserve_snapshot_matches(&current_parent, &purse, &plan).unwrap());
+        let mut calls = 0;
+        let (_, _, _, retained) = lifetime_reserve_snapshot(|| {
+            calls += 1;
+            Ok((
+                if calls == 1 {
+                    parent.clone()
+                } else {
+                    current_parent.clone()
+                },
+                purse.clone(),
+                plan.clone(),
+                calls,
+            ))
+        })
+        .unwrap();
+        assert_eq!(retained, 2);
+        assert_eq!(calls, 2);
+        calls = 0;
+        let refused = lifetime_reserve_snapshot(|| {
+            calls += 1;
+            Ok((parent.clone(), purse.clone(), plan.clone(), ()))
+        });
+        assert!(refused.unwrap_err().contains("no reserve signed"));
+        assert_eq!(calls, 8);
+        let mut invalid = plan.clone();
+        invalid["invocationWorldRoot"] = json!("0107714");
+        calls = 0;
+        assert!(lifetime_reserve_snapshot(|| {
+            calls += 1;
+            Ok((current_parent.clone(), purse.clone(), invalid.clone(), ()))
+        })
+        .is_err());
+        assert_eq!(calls, 1); // Malformed input is not a moving-snapshot retry.
+        let mut wrong_purse = purse.clone();
+        wrong_purse["worldRoot"] = json!("42");
+        assert!(!lifetime_reserve_snapshot_matches(&current_parent, &wrong_purse, &plan).unwrap());
+    }
+
+    #[test]
     fn lifetime_reserve_inspection_binds_exact_http_and_historical_grant() {
         let route = lifetime_route();
-        let retained =
-            dispatch_request(37, &parse_input(&request(), &["workroom".into()]).unwrap());
+        let input = parse_input(&request(), &["workroom".into()]).unwrap();
+        // Use the actual native forward constructor, not a legacy test stand-in.
+        let retained = lifetime_dispatch_request(37, &"ab".repeat(32), &input).unwrap();
         let http = routed_reserve_http(&retained, &route.signed_api_path).unwrap();
         let selectors = json!({"sourceBuiltExactSelectors":"test"});
         let source = json!({
@@ -2389,6 +2679,7 @@ mod tests {
         });
         let plan = json!({
             "type":"application-agent-lifetime-reserve-plan-v3",
+            "invocationWorldRoot":"900", "invocationHeight":"104",
             "fixedSelectors":selectors,
             "http":http,
             "canonicalRequestHex":"0102",
@@ -2414,38 +2705,55 @@ mod tests {
                 "pursePhysicalRoot":"803"
             }
         });
-        let verify = |request: &Value, plan: &Value| {
+        let verify = |retained: &Value, request: &Value, plan: &Value| {
             verify_lifetime_reserve_inspection(LifetimeReserveInspection {
                 route: &route,
-                retained_forward: &retained,
+                retained_forward: retained,
                 expected_selectors: &selectors,
                 reserve_operation_id: "88",
                 signed_parent_generation: "7",
                 signed_purse_generation: "6",
-                signed_app_physical_root: "800",
-                signed_session_physical_root: "801",
-                signed_parent_physical_root: "802",
-                signed_purse_physical_root: "803",
+                signed_parent: &json!({"worldRoot":"900", "height":"104", "targetRoot":"1802"}),
+                signed_purse: &json!({"worldRoot":"900", "height":"104", "targetRoot":"1803"}),
                 request,
                 plan,
             })
         };
-        verify(&source, &plan).unwrap();
+        verify(&retained, &source, &plan).unwrap();
+        for field in ["invocationWorldRoot", "invocationHeight"] {
+            let mut changed = plan.clone();
+            changed[field] = json!("901");
+            assert!(verify(&retained, &source, &changed).is_err());
+        }
+        let legacy = dispatch_request(37, &input);
+        assert!(verify(&legacy, &source, &plan)
+            .unwrap_err()
+            .contains("v3 forward"));
+        let mut wrong = retained.clone();
+        wrong["protocol"] = json!(PROTOCOL);
+        assert!(verify(&wrong, &source, &plan).is_err());
+        wrong = retained.clone();
+        wrong.as_object_mut().unwrap().remove("operationId");
+        wrong["operation_id"] = json!("37");
+        assert!(verify(&wrong, &source, &plan).is_err());
+        let mut changed = plan.clone();
+        changed["context"]["httpOperationId"] = json!("38");
+        assert!(verify(&retained, &source, &changed).is_err());
         let mut changed = source.clone();
         changed["http"]["headers"][0]["generated"] = json!(true);
-        assert!(verify(&changed, &plan).is_err());
+        assert!(verify(&retained, &changed, &plan).is_err());
         let mut changed = plan.clone();
         changed["bindings"]["grantIssueReceipt"]["worldRoot"] = json!("1");
-        assert!(verify(&source, &changed).is_err());
+        assert!(verify(&retained, &source, &changed).is_err());
         let mut changed = plan.clone();
         changed["context"]["parentGeneration"] = json!("8");
-        assert!(verify(&source, &changed).is_err());
+        assert!(verify(&retained, &source, &changed).is_err());
         let mut changed = plan.clone();
         changed["bindings"]["grantPhysicalRoot"] = json!("9");
-        assert!(verify(&source, &changed).is_err());
+        assert!(verify(&retained, &source, &changed).is_err());
         let mut changed = plan.clone();
-        changed["bindings"]["sessionPhysicalRoot"] = json!("9");
-        assert!(verify(&source, &changed).is_err());
+        changed["bindings"]["sessionPhysicalRoot"] = json!("09");
+        assert!(verify(&retained, &source, &changed).is_err());
     }
 
     #[test]
@@ -2468,9 +2776,11 @@ mod tests {
             }
         });
         let receipt = json!({"transactionId":"71","eventId":"72",
-            "acceptedCount":"15","worldRoot":"73"});
+                    "acceptedCount":"15","worldRoot":"73"});
         let mut paid = reserve.clone();
         paid["type"] = json!("application-agent-lifetime-paid-plan-v3");
+        paid["appWorldRoot"] = json!("900");
+        paid["payerWorldRoot"] = json!("900");
         paid["reserveIndex"] = json!("14");
         paid["reserveReceipt"] = receipt.clone();
         paid["bindings"]["pursePhysicalRoot"] = json!("64");
@@ -2480,10 +2790,18 @@ mod tests {
                 paid,
                 reserve_index: "14",
                 reserve_receipt: &receipt,
-                signed_post_purse_physical_root: "64",
+                signed_post_purse_world_root: "900",
             })
         };
-        verify(&paid).unwrap();
+        assert_eq!(verify(&paid).unwrap(), "64");
+        for field in ["appWorldRoot", "payerWorldRoot"] {
+            let mut changed = paid.clone();
+            changed[field] = json!("901");
+            assert!(verify(&changed).is_err());
+        }
+        let mut changed = paid.clone();
+        changed["bindings"]["pursePhysicalRoot"] = json!("064");
+        assert!(verify(&changed).is_err());
         let mut changed = paid.clone();
         changed["bindings"]["grantPhysicalRoot"] = json!("42");
         assert!(verify(&changed).is_err());
@@ -2510,7 +2828,7 @@ mod tests {
             stream.read_exact(&mut payload).unwrap();
             assert_eq!(
                 serde_json::from_slice::<Value>(&payload).unwrap(),
-                json!({"type":"dispatch","operation_id":"7"})
+                json!({"type":"dispatch","protocol":PROTOCOL,"operation_id":"7"})
             );
             let reply = serde_json::to_vec(&json!({"type":"refused","protocol":PROTOCOL,
                 "operation_id":"7","binding_sha256":"0".repeat(64),"code":"disabled"}))
@@ -2523,7 +2841,7 @@ mod tests {
         let pending = start_exchange_once(
             &path,
             unsafe { libc::geteuid() },
-            json!({"type":"dispatch","operation_id":"7"}),
+            json!({"type":"dispatch","protocol":PROTOCOL,"operation_id":"7"}),
             Instant::now() + Duration::from_secs(2),
             Arc::new(AtomicBool::new(false)),
         )
@@ -2546,7 +2864,7 @@ mod tests {
             exchange_once(
                 &absent,
                 unsafe { libc::geteuid() },
-                &json!({"type":"inspect","operation_id":"8"}),
+                &json!({"type":"inspect","protocol":PROTOCOL,"operation_id":"8"}),
                 Instant::now() + Duration::from_secs(2),
             ),
             Err(TransportError::BeforeSend(_))
@@ -2565,7 +2883,7 @@ mod tests {
             exchange_once(
                 &path,
                 unsafe { libc::geteuid() },
-                &json!({"type":"dispatch","operation_id":"8"}),
+                &json!({"type":"dispatch","protocol":PROTOCOL,"operation_id":"8"}),
                 Instant::now() + Duration::from_secs(2),
             ),
             Err(TransportError::Uncertain(_))

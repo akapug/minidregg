@@ -57,7 +57,7 @@ fn first_addition_accepts_actual_serde_skipped_empty_vectors() {
     let mut journal = Journal::fresh(json!({"config":old, "configPath":"/fixture/controller.json"}));
     journal.connection = Connection::Fenced; journal.next_operation_id = 2;
     let before = serde_json::to_value(&journal).unwrap();
-    assert!(quiescent(&journal).is_ok());
+    assert!(quiescent(&journal, quiescence::ResidentEvidence::NotConfigured).is_ok());
     assert!(permitted(&old, &new, &journal, "application").is_ok());
     assert_eq!(serde_json::to_value(&journal).unwrap(), before, "checking may not reset the prior query or journal");
 }
@@ -98,12 +98,12 @@ fn only_host_unit_may_change_on_existing_route() {
 fn prompt_or_unresolved_history_cannot_be_declared_quiescent() {
     let mut journal = Journal::fresh(json!({}));
     journal.connection = Connection::Fenced; journal.next_operation_id = 2;
-    assert!(quiescent(&journal).is_ok());
+    assert!(quiescent(&journal, quiescence::ResidentEvidence::NotConfigured).is_ok());
     journal.prompt_witness = Some(json!({"request":"active"}));
-    assert!(quiescent(&journal).is_err());
+    assert!(quiescent(&journal, quiescence::ResidentEvidence::NotConfigured).is_err());
     journal.prompt_witness = None;
     journal.unresolved_external.push("possibly submitted".into());
-    assert!(quiescent(&journal).is_err());
+    assert!(quiescent(&journal, quiescence::ResidentEvidence::NotConfigured).is_err());
     assert_eq!(journal.next_operation_id, 2);
 }
 // Append inside application_enrollment_adversary_tests.rs in a test-only
@@ -143,4 +143,43 @@ fn raw_provider_gate_refuses_before_older_typed_journal_can_drop_it() {
         assert_eq!(private(&config_path,1_048_576).unwrap(),config_bytes);
     }
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn every_resident_work_kind_blocks_enrollment_without_changing_journal() {
+    use quiescence::ResidentEvidence;
+    let journal = Journal::fresh(json!({}));
+    let before = serde_json::to_vec(&journal).unwrap();
+    assert!(quiescent(&journal, ResidentEvidence::Unknown).is_err());
+    for flag in 0..=5 {
+        let evidence = ResidentEvidence::Stopped {
+            prompt_pending: flag == 1, return_pending: flag == 2,
+            queued_requests: flag == 3, started_request: flag == 4,
+            maintenance_pending: flag == 5,
+        };
+        assert_eq!(quiescent(&journal, evidence).is_ok(), flag == 0);
+        assert_eq!(serde_json::to_vec(&journal).unwrap(), before);
+    }
+}
+
+#[test]
+fn resident_selector_requires_real_private_direct_child_and_holds_its_lock() {
+    let (root, rt) = crate::tests::restart_resolution_fixture("enrollment-resident");
+    let state = rt.config.state_dir.join("resident");
+    directory(&state).unwrap();
+    write_new(&state.join("resident.lock"), b"").unwrap();
+    write_new(&state.join("resident.json"), br#"{"completed":0}"#).unwrap();
+    let guard = quiescence::ResidentGuard::acquire(&rt.config, Some(&state)).unwrap();
+    assert!(quiescent(&Journal::fresh(json!({})), guard.evidence()).is_ok());
+    assert!(quiescence::ResidentGuard::acquire(&rt.config, Some(&state)).is_err());
+    let alias = rt.config.state_dir.join("alias");
+    std::os::unix::fs::symlink(&state, &alias).unwrap();
+    assert!(quiescence::ResidentGuard::acquire(&rt.config, Some(&alias)).is_err());
+    assert!(quiescence::ResidentGuard::acquire(&rt.config, Some(&root)).is_err());
+    atomic_json(&state.join("resident.json"), &json!({"completed":0,"pending":{"request":"uncertain"}})).unwrap();
+    assert!(guard.assert_unchanged().is_err());
+    drop(guard);
+    let guard = quiescence::ResidentGuard::acquire(&rt.config, Some(&state)).unwrap();
+    assert!(quiescent(&Journal::fresh(json!({})), guard.evidence()).is_err());
+    drop(guard); drop(rt); fs::remove_dir_all(root).unwrap();
 }

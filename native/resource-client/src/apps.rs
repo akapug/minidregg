@@ -27,6 +27,9 @@ use std::path::{Path, PathBuf};
 pub(crate) const DEFAULT_INDEX: &str = "/var/lib/mini-market/index.json";
 pub(crate) const DEFAULT_META: &str = "/var/lib/mini-market/meta";
 pub(crate) const DEFAULT_VERDICTS: &str = "/var/lib/mini-apps/verdicts";
+/// The running worker's ingest identity, beside the verdicts: the SHA-256 of the spk-host binary it drives.
+/// A verdict is the ingest's answer, so it is valid only for the ingest that wrote it (`ingestKey`).
+pub(crate) const INGEST_KEY_FILE: &str = "ingest-key";
 pub(crate) const DEFAULT_WORKER_SOCKET: &str = "/run/mini-apps/worker.sock";
 pub(crate) const INDEX_URL: &str = "https://app-index.sandstorm.io/apps/index.json";
 pub(crate) const PACKAGE_URL: &str = "https://app-index.sandstorm.io/packages/";
@@ -280,7 +283,7 @@ pub(crate) const FEATURED: &[(&str, &str)] = &[
     ("uawacvvx9f9ncex1sqj8njwpujf8s9fkmg7wmp55hg6xetrd45w0", "SQL over HTTP: /<db>.json?sql=... answers JSON"),
     ("c6rk81r4qk6dm3k04x1kxmyccqewhh4npuxeyg1xrpfypn2ddy0h", "POST /<topic> with a body publishes; GET /<topic>/json?poll=1 reads"),
     ("nx3dqcmz2sjjz939vkg4847vvxrzqsatqfjrt3ea50z3jac5kv7h", "flat-text pages: GET doku.php?id=<page>&do=export_raw, POST do=save"),
-    ("rhtntjye2n7p71vrcq0ae4f6n9nr139fdk4n884tw55k40vy4uph", "board events as JSON over its WebSocket; GET /boards/<name>.json"),
+    ("rhtntjye2n7p71vrcq0ae4f6n9nr139fdk4n884tw55k40vy4uph", "board events as JSON over socket.io (broadcast adds an item, getboard lists them); unproven beneath the HTML: the websocket closes before the first message reaches the app, and whether the board saves is unchecked"),
     ("f5z8uwz7ynf89c286f9d5tse5dwjknv32nyd78qzsyema3zf9m8h", "events as forms and iCalendar over HTTP (CalDAV when the bridge grows REPORT/PROPFIND)"),
     ("d9ygf47xrtnw12j92cyt6cu8ut75esx01u4q3kcrn8415w9qzzgh", "REST /api/v1 (repos, issues); git smart-HTTP when the bridge streams bodies"),
     ("8x12h6p0x0nrzk73hfq6zh2jxtgyzzcty7qsatkg7jfg2mzw5n90", "a plain-text journal: POST /add a transaction, GET /accounts and the JSON API"),
@@ -298,6 +301,8 @@ pub(crate) const FEATURED: &[(&str, &str)] = &[
     ("r8y55acmnwm0r8a2k3jp8m74pdf2xg7v2v5pxc07mcsqpq0ag3zh", "JSON: POST /api/new-game makes a puzzle, PUT /api/game/<id> saves the board, GET /api/game/<id> reads it"),
     ("zxent02jw0z9ckkagz1uscdxesaf1f1wgzdunx2wrcj0jt9uf9rh", "POST /api.php saves the high score; GET /api.php?action=getbestscore and /highscores.php read it"),
     ("yp9xt15y8s0rsuntnhgnr510qpcvm2tatd9mn1gzwr2au8h2n4p0", "direct capnp, no bridge: POST /chats appends a line, PUT /topic sets the topic; GET /chats and /topic read them"),
+    ("p04q48xd2kgkystkrda5n77kdns6u569wnactgh904tf7s3vev70", "MediaWiki API: GET /api.php?action=query&meta=tokens, POST action=edit with the token, read back with action=parse or action=raw"),
+    ("uws252ya9mep4t77tevn85333xzsgrpgth8q4y1rhknn1hammw70", "the page's own forms: GET /accounts/create/asset for the CSRF token, POST /accounts/store, read the list at /accounts/asset"),
 ];
 
 pub(crate) fn featured(app_id: &str) -> Option<(usize, &'static str)> {
@@ -351,8 +356,20 @@ pub(crate) fn verdict(verdicts: &Path, meta: &Path, package_id: &str) -> Verdict
             }
         }
     }
+    // The worker publishes the key of the ingest it runs; a verdict written by another ingest (an older
+    // candidate's refusal that survived a re-genesis) is absent, so the install is attempted again.
+    // With no key published yet (no worker has started here) every verdict is read as before.
+    let current = crate::fsio::read_bounded(&verdicts.join(INGEST_KEY_FILE), 128)
+        .ok()
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+        .map(|text| text.trim().to_owned())
+        .filter(|text| !text.is_empty());
     if let Ok(bytes) = crate::fsio::read_bounded(&verdicts.join(format!("{package_id}.json")), 16 * 1024) {
         if let Ok(value) = serde_json::from_slice::<Value>(&bytes) {
+            let written_by_this_ingest = current.as_deref().map_or(true, |key| value.get("ingestKey").and_then(Value::as_str) == Some(key));
+            if !written_by_this_ingest {
+                return out;
+            }
             if let Some(state) = value.get("verdict").and_then(Value::as_str) {
                 out.state = state.to_owned();
             }
@@ -1545,7 +1562,7 @@ mod tests {
         assert_eq!(all.len(), entries.len());
         let names: Vec<&str> = all.iter().take(FEATURED.len()).map(|e| e.name.as_str()).collect();
         assert_eq!(names[0], "Etherpad");
-        assert_eq!(names.len(), 25, "every featured appId is in the recorded index: {names:?}");
+        assert_eq!(names.len(), 27, "every featured appId is in the recorded index: {names:?}");
         assert!(all[FEATURED.len()..].iter().all(|e| featured(&e.app_id).is_none()));
         let pad = entry_json(all[0], &Verdict { state: "unverified".into(), reason: None, raw_bytes: None, signed_app_id: None, running: 0 });
         assert_eq!(pad["featured"]["rank"], 1);
@@ -1658,6 +1675,31 @@ mod tests {
         assert_eq!(verdict_line(&verdict(&verdicts, &meta, "5830d70137cdae158118884da8790870")), "verified, running 2");
     }
 
+
+    #[test]
+    fn apps_verdict_is_valid_only_for_the_ingest_that_wrote_it() {
+        let dir = scratch("verdict-key");
+        let meta = dir.join("meta");
+        let verdicts = dir.join("verdicts");
+        fs::create_dir_all(&meta).unwrap();
+        fs::create_dir_all(&verdicts).unwrap();
+        let package = "aee0806c9547d1f53c1ccef38ac195ba";
+        let refused_by = |key: &str| format!(r#"{{"verdict":"refused","reason":"installRefused: x","ingestKey":"{key}"}}"#);
+        fs::write(verdicts.join(format!("{package}.json")), refused_by("aaaa")).unwrap();
+        // Ingest A is running: its own refusal is reused.
+        fs::write(verdicts.join(INGEST_KEY_FILE), "aaaa\n").unwrap();
+        assert_eq!(verdict(&verdicts, &meta, package).state, "refused");
+        // A re-genesis onto ingest B: the same file is another ingest's answer, so the app is unverified again.
+        fs::write(verdicts.join(INGEST_KEY_FILE), "bbbb\n").unwrap();
+        let b = verdict(&verdicts, &meta, package);
+        assert_eq!((b.state.as_str(), b.reason.as_deref()), ("unverified", None));
+        // A verdict with no key at all (written before keys existed) is also not B's.
+        fs::write(verdicts.join(format!("{package}.json")), br#"{"verdict":"verified","running":1}"#).unwrap();
+        assert_eq!(verdict(&verdicts, &meta, package).state, "unverified");
+        // B's own verdict is read.
+        fs::write(verdicts.join(format!("{package}.json")), refused_by("bbbb")).unwrap();
+        assert_eq!(verdict(&verdicts, &meta, package).state, "refused");
+    }
 
     #[test]
     fn apps_request_law_renders_from_lean_and_binds_its_two_placeholders() {

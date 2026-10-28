@@ -590,3 +590,19 @@ mod tests {
         assert!(exact_receipt(&wrong).is_err());
     }
 }
+
+/// Read the exact accepted original from the image/config-pinned operator Host.
+/// This issues no grant and does not replace independent dispatch consent.
+pub(crate) fn inspect_accepted(host: &Path, config: &Path, socket: &Path,
+    ingress: &Path, output: &Path) -> Result<()> {
+    private_socket(socket)?;
+    let call = private_bytes(ingress, REQUEST_LIMIT)?;
+    let operation = mini_sdk::host_operations::AGENT_LIFETIME_GRANT_INSPECT;
+    let frame = session_invoke(host, socket, config, operation, &call)?;
+    let body = expect_reply(&frame, operation)?;
+    if body.len() > 2 * 1024 * 1024 {
+        return Err("accepted grant inspection exceeds JSON budget".into());
+    }
+    // Host owns the projection; the client only checks the response framing.
+    create_private(output, body)
+}

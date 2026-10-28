@@ -116,8 +116,8 @@ write_DokuWiki() {
 # GET /transactions (JSON). tsourcepos is a pair of SourcePos objects in 1.31 (the first run, with the older
 # {tag: JournalSourcePos} shape, was refused: "expected Array, but encountered Object").
 write_HledgerWeb() {
-  local amt='{"aprice":null,"acommodity":"$","aquantity":{"floatingPoint":Q,"decimalPlaces":10,"decimalMantissa":M},"aismultiplier":false,"astyle":{"ascommodityside":"L","asdigitgroups":null,"ascommodityspaced":false,"asprecision":2,"asdecimalpoint":"."}}'
-  local a1=${amt//Q/3}; a1=${a1//M/30000000000}; local a2=${amt//Q/-3}; a2=${a2//M/-30000000000}
+  local amt='{"aprice":null,"acommodity":"$","aquantity":{"floatingPoint":@Q@,"decimalPlaces":10,"decimalMantissa":@M@},"aismultiplier":false,"astyle":{"ascommodityside":"L","asdigitgroups":null,"ascommodityspaced":false,"asprecision":2,"asdecimalmark":".","asrounding":"NoRounding"}}'
+  local a1=${amt//@Q@/3}; a1=${a1//@M@/30000000000}; local a2=${amt//@Q@/-3}; a2=${a2//@M@/-30000000000}
   local post1='{"pbalanceassertion":null,"pstatus":"Unmarked","pamount":['"$a1"'],"ptransaction_":"1","paccount":"expenses:demo","pdate":null,"ptype":"RegularPosting","pcomment":"","pdate2":null,"ptags":[],"poriginal":null}'
   local post2='{"pbalanceassertion":null,"pstatus":"Unmarked","pamount":['"$a2"'],"ptransaction_":"1","paccount":"assets:cash","pdate":null,"ptype":"RegularPosting","pcomment":"","pdate2":null,"ptags":[],"poriginal":null}'
   local txn='{"tcomment":"","tpostings":['"$post1,$post2"'],"ttags":[],"tsourcepos":[{"sourceName":"","sourceLine":1,"sourceColumn":1},{"sourceName":"","sourceLine":1,"sourceColumn":1}],"tdate":"2026-10-27","tcode":"","tindex":1,"tprecedingcomment":"","tdate2":null,"tdescription":"featured by a resident","tstatus":"Unmarked"}'
@@ -148,11 +148,12 @@ while read -r letter name pkg class page kind role; do
       sh "$repo/scripts/spk-platform/grain-journey.sh" phase "$RUN" "birth-$letter" "install-$letter" "share-$letter" \
       "start-$letter" "enroll-$letter" "get-$letter" >"$out/$letter-world.out" 2>"$out/$letter-world.err"; then ok=1; else ok=0; fi
   row "$name: create, install, share, start, enrol, page $page" "$ok" "$(( $(date +%s) - started )) s $(tail -1 "$out/$letter-world.err" | cut -c1-120)$([[ $ok == 1 ]] || { f=$RUN/evidence/$(grep -o '^[a-z]*-'"$letter"' .*exit=[1-9]' "$out/$letter-world.out" | head -1 | cut -d' ' -f1)-body; echo " [failed $(basename "$f"): $(head -n 1 "$f.headers" 2>/dev/null | tr -d '\r') $(head -c 160 "$f.body" 2>/dev/null | tr '\r\n\t' '   ')]"; })"
-  [[ $ok == 1 ]] || continue
+  [[ $ok == 1 ]] || { bash "$here/collect-app-output.sh" "$env_file" "$out/evidence-$letter" "$letter" || :; continue; }
   app=$(jq -er '.applicationGrainBirth.applicationBirth.application.app' "$RUN/evidence/$letter-app-source.json")
   dir=$state/apps/$app/routes/owner-$kind body=$out/bodies/$letter
   result=$("write_$name" 2>&1 | tail -1)
   row "$name: one write beneath the HTML by a resident's script" "$([ "${result%% *}" = 1 ] && echo 1 || echo 0)" "${result#* }"
+  [[ ${result%% *} == 1 ]] || bash "$here/collect-app-output.sh" "$env_file" "$out/evidence-$letter" "$letter" || :
   [[ ${QUALIFY_STOP:-} != 1 ]] || env BIN="$BIN" sh "$repo/scripts/spk-platform/grain-journey.sh" phase "$RUN" "stop-$letter" \
     >>"$out/$letter-world.out" 2>>"$out/$letter-world.err" || row "$name: stopped after its write" 0 "$(tail -1 "$out/$letter-world.err" | cut -c1-120)"
 done <<<"$apps"

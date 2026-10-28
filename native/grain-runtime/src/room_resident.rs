@@ -308,6 +308,45 @@ fn publish_notices(room: &resource_tools::RoomToolsConfig, state: &Path) {
     }
 }
 
+/// Establish the resident's own typed custody before a first prompt. Existing
+/// custody is inspected under its lock and is never reset to a fresh state.
+pub(crate) fn initialize(controller: &Path, state: &Path) -> Result<()> {
+    let config: Config = serde_json::from_slice(&bounded_regular_file(controller, 262_144)?)
+        .map_err(|e| format!("resident controller config: {e}"))?;
+    validate(&config)?;
+    if config.tool_task.as_ref().and_then(|t| t.room.as_ref()).is_none() {
+        return Err("resident needs controller toolTask.room".into());
+    }
+    if !state.is_absolute() || state.parent() != Some(config.state_dir.as_path()) {
+        return Err("resident state must be an absolute direct child of controller stateDir".into());
+    }
+    let parent = fs::symlink_metadata(&config.state_dir).map_err(|e| e.to_string())?;
+    if !parent.is_dir() || parent.uid() != unsafe { libc::geteuid() } || parent.mode() & 0o077 != 0 {
+        return Err("resident parent must be a private owned real directory".into());
+    }
+    use std::os::unix::fs::DirBuilderExt;
+    let fresh = match fs::DirBuilder::new().mode(0o700).create(state) {
+        Ok(()) => true,
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => false,
+        Err(e) => return Err(e.to_string()),
+    };
+    if fresh {
+        let lock = OpenOptions::new().create_new(true).read(true).write(true).mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW).open(state.join("resident.lock")).map_err(|e|e.to_string())?;
+        if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+            return Err("another resident driver owns this room".into());
+        }
+        atomic_json(&state.join("resident.json"), &serde_json::to_value(ResidentState::default()).map_err(|e|e.to_string())?)?;
+        File::open(state).and_then(|f|f.sync_all()).map_err(|e|e.to_string())?;
+        File::open(&config.state_dir).and_then(|f|f.sync_all()).map_err(|e|e.to_string())?;
+    }
+    let guard = quiescence::ResidentGuard::acquire(&config, Some(state))?;
+    let _: ResidentState = serde_json::from_slice(guard.bytes()?).map_err(|e|format!("resident journal: {e}"))?;
+    guard.assert_unchanged()?;
+    println!("{}",json!({"type":"mini-hermes-room-resident-initialized-v1","state":state,"created":fresh}));
+    Ok(())
+}
+
 pub(crate) fn main(path: &Path) -> Result<()> {
     let bytes = bounded_regular_file(path, 65_536)?;
     let options: ResidentConfig = serde_json::from_slice(&bytes).map_err(|e| format!("resident config: {e}"))?;
@@ -423,6 +462,42 @@ mod tests {
         let mut member = later;
         member["recentMemberEntries"] = json!([{"author":"20","text":"please index my note"}]);
         assert_ne!(assignment_fingerprint(&before).unwrap(), assignment_fingerprint(&member).unwrap());
+    }
+
+    #[test]
+    fn native_initialization_creates_typed_state_and_preserves_existing_work() {
+        let (root, rt) = crate::tests::restart_resolution_fixture("resident-init");
+        let mut config = rt.config.clone();
+        config.host_socket=Some(root.join("host.sock"));
+        let workspace=config.state_dir.join("workspace"); let home=config.state_dir.join("room-home");
+        for path in [&workspace,&workspace.join("refs"),&workspace.join("attempts"),&workspace.join("sources"),&workspace.join("proposals"),&home] {
+            fs::create_dir(path).unwrap();fs::set_permissions(path,fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let mut value = serde_json::to_value(&config).unwrap();
+        value["toolTask"] = json!({"task":"6001","subject":"9","capability":"12","queryCapability":"13",
+            "custodyKey":root.join("tool.key"),"parentCapability":"14","parentObserveCapability":"15",
+            "reserve":"5","charge":"0","allowedPublications":[],"resourceWorkspace":workspace,
+            "room":{"mini":config.mini,"host":config.host,"hostConfig":config.host_config,"socket":config.host_socket,
+                "workspace":workspace,"home":home,"room":"lab"}});
+        config = serde_json::from_value(value).unwrap();
+        let tool=config.tool_task.as_ref().unwrap();
+        atomic_json(&workspace.join("workspace.json"),&json!({"type":"minidregg-participant-workspace-v1",
+            "host":config.host,"config":config.host_config,"key":tool.custody_key,
+            "subject":tool.subject,"socket":config.host_socket,"birthContext":null,"namespaceRoot":null})).unwrap();
+        let path = root.join("resident-controller.json"); atomic_json(&path,&config).unwrap();
+        let state = config.state_dir.join("resident");
+        initialize(&path,&state).unwrap();
+        let mut retained = ResidentState::default(); retained.pending=Some(json!({"request":"uncertain"}));
+        atomic_json(&state.join("resident.json"),&retained).unwrap();
+        let before=fs::read(state.join("resident.json")).unwrap();
+        initialize(&path,&state).unwrap();
+        assert_eq!(fs::read(state.join("resident.json")).unwrap(),before);
+        let guard=quiescence::ResidentGuard::acquire(&config,Some(&state)).unwrap();
+        assert!(initialize(&path,&state).is_err()); drop(guard);
+        assert!(initialize(&path,&root.join("outside")).is_err());
+        let alias=config.state_dir.join("alias"); std::os::unix::fs::symlink(&state,&alias).unwrap();
+        assert!(initialize(&path,&alias).is_err());
+        drop(rt);fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

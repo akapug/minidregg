@@ -90,7 +90,7 @@ check passed discovery, direct calls and byte-identical retries. Observed
 readiness was 10.8 seconds, with 8.4 seconds paid later on first discovery;
 these are measurements under shared host load, not latency guarantees.
 
-## Checked state — 27 October 2026
+## Checked state — 28 October 2026
 
 The earlier v4 receiving run installed and started two grains, answered through
 Mini's admitted API, demonstrated independent conversation state and exact reply
@@ -113,19 +113,18 @@ lookup. The original parent reservation remains held, with no result or ACK.
 All owned services are stopped and the namespace is preserved; another attempt
 must account for that failure rather than resend the original operation.
 
-The fresh v7 run installed both appliances and admitted a real agent session.
+The 27 October v7 run installed both appliances and admitted a real agent session.
 Lifetime-grant planning then refused: its source creates three grants while the
-ordinary birth validator requires two. The repair is available on
-`lane/oracle-lifetime-grant`: a dedicated frame admits exactly the source's owner,
-controller and read-only participant observer; ordinary births retain their
-existing restriction. `lane/oracle-grant-factory` adds the separate fresh-world
-policy permission for the allocated grant resource. Earlier scoped checks passed
-for the production modules, observer boundary and factory predicate. The corrected
-source fixture, current dependency closure and codec census still need the
-central integrator's validation. No grant was submitted, application started,
-or Oracle/browser call made in that run. Cleanup passed and the stopped Store
-is preserved. The next positive journey uses a fresh world on a coherent repaired
-Mini build. Agent discovery/calls and the complete restart journey remain open.
+ordinary birth validator requires two. The repair is now on `main`: a dedicated
+frame admits exactly the source's owner, controller and read-only participant
+observer; ordinary births retain their existing restriction. The fresh-world
+policy also permits the allocated grant resource. Earlier scoped checks passed
+for the production modules, observer boundary and factory predicate. No grant
+was submitted, application started, or Oracle/browser call made in that historical
+run. Cleanup passed and the stopped Store is preserved. A fresh run on 28 October
+has now admitted both the agent session and its lifetime grant on a coherent
+repaired Mini build. Route activation, agent calls, browser use and the complete
+restart journey are still being qualified.
 The [recovery record](evidence/oracle-hosted-recovery-2026-10-27.json) distinguishes
 both stopped runs and their exact evidence. The
 [factory evidence](evidence/oracle-grant-factory-2026-10-27.json) records its
@@ -137,6 +136,14 @@ its five focused composition/allocation/birth checks now pass on dregg-ref.
 The fresh hosted qualification remains in
 [ROWS-OWED](ROWS-OWED.md#oracle-appliance), including a new-Host STOP receipt
 and an actual browser driver.
+
+The same-world Hermes integration is also on `main`. Agent creation can include
+a separate dispatch purse; a reusable attachment helper joins the actual
+application, session and persistent grant to that controller. The isolated
+controller installer now supports the worker setup, and `J14_ORACLE=1` builds
+its own composed world instead of requiring a preissued route fragment.
+Focused checks cover these interfaces; the composed native journey is still
+being qualified. The [agent guide](oracle-agent-tools.md) explains the binding.
 
 The veri7vn U5 v2 source composition has 351 direct operations. Its focused
 57-request Engine run observed 37 completed tasks, 13 appropriate refusals or

@@ -24,7 +24,7 @@ def hostOutcomeMarker : UInt8 := 255
 /-- Active request operations whose receiver never appends to the durable log
 (registry `effect: none`). A handler of one of these that throws is answered a
 proven no-append refusal; on every other operation it is answered undecided. -/
-def noAppendOperations : List UInt8 := [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 17, 19, 21, 23, 25, 27, 29, 30, 31, 32, 33, 35, 36, 37, 39, 41, 42, 43, 44, 45, 47, 48, 49, 50, 51, 52, 53, 55, 56, 57, 58, 59, 61, 63, 64, 65, 66, 67, 68, 69, 70, 71, 73, 74, 75, 77, 78, 79, 80, 81, 82, 83, 85, 86, 87, 89, 91, 92, 93, 95, 96, 97, 99, 100, 101, 102, 103, 104, 106, 107, 108, 109, 111, 112, 113, 114, 116, 117, 118, 120, 121, 123, 124, 126, 127, 129, 130, 131, 132, 133, 134, 135, 136, 137, 140, 141, 143, 144, 150, 151, 152, 153, 154, 155, 160, 161, 163, 170, 171, 173, 180, 181, 182, 183, 184, 186, 187, 188, 190, 193, 194, 201, 202, 206, 207, 209, 210, 211, 213, 214, 215, 216, 218, 219, 240, 241, 243]
+def noAppendOperations : List UInt8 := [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 17, 19, 21, 23, 25, 27, 29, 30, 31, 32, 33, 35, 36, 37, 39, 41, 42, 43, 44, 45, 47, 48, 49, 50, 51, 52, 53, 55, 56, 57, 58, 59, 61, 63, 64, 65, 66, 67, 68, 69, 70, 71, 73, 74, 75, 77, 78, 79, 80, 81, 82, 83, 85, 86, 87, 89, 91, 92, 93, 95, 96, 97, 99, 100, 101, 102, 103, 104, 106, 107, 108, 109, 111, 112, 113, 114, 116, 117, 118, 120, 121, 123, 124, 126, 127, 129, 130, 131, 132, 133, 134, 135, 136, 137, 140, 141, 143, 144, 150, 151, 152, 153, 154, 155, 156, 160, 161, 163, 170, 171, 173, 180, 181, 182, 183, 184, 186, 187, 188, 190, 193, 194, 201, 202, 206, 207, 209, 210, 211, 213, 214, 215, 216, 218, 219, 240, 241, 243, 244, 245, 247]
 
 /-- The operator plans a client checks against its local consent provider (frame 224)
 before any signing consumer sees the reply (registry `consent_plans`). -/
@@ -32,10 +32,11 @@ def consentPlans : List UInt8 := [32, 36, 44, 48, 50, 52, 58, 66, 68, 70, 74, 78
 
 /-- Signing-plan operations recorded as NOT consent-checked, each with its reason in the
 registry (`consent_exempt`). -/
-def consentExemptPlans : List UInt8 := [1, 42, 56, 64, 193, 240]
+def consentExemptPlans : List UInt8 := [1, 42, 56, 64, 193, 240, 244]
 
 /-- The local consent provider's frames (`Host.ClientConsentCore`), a namespace apart from
 requests (registry `consent_frames`). -/
+def consentFullReadyFrame : UInt8 := 236
 def consentIntentFrame : UInt8 := 220
 def consentObservationFrame : UInt8 := 221
 def consentPlanFrame : UInt8 := 222
@@ -50,7 +51,7 @@ def consentThinPlanFrame : UInt8 := 232
 def consentStoreRecheckFrame : UInt8 := 233
 def consentThinBirthIntentFrame : UInt8 := 234
 def consentThinBirthPlanFrame : UInt8 := 235
-def consentFrames : List UInt8 := [220, 221, 222, 224, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235]
+def consentFrames : List UInt8 := [236, 220, 221, 222, 224, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235]
 
 /-- `Kernel.ApplicationDispatchAdmission.ordinaryHeaderName`'s names (registry `ordinary_headers`). -/
 def ordinaryHeaderNames : List String := ["cookie", "accept", "accept-encoding", "content-type", "user-agent", "if-match", "if-none-match", "x-requested-with", "x-csrftoken", "x-csrf-token", "oc-total-length", "oc-chunk-size", "x-oc-mtime", "oc-fileid", "oc-chunked", "oc-checksum", "oc-chunk-offset", "oc-lazyops", "content-encoding"]

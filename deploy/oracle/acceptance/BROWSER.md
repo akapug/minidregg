@@ -42,6 +42,22 @@ This is browser evidence, not a replacement for native admission receipts.
 The fixture requires successful UI/catalog/query responses, both refusal
 controls, and the native bootstrap-used marker before continuing.
 
+`browser_probe.mjs` drives these checks in a real Chromium browser. With an
+existing Playwright installation, private local copies of readiness and the
+token, and the port forward running:
+
+```
+ORACLE_PLAYWRIGHT_MODULE=/absolute/path/to/playwright \
+  node deploy/oracle/acceptance/browser_probe.mjs ready.json bootstrap.token result.json
+```
+
+Keep the token file mode 0600. The driver uses a fresh browser context, accepts
+the fixture certificate only in that context, submits the actual sign-in form,
+uses the rendered catalog and question controls, and saves an application-page
+screenshot beside the result. It never prints the token or cookies. Copy the
+successful result atomically to `result_path` in readiness. A failed driver
+does not publish a success result or retry a question automatically.
+
 The edge is stopped by its recorded process identity on success or failure;
 stop the separately owned SSH process by its recorded PID too. No public
 listener or production deployment is created.

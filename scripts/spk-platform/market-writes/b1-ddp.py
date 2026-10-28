@@ -23,27 +23,38 @@ sl = importlib.util.module_from_spec(spec2); spec2.loader.exec_module(sl)
 
 
 def main():
+    legs = []
+
+    def say(line):
+        print(line + ("  [route timing: " + " | ".join(legs) + "]" if legs else ""))
+
     route = sys.argv[1]
     text = "written by a resident %d" % int(time.time())
     try:
+        # Route latency evidence (un-route-latency): a plain GET and a dummy login POST with no websocket
+        # open, then the same dummy POST with the DDP websocket open on this grain. The dummy token makes
+        # the app answer at once (500, no current login), so the time is the route's.
+        legs.append("ws closed: " + sl.timed(route, "GET", "/"))
+        legs.append("ws closed: " + sl.timed(route, "POST", "/.sandstorm-login", b"probe", "application/x-sandstorm-login-token"))
         a = ddp.connect(route); a.ddp()
+        legs.append("ws open: " + sl.timed(route, "POST", "/.sandstorm-login", b"probe", "application/x-sandstorm-login-token"))
         logged, posted = sl.login(a.send, a.until, route)
         if not logged or "error" in logged:
-            print("0 loginWithSandstorm refused: %s; POST /.sandstorm-login: %s" % (str(logged)[:160], posted[:450])); return
+            say("0 loginWithSandstorm refused: %s; POST /.sandstorm-login: %s" % (str(logged)[:160], posted[:300])); return
         a.send({"msg": "method", "method": "/Data/update", "id": "1",
                 "params": [{"_id": "default_id"}, {"$set": {"value": text}}]})
         res = a.until(lambda m: m.get("msg") == "result" and m.get("id") == "1", 120)
         if not res or "error" in res:
-            print("0 /Data/update refused: %s" % str(res)[:200]); return
+            say("0 /Data/update refused: %s" % str(res)[:200]); return
         b = ddp.connect(route); b.ddp()
         b.send({"msg": "sub", "id": "d", "name": "thedocument", "params": []})
         got = b.until(lambda m: m.get("msg") == "added" and m.get("collection") == "Data", 120)
         if got and got.get("fields", {}).get("value") == text:
-            print("1 DDP method /Data/update ok; sub thedocument read back the value")
+            say("1 DDP method /Data/update ok; sub thedocument read back the value")
         else:
-            print("0 read-back mismatch: %s" % str(got)[:200])
+            say("0 read-back mismatch: %s" % str(got)[:200])
     except (EOFError, OSError, SystemExit) as e:
-        print("0 ddp failed: %s" % str(e)[:200])
+        say("0 ddp failed: %s" % str(e)[:200])
 
 
 main()

@@ -1841,6 +1841,18 @@
       "effect": "none"
     },
     {
+      "code": 156,
+      "symbol": "AGENT_LIFETIME_GRANT_INSPECT",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk",
+      "purpose": "Read-only accepted event27 projection against the refreshed verified session",
+      "receiver": "dispatchSession",
+      "effect": "none"
+    },
+    {
       "code": 160,
       "symbol": "JOB_MONEY_PLAN",
       "status": "active",
@@ -2398,41 +2410,41 @@
     {
       "code": 244,
       "symbol": "METER_REFILL_PLAN",
-      "status": "reserved",
+      "status": "active",
       "routes": [],
       "owner": "durable-meter",
-      "purpose": "plan a seed-meter refill: the commit protocol's seed meter (Snapshot.available), not a cell: a refill is a nullifier-only, charge-exempt intent, so it is its own family rather than realmWell (a law-judged cell on the credit asset's issuer well); statements in Kernel/PlatformCell.lean M2; effect becomes append at activation",
-      "receiver": null,
+      "purpose": "plan a seed-meter refill: the controller's signing plan (the signed header frame) on one opened image",
+      "receiver": "fnDispatch",
       "effect": "none"
     },
     {
       "code": 245,
       "symbol": "METER_REFILL_ASSEMBLE",
-      "status": "reserved",
+      "status": "active",
       "routes": [],
       "owner": "durable-meter",
-      "purpose": "assemble a seed-meter refill: the commit protocol's seed meter (Snapshot.available), not a cell: a refill is a nullifier-only, charge-exempt intent, so it is its own family rather than realmWell (a law-judged cell on the credit asset's issuer well); statements in Kernel/PlatformCell.lean M2; effect becomes append at activation",
-      "receiver": null,
+      "purpose": "assemble a seed-meter refill: the controller's signature over the plan's frame",
+      "receiver": "fnDispatch",
       "effect": "none"
     },
     {
       "code": 246,
       "symbol": "METER_REFILL_SUBMIT",
-      "status": "reserved",
+      "status": "active",
       "routes": [],
       "owner": "durable-meter",
-      "purpose": "submit a seed-meter refill: the commit protocol's seed meter (Snapshot.available), not a cell: a refill is a nullifier-only, charge-exempt intent, so it is its own family rather than realmWell (a law-judged cell on the credit asset's issuer well); statements in Kernel/PlatformCell.lean M2; effect becomes append at activation",
-      "receiver": null,
-      "effect": "none"
+      "purpose": "submit a seed-meter refill: controller-signed, nullifier-only, charge-exempt intent whose credit raises the commit protocol's meter (MeterRefillReceiver.receiveLoaded; Kernel/PlatformCell.lean M2)",
+      "receiver": "fnDispatch",
+      "effect": "append"
     },
     {
       "code": 247,
       "symbol": "METER_REFILL_LOOKUP",
-      "status": "reserved",
+      "status": "active",
       "routes": [],
       "owner": "durable-meter",
-      "purpose": "lookup a seed-meter refill: the commit protocol's seed meter (Snapshot.available), not a cell: a refill is a nullifier-only, charge-exempt intent, so it is its own family rather than realmWell (a law-judged cell on the credit asset's issuer well); statements in Kernel/PlatformCell.lean M2; effect becomes append at activation",
-      "receiver": null,
+      "purpose": "seed-meter refill receipt-only lookup",
+      "receiver": "fnDispatch",
       "effect": "none"
     }
   ],
@@ -2503,7 +2515,8 @@
     "FN_FRONTIER_PLAN": "operator-only fn-service route; the signer is the operator's fn tooling, not a member; not routed through the local consent provider. Owed as for FN_NAMESPACE_PLAN",
     "APPLICATION_DISPATCH_READY": "not a signing plan: `ApplicationDispatchReady.assembledReadyVerified` takes an already signed plan and its signatures and returns a Json record (`Host/ApplicationDispatchReady.lean:138`, type `IO Json`); nothing is signed after it. Named *_READY, listed here so the registry check does not read the suffix as a plan",
     "AUTHORIZED_PREPARE": "the member's own ordinary signing plan: every submit routes it through the local consent provider's frame 222 (NativeClientConsent.checkIntentPlan against the retained intent), not through the operator-plan list; listed here so the check knows it is covered elsewhere",
-    "PLATFORM_INSTALL_PLAN": "Host-stdio platform route (no socket route yet); the signer is the deployment's factory controller through its operator tooling, not a member; not routed through the local consent provider. Owed as for FN_NAMESPACE_PLAN, and an operator socket route in native/resource-client/src/transport.rs when the controller's tooling needs it"
+    "PLATFORM_INSTALL_PLAN": "Host-stdio platform route (no socket route yet); the signer is the deployment's factory controller through its operator tooling, not a member; not routed through the local consent provider. Owed as for FN_NAMESPACE_PLAN, and an operator socket route in native/resource-client/src/transport.rs when the controller's tooling needs it",
+    "METER_REFILL_PLAN": "Host-stdio meter route (no socket route yet); the signer is the deployment's factory controller through its operator tooling, not a member; not routed through the local consent provider. Owed as for PLATFORM_INSTALL_PLAN"
   },
   "client_constants": [
     {
@@ -2613,6 +2626,11 @@
     }
   ],
   "consent_frames": [
+    {
+      "code": 236,
+      "symbol": "CONSENT_FULL_READY",
+      "purpose": "Explicit full independent history verification before lifecycle signing"
+    },
     {
       "code": 220,
       "symbol": "CONSENT_INTENT",

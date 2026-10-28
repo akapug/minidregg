@@ -383,21 +383,22 @@ class Fixture:
         require(o.get("type") == "confirmed" and o.get("confirmation") == "installed", "session birth not confirmed")
         d.update(sessionSource=str(author / "source.json"), sessionReceipt=str(attempt / "outcome.json"))
 
-    def delegate(self, target, parent, child, holder):
-        c = self.query(self.owner, target, parent, "capability")
+    def delegate(self, target, parent, child, holder, by=None):
+        by = by or self.owner  # the subject that holds `parent`; a ticket's owner capability is its issuer's
+        c = self.query(by, target, parent, "capability")
         head = self.fresh("cap-head.json")
         self.run([self.m["host"]["path"], self.config, "inspect", "view-object-capability", c["dir"] / "view.bin", head])
         p = load(head)["head"]
-        q = self.query(self.owner, target, parent)
+        q = self.query(by, target, parent)
         new = copy.deepcopy(p)
         new.update(id=str(child), parent=p["id"], holder={"type": "subject", "subject": str(holder)},
                    targets=[str(target)], verbs=["observe"], ancestors=sorted(set(p["ancestors"] + [p["id"]])))
-        return self.submit({"subject": self.owner, "nonce": self.n(), "purpose": {"type": "prepare", "draft": {
+        return self.submit({"subject": by, "nonce": self.n(), "purpose": {"type": "prepare", "draft": {
             "type": "delegate-source", "command": {"kind": "object", "domain": q["challenge"]["domain"],
-                "semantics": q["challenge"]["semantics"], "subject": self.owner, "nonce": self.n(),
+                "semantics": q["challenge"]["semantics"], "subject": by, "nonce": self.n(),
                 "expectedTargetRoot": q["view"]["cell"]["root"], "parentId": p["id"], "target": str(target),
                 "child": new}}},
-                "grants": [grant(target,parent)]}, self.owner)
+                "grants": [grant(target,parent)]}, by)
 
     def approve(self, plan, header, base, out):
         signers = []
@@ -431,7 +432,7 @@ class Fixture:
                     "kind": kind, "subject": d["subject"], "origin": {"type": "human"},
                     "sessionCapability": d["cap"], "appObserveCapability": d["appObserve"],
                     "ticketObserveCapability": d["ticketObserve"]}, "ceiling": ceiling, "issueNonce": self.n(), "notAfter": "1000000000"},
-                "issuer": self.owner, "appDelegateCapability": self.appcap,
+                "issuer": self.creator, "appDelegateCapability": self.appcap,
                 "ticketOwnerCapability": d["ticketOwner"], "ticketControlCapability": d["ticketControl"]}
         req = {"spec": spec, "payer": self.creator, "funding": [], "sourceCapabilities": [self.accountcap],
                "tool": self.tool, "parent": self.parent}
@@ -447,13 +448,14 @@ class Fixture:
         self.mini("grain-share-issue-prepare", "--request", request, "--approval", approval, "--dir", issue, operator=True)
         # The exact attempt is named before its one submission, so an
         # interrupted issue is recovered by lookup of this directory only.
+        d["issueRequest"] = str(request)
         d["issueAttempt"] = str(issue)
         self.write_state()
         self.run([self.m["mini"]["path"], "grain-share-issue-submit", "--socket", self.osock, "--attempt", issue])
         confirmed_issue_receipt(issue)
         d["issue"] = str(issue)
         if observe:
-            self.delegate(d["ticket"], d["ticketOwner"], d["ticketObserve"], d["subject"])
+            self.delegate(d["ticket"], d["ticketOwner"], d["ticketObserve"], d["subject"], by=self.creator)
 
     def enroll(self, d):
         schema = load(self.pkg / "schema-inspection.json")
@@ -575,12 +577,12 @@ class Fixture:
         d = self.f["delegates"]["a"]
         if action == "revokeA":
             require(not d.get("revoked",False), "A already revoked; refusing duplicate mutation")
-            q = self.query(self.owner,d["ticket"],d["ticketOwner"])
-            artifact = self.submit({"subject":self.owner,"nonce":self.n(),"purpose":{"type":"prepare","draft":{
-                "type":"revoke-source","command":{"kind":"object","subject":self.owner,"nonce":self.n(),"target":d["ticket"],
+            q = self.query(self.creator,d["ticket"],d["ticketOwner"])
+            artifact = self.submit({"subject":self.creator,"nonce":self.n(),"purpose":{"type":"prepare","draft":{
+                "type":"revoke-source","command":{"kind":"object","subject":self.creator,"nonce":self.n(),"target":d["ticket"],
                   "victimKind":"object","capability":d["ticketObserve"],"controlCapability":d["ticketControl"],
                   "expectedTargetRoot":q["view"]["cell"]["root"],"expectedAuthorityRoot":q["challenge"]["authorityRoot"]}}},
-                "grants":[grant(d["ticket"],d["ticketOwner"])]},self.owner)
+                "grants":[grant(d["ticket"],d["ticketOwner"])]},self.creator)
             self.query(d["subject"],d["ticket"],d["ticketObserve"],denied=True)
             b = self.f["delegates"]["b"]
             self.query(b["subject"],b["ticket"],b["ticketObserve"])

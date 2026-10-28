@@ -19,6 +19,37 @@ static LAUNCH: OnceLock<Mutex<Option<Client>>> = OnceLock::new();
 const WWW_ABSENT: &str = "noPublishedSite";
 const WWW_NO_FILE: &str = "noSuchPublishedFile";
 const WWW_TOO_LARGE: &str = "publishedFileTooLarge";
+/// The published tree `/var/www` as a directory descriptor, or -1. Sandstorm's own
+/// publishing follows `/var/www`, and an app may make it a symlink to its real tree:
+/// Hacker CMS runs `symlink("published", "/var/www")` at start. The link is followed
+/// exactly once and only to a single sibling directory of `www` inside `/var`
+/// (`www_link_target`); that sibling is then opened with `O_NOFOLLOW`, so nothing
+/// outside `/var` and no second link is reached.
+fn open_www_tree(var: libc::c_int) -> libc::c_int {
+    let flags = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC;
+    let tree = unsafe { libc::openat(var, c"www".as_ptr(), flags) };
+    if tree >= 0 {
+        return tree;
+    }
+    let mut buf = [0u8; 300];
+    let n = unsafe { libc::readlinkat(var, c"www".as_ptr(), buf.as_mut_ptr().cast(), buf.len()) };
+    if n <= 0 || n as usize >= buf.len() {
+        return -1;
+    }
+    let Some(target) = www_link_target(&buf[..n as usize]) else { return -1 };
+    let Ok(target) = std::ffi::CString::new(target) else { return -1 };
+    unsafe { libc::openat(var, target.as_ptr(), flags) }
+}
+
+/// The one directory name a `/var/www` symlink may point at: a single safe
+/// component, written relative (`published`) or as `/var/<name>`.
+fn www_link_target(raw: &[u8]) -> Option<String> {
+    let text = std::str::from_utf8(raw).ok()?;
+    let name = text.strip_prefix("/var/").unwrap_or(text);
+    let name = name.strip_suffix('/').unwrap_or(name);
+    crate::www_publish::valid_components(&[name.to_owned()]).then(|| name.to_owned())
+}
+
 fn refused(s: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, s)
 }
@@ -536,10 +567,7 @@ fn worker_inner(mut stream: UnixStream, app: Identity, _audit: bool) -> io::Resu
             let opened = if !crate::www_publish::valid_components(&request.components) {
                 Err(WWW_NO_FILE)
             } else {
-                let tree = unsafe {
-                    libc::openat(var_keep.as_raw_fd(), c"www".as_ptr(),
-                        libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
-                };
+                let tree = open_www_tree(var_keep.as_raw_fd());
                 if tree < 0 {
                     Err(WWW_ABSENT)
                 } else {
@@ -699,6 +727,18 @@ pub(crate) fn initialize_mount_audit_worker(app_uid: u32, app_gid: u32) -> io::R
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn www_symlink_may_name_only_one_sibling_directory() {
+        for ok in ["published", "/var/published", "site_v2", "published/"] {
+            assert!(super::www_link_target(ok.as_bytes()).is_some(), "{ok}");
+        }
+        assert_eq!(super::www_link_target(b"/var/published").as_deref(), Some("published"));
+        for bad in ["", "..", "../x", "a/b", ".hidden", "/etc", "/var/a/b", "/var/", "/", "x\\y", "/var/../etc"] {
+            assert!(super::www_link_target(bad.as_bytes()).is_none(), "{bad:?}");
+        }
+        assert!(super::www_link_target(b"a\0b").is_none());
+    }
+
     use super::*;
     #[test]
     fn bootstrap_wire_cannot_select_identity_or_unbounded_bytes() {

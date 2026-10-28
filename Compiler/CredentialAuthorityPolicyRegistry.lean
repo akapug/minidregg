@@ -178,7 +178,7 @@ def capabilityKindTag : ResourceKind → UInt8
 in one source-owned commitment. This is not a possession proof. -/
 def storedCapabilityDigest (snapshot : Snapshot) {kind : ResourceKind}
     (stored : StoredCapability kind) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.AUTHORITY.CAPABILITY/v3".toUTF8.toList
+  (Sp800185Cshake256.hash "DREGG.AUTHORITY.CAPABILITY/v4".toUTF8.toList
     (capabilityKindTag kind ::
       (StreamCodec.product digestStream
         (CredentialAuthorityEntryCodec.storedCapabilityStream kind)).encode

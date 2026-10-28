@@ -89,6 +89,11 @@ structure BirthCoordinates where
   issuerEpoch : Nat
   policyEpochs : List (Nat × Nat)
   lineage : List (Nat × List Nat)
+  /-- The platform terms the draft carries (the receiver checks them against the record of the
+  image it commits against): the first grant's owner budget and lifetime, and the fee. -/
+  ownerBudget : Nat
+  lifetime : Nat
+  fee : CreationFee
   deriving DecidableEq, Repr
 
 /-- The coordinates a draft carries, read off its grants: the first grant's window start and
@@ -106,6 +111,10 @@ def coordinatesOf (descriptor : Descriptor Registry) : BirthCoordinates where
     let owner ← descriptor.grants[2 * position]?
     let ancestors := (owner.capability.head.ancestors.image CapabilityId.value).sort (· ≤ ·)
     if ancestors.isEmpty then none else pure (placement.value, ancestors)
+  ownerBudget := (descriptor.grants.head?.map fun grant => grant.capability.head.scope.maxCost).getD 0
+  lifetime := (descriptor.grants.head?.map fun grant =>
+    grant.capability.head.notAfter - grant.capability.head.notBefore).getD 0
+  fee := descriptor.fee
 
 /-! ## The member's derivation of every branch request -/
 
@@ -241,6 +250,38 @@ def checkBirthIntentThin (author : BirthCoordinates → Option NativeObservation
         else .error .draftNotAuthored
       else .error .birthMalformed
   | _ => .error (.birthRoute "not a birth intent")
+
+/-- The births the thin birth arm consents to: a birth intent whose draft is not a grain-backed
+source. The thin intent and plan frames (230/232) refuse exactly these by name, so an ordinary
+birth is consented only with the member's source (234/235). A grain-backed birth has no thin birth
+path (`checkBirthIntentThin` refuses it `birthRoute`), and its intent consent is the provider-route
+check alone (a provider purse's law against the pinned tariff, `Kernel.ProviderRouteConsent`). -/
+def thinBirthIntent (wanted : NativeObservationCodec.Intent) : Bool :=
+  match wanted.purpose with
+  | .prepare (.birth draftBytes _) => (GrainResourceBirthHostCodec.sourceCodec.decode draftBytes).isNone
+  | _ => false
+
+/-- **The discriminator covers the arm.** Every intent the thin birth arm accepts is one the thin
+intent and plan frames refuse by name, so no birth the arm checks against the member's source can
+be consented without it. -/
+theorem thinBirthIntent_of_checked {author : BirthCoordinates → Option NativeObservationCodec.Intent}
+    {wanted : NativeObservationCodec.Intent}
+    {result : List UInt8 × List CapabilityId × Descriptor Registry}
+    (checked : checkBirthIntentThin author wanted = .ok result) : thinBirthIntent wanted = true := by
+  unfold checkBirthIntentThin at checked
+  unfold thinBirthIntent
+  revert checked
+  split
+  · split
+    · intro checked
+      cases checked
+    · rename_i grain
+      intro _
+      simpa using grain
+  · intro checked
+    cases checked
+
+#assert_axioms thinBirthIntent_of_checked
 
 /-- **Thin birth consent.** `author` is the deployed authoring of the member's own source at
 given coordinates (instantiated once, in `Host`): the whole intent (subject, nonce, observe
@@ -769,8 +810,9 @@ private theorem mapM_forall₂ {α β : Type} (f : α → Except String β) :
 theorem validateChecks_pins {config : NativeHost.Config} {seed : DurableReceiver.Seed}
     {logStart : Digest} {directory? : Option (CellRegistry.Directory Nat CanonicalCellRegistry.registry)}
     {logical? : Option (Store.Store CredentialAuthorityState.layout)} {lawful? : Option Bool}
-    {built : FactoryPins}
-    (validated : NativeHost.validateChecks config seed logStart directory? logical? lawful? = .ok built) :
+    {platform? : Option PlatformCellLayout.Platform} {built : FactoryPins}
+    (validated : NativeHost.validateChecks config seed logStart directory? logical? lawful? platform? =
+      .ok built) :
     built.federation = config.federation ∧ built.policyId = ⟨config.deployment.factoryId⟩ := by
   unfold NativeHost.validateChecks at validated
   repeat' (first | split at validated | (simp only [bind, Except.bind] at validated))
@@ -788,14 +830,15 @@ theorem validateCore_pins {D A : Type} {config : NativeHost.Config} {seed : Dura
     {logStart : Digest} {directory? : Option D} {authority? : Option A}
     {directoryOf : D → CellRegistry.Directory Nat CanonicalCellRegistry.registry}
     {logicalOf : A → Store.Store CredentialAuthorityState.layout} {lawfulCheck : D → Bool}
+    {platform? : Option PlatformCellLayout.Platform}
     {parts : {parts : D × A × FactoryPins // lawfulCheck parts.1 = true}}
     (validated : NativeHost.validateCore config seed logStart directory? authority? directoryOf
-      logicalOf lawfulCheck = .ok parts) :
+      logicalOf lawfulCheck platform? = .ok parts) :
     parts.1.2.2.federation = config.federation ∧
       parts.1.2.2.policyId = ⟨config.deployment.factoryId⟩ := by
   unfold NativeHost.validateCore at validated
   cases checked : NativeHost.validateChecks config seed logStart (directory?.map directoryOf)
-      (authority?.map logicalOf) (directory?.map lawfulCheck) with
+      (authority?.map logicalOf) (directory?.map lawfulCheck) platform? with
   | error detail => simp [checked, bind, Except.bind] at validated
   | ok built =>
     simp only [checked, bind, Except.bind] at validated

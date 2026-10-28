@@ -1494,7 +1494,8 @@ pub fn usage() -> &'static str {
      grain init-store GRAINS_ROOT MINI_HOST MINI_CONFIG [--broker-socket PATH] | grain backup PROFILE | \
      grain rebind-profile OLD_PROFILE ADMISSION | grain session-intents PROFILE APP | \
      grain register-route --socket PATH --request PATH | \
-     grain current-profile BASELINE | grain runtime-status PROFILE | grain adopt-runtime PROFILE ADMISSION"
+     grain current-profile BASELINE | grain runtime-status PROFILE | grain adopt-runtime PROFILE ADMISSION | \
+     grain reclaim-agent-socket SOCKET CONTROLLER_UID"
 }
 
 struct InstallOptions {
@@ -1573,6 +1574,13 @@ fn init_store(root: &Path, host: &Path, config: &Path, socket: Option<&Path>) ->
 }
 
 pub fn run(args: &[String]) -> io::Result<Value> {
+    if let [verb, socket, uid] = args {
+        if verb == "reclaim-agent-socket" {
+            if !lifecycle_selector::decimal(uid) { return Err(invalid("controller UID must be canonical decimal")); }
+            let uid = uid.parse::<u32>().map_err(|_| invalid("controller UID out of range"))?;
+            return crate::agent_api_server::reclaim_socket(Path::new(socket), uid);
+        }
+    }
     if let [verb,store,app,generation]=args {
         if verb=="unit-name" { return Ok(json!({"unit":broker::resident_unit(store,app,generation)?})); }
     }

@@ -456,6 +456,16 @@ def birthJson (display : NativeThinBirth.BirthDisplay) : Json :=
       ("lineage", toJson (display.coordinates.lineage.map fun (placement, ancestors) =>
         Json.mkObj [("placement", toJson (toString placement)),
           ("ancestors", toJson (ancestors.map toString))]))]),
+    -- The money terms the member consents to (audit pass 22/24 follow-up): the owner budget
+    -- and lifetime its grants carry and the fee, rendered, not only inside the draft hex.
+    ("terms", Json.mkObj [
+      ("ownerBudget", toJson (toString display.coordinates.ownerBudget)),
+      ("lifetime", toJson (toString display.coordinates.lifetime)),
+      ("fee", Json.mkObj [
+        ("payer", toJson (toString display.coordinates.fee.payer)),
+        ("collector", toJson (toString display.coordinates.fee.collector)),
+        ("asset", toJson (toString display.coordinates.fee.asset)),
+        ("amount", toJson (toString display.coordinates.fee.amount))])]),
     ("finalized", toJson (SourceAgreementJson.encodeHex display.finalized))])]
 
 /-- The member's own birth source, as the thin birth frames carry it. -/
@@ -466,11 +476,6 @@ def birthSource (bytes : List UInt8) : IO Json := do
   | .ok json => pure json
   | .error detail => throw (IO.userError s!"thin birth source JSON: {detail}")
 
-def isBirth (wanted : NativeObservationCodec.Intent) : Bool :=
-  match wanted.purpose with
-  | .prepare (.birth _ _) => true
-  | _ => false
-
 def thin (services : ProviderRouteConsent.Services) (config : NativeHost.Config)
     (operation : UInt8) (payload : List UInt8) : IO (List UInt8) := do
   let (intentBytes, rest) ← splitPair payload
@@ -480,7 +485,9 @@ def thin (services : ProviderRouteConsent.Services) (config : NativeHost.Config)
   let (signer, rest) ← splitPair rest
   unless signer.length == 32 do throw (IO.userError "custody signer is not an Ed25519 key")
   let semantics := config.profile.semantics
-  if (operation == 230 || operation == 232) && isBirth wanted then
+  -- Only the births the thin birth arm consents to (`NativeThinBirth.thinBirthIntent`); a grain
+  -- birth (a provider purse's) keeps its intent consent, the provider-route check above.
+  if (operation == 230 || operation == 232) && NativeThinBirth.thinBirthIntent wanted then
     throw (IO.userError "a thin birth is consented with the member's source (thin birth frames 234/235); nothing signed")
   match operation with
   | 234 =>
@@ -636,6 +643,9 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
       catch error => pure (255, error.toString.toUTF8.toList)
     writeSessionFrame output answer.1 answer.2
     serve extraExpected extraObjective settings config retained held input output own
+  else if operation == 236 && !payload.isEmpty then
+    writeSessionFrame output 255 "full consent readiness requires empty input".toUTF8.toList
+    serve extraExpected extraObjective settings config retained held input output own
   else if operation == 228 then
     if held.isSome then
       writeSessionFrame output 255
@@ -680,12 +690,14 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
       | none => verifyInitial config retained
       | some session => refresh config session own
     let own := retainOwn admitted own
-    let (full, updated) ← if operation == 224 && specializedNeedsFull payload then do
+    let (full, updated) ← if operation == 236 || operation == 224 && specializedNeedsFull payload then do
         let (full, upgraded) ← upgrade config admitted own
         pure (some full, upgraded)
       else pure (none, admitted)
     let answer ← try
-        let reply ← if operation == 224 then
+        let reply ← if operation == 236 then
+            pure []
+          else if operation == 224 then
             specialized extraExpected settings config updated full payload
           else if operation == 227 then objectiveHeaders extraObjective settings config updated payload
           else do consent (← IO.ofExcept settings.providerRoutes) config updated operation payload
@@ -697,6 +709,9 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
 def run (extraExpected : ExtraExpected) (arguments : List String)
     (extraObjective : ExtraObjective := refuseObjective) : IO UInt32 := do
   match arguments with
+  | [_, "features"] =>
+      IO.println "mini-consent-full-ready-v1"
+      pure 0
   | [path, "stdio"] =>
       let settings ← loadSettings path
       withPinnedSignature settings.config fun config => do

@@ -460,12 +460,47 @@ def effectDigest (domain semantics : Digest) (command : Command) (d : Declaratio
       (StreamCodec.product bytesStream bytesStream))).encode
       (domain, semantics, commandCodec.encode command, declarationCodec.encode d))).digest
 
-/-- The environment of a submission: the federation, the logical height, and
-the factory's creation tariff (the birth fee's source). -/
+/-- The environment of a submission: the federation, the logical height, the factory's
+creation tariff (the birth fee's source) and the factory template the enrollment's grants are
+bound by. Both prices are the image's platform record's (`AmbientCurrent`); every plan
+checks that before it decides. -/
 structure Ambient where
   federation : FederationId
   height : Height
   tariff : CreationTariff
+  template : CanonicalRuntimeProfile.FactoryTemplate
+
+/-- **The ambient prices from the image's platform record**: its creation tariff, and the
+factory template under it (`templateAt`: the record's owner budget and lifetime, the
+profile's issuer and birth slack). -/
+def AmbientCurrent {F : Type} [Field F] (deployment : Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (durable : Durable) (ambient : Ambient) : Prop :=
+  ∃ record, ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable = some record ∧
+    ambient.tariff = record.creation ∧
+    ambient.template = ResourceBirthPolicyController.Concrete.templateAt profile.template record
+
+def ambientCurrent {F : Type} [Field F] (deployment : Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (durable : Durable) (ambient : Ambient) : Bool :=
+  match ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable with
+  | none => false
+  | some record => decide (ambient.tariff = record.creation) &&
+      decide (ambient.template = ResourceBirthPolicyController.Concrete.templateAt profile.template record)
+
+theorem ambientCurrent_iff {F : Type} [Field F] (deployment : Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (durable : Durable) (ambient : Ambient) :
+    ambientCurrent deployment profile durable ambient = true ↔
+      AmbientCurrent deployment profile durable ambient := by
+  unfold ambientCurrent AmbientCurrent
+  cases ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable with
+  | none => simp
+  | some record => simp
+
+instance {F : Type} [Field F] (deployment : Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (durable : Durable) (ambient : Ambient) :
+    Decidable (AmbientCurrent deployment profile durable ambient) :=
+  decidable_of_iff _ (ambientCurrent_iff deployment profile durable ambient)
+
+#assert_axioms ambientCurrent_iff
 
 def context (deployment : Deployment) (snapshot : Snapshot) (semantics : Digest)
     (ambient : Ambient) (command : Command) : RequestContext where
@@ -518,6 +553,10 @@ def family (deployment : Deployment) (snapshot : Snapshot) (pay : PayCell.Cell) 
 
 inductive Reject where
   | directoryUnavailable | authorityUnavailable | payUnavailable
+  /-- The image holds no platform record to price the enrollment from. -/
+  | platformUnavailable
+  /-- The ambient's tariff or template is not the platform record's (`AmbientCurrent`). -/
+  | platformStale
   | bookUnavailable | factoryUnavailable | staleAuthority | stalePay
   | clockUnavailable | tipBehindClock | chainTipRegressed
   | decision (reason : PayEnrolDecision.Reject)
@@ -595,12 +634,12 @@ def enrolKey (authority : Loaded deployment durable.snapshot) (plan : EnrolPlan)
 
 def enrolObserve (authority : Loaded deployment durable.snapshot) (plan : EnrolPlan) :
     AuthorityGrant :=
-  observeGrant deployment profile.template authority.snapshot.cell ambient.height
+  observeGrant deployment ambient.template authority.snapshot.cell ambient.height
     (enrolIds deployment plan)
 
 def enrolDraft (authority : Loaded deployment durable.snapshot) (tariff : Tariff) (price : Price)
     (plan : EnrolPlan) : Descriptor Registry :=
-  draft deployment profile.semantics profile.template ambient.tariff authority.snapshot.cell
+  draft deployment profile.semantics ambient.template ambient.tariff authority.snapshot.cell
     ambient.height (enrolIds deployment plan) plan.float (enrolRemainder tariff price plan)
 
 /-- Every leg of an enrollment, prepared on the loaded image before any
@@ -618,18 +657,18 @@ structure EnrolLegs (directory : LoadedDirectory durable)
   grants : PreparedGrantBatch profile.compilerProfile deployment authority descriptor
   auxiliaryExact : descriptor.auxiliaryCreates = grants.auxiliaryCreates
   initials : CanonicalCellRegistry.BirthsAdmissible deployment descriptor
-  templateBound : ResourceBirthPolicyController.Concrete.TemplateBound profile.template
+  templateBound : ResourceBirthPolicyController.Concrete.TemplateBound ambient.template
     authority.snapshot.authState ambient.height descriptor
   bornLineage : ResourceBirthPolicyController.Concrete.BornLineage
     (ResourceBirthPolicyController.Concrete.placementLineage authority.snapshot.cell) descriptor
   keyFresh : KeyFresh authority.snapshot (enrolKey deployment authority plan)
-  observeReady : GrantReady authority.snapshot (enrolObserve deployment profile ambient authority plan)
+  observeReady : GrantReady authority.snapshot (enrolObserve deployment ambient authority plan)
   entriesDistinct : ((authorityEntries descriptor (enrolKey deployment authority plan)
-    (enrolObserve deployment profile ambient authority plan)).map Sigma.fst).Nodup
+    (enrolObserve deployment ambient authority plan)).map Sigma.fst).Nodup
   authorityValidated : ValidatedPatch AuthorityMaterializer authority.snapshot.cell
     authority.snapshot.cell.root
     (assignAll authority.snapshot.logical (authorityEntries descriptor
-      (enrolKey deployment authority plan) (enrolObserve deployment profile ambient authority plan)))
+      (enrolKey deployment authority plan) (enrolObserve deployment ambient authority plan)))
   allocated : ResourceBirthController.Allocated Registry directory.directory descriptor
   resources : CanonicalResourceKernel.AcceptedBatch book.payload
     (enrolBatch tariff ambient.tariff.collector plan descriptor)
@@ -643,7 +682,7 @@ theorem EnrolLegs.sound {directory : LoadedDirectory durable}
       legs.descriptor.auxiliaryCreates = legs.grants.auxiliaryCreates ∧
       KeyFresh authority.snapshot (enrolKey deployment authority plan) ∧
       ((authorityEntries legs.descriptor (enrolKey deployment authority plan)
-        (enrolObserve deployment profile ambient authority plan)).map Sigma.fst).Nodup :=
+        (enrolObserve deployment ambient authority plan)).map Sigma.fst).Nodup :=
   ⟨legs.descriptorExact, legs.auxiliaryExact, legs.keyFresh, legs.entriesDistinct⟩
 
 def prepareEnrolLegs (directory : LoadedDirectory durable)
@@ -659,18 +698,18 @@ def prepareEnrolLegs (directory : LoadedDirectory durable)
   let aux ← require (ResourceBirthController.Concrete.sameCreates descriptor.auxiliaryCreates
     grants.auxiliaryCreates = true) .grantBatch
   let initials ← require (CanonicalCellRegistry.BirthsAdmissible deployment descriptor) .birthShape
-  let template ← require (ResourceBirthPolicyController.Concrete.TemplateBound profile.template
+  let template ← require (ResourceBirthPolicyController.Concrete.TemplateBound ambient.template
     authority.snapshot.authState ambient.height descriptor) .birthShape
   let lineage ← require (ResourceBirthPolicyController.Concrete.BornLineage
     (ResourceBirthPolicyController.Concrete.placementLineage authority.snapshot.cell) descriptor) .birthShape
   let key ← require (KeyFresh authority.snapshot (enrolKey deployment authority plan)) .keyTaken
   let observe ← require (GrantReady authority.snapshot
-    (enrolObserve deployment profile ambient authority plan)) .observeGrantTaken
+    (enrolObserve deployment ambient authority plan)) .observeGrantTaken
   let distinct ← require (((authorityEntries descriptor (enrolKey deployment authority plan)
-    (enrolObserve deployment profile ambient authority plan)).map Sigma.fst).Nodup) .authorityEntries
+    (enrolObserve deployment ambient authority plan)).map Sigma.fst).Nodup) .authorityEntries
   match validate AuthorityMaterializer authority.snapshot.cell authority.snapshot.cell.root
       (assignAll authority.snapshot.logical (authorityEntries descriptor
-        (enrolKey deployment authority plan) (enrolObserve deployment profile ambient authority plan)))
+        (enrolKey deployment authority plan) (enrolObserve deployment ambient authority plan)))
       with
   | .rejected _ => throw .validation
   | .accepted validated =>
@@ -837,7 +876,7 @@ def patchOf {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile
 abbrev priceAt (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) {durable : Durable} (authority : Loaded deployment durable.snapshot)
     (command : Command) : Price :=
-  priceIn deployment profile.semantics profile.template ambient authority.snapshot command.observation
+  priceIn deployment profile.semantics ambient.template ambient authority.snapshot command.observation
 
 /-- **The enrollment, decided and planned before any authorization**: the loaded
 cells, the two pinned roots, the clock advance, the pure decision (`decideEnrol`,
@@ -855,6 +894,8 @@ structure Planned (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
   pay : PayCellDomain.Loaded deployment durable.snapshot
   book : BookCell deployment directory.directory
   factory : FactoryCell deployment directory.directory
+  /-- The enrollment is priced from the image's platform record. -/
+  ambientCurrent : AmbientCurrent deployment profile durable ambient
   tariff : Tariff
   tariffExact : tariffOf pay.cell.logical = some tariff
   clock : ClockCellDomain.Loaded deployment durable.snapshot
@@ -876,12 +917,13 @@ structure Planned (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
     deployment.factoryId = some dependencies
 
 /-- **What every `Planned` enrollment means** (layer 1): the observer read the
-loaded authority and pay roots, the decision is `decideEnrol`'s on the loaded pay
-cell under exactly `verified`, the clock advance is the tip's, and the factory
-law's structural dependencies are the loaded ones. -/
+loaded authority and pay roots, the ambient prices from the image's platform record, the
+decision is `decideEnrol`'s on the loaded pay cell under exactly `verified`, the clock advance
+is the tip's, and the factory law's structural dependencies are the loaded ones. -/
 theorem Planned.sound {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
     {ambient : Ambient} {durable : Durable} {command : Command} {verified : Verified}
     (planned : Planned deployment profile ambient durable command verified) :
+    AmbientCurrent deployment profile durable ambient ∧
     decideEnrol planned.pay.cell.logical (priceAt deployment profile ambient planned.authority command)
         command.tip command.observation verified
         (subjectTakenIn planned.authority.snapshot command.observation) = .ok planned.decision ∧
@@ -889,7 +931,8 @@ theorem Planned.sound {deployment : Deployment} {profile : CanonicalRuntimeProfi
       PayChainTip.advances (chainTipOf planned.pay.cell.logical) command.tip ∧
       WorldKindLawDependencies.loadTarget deployment planned.directory.directory
         deployment.factoryId = some planned.dependencies :=
-  ⟨planned.decided, planned.tipAhead, planned.chainTipAhead, planned.dependenciesExact⟩
+  ⟨planned.ambientCurrent, planned.decided, planned.tipAhead, planned.chainTipAhead,
+    planned.dependenciesExact⟩
 
 /-- Plan the enrollment under the verifier's answers `verified`. -/
 def plan (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
@@ -909,6 +952,10 @@ def plan (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
   let factory ← requireSome .factoryUnavailable
     (ResourceBirthController.Concrete.observeCell deployment directory.directory
       deployment.factoryId .declaredObject)
+  match ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable with
+  | none => throw .platformUnavailable
+  | some _ =>
+  let current ← require (AmbientCurrent deployment profile durable ambient) .platformStale
   let snapshot := authority.snapshot
   if command.expectedAuthorityRoot = snapshot.cell.root then
     if rootExact : command.expectedPayRoot = pay.cell.root then
@@ -943,7 +990,8 @@ def plan (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
                     directory.directory deployment.factoryId with
                 | none => throw .policyUnavailable
                 | some dependencies =>
-                  pure ⟨directory, directoryExact, authority, authorityExact, pay, book, factory, tariff, tariffExact, clock,
+                  pure ⟨directory, directoryExact, authority, authorityExact, pay, book, factory,
+                    current.down, tariff, tariffExact, clock,
                     tipAhead, chainTipAhead, clockValid, decision, decided, legs, candidate,
                     dependencies, dependenciesExact⟩
           else throw .chainTipRegressed

@@ -106,9 +106,22 @@ def wbo(route, board):
     item = {"tool": "Rectangle", "type": "rect", "id": "featured" + os.urandom(4).hex(),
             "color": "#123456", "size": 4, "x": 10, "y": 10, "x2": 120, "y2": 90}
     s.emit("broadcast", {"board": board, "data": item})
-    time.sleep(3)  # the server applies broadcasts in order; GET /boards/<board>.json is the read-back
-    print(json.dumps({"ok": True, "id": item["id"]}))
-    return 0
+    time.sleep(3)  # the server applies broadcasts in order
+    # Read-back by WBO's own protocol: a second socket joins the board with getboard and the server answers
+    # one `broadcast` event whose _children are the board's items (sockets.js onGetBoard).
+    r = SIO(route, "")
+    r.emit("getboard", board)
+    seen = 0
+    for ev in r.events(60):
+        if ev[0] == "broadcast" and isinstance(ev[1], dict) and "_children" in ev[1]:
+            kids = ev[1]["_children"]
+            seen = len(kids)
+            if any(k.get("id") == item["id"] for k in kids):
+                print(json.dumps({"ok": True, "id": item["id"], "items": seen, "readback": "getboard"}))
+                return 0
+            break
+    print(json.dumps({"ok": False, "refused": "itemNotInGetboard", "id": item["id"], "items": seen}))
+    return 1
 
 
 def hedgedoc(route, note):
