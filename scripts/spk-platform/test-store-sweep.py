@@ -60,10 +60,50 @@ class StoreSweep(unittest.TestCase):
             result = subprocess.run(cmd + ['--max-worlds', '3'], check=True, capture_output=True, text=True)
             self.assertIn('3 worlds;', result.stdout)
 
+    def test_retry_stage_only_archives_packages_in_the_selected_index(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            apps = [dict(appId=f'app{i}', packageId=f'{i:032x}', name=f'App {i}') for i in range(2)]
+            for app in apps:
+                sweep.record(out, 'a'*40, app, 'FAIL', 'install', 'native refusal', '/ev', 'standard-v1', 1, 2)
+            index = out/'selected-index.json'
+            index.write_text(json.dumps(dict(apps=[apps[1]])))
+            subprocess.run([sys.executable, str(Path(__file__).with_name('store-sweep-data.py')),
+                            'retry-stage', str(out), 'a'*40, 'install', str(index)], check=True)
+            self.assertEqual([r['packageId'] for r in sweep.records(out, 'a'*40)], [apps[0]['packageId']])
+            self.assertEqual(len(list((out/'records'/'history').glob('*/*.json'))), 1)
+
     def test_profile_uses_both_bounds(self):
         self.assertEqual(sweep.profile(256, 768, 256, 768), 'standard-v1')
         self.assertEqual(sweep.profile(257, 768, 256, 768), 'market-large-v1')
         self.assertEqual(sweep.profile(100, 769, 256, 768), 'market-large-v1')
+
+    def test_profile_uses_native_segment_limit_without_judging_admission(self):
+        here = Path(__file__).resolve().parent
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            host = root/'spk-host'
+            host.write_text('''#!/bin/bash
+if [[ $1 == import-limits ]]; then echo '256 768 10'; exit 0; fi
+[[ $1 == qualify && $2 == --import-profile && $3 == standard-v1 ]] || exit 99
+echo "$SWEEP_TEST_NATIVE_REFUSAL" >&2
+[[ -z $SWEEP_TEST_NATIVE_REFUSAL ]]
+''')
+            host.chmod(0o755)
+            timeout = root/'timeout'
+            timeout.write_text('#!/bin/bash\nshift 2\nexec "$@"\n')
+            timeout.chmod(0o755)
+            cmd = ['bash', str(here/'store-sweep-profile.sh'), str(host), str(root/'package.spk'),
+                   '100', '700', str(root/'native')]
+            env = dict(os.environ, PATH=str(root)+os.pathsep+os.environ['PATH'])
+            for refusal, expected in (
+                ("spk-host: too many Cap'n Proto segments: 809 exceeds bound 512", 'market-large-v1'),
+                ('spk-host: archive hash mismatch', 'standard-v1'),
+                ('', 'standard-v1'),
+            ):
+                env['SWEEP_TEST_NATIVE_REFUSAL'] = refusal
+                result = subprocess.run(cmd, env=env, capture_output=True, text=True, check=True)
+                self.assertEqual(result.stdout.strip(), expected)
 
     def test_teardown_does_not_need_removed_grain_profile(self):
         here = Path(__file__).resolve().parent

@@ -66,7 +66,7 @@ fi
 if [[ $dry == 0 ]]; then
   "$candidate/bin/mini" apps index-check --in "$index" --out "$out/index.json"
   index=$out/index.json
-  [[ -z $retry ]] || python3 "$data" retry-stage "$out" "$sha" "$retry"
+  [[ -z $retry ]] || python3 "$data" retry-stage "$out" "$sha" "$retry" "$index"
   python3 "$data" publish "$out" "$sha"
 fi
 plan=$out/plan.jsonl
@@ -74,7 +74,7 @@ plan=$out/plan.jsonl
 python3 "$data" plan "$index" "$out" "$sha" "$size" "$maximum" "$retry" >"$plan.new"
 mv "$plan.new" "$plan"
 jq -r 'to_entries[] | [.value.letter,.value.name,.value.packageId,"birth → install → share → start → enroll → GET /"] | @tsv' "$plan"
-echo "$(wc -l <"$plan") worlds; candidate $sha; profile chosen from raw and decoded package bytes"
+echo "$(wc -l <"$plan") worlds; candidate $sha; profile chosen from package bytes and native segment limits"
 [[ $dry == 0 ]] || exit 0
 [[ $staging == /tank/lanes/* && $staging != *[!a-zA-Z0-9_./-]* ]] || { echo 'staging must be a simple absolute directory under /tank/lanes' >&2; exit 2; }
 mkdir -p "$staging"
@@ -83,7 +83,7 @@ if compgen -G "$staging/b.*" >/dev/null; then
 fi
 # Save the scripts and binary pins used, independently of subsequent lane edits.
 mkdir -p "$out/driver"
-cp "$0" "$data" "$here/store-sweep-world.sh" "$here/grain-journey.sh" "$here/world-up.sh" "$here/broker-world-up.sh" "$here/world-down.sh" "$here/stop-residents.sh" "$out/driver/"
+cp "$0" "$data" "$here/store-sweep-profile.sh" "$here/store-sweep-world.sh" "$here/grain-journey.sh" "$here/world-up.sh" "$here/broker-world-up.sh" "$here/world-down.sh" "$here/stop-residents.sh" "$out/driver/"
 sha256sum "$candidate/bin/mini" "$candidate/bin/spk-host" "$candidate/bin/minidregg-host" >"$out/binary-sha256.txt"
 while IFS= read -r batch; do
   batchfile=$(mktemp "$out/batch.XXXXXX.json")

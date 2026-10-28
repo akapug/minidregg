@@ -22,13 +22,17 @@ Use a detached job with its own PID file and `box-wait`, as COORDINATION §3 des
 The default index is fetched through `mini-market-fetch` and checked by the candidate's
 `mini apps index-check`. `--index FILE` selects a recorded index. Dry runs need curl,
 jq and Python 3, but do not execute the candidate's Linux binaries or start worlds.
-Actual runs also need the ordinary world prerequisites, flock and xz.
+Actual runs also need the ordinary world prerequisites, flock, xz and GNU timeout.
 
 The package download is bounded by the candidate's `spk-host import-limits market-large-v1`
 raw ceiling and verified against its package ID's SHA-256 prefix. The XZ index after the
 SPK's eight-byte magic supplies the decoded-size hint. Either raw or decoded size above
 `standard-v1` selects `market-large-v1`; a batch containing such a package gets that
-profile. The real Mini ingest verifies signatures and enforces the actual decoder bounds.
+profile. When the bytes fit standard, a bounded `spk-host qualify --import-profile standard-v1`
+preflight also detects the native Cap'n Proto segment-count refusal and selects the large
+profile for it. Segment count is not inferred from byte length or parsed in this wrapper.
+Other preflight refusals are retained as evidence; the real grain install still decides the
+app's verdict. The real Mini ingest verifies signatures and enforces the actual decoder bounds.
 Packages beyond the large profile are reported as `FAIL package-size`, never silently omitted.
 
 Every complete world, including teardown, holds `flock -o /tank/lanes/world-up.lock`.
@@ -47,6 +51,7 @@ between their renames loses no verdict. Results name the failed stage and native
 when available. World setup failures are reported as `FAIL world-up`, not app incompatibility.
 After fixing a cause, `--retry-stage world-up` (or another failed stage) explicitly moves
 those FAIL records into `records/history/` before replanning; PASS rows are never discarded.
+When `--index FILE` selects a subset, only failures in that index are archived and retried.
 With `--dry-run` this previews the retries without changing the recorded verdicts.
 Evidence includes journey outputs, HTTP bodies/headers, logs and driver/binary pins. It is
 private operator evidence and may contain credentials; publish only the summary.

@@ -37,10 +37,13 @@ def profile(raw, decoded, raw_limit, decoded_limit):
     return 'market-large-v1' if raw > raw_limit or decoded > decoded_limit else 'standard-v1'
 
 
-def retry_stage(out, candidate, stage):
+def retry_stage(out, candidate, stage, apps=None):
     archive = out/'records'/'history'/datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%f')
+    selected = None if apps is None else {(a['appId'], a['packageId']) for a in apps}
     for path in sorted((out/'records').glob('*.json')):
         row = json.loads(path.read_text())
+        if selected is not None and (row['appId'], row['packageId']) not in selected:
+            continue
         if row['candidate'] == candidate and row['verdict'] == 'FAIL' and row['stage'] == stage:
             archive.mkdir(parents=True, exist_ok=True)
             path.replace(archive/path.name)
@@ -98,6 +101,7 @@ if __name__ == '__main__':
     elif action == 'profile':
         print(profile(*map(int, args)))
     elif action == 'retry-stage':
-        retry_stage(Path(args[0]), args[1], args[2])
+        selected = json.loads(Path(args[3]).read_text())['apps'] if len(args) == 4 else None
+        retry_stage(Path(args[0]), args[1], args[2], selected)
     else:
         raise SystemExit(f'unknown action: {action}')
