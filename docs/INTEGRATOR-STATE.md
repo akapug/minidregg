@@ -170,7 +170,7 @@ coordinator): cx-oracle, cx-store-sweep, cx-app-interface, oracle-grant-factory 
 main; un-consent-reconnect 02a03960f is dropped (b71898658 stands); un-ns-owner 587c5acbd is superseded;
 un-japps-rows waits for its owner's message. cx-web 7c4ecd454 (web redesign, ember-approved) waits for codex's follow-up sha (main merged, gallery widened to FEATURED); do not merge 7c4ecd454 alone. Qualification lead ab292a1cd5ddfbbe5 owns keep-going composed, the warm test-ahead world (seeded from integ4/citer3.sh) and the rehearsal-3 board; the integrator keeps builds, merges and gate scripts and merges what it sends. un-story-install 81b631818 (story invite, door log) and de75c40a8 (provisioning wedge, main 65309b427) on main after 9bd52317c: they ride the next build; name it to acf88647b53657831. 68cf4ba7a gate FAIL 16:09 (tour 69/69; composed apps:sheet generic share-issue refusal), reported 16:3x; 9bd52317c in its umbrellas stage at 16:30 (non-blocking), then rust/pack/gate-cut6; its composed store.log names the share-issue stage: send that line to a85d12892ea6de3ca. Tool work done: rust-check before the host stage (28dc877e8); the regen refuses an old spelling inside a Lean string literal (9e3d67e43).
 
-Hermes is L4c a6c2f758a0dac46fe (10-28; L4b ad81db6d6fd317d3a stopped: older mentions are history). Infra is a298031c78e86d651 (10-28; older mentions of ae95a4eac63b0715e/aed5ecf506cf840af in the table are history). Red routing: lean-audit-c and lean-audit-c-m2 are L1e's successor's (L1e a58f907aef8926430 handed off 10-28 at its cap; the successor starts from docs/PLATFORM-RECEIVER-STATE.md and will message; until then route through the coordinator): its green sha comes from and its reds go to L1e directly; when the module conversion lands on main, tell L1e (it merges the conversion into lean-audit-c and sends a green sha) and L1d's old address; Hermes to L4c (a6c2f758a0dac46fe; L4b ad81db6d6fd317d3a has stopped); L13 a1618140607ac439b; un-stream-continuity reds
+Hermes: L4c handed off 10-28 (successor starts from deploy/hermes/README.md "State" on lane/hermes-b; route through the coordinator until it messages). Formerly L4c a6c2f758a0dac46fe (10-28; L4b ad81db6d6fd317d3a stopped: older mentions are history). Infra is a298031c78e86d651 (10-28; older mentions of ae95a4eac63b0715e/aed5ecf506cf840af in the table are history). Red routing: lean-audit-c and lean-audit-c-m2 are L1e's successor's (L1e a58f907aef8926430 handed off 10-28 at its cap; the successor starts from docs/PLATFORM-RECEIVER-STATE.md and will message; until then route through the coordinator): its green sha comes from and its reds go to L1e directly; when the module conversion lands on main, tell L1e (it merges the conversion into lean-audit-c and sends a green sha) and L1d's old address; Hermes to L4c (a6c2f758a0dac46fe; L4b ad81db6d6fd317d3a has stopped); L13 a1618140607ac439b; un-stream-continuity reds
 (ApplicationStreamContinuityFresh pole proofs, NativeHostReplay.lean:3816) to the deputy a308118209b4a48ea; all
 others through the coordinator. Expected reds, not new: the eight hand-rolled genesis writers (acceptance.sh,
 application-acceptance.sh, authority-acceptance.sh, selected-release-acceptance.sh, grain-runtime/acceptance.sh,
@@ -259,11 +259,9 @@ only `.lake/packages`; Lake's artifact cache restores the build dir as fresh ino
 
 ## Named reds outstanding
 
-- TokenCensus.lean:34 "token census failed (21)" (umbrellas, non-blocking; first reached at 9bd52317c, 10-28 17:17):
-  10 unlisted private constructors of lean-audit-c's receivers (CompletionCustodianKey.Read, MeterRefillReceiver.*,
-  PlatformInstallReceiver.*, PlatformCellDomain.Loaded): L1e's successor; DurableHistory.RawEntry/RawNode.ofStore bare
-  tokens; 9 receiverVerifier calls outside its allow list (NativeHostReplay.derive, NativeHost.receivingOutcome,
-  PayEnrolProofs.intentOf, PayObservationReceiver.prepare). Named to the coordinator for routing.
+- TokenCensus.lean:34 "token census failed (21)" (umbrellas, non-blocking; first reached at 9bd52317c): OWNER
+  iter-speed a0fd127abfb9aac75, ALL 21 (ten L1 rows, mints: notes for ofStore, a census rule counting only
+  computational uses; allow list unchanged). Do not re-route; its sha comes to the integrator.
 - Fixtures.NativeAcceptedFixture / NativeDocWriteFixture: ruling (c) (run-relative charge lanes), effects successor.
 
 ## Conventions
