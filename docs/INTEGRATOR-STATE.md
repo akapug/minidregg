@@ -113,6 +113,7 @@ gates main and fixes reds itself.
 
 ## Rulings (do not re-ask)
 
+- Context: write the continuation (this file, rewritten whole) by about 450k tokens; distill or hand off at about 470k (COORDINATION 22f5a3cc3).
 - Intent.credit (L1d item 5, ops 244-247) persists in IntentRecord: durable log frame v3 and
   `DREGG.DURABLE.IMAGE` v3, shipped with the module conversion's re-genesis so the StoreEpoch moves once. Pending
   the auditor's acceptance; L1d (ad6d6eff243f32816) coordinates the order with the integrator and the iter-speed
