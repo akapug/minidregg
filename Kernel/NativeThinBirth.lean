@@ -833,7 +833,7 @@ theorem honest_plan_accepted : HonestPlanAcceptedStatement := by
       (capabilities.length == prepared.descriptor.resourceBatch.operations.length)
       "birth source capability count mismatch" with
   | error reason => simp [capabilityCount] at planned
-  | ok unit =>
+  | ok counted =>
   simp only [capabilityCount] at planned
   cases fac : hostSlot prepared.prepared.authority.snapshot prepared.descriptor.authorityNullifier 0 0
       (branchRequest prepared.prepared height .factory) with
@@ -857,11 +857,14 @@ theorem honest_plan_accepted : HonestPlanAcceptedStatement := by
   subst planned
   have userExact : userPart prepared.descriptor = draft := by
     have exact := prepared.sourceExact
+    have none := prepared.noAuxiliaryInput
     unfold userPart
+    generalize prepared.descriptor = descriptor at exact ⊢
     rw [exact]
-    simp [prepared.noAuxiliaryInput]
     cases draft
-    simp_all
+    simp only at none ⊢
+    subst none
+    rfl
   have slots : checkSlots prepared.descriptor.authorityNullifier 0
       (factorySlot :: authoritySlot :: (allocationSlots ++ sourceSlots))
       (birthSlotPlan (publicPins config) prepared.descriptor) = .ok () := by
@@ -879,6 +882,7 @@ theorem honest_plan_accepted : HonestPlanAcceptedStatement := by
       refine (List.forall₂_map_right_iff).mpr (pointwise.imp ?_)
       intro built index ok
       exact slot_checked prepared.prepared height (.source index) (publicPins config) domain semantics federation factory policy ok
+  simp only [publicPins] at slots
   refine ⟨⟨draftBytes, capabilities, coordinatesOf draft,
     CanonicalCellRegistry.sourceEncoding.codec.encode prepared.descriptor⟩, ?_⟩
   simp [checkBirthThin, checkBirthIntentThin, purpose, grain, decodedDraft,
