@@ -13,6 +13,8 @@ HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 REPO=$(CDPATH='' cd -- "$HERE/../.." && pwd)
 . "$REPO/native/resource-client/journey.d/lib/genesis-params.sh"
 resolve_params_sh "$REPO" || exit 2
+. "$REPO/native/resource-client/journey.d/lib/wire.sh"
+NO_RECORD=$(response_marker "$REPO" NO_RECORD)
 MINI=${MINI:-"$HERE/target/debug/mini"}
 STORE_BINARY=${STORE_BINARY:-"$REPO/native/hyperdocument-link-sqlite-store/target/debug/minidregg-link-sqlite-store"}
 SIGNATURE_BINARY=${SIGNATURE_BINARY:-"$REPO/native/credential-signature-verifier/target/debug/minidregg-credential-signature-verifier"}
@@ -232,7 +234,7 @@ test ! -e "$AD/call.bin"
 test ! -e "$AD/outcome.json"
 jq -e '.type == "minidregg-pre-submit-refusal-v1" and .stage == "prepare" and
   .operation == 1' "$AD/pre-submit-refusal.json" >/dev/null
-[ "$(head -c 1 "$AD/pre-submit-refusal.frame" | od -An -tu1 | tr -d ' ')" = 253 ] || {
+[ "$(head -c 1 "$AD/pre-submit-refusal.frame" | od -An -tu1 | tr -d ' ')" = "$NO_RECORD" ] || {
   echo "Alice mutation: prepare refusal is not a NO_RECORD (253) frame" >&2; exit 1; }
 tail -c +2 "$AD/pre-submit-refusal.frame" >"$AD/prepare-refusal.bin"
 "$HOST" "$CONFIG" inspect outcome "$AD/prepare-refusal.bin" "$AD/prepare-refusal.json" \
