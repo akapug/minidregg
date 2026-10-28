@@ -70,6 +70,26 @@ class AttachmentContinuationTests(unittest.TestCase):
                     with self.assertRaises(ValueError):j.finish_session_attachment(root/'input.json',session,'selected')
                     fixed.assert_not_called();phase.assert_not_called()
 
+class ApplicationClosureTests(unittest.TestCase):
+    def test_uncertain_custody_preserves_app_and_settled_stop_requires_exact_unit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);journal=root/'journal.json';receipt=root/'stop.json'
+            j=driver.Journey.__new__(driver.Journey);j.bins=root;j.profile=root/'profile.json';j.application_unit='owned.service'
+            for field in ('applicationApiAttempt','dispatchHold','foregroundAttempt','parentHold','pending'):
+                journal.write_text(driver.json.dumps({field:{'uncertain':True}}))
+                with patch.object(j,'fixed',return_value=journal),patch.object(j,'run') as run:
+                    with self.assertRaisesRegex(ValueError,'unsettled'):j.stop_qualified_application()
+                    run.assert_not_called()
+            journal.write_text('{}')
+            for unit,accepted in [('foreign.service',False),('owned.service',True)]:
+                receipt.write_text(driver.json.dumps({'protocol':'mini-spk-grain-stop-v1','app':'9890001','unit':unit,'activeState':'inactive'}))
+                with patch.object(j,'fixed',return_value=journal) as fixed,patch.object(j,'run',return_value=receipt) as run:
+                    if accepted:self.assertEqual(j.stop_qualified_application(),receipt)
+                    else:
+                        with self.assertRaisesRegex(ValueError,'stopped test unit'):j.stop_qualified_application()
+                    self.assertEqual([c.args for c in fixed.call_args_list],[('controller-stop',),('controller-journal',)])
+                    self.assertEqual(run.call_args.args[1],[root/'spk-host','grain','stop',j.profile,'9890001'])
+
 class CheckpointTests(unittest.TestCase):
     def test_checkpoint_restores_coordinates_but_refuses_changed_native_inputs(self):
         with tempfile.TemporaryDirectory(prefix='j14-checkpoint-',dir='/tmp') as temp:
