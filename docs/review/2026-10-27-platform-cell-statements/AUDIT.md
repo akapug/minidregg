@@ -1068,3 +1068,12 @@ On the World-level tooth: `decodeTurn_encodeTurn`, with `decodeTurn` reading the
 `encodeTurn` injective in it. Add the one-line corollary `encodeTurn_credit_ne`, turns differing only in
 credit having different bytes, as the stated tooth. Then a future codec that drops the field fails a
 named theorem instead of passing silently through a roundtrip on a defaulted value.
+
+**Addendum, `SnapRepresents.meter` strengthened (L1e): ACCEPT.** A credited lane at an exhausted meter may
+hold `none`, so the World's guarded allowance write would refuse the very refill the 0→5 pole admits. The
+`getD 0` field cannot distinguish `none` from `some 0`. Strengthening the field in place to
+`w.allowanceOf l = some (snap.model.available l)`, with `meter_eq` as the old field for current readers,
+is the right fix. It is a stronger premise every producer inhabits, not a new hypothesis, and deployed
+genesis records every lane (`TurnLog.genesisSystem`), which writes preserve. `representsCheck_sound`
+moving to the `some` comparison keeps the open deciding it. Restating `charge_le_allowance`'s second
+conjunct as `step_meter` is required by the credit and accepted.
