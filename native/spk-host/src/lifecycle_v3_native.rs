@@ -98,6 +98,23 @@ pub(crate) fn host_refusal(
     }
     let decided = reply[4] == RESPONSE_NO_RECORD;
     let outcome = write_new(attempt_dir, &format!("{step}-refusal-outcome.bin"), &reply[5..])?;
+    // Nothing was appended when the Host says NO_RECORD, or when the step appends nothing
+    // whatever it answers (op66 plans, op67 assembles; only op22 submits). Such an attempt is
+    // settled: `BEGIN_REFUSED_MARKER` lets a later INSTALL set it aside and begin afresh
+    // (`grain::set_aside_refused_install`). An undecided op22 keeps the attempt held.
+    let settled = decided || step != "op22-submit";
+    if settled {
+        write_new(
+            attempt_dir,
+            BEGIN_REFUSED_MARKER,
+            &serde_json::to_vec(&json!({
+                "protocol":"mini-spk-launch-begin-refused-v1",
+                "step":step,
+                "marker":reply[4],
+                "outcomeSha256":hex(&Sha256::digest(&reply[5..])),
+            }))?,
+        )?;
+    }
     let named = operator
         .tool("inspect", "outcome", &outcome, &attempt_dir.join(format!("{step}-refusal-outcome.json")))
         .ok()
@@ -124,6 +141,9 @@ pub(crate) fn host_refusal(
 }
 
 pub(crate) const BEGIN_ACTIVE_MARKER: &str = "lifecycle-begin-v3-active.json";
+/// Written in the BEGIN attempt directory when the Host refused a step and nothing was
+/// appended (`host_refusal`).
+pub(crate) const BEGIN_REFUSED_MARKER: &str = "begin-refused.json";
 pub(crate) const BEGIN_INGRESS_FILE: &str = "begin-v3.bin";
 
 fn hold_begin_attempt(parent: &Path, active: &[u8]) -> io::Result<()> {
