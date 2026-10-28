@@ -78,10 +78,20 @@ Next steps: when 1af366fe9's build reaches READY, its chain runs the gate (gate-
 dregg-infra-026d132) and enrol-resume itself; report "candidate <sha> at <path>: gate <verdict>, reds by name" to
 the coordinator and the sha + path to L4b (ad81db6d6fd317d3a); tell the rows validator (aeee8349c191e8506, through
 the coordinator) the candidate. If the build reds, name it at once (file:line, owner) and fix forward. Pending
-lands: lean-audit-c (88d6808fd+) only on L1c's warm-tree green sha. Open design question carried from the regen
-tool: transitive bumps through registry constants (the census excludes PersistedCodecTags constants from
-fingerprints, so a codec that references a bumped identity by its constant does not move; making them count
-re-pins every fingerprint once). jspk1.sh still speaks to the global /run/mini-spk-broker.sock (old system-broker
+lands: lean-audit-c (88d6808fd+) only on L1c's warm-tree green sha. Transitive bumps through registry constants: closed by ruling (no). Nesting already propagates through the
+regen's round loop, and both hand-bump stops were spelling forms the tool now handles. The one planned re-pin is
+the module conversion's census change (option A, structure-not-name for compiler auxiliaries): iter-speed's
+successor (a0fd127abfb9aac75) lands it after the next candidate, and it moves the StoreEpoch once; land it only
+after that candidate is reported, then run the regen once in the next full build.
+Main after 1af366fe9 (in the next full build): rows-ledger 709cd12d/6ee5acb4 (FOUC 12/12 site and app), the one
+birth acceptance 78fe8e63d (native-acceptance.sh and native-share-member.sh source one function), hermes-b
+2aa94b0c, un-effects-rows 8223735f and 4dc6225d (commons still red at publish: over SOURCE_BYTES; the deputy's
+split follows), prepare-refusal-clients f73893fc; then (main 81bca08c6) un-effects-rows 703128ec (commons split into app and
+scenario modules) and prepare-refusal-clients 25cfb86bd (BEGIN plans name the Store by storeIdentity: the grain-install
+red; spk-host retries a refused install). PRIORITY: the next full build starts from main >= 81bca08c6 the moment
+1af366fe9's chain releases integ8, so the next candidate carries 25cfb86bd (app market, joracle, Oracle v7 world wait on it);
+take L1c's framed_payload follow-up if pushed by then. Rows validator: fresh worlds on that candidate.
+jspk1.sh still speaks to the global /run/mini-spk-broker.sock (old system-broker
 journey; its owner's).
 
 Red routing: lean-audit-c reds go to L1c (acf52d65283ef4ebc) directly; Hermes to L4b (ad81db6d6fd317d3a); L13 a1618140607ac439b; un-stream-continuity reds
