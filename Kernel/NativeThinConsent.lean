@@ -109,6 +109,8 @@ inductive Refusal where
   /-- The plan's finalized descriptor differs from the intent's draft beyond the kernel's
   auxiliary creates. -/
   | birthSourceChanged
+  /-- The served view's packed cell is not exactly the store of its opened entries. -/
+  | openingMismatch (target : Nat)
   deriving DecidableEq, Repr
 
 /-- The part of a target's patch that the member authored: every input is the
@@ -354,6 +356,149 @@ theorem thin_display_is_commit {deployment : Deployment} {directory : CellRegist
 
 #assert_axioms memberPatch_supported computeTarget_root honest_binds mismatch_refused
   post_run thin_display_is_commit
+
+/-! ## Served views over salted openings (statement first)
+
+The Host never serves a cell's hiding key: every resource view drops the blinding entry
+(`ResourceObservationAdmission.narrowPacked_erases_blinding`) and serves, beside the narrowed
+packed cell, the cell's salted opening: one item per entry in canonical order, an opened entry
+(salt and bytes) or a sealed leaf (`NativeObservationController.openingView`,
+`root_opens`). The salts derive from the blinding key, so re-encoding the served store cannot
+reproduce the signed root of a blinded cell, and `checkServed` refuses every write to one
+(`servedRootMismatch`: JP2 row 22 on candidate e89fe7b8b).
+
+`checkOpened` checks the view by its opening instead: the frame is the target's store frame,
+the root recomputed from the items alone is the root the signed command names, and the narrowed
+packed cell is exactly the store of the opened entries. The display is the member patch run on
+that store. The claim is at every address that is neither kernel-owned nor sealed in the
+served opening, and it concludes **or** a named collision of the store hash at the actual
+pre-state (`OpeningCollision`), taking no hash premise. -/
+
+/-- Every target's materializer is a salted store over one wire. -/
+def Target.wire (target : Target) : StoreCodec.Wire target.layout := by
+  cases target with
+  | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
+    cases payload with
+    | scalar _ | computeFunding _ | moneyConsent _ => exact DeclaredEffectCell.wire
+    | content _ | read => exact HyperdocumentCell.contentWire
+    | append _ => exact StreamCell.headWire
+    | world _ => exact WorldKindCell.instanceWire
+    | kindDefinition _ | kindRead => exact WorldKindCell.definitionWire
+
+/-- The entry bytes an opening discloses, in canonical order. -/
+def openedBytes (items : List StoreHiding.Item) : List (List UInt8) :=
+  items.filterMap fun item => item.getLeft?.map StoreCodec.Opening.entry
+
+/-- The parts of a served resource view that thin consent reads: the narrowed packed cell's
+bytes and the opening (frame and items). -/
+def servedOpening (target : Target) (view : List UInt8) :
+    Except Refusal (List UInt8 × List UInt8 × List StoreHiding.Item) :=
+  match NativeObservationController.resourceViewCodec.decode view with
+  | none => .error (.viewMalformed target.target)
+  | some (_, packedBytes, _, (frame, items), _) => .ok (packedBytes, frame, items)
+
+/-- **Thin consent's check of one served view.** The frame is the target's store frame; the
+root recomputed from the opening's items is the root the signed command names; the narrowed
+packed cell, selected under the executor's own role selection, is exactly the store of the
+opened entries; the member patch applies to it. Returns the displayed post. -/
+def checkOpened (deployment : Deployment) (command : Command) (target : Target)
+    (view : List UInt8) : Except Refusal (Store target.layout) := do
+  let (packedBytes, frame, items) ← servedOpening target view
+  unless frame = StoreCodec.frame target.wire do .error (.viewMalformed target.target)
+  unless StoreHiding.rootOfItems target.wire items = target.expectedTargetRoot do
+    .error (.servedRootMismatch target.target)
+  let some packed := CanonicalCellRegistry.cellCodec.decode packedBytes
+    | .error (.viewMalformed target.target)
+  let some cell := selectTarget deployment target packed | .error (.viewRole target.target)
+  unless (StoreCodec.entries target.wire cell.logical).map (StoreCodec.entryBytes target.wire) =
+      openedBytes items do .error (.openingMismatch target.target)
+  let patch ← memberPatch command target cell.logical
+  if Patch.ValidFrom cell.logical patch then .ok (Patch.run cell.logical patch)
+  else .error (.patchRefused target.target)
+
+/-- A collision of the store hash at the actual pre-state: the items' leaves are not the
+actual store's leaves yet root to the same digest, or an opened item is not the actual
+opening at its position yet has the same leaf. -/
+def OpeningCollision {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L)
+    (items : List StoreHiding.Item) (actual : Store L) : Prop :=
+  (items.map StoreHiding.Item.leaf ≠ StoreCodec.leaves wire actual ∧
+      StoreCodec.rootOfLeaves wire (items.map StoreHiding.Item.leaf) =
+        StoreCodec.rootOfLeaves wire (StoreCodec.leaves wire actual)) ∨
+  ∃ (position : Nat) (shown : StoreCodec.Opening) (entry : Entry L),
+    items[position]? = some (.inl shown) ∧ (StoreCodec.entries wire actual)[position]? = some entry ∧
+    shown ≠ StoreCodec.opening wire actual entry ∧
+    shown.leaf = (StoreCodec.opening wire actual entry).leaf
+
+/-- An address the served opening seals: the actual store has an entry there whose item is a
+leaf. Thin consent shows nothing at it. -/
+def SealedIn {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L) (items : List StoreHiding.Item)
+    (actual : Store L) (address : Address L) : Prop :=
+  ∃ (position : Nat) (entry : Entry L) (leaf : List UInt8),
+    (StoreCodec.entries wire actual)[position]? = some entry ∧ entry.1 = address ∧
+      items[position]? = some (.inr leaf)
+
+/-- **Keystone: what thin consent shows over an opening is what commits.** For the executor's
+own prepared target and a served view thin consent accepted: either the view's opening is a
+collision of the store hash at the actual pre-state, or at every address that is neither
+kernel-owned nor sealed in that opening, the committed post is the displayed post. -/
+def OpenedDisplayIsCommitStatement : Prop :=
+  ∀ {deployment : Deployment} {directory : CellRegistry.Directory Nat Registry}
+    {snapshot : AuthoritySnapshot} {semantics : Digest} {ambient : Ambient}
+    {command : Command} {target : Target}
+    (prepared : PreparedTarget deployment directory snapshot semantics ambient command target)
+    (view : List UInt8) (shown : Store target.layout)
+    (packedBytes frame : List UInt8) (items : List StoreHiding.Item),
+    checkOpened deployment command target view = .ok shown →
+    servedOpening target view = .ok (packedBytes, frame, items) →
+    OpeningCollision target.wire items prepared.pre.logical ∨
+      ∀ address, ¬ KernelOwned target address →
+        ¬ SealedIn target.wire items prepared.pre.logical address →
+        prepared.post address = shown address
+
+/-- **Teeth.** (1) A view whose opening roots to anything but the signed root is refused
+`servedRootMismatch`. (2) A view whose packed cell is not exactly the store of its opened
+entries (a Host that shows one value and opens another) is refused `openingMismatch`. -/
+def OpenedViewRefusedStatement : Prop :=
+  (∀ (deployment : Deployment) (command : Command) (target : Target) (view packedBytes frame : List UInt8)
+      (items : List StoreHiding.Item),
+    servedOpening target view = .ok (packedBytes, frame, items) →
+    frame = StoreCodec.frame target.wire →
+    StoreHiding.rootOfItems target.wire items ≠ target.expectedTargetRoot →
+    checkOpened deployment command target view = .error (.servedRootMismatch target.target)) ∧
+  (∀ (deployment : Deployment) (command : Command) (target : Target) (view packedBytes frame : List UInt8)
+      (items : List StoreHiding.Item) (packed : PackedCell Registry) (cell : TargetCell target),
+    servedOpening target view = .ok (packedBytes, frame, items) →
+    frame = StoreCodec.frame target.wire →
+    StoreHiding.rootOfItems target.wire items = target.expectedTargetRoot →
+    CanonicalCellRegistry.cellCodec.decode packedBytes = some packed →
+    selectTarget deployment target packed = some cell →
+    (StoreCodec.entries target.wire cell.logical).map (StoreCodec.entryBytes target.wire) ≠
+      openedBytes items →
+    checkOpened deployment command target view = .error (.openingMismatch target.target))
+
+/-- **Satisfiable: the honest Host's view passes.** For a scalar target over a declared object
+cell whose root is the signed root, the resource view the Host serves under any field scope
+(`NativeObservationController.resourceView`) is accepted whenever the narrowed cell is
+selected and the member patch applies to it. (Scope: declared-object scalar targets, the
+cells JP2 writes; every other target kind's view is built by the same `resourceView`.) -/
+def HonestScalarViewAcceptedStatement : Prop :=
+  ∀ (deployment : Deployment) (command : Command) (kind : ResourceKind) (id : Nat)
+    (capability : CapabilityId) (version : Nat) (actions : List DeclaredResourceScalar.Action)
+    (observe : Option CapabilityId) (audienceEpoch : Option Nat)
+    (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
+    (fields : Option (Finset CellField)) (payload : DeclaredEffectCell.Cell)
+    (balances : List (Nat × Int)) (quote : Option RunComputeView.ComputeQuote)
+    (narrowed : DeclaredEffectCell.Cell),
+    let target : Target := ⟨kind, id, capability, version, payload.root, .scalar actions, observe,
+      audienceEpoch, audienceRoster⟩
+    selectTarget deployment target
+        (ResourceObservationAdmission.narrowPacked fields ⟨.declaredObject, payload⟩) =
+      some narrowed →
+    Patch.ValidFrom narrowed.logical (DeclaredResourceScalar.cellPatch (scalarCommand command target actions)) →
+    ∃ shown, checkOpened deployment command target
+      (NativeObservationController.resourceViewCodec.encode
+        (NativeObservationController.resourceView fields ⟨.declaredObject, payload⟩ balances quote)) =
+      .ok shown
 
 /-! ## Headers: every member-derived field is recomputed locally
 
