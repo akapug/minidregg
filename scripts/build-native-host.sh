@@ -21,7 +21,12 @@ usage: scripts/build-native-host.sh [--root MODULE --usage-prefix TEXT [--compan
               with --umbrella: the Lake target of that step instead of Minidregg (the
               artifact publisher builds Host.Main: it links binaries of a tip the merge
               gate already judged, and the gate's umbrella is not its business; recorded
-              as lake_gate= in the manifest)
+              as lake_gate= in the manifest). Repeat it to build several targets in one
+              seated `lake build`
+  --umbrella-only
+              with --umbrella: stop after the seated umbrella step (no Host.Main leanArts,
+              no link). The candidate's `umbrellas` stage elaborates the libraries no shipped
+              root imports (Fixtures, ObjectiveProofs, CensusChecks) this way
   --incremental-host-from SNAPSHOT BUILD_OUTPUT
               compile only changed Host.Main after byte-checking every imported
               source, Lean artifact, and package artifact against a successful
@@ -99,7 +104,8 @@ EOF
 output_dir=""
 binary_path=""
 build_umbrella=0
-umbrella_target=Minidregg
+umbrella_targets=()
+umbrella_only=0
 incremental_baseline_root=""
 incremental_baseline_output=""
 incremental_changed_module=""
@@ -126,8 +132,12 @@ while [[ $# -gt 0 ]]; do
       ;;
     --umbrella-target)
       [[ $# -ge 2 && "$2" =~ ^[A-Z][A-Za-z0-9_.]*$ ]] || { usage >&2; exit 64; }
-      umbrella_target=$2
+      umbrella_targets+=("$2")
       shift 2
+      ;;
+    --umbrella-only)
+      umbrella_only=1
+      shift
       ;;
     --incremental-host-from)
       [[ $# -ge 3 ]] || { usage >&2; exit 64; }
@@ -236,6 +246,13 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+[[ ${#umbrella_targets[@]} -gt 0 ]] || umbrella_targets=(Minidregg)
+umbrella_target="${umbrella_targets[*]}"
+umbrella_tag=$(printf %s "$umbrella_target" | tr " " "+")
+if [[ "$umbrella_only" == 1 && "$build_umbrella" != 1 ]]; then
+  printf 'build-native-host: --umbrella-only needs --umbrella\n' >&2
+  exit 64
+fi
 if [[ "$build_umbrella" == 1 && -n "$incremental_baseline_root" ]]; then
   printf 'build-native-host: --umbrella and incremental modes are exclusive\n' >&2
   exit 64
@@ -411,16 +428,19 @@ done | sort -u > "$package_required"
 build_modules="$output_dir/build-modules.txt"
 if [[ "$build_umbrella" == 1 ]]; then
   umbrella_closure="$output_dir/umbrella-transitive-imports.json"
-  env LEAN_NUM_THREADS="$lean_threads" \
-    lake query "+$umbrella_target:transImports" --json \
-    > "$umbrella_closure" 2> "$output_dir/umbrella-transitive-imports.log"
-  jq -e 'type == "array" and length > 0' "$umbrella_closure" >/dev/null
   umbrella_modules="$output_dir/umbrella-source-modules.txt"
-  jq -r '.[]' "$umbrella_closure" | while IFS= read -r module; do
-    relative=${module//./\/}.lean
-    [[ -f "$relative" ]] && printf '%s\n' "$module"
-  done > "$umbrella_modules"
-  grep -qxF "$umbrella_target" "$umbrella_modules" || printf '%s\n' "$umbrella_target" >> "$umbrella_modules"
+  : > "$umbrella_modules"
+  for target in "${umbrella_targets[@]}"; do
+    env LEAN_NUM_THREADS="$lean_threads" \
+      lake query "+$target:transImports" --json \
+      > "$umbrella_closure" 2>> "$output_dir/umbrella-transitive-imports.log"
+    jq -e 'type == "array" and length > 0' "$umbrella_closure" >/dev/null
+    jq -r '.[]' "$umbrella_closure" | while IFS= read -r module; do
+      relative=${module//./\/}.lean
+      [[ -f "$relative" ]] && printf '%s\n' "$module"
+    done >> "$umbrella_modules"
+    grep -qxF "$target" "$umbrella_modules" || printf '%s\n' "$target" >> "$umbrella_modules"
+  done
   awk '!seen[$0]++' "$umbrella_modules" "$source_modules" > "$build_modules"
 else
   cp "$source_modules" "$build_modules"
@@ -1610,15 +1630,19 @@ elif [[ "$build_umbrella" == 0 ]]; then
 fi
 
 if [[ "$build_umbrella" == 1 ]]; then
-  lake_gate_log="$output_dir/lake-build-$umbrella_target.log"
-  cat > "$output_dir/lake-build-$umbrella_target.command.txt" <<EOF
-LAKE_OVERRIDE_LEAN=true LEAN_SYSROOT=$wrapper_root LEAN_NUM_THREADS=$lean_threads MINIDREGG_LEAN_SEATS=$lean_seats lake build "$umbrella_target"
+  lake_gate_log="$output_dir/lake-build-$umbrella_tag.log"
+  cat > "$output_dir/lake-build-$umbrella_tag.command.txt" <<EOF
+LAKE_OVERRIDE_LEAN=true LEAN_SYSROOT=$wrapper_root LEAN_NUM_THREADS=$lean_threads MINIDREGG_LEAN_SEATS=$lean_seats lake build $umbrella_target
 EOF
   gate_start=$(date +%s)
   printf 'lake-gate %s start\n' "$umbrella_target" | tee -a "$output_dir/build.log"
-  if seated_lake "$lake_gate_log" "$umbrella_target"; then
+  if seated_lake "$lake_gate_log" "${umbrella_targets[@]}"; then
     printf 'lake-gate %s PASS %ss\n' "$umbrella_target" \
       "$(( $(date +%s) - gate_start ))" | tee -a "$output_dir/build.log"
+    if [[ "$umbrella_only" == 1 ]]; then
+      printf 'lake_gate=lake build %s\nlean_seats=%s\n' "$umbrella_target" "$lean_seats" > "$output_dir/manifest.txt"
+      exit 0
+    fi
   else
     code=$?
     printf 'lake-gate %s FAIL(%s) log=%s\n' "$umbrella_target" \
