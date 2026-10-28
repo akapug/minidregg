@@ -226,7 +226,7 @@ if [ "$mode" = --box ]; then
       state=$(jq -er .stateRoot "$(jq -er .profilePath "$run/evidence/profile-result.json")")
       # The tour's step 7: a second browser session on the running Simple Todos grain co-edits.
       app_b=$(jq -er '.applicationGrainBirth.applicationBirth.application.app' "$run/evidence/b-app-source.json")
-      if jenv $J share-b2 enroll-b2 register-b2 get-b2 >"$W/coedit-world.out" 2>"$W/coedit-world.err"; then
+      if jenv $J share-bs enroll-bs register-bs get-bs >"$W/coedit-world.out" 2>"$W/coedit-world.err"; then
         co=$(python3 "$REPO/scripts/spk-platform/ddp-coedit.py" "$state/apps/$app_b/routes/owner-web" "$state/apps/$app_b/routes/guest2-web" 2>&1 | tail -1)
       else co="second session: $(tail -1 "$W/coedit-world.err")"; fi
       row "a second browser session co-edits Simple Todos (B sees A's todo over DDP)" "$(jq -e .ok <<<"$co" >/dev/null 2>&1 && echo 1 || echo 0)" "$(cut -c1-160 <<<"$co")"
