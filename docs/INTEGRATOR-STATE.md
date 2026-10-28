@@ -79,14 +79,14 @@ constructors with pricedAt, drops e7958d3b9's arms on merge; unbuilt, not to mer
 elaborates) seeds its dregg-ref tree from the integ8 copy; tell it when the copy lands.
 
 Next steps: A10 → regen patch onto main → full build at main's tip (it carries 25cfb86bd, custody-b's
-delegated consent, f79044d79 and c11b235ee (grain-runtime NO_RECORD refusals; a0d58aaef), hermes-b 5422506f, the world/ pack 1b870fbdd, red-jli-refname 81349cec2 (JLI reruns on it), un-tale-welcome 19bb968e0 (f5602a8cd; the door joins members to door.json's story)). On READY the chain runs gate + enrol-resume;
+delegated consent, f79044d79 and c11b235ee (grain-runtime NO_RECORD refusals; a0d58aaef), hermes-b 5422506f, custody-b 97aab6054 (55e8a05d9; the profiled grain bootstrap twin deleted), un-tale-welcome bc6c837ba (docs), the world/ pack 1b870fbdd, red-jli-refname 81349cec2 (JLI reruns on it), un-tale-welcome 19bb968e0 (f5602a8cd; the door joins members to door.json's story)). On READY the chain runs gate + enrol-resume;
 report "candidate <sha> at <path>: gate <verdict>, reds by name" to the coordinator, and the sha + path to the rows
 validator (aeee8349c191e8506, the app tables wait on 25cfb86bd), L4b (ad81db6d6fd317d3a) and the deputy
 (a308118209b4a48ea, owns the app market; wants the first candidate carrying 25cfb86bd). Pending lands:
-lean-audit-c only on L1d's warm-tree green sha (e2dae30ee queued on dregg-ref; b7412f32a and three more unbuilt behind it); iter-speed successor's census re-pin (a0fd127abfb9aac75) only
+lean-audit-c only on L1e's warm-tree green sha (e2dae30ee queued on dregg-ref; b7412f32a and three more unbuilt behind it); iter-speed successor's census re-pin (a0fd127abfb9aac75) only
 after that candidate is reported.
 
-Red routing: lean-audit-c is L1d's (ad6d6eff243f32816): its green sha comes from and its reds go to L1d directly; Hermes to L4b (ad81db6d6fd317d3a); L13 a1618140607ac439b; un-stream-continuity reds
+Red routing: lean-audit-c and lean-audit-c-m2 are L1e's (a58f907aef8926430; L1d ad6d6eff243f32816 has stopped): its green sha comes from and its reds go to L1e directly; when the module conversion lands on main, tell L1e (it merges the conversion into lean-audit-c and sends a green sha) and L1d's old address; Hermes to L4b (ad81db6d6fd317d3a); L13 a1618140607ac439b; un-stream-continuity reds
 (ApplicationStreamContinuityFresh pole proofs, NativeHostReplay.lean:3816) to the deputy a308118209b4a48ea; all
 others through the coordinator. Expected reds, not new: the eight hand-rolled genesis writers (acceptance.sh,
 application-acceptance.sh, authority-acceptance.sh, selected-release-acceptance.sh, grain-runtime/acceptance.sh,
