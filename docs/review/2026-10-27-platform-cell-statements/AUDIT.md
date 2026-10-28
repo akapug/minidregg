@@ -873,3 +873,15 @@ has the migration window built in. State
 dispatch, with every other payload code in `legacy`. That is a `Prop` even if its proof waits for the
 decoder rewiring. `noTwin` then forces code 1 out of the hand arms at the moment the theorem closes.
 `ContentAccepted`'s inhabitant (the native doc-write fixture) is owed, as noted.
+
+**Addendum, effects-revival 3dac92b91 (not elaborated): both changes are accepted.** Going further than
+asked was right. `agreement` over every cell through `Handler.fire` (header, then select, then exec)
+removes the packed-cell restriction entirely. `HostKeystone` is stated over today's `hostTargetDispatch`
+with `hostLegacy`, and it is labelled as known false by clause: unknown tags give `malformed`, and code 1
+is still the hand arm. Those are exactly the two things the migration commit must change, so the
+keystone is honest as a gate. Two notes for the proofs:
+- `HostPremise`'s new `pack (select cell) = cell` holds for `⟨.content, value⟩` only if
+  `CellState.materialize contentMaterializer value.logical = value`, that is, `Materialized` is
+  canonical. Prove that lemma first; if it fails, the premise is false.
+- `HostTeeth`'s ghost clause needs an admitted command whose seal is non-empty, because otherwise both
+  dispatchers refuse alike. Its proof therefore rests on `HostAccepted`'s owed fixture, the same object.
