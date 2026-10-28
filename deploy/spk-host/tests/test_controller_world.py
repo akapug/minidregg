@@ -261,6 +261,13 @@ class ControllerWorldTests(unittest.TestCase):
             c.controller_admin_fixed(r['store'], 'helper', 'prepare idle')
             self.assertEqual(child.call_args.args[1][-1], 'prepare idle')
             self.assertEqual(child.call_args.kwargs['timeout'], 1800)
+            for operation in ('67',str(2**64-1)):
+                c.reconcile_prompt(r['store'],'helper',operation)
+                self.assertEqual(child.call_args.args[1][-1],'reconcile prompt audited '+operation)
+            before = child.call_count
+            for bad in ('0','01','-1','1;stop',str(2**64),'67\nstop',''):
+                with self.assertRaises(ValueError):c.reconcile_prompt(r['store'],'helper',bad)
+            self.assertEqual(child.call_count,before)
             for bad in ('', '../x', request + ' reconcile', 'AB' * 16):
                 with self.assertRaises(ValueError): c.recover_api_unreserved(r['store'], 'helper', bad)
             for bad in ('foreground', 'attach', 'parent;stop', ''):

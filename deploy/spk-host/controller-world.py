@@ -2064,6 +2064,12 @@ def reconcile_controller(store, helper, selector):
     return controller_admin_fixed(store, helper, commands[selector])
 
 
+def reconcile_prompt(store, helper, operation):
+    require(isinstance(operation,str) and re.fullmatch('[1-9][0-9]{0,19}',operation)
+            and int(operation) < 2**64, 'prompt operation ID must be canonical nonzero u64')
+    return controller_admin_fixed(store,helper,'reconcile prompt audited '+operation)
+
+
 def worker_unit_observation(store, helper):
     """Observe only the exact retained worker through its registered manager."""
     _, base, r = load(store, helper)
@@ -2548,6 +2554,9 @@ def main(args):
         elif action == 'controller-reconcile' and len(extra) == 1:
             fcntl.flock(lock, fcntl.LOCK_UN)
             return reconcile_controller(store, helper, extra[0])
+        elif action == 'controller-reconcile-prompt' and len(extra) == 1:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            return reconcile_prompt(store,helper,extra[0])
         elif action == 'controller-export' and not extra: result = export_state(store, helper)
         elif action == 'controller-reserve-export' and len(extra) == 1: result = reserve_export(store, helper, extra[0])
         elif action == 'controller-service-logs' and not extra: result = service_logs(store, helper)
