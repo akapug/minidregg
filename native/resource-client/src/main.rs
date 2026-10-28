@@ -982,7 +982,17 @@ impl Args {
         // `mini pay ACTION ...` (PAY.md §5 spells the verbs this way) is `mini pay --action ACTION ...`.
         if command == OsStr::new("pay") || command == OsStr::new("store") || command == OsStr::new("apps") {
             if let Some(action) = raw.next_if(|next| !next.to_string_lossy().starts_with("--")) {
+                // `mini apps share a4501 bob`: the grammar leaf's positionals are the flags
+                // `--grain a4501 --to bob` (the same words the shell takes).
+                let leaf = (command == OsStr::new("apps")).then(|| action.to_str()).flatten()
+                    .and_then(|name| shell_grammar::leaf(&shell_grammar::APPS, &["apps", name]));
                 values.push((OsString::from("--action"), action));
+                for argument in leaf.map(|l| l.args).unwrap_or(&[]) {
+                    match raw.next_if(|next| !next.to_string_lossy().starts_with("--")) {
+                        Some(value) => values.push((OsString::from(format!("--{}", apps::positional_flag(argument.name))), value)),
+                        None => break,
+                    }
+                }
             }
         }
         while let Some(flag) = raw.next() {
@@ -3848,6 +3858,18 @@ pub(crate) fn swap_exit_status(value: u8) -> u8 {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn apps_positionals_are_the_grammar_leafs_flags() {
+        let flags = |words: &[&str]| Args::parse_from(words.iter().map(OsString::from)).unwrap().values.into_iter()
+            .map(|(k, v)| format!("{}={}", k.to_string_lossy(), v.to_string_lossy())).collect::<Vec<_>>();
+        assert_eq!(flags(&["apps", "share", "a4501", "bob"]), ["--action=share", "--grain=a4501", "--to=bob"]);
+        assert_eq!(flags(&["apps", "search", "slides", "--json"]), ["--action=search", "--term=slides", "--json=yes"]);
+        assert_eq!(flags(&["apps", "search", "--term", "slides"]), ["--action=search", "--term=slides"]);
+        assert_eq!(flags(&["apps", "renew", "a4501"]), ["--action=renew", "--grain=a4501"]);
+        assert_eq!(flags(&["apps", "list"]), ["--action=list"]);
+        assert_eq!(flags(&["apps", "revoke-identity", "a4501", "tok"]), ["--action=revoke-identity", "--grain=a4501", "--token=tok"]);
+    }
     use super::*;
 
     #[test]
