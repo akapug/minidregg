@@ -626,6 +626,205 @@ theorem checkOpened_ok {deployment : Deployment} {command : Command} {target : T
     · cases checked
   · cases checked
 
+theorem entries_keys_nodup {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L) (store : Store L) :
+    ((StoreCodec.entries wire store).map Sigma.fst).Nodup := by
+  rw [StoreCodec.entries_keys]
+  exact (StoreCodec.sortedSupport_pairwise wire store).imp fun less same => by
+    rw [same] at less; exact lt_irrefl _ less
+
+/-- The entries an aligned opening opens: the actual entries at its opened positions. -/
+def openedEntries {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L) (items : List StoreHiding.Item)
+    (actual : Store L) : List (Entry L) :=
+  (((StoreCodec.entries wire actual).zip items).filter fun pair => pair.2.isLeft).map Prod.fst
+
+theorem openedBytes_aligned {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L) (actual : Store L) :
+    ∀ (entries : List (Entry L)) (items : List StoreHiding.Item), entries.length = items.length →
+      (∀ pair ∈ entries.zip items, ∀ shown, pair.2 = .inl shown →
+        shown = StoreCodec.opening wire actual pair.1) →
+      openedBytes items =
+        (((entries.zip items).filter fun pair => pair.2.isLeft).map Prod.fst).map
+          (StoreCodec.entryBytes wire)
+  | [], [], _, _ => rfl
+  | entry :: entries, item :: items, length, aligned => by
+      have rest := openedBytes_aligned wire actual entries items (by simpa using length)
+        (fun pair member => aligned pair (List.mem_cons_of_mem _ member))
+      cases item with
+      | inl shown =>
+          have exact := aligned (entry, .inl shown) List.mem_cons_self shown rfl
+          simp only [openedBytes, List.filterMap_cons, Sum.getLeft?, Option.map_some,
+            List.zip_cons_cons, List.filter_cons, Sum.isLeft_inl, if_true, List.map_cons]
+          rw [exact]
+          exact congrArg _ rest
+      | inr leaf =>
+          simp only [openedBytes, List.filterMap_cons, Sum.getLeft?, Option.map_none,
+            List.zip_cons_cons, List.filter_cons, Sum.isLeft_inr, Bool.false_eq_true, if_false]
+          exact rest
+  | [], _ :: _, length, _ => by simp at length
+  | _ :: _, [], length, _ => by simp at length
+
+/-- **What an aligned opening shows.** When the items' leaves are the actual store's and every
+opened item is the actual opening at its position, a shown store whose entries' bytes are the
+opened bytes agrees with the actual store at every unsealed address and is empty at every
+sealed one. -/
+theorem shown_agrees {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L)
+    (items : List StoreHiding.Item) (actual shown : Store L)
+    (sameLeaves : items.map StoreHiding.Item.leaf = StoreCodec.leaves wire actual)
+    (aligned : ∀ (position : Nat) (opened : StoreCodec.Opening) (entry : Entry L),
+      items[position]? = some (.inl opened) → (StoreCodec.entries wire actual)[position]? = some entry →
+      opened = StoreCodec.opening wire actual entry)
+    (bytes : (StoreCodec.entries wire shown).map (StoreCodec.entryBytes wire) = openedBytes items) :
+    (∀ address, ¬ SealedIn wire items actual address → shown address = actual address) ∧
+      ∀ address, SealedIn wire items actual address → shown address = none := by
+  set E := StoreCodec.entries wire actual with hE
+  have length : E.length = items.length := by
+    have := congrArg List.length sameLeaves
+    simp [StoreCodec.leaves] at this
+    exact this.symm
+  have pairAligned : ∀ pair ∈ E.zip items, ∀ opened, pair.2 = .inl opened →
+      opened = StoreCodec.opening wire actual pair.1 := by
+    intro pair member opened isOpened
+    obtain ⟨position, bound, found⟩ := List.getElem_of_mem member
+    have boundE : position < E.length := by simp at bound; omega
+    have boundI : position < items.length := by simp at bound; omega
+    rw [List.getElem_zip] at found
+    subst found
+    exact aligned position opened E[position] (by simp [List.getElem?_eq_getElem boundI, isOpened])
+      (List.getElem?_eq_getElem boundE)
+  have entriesShown : StoreCodec.entries wire shown = openedEntries wire items actual := by
+    apply List.map_injective_iff.mpr (StoreCodec.entryBytes_injective wire)
+    rw [bytes, openedBytes_aligned wire actual E items length pairAligned]
+    rfl
+  have shownStore : shown = StoreCodec.fromEntries (openedEntries wire items actual) := by
+    rw [← entriesShown, StoreCodec.fromEntries_entries]
+  have sublist : openedEntries wire items actual <+ E := by
+    have mapped : ((E.zip items).map Prod.fst) = E := List.map_fst_zip (by omega)
+    calc openedEntries wire items actual <+ (E.zip items).map Prod.fst :=
+          (List.filter_sublist _).map _
+      _ = E := mapped
+  have keysNodup : ((openedEntries wire items actual).map Sigma.fst).Nodup :=
+    (sublist.map Sigma.fst).nodup (entries_keys_nodup wire actual)
+  -- the opened positions' entries are exactly the entries of `openedEntries`
+  have memOpened : ∀ (position : Nat) (bound : position < E.length),
+      (∃ opened, items[position]? = some (.inl opened)) → E[position] ∈ openedEntries wire items actual := by
+    intro position bound ⟨opened, isOpened⟩
+    have boundI : position < items.length := by omega
+    have item : items[position] = .inl opened := by
+      rw [List.getElem?_eq_getElem boundI] at isOpened; exact Option.some.inj isOpened
+    refine List.mem_map.mpr ⟨(E[position], items[position]), List.mem_filter.mpr ⟨?_, ?_⟩, rfl⟩
+    · exact List.mem_iff_getElem.mpr ⟨position, by simp; omega, by simp [List.getElem_zip]⟩
+    · simp [item]
+  have keyPosition : ∀ entry ∈ openedEntries wire items actual, ∃ (position : Nat)
+      (bound : position < E.length), E[position] = entry ∧ ∃ opened, items[position]? = some (.inl opened) := by
+    intro entry member
+    obtain ⟨pair, filtered, rfl⟩ := List.mem_map.mp member
+    obtain ⟨inZip, isLeft⟩ := List.mem_filter.mp filtered
+    obtain ⟨position, bound, found⟩ := List.getElem_of_mem inZip
+    have boundE : position < E.length := by simp at bound; omega
+    have boundI : position < items.length := by simp at bound; omega
+    rw [List.getElem_zip] at found
+    subst found
+    refine ⟨position, boundE, rfl, ?_⟩
+    cases item : items[position] with
+    | inl opened => exact ⟨opened, by simp [List.getElem?_eq_getElem boundI, item]⟩
+    | inr leaf => simp [item] at isLeft
+  constructor
+  · intro address unsealed
+    rw [shownStore]
+    cases present : actual address with
+    | none =>
+        rw [StoreCodec.fromEntries_apply_eq_none_iff]
+        intro inKeys
+        obtain ⟨entry, member, rfl⟩ := List.mem_map.mp inKeys
+        have inE := sublist.subset member
+        have := StoreHiding.mem_entries wire inE
+        rw [present] at this
+        cases this
+    | some value =>
+        have inE := mem_entries_of_present wire actual present
+        obtain ⟨position, bound, found⟩ := List.getElem_of_mem inE
+        have boundI : position < items.length := by omega
+        cases item : items[position] with
+        | inr leaf =>
+            exact absurd ⟨position, _, leaf, by simp [List.getElem?_eq_getElem bound, found],
+              rfl, by simp [List.getElem?_eq_getElem boundI, item]⟩ unsealed
+        | inl opened =>
+            have member := memOpened position bound
+              ⟨opened, by simp [List.getElem?_eq_getElem boundI, item]⟩
+            rw [found] at member
+            exact StoreCodec.fromEntries_apply_of_mem _ keysNodup member
+  · intro address ⟨position, entry, leaf, atEntry, keyed, sealed⟩
+    rw [shownStore, StoreCodec.fromEntries_apply_eq_none_iff]
+    intro inKeys
+    obtain ⟨other, member, keyOther⟩ := List.mem_map.mp inKeys
+    obtain ⟨position', bound', found', opened, isOpened⟩ := keyPosition other member
+    have bound : position < E.length := by
+      by_contra outside; rw [List.getElem?_eq_none (by omega)] at atEntry; cases atEntry
+    rw [List.getElem?_eq_getElem bound] at atEntry
+    have sameEntry := Option.some.inj atEntry
+    have samePosition : position' = position := by
+      have distinct := entries_keys_nodup wire actual
+      rw [← hE] at distinct
+      apply (List.Nodup.getElem_inj_iff distinct (i := position') (j := position)
+        (by simpa using bound') (by simpa using bound)).mp
+      simp only [List.getElem_map]
+      rw [found', sameEntry, keyOther, keyed]
+    subst samePosition
+    rw [isOpened] at sealed
+    cases sealed
+
+theorem opened_display_is_commit : OpenedDisplayIsCommitStatement := by
+  intro deployment directory snapshot semantics ambient command target prepared view shown
+    packedBytes frame items checked served
+  obtain ⟨cell, patch, rooted, bytes, member, valid, rfl⟩ := checkOpened_ok checked served
+  have supported := memberPatch_supported command target cell.logical patch member
+  have signedRoot := computeTarget_root snapshot semantics ambient command target prepared.pre
+    prepared.post prepared.candidate.modeEvidence.down supported
+  have rootActual : StoreCodec.rootOfLeaves (targetWire target) (items.map StoreHiding.Item.leaf) =
+      StoreCodec.rootOfLeaves (targetWire target) (StoreCodec.leaves (targetWire target) prepared.pre.logical) := by
+    have preRoot : prepared.pre.root = target.materializer.rootOf prepared.pre.logical := rfl
+    rw [target_rootOf] at preRoot
+    change StoreHiding.rootOfItems (targetWire target) items = _
+    rw [rooted, signedRoot, preRoot]
+    rfl
+  by_cases sameLeaves : items.map StoreHiding.Item.leaf = StoreCodec.leaves (targetWire target) prepared.pre.logical
+  swap
+  · exact Or.inl (Or.inl ⟨sameLeaves, rootActual⟩)
+  by_cases misaligned : ∃ (position : Nat) (opened : StoreCodec.Opening) (entry : Entry target.layout),
+      items[position]? = some (.inl opened) ∧
+        (StoreCodec.entries (targetWire target) prepared.pre.logical)[position]? = some entry ∧
+        opened ≠ StoreCodec.opening (targetWire target) prepared.pre.logical entry
+  · obtain ⟨position, opened, entry, isOpened, atEntry, different⟩ := misaligned
+    refine Or.inl (Or.inr ⟨position, opened, entry, isOpened, atEntry, different, ?_⟩)
+    have leafAt := congrArg (fun leaves => leaves[position]?) sameLeaves
+    simp only [List.getElem?_map, isOpened, Option.map_some, StoreCodec.leaves, atEntry] at leafAt
+    exact Option.some.inj leafAt
+  push_neg at misaligned
+  obtain ⟨agrees, sealedEmpty⟩ := shown_agrees (targetWire target) items prepared.pre.logical
+    cell.logical sameLeaves misaligned bytes
+  obtain ⟨tail, split, frameTail⟩ :=
+    targetPatch_split snapshot semantics ambient command target prepared.pre patch member
+  have actualValid : Patch.ValidFrom prepared.pre.logical patch := by
+    have whole := prepared.candidate.validated.valid
+    change Patch.ValidFrom prepared.pre.logical
+      (targetPatch snapshot semantics ambient command target prepared.pre) at whole
+    rw [split] at whole
+    exact ((Patch.validFrom_append _ _ _).mp whole).1
+  refine Or.inr ⟨fun address owned unsealed => ?_, fun address owned sealed => ?_⟩
+  · rw [post_run prepared, split, Patch.run_append, frameTail _ address owned]
+    exact run_congr_at address patch _ _ (agrees address unsealed).symm
+  · rw [post_run prepared, split, Patch.run_append, frameTail _ address owned]
+    have present : prepared.pre.logical address ≠ none := by
+      obtain ⟨position, entry, leaf, atEntry, keyed, _⟩ := sealed
+      have inE := List.mem_of_getElem? atEntry
+      have := StoreHiding.mem_entries (targetWire target) inE
+      rw [keyed] at this
+      simp [this]
+    exact Patch.run_frame _ _ _ (untouched_of_both_valid address patch cell.logical
+      prepared.pre.logical (sealedEmpty address sealed) present valid actualValid)
+
+#assert_axioms target_rootOf run_congr_at untouched_of_both_valid checkOpened_ok shown_agrees
+  opened_display_is_commit
+
 /-! ## Headers: every member-derived field is recomputed locally
 
 A signing header carries the request it signs (`header.message`, the PLAN frame:
