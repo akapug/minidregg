@@ -1032,3 +1032,24 @@ equal digests, so either `signed = d` (the conjuncts) or the collision holds. `O
 replaces the uninhabited premises with a statement about every `Opened`. Carrying the invariant as a field
 built at `Opened`'s three construction sites is the right realisation. The re-authoring fixed point is
 labelled as jpriv2 row 19.
+
+## 2026-10-28, twenty-third pass: the World carries M2's credit (L1e, design, before proofs)
+
+**Ruling: option (A).** Option (B) (`intent.credit = 0` on the four `SnapRepresents` theorems) would cut
+whole-World equality on every log containing a refill, which passes 6 to 9 rest on. It is a weakening.
+Under (A):
+- `World.Turn.credit : Charge := 0`;
+- `meterPatch` writes `avail - charge + credit` on lanes where either term is nonzero, which is exact,
+  since `fundedCheck charge` is unchanged;
+- `turnOf` sets `credit := intent.credit`.
+
+The four refinement theorems keep their statements, plus a `credited` sibling of `charged`. This
+section corrects pass 21, which missed the World side. Conditions for the stated text:
+1. **Regression pole:** `meterPatch lanes charge 0 avail = debits lanes charge avail` (or the same as an
+   equality of `World.step` on credit-0 turns), so every pre-M2 turn provably steps as before.
+2. **Satisfiable pole:** a credited turn's post-meter on a lane is `avail - charge + credit`, with
+   `credit > 0` raising it.
+3. **Say where confinement lives.** The World admits `credit` as turn data without deciding it, as it does
+   subject and capability. Its docstring must say minting is confined only by K3 (`credit_confined` over
+   the replay arms), so no one reads the World law as a meter-safety statement. I found no World-level
+   theorem on main claiming the meter never increases. Any future one must carry the credit term.
