@@ -12,7 +12,7 @@
 # OUT/subrows.tsv (ID<TAB>STATUS<TAB>WALL_S<TAB>DETAIL) to report one table row per step; the
 # last stderr line is the row's detail. Rows generate their own test keys inside RUN; no secret
 # ever reaches the box. OWNER hints: OUT/owner (a lane name) when the row can tell.
-JOURNEY_ROWS=(journey demo objective rooms activity seats bounty call send domain upgrade hostupgrade objectrecord welcomecontinuity sshe2e m3 m4 hermes m6grain m7 m8 fleetsign jpay exchange chargedfailure jbend births jserve perf)
+JOURNEY_ROWS=(journey demo objective rooms activity seats bounty call send domain upgrade hostupgrade objectrecord welcomecontinuity sshe2e m3 m4 hermes m6grain m7 m8 fleetsign jpay exchange chargedfailure jbend births jserve perf jprivate rate)
 # growth (1000 records through journey.sh, 30-90 min, judged on UPDATES) belongs to the nightly, not to a landing:
 # it runs only when PIPELINE_NIGHTLY=1 (docs/PIPELINE-HBOX.md "Nightly"). The bar is judged per landing by births.
 # kernel (journey.sh JOURNEY_SET=kernel without G: the steps no public surface needs) is nightly too.
@@ -55,8 +55,9 @@ journey_set_row() {
     steps="$steps $id"
   done <"$OUT/set.txt"
   # the journey's own wall budget ends 400 s inside the runner's row timeout, so a slow run is a named red
+  # J14 and J17 name the grain runtime GRAIN_RUNTIME; the runner exports the set's as GRAIN
   JOURNEY_KEEP_GOING=${JOURNEY_KEEP_GOING:-1} JOURNEY_STEPS="${steps# }" JOURNEY_GROWTH_LEVELS=10 JOURNEY_BUDGET_S=$(( ${PIPELINE_ROW_TIMEOUT_S:-5400} - 400 )) \
-    bash "$js" "$MANIFEST" "$RUN/j" >"$OUT/journey.out" 2>"$OUT/journey.err"
+    GRAIN_RUNTIME=${GRAIN_RUNTIME:-${GRAIN:-$BIN/grain-runtime}} bash "$js" "$MANIFEST" "$RUN/j" >"$OUT/journey.out" 2>"$OUT/journey.err"
   local rc=$?
   [ -s "$RUN/j/journey-result.json" ] || { tail -1 "$OUT/journey.err" >&2; return 1; }
   cp "$RUN/j/journey-result.json" "$OUT/"
@@ -82,10 +83,20 @@ row_kernel() { journey_set_row kernel G; }
 # The native Objective acceptance (Accepted receipt + every refusal) on its own two scratch worlds.
 # world: template: the fixture's per-candidate world restored, the row's own heights on top (both scratch worlds: the policy and knobs are constant, so one variant each)
 row_objective() {
-  local d=$SRC/native/resource-client/objective-native-acceptance.py
+  local d=$SRC/native/resource-client/objective-native-acceptance.py lean=$SRC
   [ -f "$d" ] || return 99
-  [ "$LEANENV" = 1 ] || { echo "no lean env for this tip (its mutations run lake env lean)" >&2; return 98; }
-  (cd "$SRC" && python3 "$d" all --bin "$BIN" --root "$RUN/o") >"$OUT/objective.out" 2>"$OUT/objective.err"
+  if [ "$LEANENV" != 1 ]; then
+    # --source-tree unbinds leanenv even when the box holds the tip's own oleans
+    # ($ARTIFACT_ROOT/.leanenv/TIP, the very tree the standing pipeline runs rows from):
+    # take them by the tip's name before declaring the row unconfigured.
+    lean=${ARTIFACT_ROOT:-/srv/artifacts}/.leanenv/${SET##*/}
+    if [ ! -f "$lean/.pipeline-leanenv-complete" ] || [ ! -f "$lean/native/resource-client/objective-native-acceptance.py" ]; then
+      echo "missing input: the tip's lean env ($lean with .pipeline-leanenv-complete; the mutations run lake env lean)" >&2
+      return 98
+    fi
+    d=$lean/native/resource-client/objective-native-acceptance.py
+  fi
+  (cd "$lean" && python3 "$d" all --bin "$BIN" --root "$RUN/o") >"$OUT/objective.out" 2>"$OUT/objective.err"
   local rc=$?
   cp "$RUN/o/results/summary.json" "$OUT/" 2>/dev/null
   tail -1 "$OUT/objective.out" >&2
@@ -484,6 +495,10 @@ row_m4() {
   product_input SHELL_BIN executable || return $?
   product_tools ssh ssh-keygen ss || return $?
   command -v sshd >/dev/null 2>&1 || [ -x /usr/sbin/sshd ] || { echo "missing input: sshd" >&2; return 98; }
+  [ -x "$SRC/deploy/shell/mini-shell-ssh" ] && [ -x "$SRC/deploy/shell/render-shell-key" ] ||
+    { echo "missing input: $SRC/deploy/shell/mini-shell-ssh and render-shell-key (shell-journey.sh: 'deploy/shell scripts missing')" >&2; return 98; }
+  ss -ltn 2>/dev/null | awk '{print $4}' | grep -q ':22422$' &&
+    { echo "missing input: a free 127.0.0.1:22422 for the journey's private sshd (shell-journey.sh: 'port 22422 is in use')" >&2; return 98; }
   product_exec m4 bash "$d" "$HOST" "$MINI" "$SHELL_BIN" "$STORE" "$VERIFIER" "$RUN/s"; rc=$?
   product_keep "$RUN/s/log"
   if [ "$rc" != 0 ]; then
@@ -498,13 +513,19 @@ row_m4() {
 }
 # world: template: the fixture's per-candidate world restored, the row's own heights on top (subjects 8/9 fixture-made)
 row_hermes() {
-  local d=$SRC/native/grain-runtime/hermes-journey.sh rc
+  local d=$SRC/native/grain-runtime/hermes-journey.sh rc task=${HERMES_JOURNEY_TASK:-8751} state
   [ -f "$d" ] || return 99
   product_native || return $?
   product_input GRAIN executable || return $?
   product_systemd || return $?
   product_tools rustc || return $?
   product_userns || return $?
+  [ "$(uname -s)" = Linux ] || { echo "missing input: Linux user systemd (hermes-journey.sh: 'Linux user systemd is required')" >&2; return 98; }
+  [ -n "${LAUNCH_GATE:-}" ] && [ -x "$LAUNCH_GATE" ] ||
+    { echo "missing input: LAUNCH_GATE, the candidate's bin/launch-gate (hermes-journey.sh: 'LAUNCH_GATE names the launch gate (a candidate bin/launch-gate, or cargo build -p launch-gate)')" >&2; return 98; }
+  state=$(systemctl --user show -p LoadState --value "mini-grain-controller@$task.service" 2>/dev/null || :)
+  [ "$state" = not-found ] ||
+    { echo "missing input: unit mini-grain-controller@$task.service unloaded (hermes-journey.sh: 'unit mini-grain-controller@$task is already loaded ($state)'; stop and reset-failed it)" >&2; return 98; }
   product_exec hermes bash "$d" "$HOST" "$MINI" "$STORE" "$VERIFIER" "$GRAIN" "$RUN/h"; rc=$?
   product_keep "$RUN/h/evidence"
   [ "$rc" = 0 ] || return "$rc"
@@ -794,6 +815,48 @@ row_perf() {
   fi
   tail -1 "$OUT/perf.err" >&2
   return $rc
+}
+
+# The research-labelled in-process four-party MPC door (private-backend R1; owner ruling 2026-10-27): one
+# computation through `mini private-compute`, asserting the output, the research banner with the label
+# verbatim, the curious-holder transcript (present, and naming no input value), the refusals, and that a
+# report without the label is refused. A DOOR, not the spine: NOT in required-rows, no Store, no Host, no
+# socket; it needs `mini-private-compute` in the set's bin (cargo build --release --features demo --bin
+# mini-private-compute, native/private-backend), and a set without it is UNCONFIGURED (98), named.
+# Plant: JPRIVATE_PLANT=leak | drop-label (native/resource-client/journey.d/jprivate.sh).
+# world: genesis: no world at all; a local computation
+row_jprivate() {
+  local d=$SRC/native/resource-client/journey.d/jprivate.sh rc
+  [ -f "$d" ] || return 99
+  [ -x "$BIN/mini" ] || { echo "jprivate: $BIN/mini is not executable" >&2; return 98; }
+  [ -x "$BIN/mini-private-compute" ] || { echo "jprivate UNCONFIGURED: $BIN/mini-private-compute is not in the artifact set (cargo build --release --features demo --bin mini-private-compute in native/private-backend)" >&2; return 98; }
+  bash "$d" "$BIN" "$RUN/jp" >"$OUT/jprivate.out" 2>"$OUT/jprivate.err"; rc=$?
+  awk -F'\t' '$1=="PASS"||$1=="FAIL" {print "jprivate-" $2 "\t" $1 "\t0\t" $3}' "$OUT/jprivate.out" >"$OUT/subrows.tsv"
+  tail -1 "$OUT/jprivate.err" >&2
+  return $rc
+}
+
+# The per-subject request rate (Kernel/SubjectRate.lean; docs/PD-HOST-RATE-DESIGN.md): a genesis
+# with requestRate {limit 3, window 20 s, the sponsor exempt} through the one template, one
+# `mini serve`; subject 8's first three signed reads (op 5) admitted, the fourth in the window
+# refused `rate-limited` naming the retry seconds under NO_RECORD; subject 9 admitted at that
+# moment; the exempt sponsor never refused past the limit; after the window subject 8 admitted
+# again. One sub-row per check (rate-rows.tsv); the driver names its own red row.
+# world: genesis: requestRate is operator config pinned at this row's own genesis (scenario-genesis.sh), a knob the template world does not carry
+row_rate() {
+  local d=$SRC/native/resource-client/rate-journey.sh rc
+  [ -f "$d" ] || return 99
+  product_native || return $?
+  product_exec rate bash "$d" "$HOST" "$MINI" "$STORE" "$VERIFIER" "$RUN/r"; rc=$?
+  product_keep "$RUN/r/rate-rows.tsv" "$RUN/r/input-sha256.txt"
+  [ ! -s "$OUT/rate-rows.tsv" ] ||
+    awk -F'\t' 'NR>1 {printf "%s\t%s\t0\t%s\n", $1, $2, $3}' "$OUT/rate-rows.tsv" >"$OUT/subrows.tsv"
+  [ "$rc" = 0 ] || return "$rc"
+  product_evidence "$OUT/rate-rows.tsv" || return 1
+  # every check of the row table, and exactly the nine it defines
+  awk -F'\t' 'NR>1 {n++; if ($2 != "PASS") bad=1} END {exit !(n==9 && !bad)}' "$OUT/rate-rows.tsv" ||
+    { echo "invalid expected evidence: rate-rows.tsv $(cut -f1,2 "$OUT/rate-rows.tsv" | tr '\n' ';')" >&2; return 1; }
+  tail -1 "$OUT/rate.err" >&2
 }
 
 product_pay_step() {

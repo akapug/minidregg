@@ -26,6 +26,9 @@ pub(super) struct Shell {
     pub home: PathBuf,
     /// The public reader's subject: who a member publishes to (`delegate ID DOC SUBJECT observe 0`).
     pub public_subject: Option<String>,
+    /// The published document the public reader's front page shows (`--front-doc`, from the
+    /// operator's `/etc/mini/front-doc` through `mini-web-spawn`); `None`: the front page is the index.
+    pub front_doc: Option<String>,
 }
 
 pub(super) fn run(mut args: Args, root: PathBuf) -> Result<()> {
@@ -43,6 +46,10 @@ pub(super) fn run(mut args: Args, root: PathBuf) -> Result<()> {
         .optional("public-subject")
         .map(|v| v.to_string_lossy().into_owned())
         .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()));
+    let front_doc = args
+        .optional("front-doc")
+        .map(|v| v.to_string_lossy().into_owned())
+        .filter(|s| !s.is_empty() && s.len() <= 64 && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'));
     args.finish()?;
     let workspace = workspace::load(&root)?;
     let site = Arc::new(Site {
@@ -55,7 +62,7 @@ pub(super) fn run(mut args: Args, root: PathBuf) -> Result<()> {
         front: Front { origins: Vec::new(), read_only: anonymous },
         base: String::new(),
         face: Face::Body,
-        shell: Some(Shell { host, config, home, public_subject }),
+        shell: Some(Shell { host, config, home, public_subject, front_doc }),
     });
     let listener = unsafe { UnixListener::from_raw_fd(fd) };
     eprintln!("mini web --body: subject {} serving fd {fd}{}", site.subject, if anonymous { " (anonymous)" } else { "" });
@@ -145,6 +152,8 @@ fn serve(site: &Site, mut stream: UnixStream, deadline: Instant) -> Result<()> {
         }
         _ => simple(405, "Method", "GET, HEAD and POST only"),
     };
+    let mut page = page;
+    page.body = page.body.replace(PAGE_MARK, &pct(&target));
     answer(&mut stream, &page, site)
 }
 
@@ -187,6 +196,11 @@ fn get(site: &Site, parts: &[&str], target: &str) -> Page {
         [] | ["doc"] => {
             if site.front.read_only {
                 import_inbox(site);
+                if parts.is_empty() {
+                    if let Some(page) = front_doc_page(site) {
+                        return page;
+                    }
+                }
             }
             let mut page = site.index();
             if site.front.read_only {
@@ -224,7 +238,7 @@ fn get(site: &Site, parts: &[&str], target: &str) -> Page {
         ["grain", n] => apps::grain(site, n),
         ["grain", n, "pane"] => apps::pane(site, n),
         ["verb"] => verbs::index(site),
-        ["verb", name] => verbs::page(site, name),
+        ["verb", name] => verbs::page(site, name, target),
         ["verb", name, "dry"] => verbs::dry(site, name),
         ["receipts"] => receipts(site),
         ["receipts", "lookup"] => match query(target, "id") {
@@ -276,6 +290,26 @@ fn get(site: &Site, parts: &[&str], target: &str) -> Page {
         ["stream", ..] => simple(404, "Not here", "not a page"),
         _ => site.route(&parts.iter().map(|s| s.to_string()).collect::<Vec<_>>()),
     }
+}
+
+/// The public front page as the operator's published document (`--front-doc`), rendered through
+/// the same page path as `/doc/NAME`, so it carries the same shell and styles as every page. `None`
+/// (no setting, or the document is not published to the public reader, or its read fails): the caller
+/// serves today's index. `/doc` stays the index, linked from here.
+fn front_doc_page(site: &Site) -> Option<Page> {
+    let name = site.shell.as_ref()?.front_doc.as_deref()?;
+    if !site.names().iter().any(|n| n == name) {
+        return None;
+    }
+    let mut page = site.route(&["doc".to_owned(), name.to_owned()]);
+    if page.status != 200 {
+        return None;
+    }
+    page.body.push_str(
+        "<nav class=\"front-more\"><p><a href=\"/doc\">Every published document</a> · <a href=\"/receipts\">receipts</a> · \
+         <a href=\"/registry\">the laws of the box</a> · <a href=\"/tour\">the tour</a> · <a href=\"/join\">Join</a></p></nav>\n",
+    );
+    Some(page)
 }
 
 /// `/board` and `/room`: the workspace's references, each opened as that place.
@@ -1235,6 +1269,9 @@ fn outcome_parts(ending: &Ending, next: &[(&str, &str)], transition: bool, paste
             links.push_str(&format!("<a href=\"/receipts/{id}\">the retained attempt {id}</a> "));
         }
     }
+    if matches!(class, "refused" | "error" | "undecided") {
+        links.push_str(&report_link(&headline, next));
+    }
     let detail = ending.text();
     format!(
         "<div class=\"outcome {class}\" role=\"status\" aria-live=\"polite\" aria-atomic=\"true\"><p class=\"headline\">{}</p>{}{}{}</div>\n",
@@ -1243,6 +1280,26 @@ fn outcome_parts(ending: &Ending, next: &[(&str, &str)], transition: bool, paste
         paste,
         if links.is_empty() { String::new() } else { format!("<p class=\"next\">{links}</p>") }
     )
+}
+
+/// Where `report_link` puts the page the person was on; the dispatcher, which holds the request,
+/// fills it in (`handle`), so no outcome partial has to know its own address.
+const PAGE_MARK: &str = "@PAGE@";
+
+/// Percent-encode a query value: only the unreserved characters pass.
+pub(super) fn pct(text: &str) -> String {
+    text.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
+}
+
+/// "Report a problem" from an outcome that went wrong: the derived `feedback` form, prefilled
+/// with the clause the Host named (the headline) and the attempt the page links as its receipt.
+fn report_link(headline: &str, next: &[(&str, &str)]) -> String {
+    let clause: String = headline.chars().take(400).collect();
+    let mut query = format!("clause={}&page={PAGE_MARK}", pct(&clause));
+    if let Some(id) = next.iter().find_map(|(_, href)| href.strip_prefix("/receipts/")).filter(|id| workspace_id(id).is_ok()) {
+        query.push_str(&format!("&from={}", pct(id)));
+    }
+    format!("<a class=\"report\" href=\"/verb/feedback?{}\">Report a problem</a> ", escape(&query))
 }
 
 /// A refusal is the clause, highlighted: `refused: law-denied: field 2 monotone (before 2, after 1)`
@@ -1470,5 +1527,26 @@ mod tests {
         assert!(outcome(&ok, &[("the doc", "/doc/a")]).contains("outcome admitted"));
         assert!(fresh_id().starts_with("w-") && fresh_id().len() == 14);
         assert!(workspace_id("w-1").is_ok() && workspace_id("../x").is_err());
+    }
+
+    /// A refusal, an error and an undecided attempt each offer the derived feedback form with the
+    /// clause and the attempt id (the receipt the page links); an admitted write offers none.
+    #[test]
+    fn a_failed_outcome_offers_a_prefilled_report_link() {
+        let refused = Ending { code: 3, stdout: String::new(), stderr: "refused: law-denied: field 2 monotone (before 2, after 1)\n".into() };
+        let html = outcome_of(&refused, &[("the receipt", "/receipts/w-abc")], true);
+        let href = html.split("class=\"report\" href=\"").nth(1).and_then(|r| r.split('"').next()).unwrap_or_else(|| panic!("no report link: {html}")).replace("&amp;", "&");
+        assert_eq!(query(&href, "from").as_deref(), Some("w-abc"), "{href}");
+        assert_eq!(query(&href, "clause").as_deref(), Some("refused: law-denied: field 2 monotone (before 2, after 1)"), "{href}");
+        assert_eq!(query(&href, "page").as_deref(), Some(PAGE_MARK), "{href}");
+        assert!(href.starts_with("/verb/feedback?"), "{href}");
+        let failed = Ending { code: 1, stdout: String::new(), stderr: "error: no such reference\n".into() };
+        assert!(outcome_of(&failed, &[], true).contains("Report a problem"));
+        let undecided = Ending { code: 4, stdout: String::new(), stderr: "undecided: the attempt is retained\n".into() };
+        assert!(outcome_of(&undecided, &[], true).contains("Report a problem"));
+        let ok = Ending { code: 0, stdout: "admitted\n".into(), stderr: String::new() };
+        assert!(!outcome_of(&ok, &[("the receipt", "/receipts/w-abc")], true).contains("Report a problem"));
+        // A receipt path that is not an attempt id is not offered as one.
+        assert!(!outcome_of(&refused, &[("x", "/receipts/a/b")], true).contains("from="));
     }
 }

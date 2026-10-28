@@ -24,7 +24,14 @@ class IngestProfiles(unittest.TestCase):
                 out.truncate(size)
             package.chmod(0o600)
             host = work / "host"
-            host.write_text("#!/bin/sh\nexit 98\n")
+            # The Host answers `import-limits` as spk-host does (spk-package-stream Limits):
+            # raw and decoded bounds, then 60 s + 3 s per raw MiB up to the profile's cap.
+            host.write_text("#!/bin/sh\n[ \"$1\" = import-limits ] || exit 98\n"
+                            "mib=$(( ($3 + 1048575) / 1048576 )); s=$((60 + 3 * mib))\n"
+                            "case $2 in standard-v1) r=268435456 d=805306368 c=900;;"
+                            " market-large-v1) r=536870912 d=2147483648 c=1800;;"
+                            " operator-appliance-v1) r=8589934592 d=21474836480 c=1800;; *) exit 2;; esac\n"
+                            "[ $s -le $c ] || s=$c; echo \"$r $d $s\"\n")
             host.chmod(0o700)
             marker = work / "args"
             # Retain exactly what the real helper would ask the service manager
@@ -46,7 +53,7 @@ class IngestProfiles(unittest.TestCase):
     def test_standard_budget_and_exact_host_arguments(self):
         result, args = self.exercise()
         self.assertEqual(result.returncode, 99, result.stderr)
-        self.assertIn("RuntimeMaxSec=120", args)
+        self.assertIn("RuntimeMaxSec=63", args)
         self.assertIn("LimitFSIZE=805306368", args)
         host_args = args[args.index("--") + 1:]
         self.assertEqual(host_args[1:4], ["materialize", "--import-profile", "standard-v1"])
@@ -55,10 +62,22 @@ class IngestProfiles(unittest.TestCase):
     def test_operator_budget_is_explicit_and_memory_stays_bounded(self):
         result, args = self.exercise("operator-appliance-v1")
         self.assertEqual(result.returncode, 99, result.stderr)
-        self.assertIn("RuntimeMaxSec=1800", args)
+        self.assertIn("RuntimeMaxSec=63", args)
         self.assertIn("LimitFSIZE=21474836480", args)
         self.assertIn("MemoryMax=2G", args)
         self.assertIn("operator-appliance-v1", args)
+
+    def test_wall_clock_scales_with_the_package(self):
+        result, args = self.exercise(size=75 * 1024 * 1024)
+        self.assertEqual(result.returncode, 99, result.stderr)
+        self.assertIn("RuntimeMaxSec=285", args)
+
+    def test_market_large_raises_only_the_byte_bounds(self):
+        result, args = self.exercise("market-large-v1", size=300 * 1024 * 1024)
+        self.assertEqual(result.returncode, 99, result.stderr)
+        self.assertIn("LimitFSIZE=2147483648", args)
+        self.assertIn("MemoryMax=2G", args)
+        self.assertIn("RuntimeMaxSec=960", args)
 
     def test_unknown_profile_never_reaches_unit(self):
         result, args = self.exercise("unlimited")

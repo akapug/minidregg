@@ -147,6 +147,8 @@ theorem durableRefusal_tailBound (head certified bound : Nat) :
 private def birthRejection : ResourceBirthReceiver.Reject → String
   | .malformedIngress => "malformed ingress"
   | .transactionConflict => "transaction identity conflict"
+  | .platformUnavailable => "platform cell unavailable: an ordinary birth has no price"
+  | .platformStale => "stale creation tariff: the pins are not the platform record's"
   | .admission reason => s!"admission: {repr reason}"
   | .durable (.tailBound head certified bound) => s!"head {head} certified {certified} bound {bound}"
   | .durable reason => s!"durable: {repr reason}"
@@ -165,6 +167,8 @@ private def grainBirthRejection : GrainResourceBirthReceiver.Reject → String
 private def birthReason : ResourceBirthReceiver.Reject → RefusalReason
   | .malformedIngress => .malformed
   | .transactionConflict => .conflict
+  | .platformUnavailable => .operationRejected
+  | .platformStale => .operationRejected
   | .admission _ => .operationRejected
   | .durable (.tailBound ..) => .tailBound
   | .durable (.overBound ..) => .overBound
@@ -832,26 +836,37 @@ def invokeRefusal (config : Config) (opened : Opened config)
 as `invokeRefusal` judges an invocation's target laws. A grain-backed (application) birth is
 judged by its own preparation; an ordinary birth's factory law was otherwise met only at the
 blind submission, whose refusal is `undisclosed`, so a member refused by the factory law
-learned nothing (L13, 2026-10-27; law 10). The verdict is the factory branch's: the law the
-branch configuration resolves, on that branch's step (`Pending.branchStep .factory`), the
-very pair `Pending.admitBranch` admits on; disclosure is through the slots the requester's
-grant on the factory names. -/
+learned nothing (L13, 2026-10-27; law 10). The verdict is the factory branch's plan verdict
+(`Pending.factoryRefusal`: the compiler's support, range and cast verdicts and the law's own,
+on the law the branch configuration resolves and the very step `Pending.admitBranch` admits
+on), so a plan refusal is one admission of the same image makes
+(`ResourceBirthPolicyController.Concrete.planRefusalSound`) and every law refusal at
+admission is disclosed here (`lawRefusalDisclosed`). A draft that does not decode, prepare
+or bind its pending admission is refused by name, never passed silently. Disclosure is
+through the slots the requester's grant on the factory names. -/
 def birthRefusal (config : Config) (opened : Opened config)
     (grants : List NativeObservationCodec.GrantRef) : Draft → Option Refusal
-  | .birth bytes _ => do
+  | .birth bytes _ =>
       if (GrainResourceBirthHostCodec.sourceCodec.decode bytes).isSome then none else
-      let descriptor ← CanonicalCellRegistry.sourceEncoding.codec.decode bytes
-      let height := logicalHeight config opened.durable
-      let prepared ← (ResourceBirthController.Concrete.prepareDraft config.profile.compilerProfile
-        config.profile.disabledEvaluators config.deployment opened.pins opened.durable descriptor
-        height).toOption
-      let pending ← (ResourceBirthPolicyController.Concrete.preparePending
-        (profile := config.profile) prepared.prepared height).toOption
-      let law ← (pending.branchConfig .factory).resolve?
-      let step := pending.branchStep .factory
-      if Minidregg.Pred.eval law.predicate step.oldState step.newState then none
-      else some (ComposedLawDiagnostics.publicRefusal
-        (grantFields config opened grants config.deployment.factoryId) law)
+      match CanonicalCellRegistry.sourceEncoding.codec.decode bytes with
+      | none => some ⟨.operationRejected, "noncanonical birth draft", none⟩
+      | some descriptor =>
+          let height := logicalHeight config opened.durable
+          match ResourceBirthController.Concrete.prepareDraft config.profile.compilerProfile
+              config.profile.disabledEvaluators config.deployment opened.pins opened.durable
+              descriptor height with
+          | .error reason => some ⟨.operationRejected, s!"birth preparation: {repr reason}", none⟩
+          | .ok prepared =>
+              match ResourceBirthPolicyController.Concrete.preparePending
+                  (profile := config.profile) prepared.prepared height with
+              | .error reason =>
+                  some ⟨.operationRejected, s!"birth admission: {repr reason}", none⟩
+              | .ok pending =>
+                  match pending.factoryRefusal with
+                  | none => none
+                  | some none => some ⟨.operationRejected, "birth factory law unavailable", none⟩
+                  | some (some law) => some (ComposedLawDiagnostics.publicRefusal
+                      (grantFields config opened grants config.deployment.factoryId) law)
   | _ => none
 
 /-- Only an ordinary birth is judged here; every other draft passes to its own diagnosis. -/
@@ -1318,14 +1333,14 @@ theorem historicalReceipt_exactCandidate_fresh (config : Config)
     (derived : NativeHostReplay.Derived config old.opened)
     (ready : DurableCheckpoint.Ready ResourceBirthCodec.rootBytes
       old.opened.durable.image old.opened.durable.baseHeight old.opened.durable.base
-      old.opened.durable.snapshot derived.intent)
+      old.opened.durable.snapshot derived.intent) (tag : List UInt8)
     (fresh : old.opened.durable.image.accepted.findIdx?
       (fun record => record.transactionId == derived.intent.transactionId) = none) :
-    historicalReceipt config (NativeHostReplay.exactCandidate old derived ready)
+    historicalReceipt config (NativeHostReplay.exactCandidate old derived ready tag)
       derived.intent.transactionId derived.intent.event.eventId =
       some ⟨derived.intent.transactionId, derived.intent.event.eventId,
         old.opened.durable.image.accepted.length + 1,
-        (NativeHostReplay.exactCandidate old derived ready).worldRoot⟩ := by
+        (NativeHostReplay.exactCandidate old derived ready tag).worldRoot⟩ := by
   simp [historicalReceipt, receiptRoot, NativeHostReplay.exactCandidate,
     DurableReceiverIO.Loaded.extend, DurableReceiver.Image.append, List.findIdx?_append, fresh,
     DurableReceiver.IntentRecord.ofIntent, DurableReceiverIO.Loaded.height]
@@ -2035,6 +2050,64 @@ def payLookupLoaded (config : Config) (opened : Opened config) (bytes : List UIn
       | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
   | _, _, some (.error _) => refused .conflict "replay" "transaction identity conflict"
   | _, _, none => .absent
+
+/-! ## The platform cell (GENESIS-COUPLING L1): session operations 240–243
+
+The controller's install of a new platform record: plan, assembly, submission and a
+receipt-only lookup, as the pay quartet (103–106). -/
+
+/-- The signing plan for a platform install on one opened image. It discloses no decision;
+a signer key the authority cell does not hold is refused. -/
+def platformPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
+    Except String PlatformCellDomain.SigningPlan := do
+  let some command := PlatformInstallReceiver.commandCodec.decode commandBytes
+    | .error "noncanonical platform install command"
+  let header ← PlatformInstallReceiver.signingHeader config.deployment config.profile
+    ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable command
+  pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
+    CredentialSignedEnvelopeController.headerCodec.encode header⟩
+
+/-- Assembly transports the controller's detached signature and, for a custodian rotation,
+the current custodian's cosignature, both over the plan's header (the frame the native
+verifier receives, `PlatformInstallReceiver.Moment.frame`); submission rechecks both, the
+signed `validUntil`, the current law, the exact roots and the whole decision. -/
+def platformAssemble (plan : PlatformCellDomain.SigningPlan) (signature : List UInt8)
+    (cosign : Option (List UInt8)) : Except String (List UInt8) := do
+  check (decide (signature.length = 64)) "platform signature must be 64 bytes"
+  check (decide (∀ s ∈ cosign, s.length = 64)) "custodian cosignature must be 64 bytes"
+  check (PlatformInstallReceiver.commandCodec.decode plan.commandBytes).isSome
+    "noncanonical platform plan command"
+  let header ← need "noncanonical platform header"
+    (CredentialSignedEnvelopeController.headerCodec.decode plan.header)
+  let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
+  pure (PlatformInstallReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope, cosign⟩)
+
+def platformSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config)
+    (bytes : List UInt8) : IO Outcome := do
+  match ← PlatformInstallReceiver.receiveLoaded config.deployment config.profile
+      ⟨config.federation, logicalHeight config opened.durable⟩ config.signature config.transport
+      opened.durable bytes with
+  | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
+  | .rejected reason => return refused .operationRejected "platform-install" s!"{repr reason}"
+  | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
+  | .durableRejected reason => return durableRefusal reason
+  | .contention => return .contention
+  | .unavailable detail => return .unavailable detail.toUTF8.toList
+  | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+/-- Receipt-only historical lookup of a platform install. Absence never submits fresh work. -/
+def platformLookupLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) : Outcome :=
+  match PlatformInstallReceiver.decodeIngress bytes with
+  | none => refused .malformed "platform-install" "noncanonical signed ingress"
+  | some ingress =>
+      match PlatformInstallReceiver.replay config.deployment.domain config.profile.semantics
+          opened.durable ingress with
+      | none => .absent
+      | some (.error _) => refused .conflict "replay" "transaction identity conflict"
+      | some (.ok receipt) =>
+          match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
+          | some original => .confirmed .replayed original
+          | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
 
 /-- The public view of the pay cell (no assignment map). -/
 def payViewLoaded (config : Config) (opened : Opened config) : Except String PayCellDomain.View := do

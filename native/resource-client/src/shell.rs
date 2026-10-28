@@ -54,6 +54,7 @@ pub(crate) struct Verb {
 pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "app", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "home", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "private-compute", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "whoami", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "keygen", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "key-status", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
@@ -957,6 +958,16 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             if p.has("--json") { flags.push(flag("json", "true")); }
             Plan::Client { command: "member".into(), flags, writes: vec![] }
         }
+        "private-compute" => {
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::PRIVATE_COMPUTE, &w)?;
+            // Typed by the grammar (decimal); bounded here, before anything runs.
+            for (name, at) in [("LEFT", 0), ("RIGHT", 1)] {
+                if p.arg(at).parse::<u8>().is_err() {
+                    return Err(format!("{name} must be a decimal value 0..=255"));
+                }
+            }
+            client("private-compute", vec![flag("left", p.arg(0)), flag("right", p.arg(1))])
+        }
         "whoami" => {
             crate::shell_grammar::parse(&crate::shell_grammar::WHOAMI, &w)?;
             Plan::Whoami
@@ -1170,6 +1181,12 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 }
                 "run" => flags.extend([flag("action", "run"), flag("name", p.arg(0)), flag("object", p.arg(1))]),
                 "show" => flags.extend([flag("action", "show"), flag("object", p.arg(0))]),
+                "await" => flags.extend([flag("action", "await"), flag("object", p.arg(0)), flag("transaction", p.arg(1))]),
+                "answer" => {
+                    let file = p.arg(1).trim_start_matches('@');
+                    session_file(file, "answer")?;
+                    flags.extend([flag("action", "answer"), flag("slot", p.arg(0)), flag("answer", session.home.join("requests").join(file))]);
+                }
                 action => flags.extend([flag("action", action), flag("name", p.arg(0))]),
             }
             if p.has("--lose-reply-once") { flags.push(flag("lose-reply-once", "true")); }
@@ -2073,6 +2090,61 @@ fn history(session: &Session, all: bool) {
 /// The delegated references delivered to this session (`import` keeps each
 /// one in HOME/inbox): who it is addressed to and whether it is a reference
 /// in the workspace now. Discovery only; the Host checks every grant at use.
+/// Room joins delivered before this member's workspace existed: the operator's enrolment
+/// (deploy's mini-reenroll: the member's feedback room) writes HOME/inbox/NAME.join, one shell line
+/// `chat join ROOM INVITATION`, when there is no workspace yet to join with. The first `init` that
+/// succeeds applies each, in name order, through the same `chat join` a typed line runs (nothing
+/// else: a file holding any other line is refused, never run). A join that lands renames its file
+/// NAME.joined; a refused one stays NAME.join, so the member can see it and type it again. One line
+/// says what happened.
+fn apply_pending_joins(session: &Session) {
+    let inbox = session.home.join("inbox");
+    let Ok(entries) = fs::read_dir(&inbox) else { return };
+    let mut files: Vec<PathBuf> = entries
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("join"))
+        .collect();
+    if files.is_empty() {
+        return;
+    }
+    files.sort();
+    let (mut joined, mut refused) = (Vec::new(), Vec::new());
+    for path in files {
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let text = match session_fs::read(&inbox, &path, 1 << 20).map(|bytes| String::from_utf8(bytes)) {
+            Ok(Ok(text)) => text.trim().to_owned(),
+            _ => {
+                refused.push(format!("{name} (unreadable)"));
+                continue;
+            }
+        };
+        let words: Vec<&str> = text.split_whitespace().collect();
+        if text.contains('\n') || words.get(..2) != Some(&["chat", "join"][..]) {
+            refused.push(format!("{name} (not one `chat join` line)"));
+            continue;
+        }
+        match plan(session, &text) {
+            Ok(Plan::Chat(join @ crate::chat::Line::Join { .. })) => {
+                let room = words.get(2).copied().unwrap_or_default().to_owned();
+                match crate::chat::run(session, join) {
+                    (EXIT_OK, _) => {
+                        let _ = fs::rename(&path, path.with_extension("joined"));
+                        joined.push(room);
+                    }
+                    (_, why) => refused.push(format!("{name} ({})", why.trim().lines().next().unwrap_or("refused"))),
+                }
+            }
+            Ok(_) => refused.push(format!("{name} (not one `chat join` line)")),
+            Err(why) => refused.push(format!("{name} ({})", why.trim().lines().next().unwrap_or("does not plan"))),
+        }
+    }
+    println!(
+        "init: pending joins from HOME/inbox: joined {}{}",
+        if joined.is_empty() { "none".to_owned() } else { joined.join(", ") },
+        if refused.is_empty() { String::new() } else { format!("; refused {} (each stays .join; type it again)", refused.join(", ")) }
+    );
+}
+
 fn inbox(session: &Session) {
     let me = session_subject(session).ok();
     let mut names: Vec<String> = stems(&session.home.join("inbox"), ".json", |_| false)
@@ -2249,7 +2321,14 @@ fn line_untraced(session: &Session, text: &str) -> (i32, bool) {
                 path.display()
             )),
         },
-        Ok(plan) => execute(session, plan),
+        Ok(plan) => {
+            let init = text.split_whitespace().next() == Some("init");
+            let ending = execute(session, plan);
+            if init && matches!(ending, Ending::Done) {
+                apply_pending_joins(session);
+            }
+            ending
+        }
     };
     let (code, text) = render(&ending);
     let _ = io::stdout().flush();
@@ -2627,6 +2706,28 @@ mod tests {
             flags.into_iter().map(|(k, v)| (k, v.into_string().unwrap())).collect(),
             writes.into_iter().map(|(p, b)| (p, String::from_utf8(b).unwrap())).collect(),
         )
+    }
+
+    #[test]
+    fn pending_inbox_joins_run_only_chat_join_and_a_refused_one_stays_for_the_member() {
+        let home = std::env::temp_dir().join(format!("mini-pending-joins-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&home);
+        fs::create_dir_all(home.join("inbox")).unwrap();
+        fs::set_permissions(&home, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::write(home.join("inbox/a-other.join"), "keygen stolen.key\n").unwrap();
+        fs::write(home.join("inbox/b-two.join"), "chat join x {}\nkeygen y.key\n").unwrap();
+        // no workspace: the join is refused by chat join itself, and the file stays for the member
+        fs::write(home.join("inbox/c-feedback.join"), "chat join feedback {\"recipient\":\"7\"}\n").unwrap();
+        fs::write(home.join("inbox/ref.json"), "{}").unwrap();
+        let session = Session { home: home.clone(), workspace: home.join("no-workspace"), ..session() };
+        apply_pending_joins(&session);
+        for name in ["a-other", "b-two", "c-feedback"] {
+            assert!(home.join(format!("inbox/{name}.join")).is_file(), "{name} stays pending");
+            assert!(!home.join(format!("inbox/{name}.joined")).exists(), "{name} was not joined");
+        }
+        assert!(!home.join("keys").exists(), "a .join file never runs another verb");
+        assert!(home.join("inbox/ref.json").is_file(), "delivered references are untouched");
+        let _ = fs::remove_dir_all(&home);
     }
 
     #[test]
@@ -3267,7 +3368,7 @@ mod tests {
         fs::write(ws.join("refs").join("factory.json"), b"{}").unwrap();
         let s = Session { workspace: ws, home: root.join("h"), host: "/x".into(), config: "/y".into() };
         assert_eq!(complete(&s, "su"), ["submit", "summon"]);
-        assert_eq!(complete(&s, "re"), ["refs", "read", "reveal", "retry", "revoke", "renounce", "react"]);
+        assert_eq!(complete(&s, "re"), ["refs", "read", "reveal", "retry", "revoke", "renounce", "react", "reports"]);
         assert_eq!(complete(&s, "bid "), ["factory", "shared"]);
         assert_eq!(complete(&s, "bids s"), ["shared"]);
         assert_eq!(complete(&s, "market s"), ["settle"]);
@@ -3660,6 +3761,19 @@ mod tests {
         assert_eq!(request["targets"][0]["payload"]["actions"][0],
             json!({"type":"create","key":{"type":"object","field":"3"},"value":"11033321548135836207"}));
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn private_compute_takes_two_bounded_values_and_is_a_local_client_call() {
+        let s = session();
+        let (command, flags, writes) = client(plan(&s, "private-compute 173 59").unwrap());
+        assert_eq!((command.as_str(), flags, writes), ("private-compute", pairs(&[("left", "173"), ("right", "59")]), vec![]));
+        for bad in ["private-compute", "private-compute 1", "private-compute 1 2 3", "private-compute 256 1", "private-compute 1 x", "private-compute -1 2"] {
+            assert!(plan(&s, bad).is_err(), "{bad}");
+        }
+        let g = crate::shell_grammar::grammar("private-compute").unwrap();
+        assert_eq!(g.leaves[0].effect, crate::shell_grammar::Effect::Local);
+        assert!(crate::shell_grammar::operation(g).contains("RESEARCH"));
     }
 
     #[test]

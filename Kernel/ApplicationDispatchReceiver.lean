@@ -43,12 +43,12 @@ def Committed.projection {config : Config} (permit : Committed config) :
 def Committed.verified {config : Config} (permit : Committed config) :
     NativeHostReplay.Verified config
       (NativeHostReplay.exactCandidate permit.old
-        permit.readback.derived permit.readback.ready) :=
+        permit.readback.derived permit.readback.ready permit.readback.tag) :=
   NativeHostReplay.extendExact permit.reader permit.old permit.readback
 
 def Committed.receipt {config : Config} (permit : Committed config) : NativeHostCodec.Receipt :=
   let old := permit.old
-  let candidate := NativeHostReplay.exactCandidate old permit.readback.derived permit.readback.ready
+  let candidate := NativeHostReplay.exactCandidate old permit.readback.derived permit.readback.ready permit.readback.tag
   ⟨permit.readback.derived.intent.transactionId,
     permit.readback.derived.intent.event.eventId,
     old.opened.durable.height + 1,
@@ -73,7 +73,7 @@ post-CAS image is the `config`-validated successor of `old` extended by it. -/
 theorem Committed.validated_successor {config : Config} (permit : Committed config) :
     permit.readback.derived.intent = permit.admitted.intent ∧
       validateLoaded config (NativeHostReplay.exactCandidate permit.old
-        permit.readback.derived permit.readback.ready) = .ok permit.readback.after :=
+        permit.readback.derived permit.readback.ready permit.readback.tag) = .ok permit.readback.after :=
   ⟨permit.derivedExact, permit.readback.validated⟩
 
 /-- Receipt evidence alone cannot construct physical delivery authority. -/
@@ -88,7 +88,7 @@ def Permit.projection {config : Config} (permit : Permit config) :
 def Permit.verified {config : Config} (permit : Permit config) :
     NativeHostReplay.Verified config
       (NativeHostReplay.exactCandidate permit.old
-        permit.readback.derived permit.readback.ready) := permit.toCommitted.verified
+        permit.readback.derived permit.readback.ready permit.readback.tag) := permit.toCommitted.verified
 
 def Permit.receipt {config : Config} (permit : Permit config) : NativeHostCodec.Receipt :=
   permit.toCommitted.receipt
@@ -113,7 +113,7 @@ theorem Permit.installed_validated_successor {config : Config} (permit : Permit 
     permit.freshCasWinner = true ∧ permit.confirmation = .installed ∧
       permit.readback.derived.intent = permit.admitted.intent ∧
       validateLoaded config (NativeHostReplay.exactCandidate permit.old
-        permit.readback.derived permit.readback.ready) = .ok permit.readback.after :=
+        permit.readback.derived permit.readback.ready permit.readback.tag) = .ok permit.readback.after :=
   ⟨permit.fresh, permit.installed, permit.toCommitted.validated_successor⟩
 
 /-- A distinct wire frame ensures the physical host cannot confuse a checked

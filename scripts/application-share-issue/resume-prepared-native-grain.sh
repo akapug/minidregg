@@ -3,6 +3,7 @@
 # A submit marker is the one-shot boundary; a failed submit must use lookup.
 set -eu
 umask 077
+. "$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)/native/resource-client/journey.d/lib/evidence.sh"
 
 if [ "$#" -ne 5 ]; then
   echo "usage: $0 EXISTING_RUN MINI STORE_BINARY SOURCE_FEE_FILE NEW_CONTINUATION_DIR" >&2
@@ -80,15 +81,6 @@ query_payer() {
 # Public signed read is a separate route from the owner-private submit.
 start_service serve public-before
 query_payer payer-before 86000
-# The Store's durable image (seed + every log record), read under the Store's own
-# anchor identity, as the Host's transport opens it (`Config.anchorIdentity`,
-# printed by `describe` as storeAnchorIdentity; never re-derived here). The legacy single-blob `read-to` image no longer
-# exists: the Store keeps a durable log, so `read-to` refuses ("published byte
-# record is missing").
-durable_image() {
-  _image_id=$("$HOST" "$CONFIG" describe | jq -er .storeAnchorIdentity)
-  "$STORE_BINARY" --anchor-identity "$_image_id" durable-read "$1" 1 1 "$2"
-}
 durable_image "$STORE" "$CONT/before-issue-image.bin"
 stop_service
 

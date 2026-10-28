@@ -340,6 +340,69 @@ theorem exceptionAnswer_submit_fault_undecided :
       (answer 2 (.userError "durable append failed")).effectClass = .noRecord :=
   ⟨rfl, rfl⟩
 
+/-! ## The rate refusal (`Kernel.SubjectRate`; docs/PD-HOST-RATE-DESIGN.md)
+
+`serveFrame` checks the subject a signed read claims before dispatch; a full window is
+answered here, as a returned decision under NO_RECORD, before any receiver or Store work.
+After the receiver answers, `chargeable` says whether that answer proves the claimed subject's
+signature verified: the operation's own reply, or a refusal the disclosure order
+(`Compiler.RefusalReason`) tells only after verification. A forgery is answered
+`badSignature` or `unknownKey` and charges nobody. -/
+
+/-- The detail of a rate refusal: the milliseconds until the window reopens. -/
+def rateLimitedDetail (retryAfterMs : Nat) : List UInt8 :=
+  s!"rate-limited retry-after-ms {retryAfterMs}".toUTF8.toList
+
+def rateLimitedAnswer (operation : UInt8) (retryAfterMs : Nat) : Outcome :=
+  .refused .rateLimited (phase operation) (rateLimitedDetail retryAfterMs)
+
+def rateLimitedFrame (operation : UInt8) (retryAfterMs : Nat) : List UInt8 :=
+  outcomeCodec.encode (rateLimitedAnswer operation retryAfterMs)
+
+theorem rateLimitedFrame_decodes (operation : UInt8) (retryAfterMs : Nat) :
+    outcomeCodec.decode (rateLimitedFrame operation retryAfterMs) =
+      some (rateLimitedAnswer operation retryAfterMs) :=
+  outcomeCodec.decode_encode _
+
+/-- A rate refusal is a no-record refusal: the client may retry it as a fresh attempt. -/
+theorem rateLimitedAnswer_noRecord (operation : UInt8) (retryAfterMs : Nat) :
+    noRecordPayload (rateLimitedAnswer operation retryAfterMs) = true := rfl
+
+/-- The reasons told before a request's signature verified for the subject it claims. -/
+def preVerification : RefusalReason → Bool
+  | .malformed | .unknownKey | .staleRoot | .badSignature | .overBound | .rateLimited => true
+  | _ => false
+
+/-- Whether a rated request's answer charges the subject it claimed: its operation's own reply,
+or a refusal reached only after verification. Anything else (a pre-verification refusal, an
+undecided or unavailable outcome, an undecodable payload) charges nobody. -/
+def chargeable (operation responseOperation : UInt8) (payload : List UInt8) : Bool :=
+  if responseOperation == operation then true
+  else match outcomeCodec.decode payload with
+    | some (.refused reason _ _ _) => !preVerification reason
+    | _ => false
+
+/-- Teeth: a forged signature charges nobody. -/
+theorem chargeable_badSignature (operation : UInt8) (phase detail : List UInt8)
+    (h : operation ≠ HostOperations.hostOutcomeMarker) :
+    chargeable operation HostOperations.hostOutcomeMarker
+      (outcomeCodec.encode (.refused .badSignature phase detail)) = false := by
+  have : (HostOperations.hostOutcomeMarker == operation) = false := beq_false_of_ne (Ne.symm h)
+  simp [chargeable, this, outcomeCodec.decode_encode, preVerification]
+
+/-- Satisfiable: a verified holder refused by the law is charged. -/
+theorem chargeable_lawDenied (operation : UInt8) (phase detail : List UInt8)
+    (h : operation ≠ HostOperations.hostOutcomeMarker) :
+    chargeable operation HostOperations.hostOutcomeMarker
+      (outcomeCodec.encode (.refused .lawDenied phase detail)) = true := by
+  have : (HostOperations.hostOutcomeMarker == operation) = false := beq_false_of_ne (Ne.symm h)
+  simp [chargeable, this, outcomeCodec.decode_encode, preVerification]
+
+#assert_axioms rateLimitedFrame_decodes
+#assert_axioms rateLimitedAnswer_noRecord
+#assert_axioms chargeable_badSignature
+#assert_axioms chargeable_lawDenied
+
 #assert_axioms exceptionAnswer_cases
 #assert_axioms exceptionAnswer_class
 #assert_axioms exceptionAnswer_noRecord_sound

@@ -61,7 +61,14 @@ text-align:left;vertical-align:top}code,.id{font:12px ui-monospace,monospace;ove
 pre{white-space:pre-wrap;overflow-wrap:anywhere}\
 .refusal{border-left:4px solid #b3261e;padding:.4rem .8rem;background:#fbeeee}\
 .note{color:#555;font-size:13px}blockquote{border-left:3px solid #999;margin:.3rem 0;padding:0 .7rem}\
-.stale{color:#8a5a00}.ann{font-size:13px;color:#333;margin:.2rem 0 .2rem 1rem}";
+.stale{color:#8a5a00}.ann{font-size:13px;color:#333;margin:.2rem 0 .2rem 1rem}\
+body:has(.editing){max-width:90rem}\
+.editing{display:grid;grid-template-columns:minmax(0,2fr) minmax(16rem,1fr);gap:2rem}\
+.editing textarea{display:block;box-sizing:border-box;width:100%;min-height:22rem;font:15px/1.6 ui-monospace,monospace;padding:1rem}\
+.editing button{padding:.6rem 1rem;margin:.5rem 0;font:inherit}\
+.editing .inspector{border-left:1px solid #ddd;padding-left:1rem}.editing code{overflow-wrap:anywhere}\
+.editing details{margin:.5rem 0}\
+@media(max-width:800px){.editing{display:block}.editing .inspector{border:0;padding:0}}";
 
 pub(crate) fn run(mut args: Args) -> Result<()> {
     let root = absolute(&path(args.required("dir")?))?;

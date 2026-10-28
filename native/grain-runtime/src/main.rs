@@ -10,6 +10,9 @@ mod application_tools;
 mod concierge;
 mod hermes_room;
 mod room_task;
+mod sandbox_tools;
+mod history_compaction;
+mod resident_compute;
 mod room_resident;
 mod resident_context;
 mod quiescence;
@@ -109,6 +112,10 @@ struct Config {
     dispatch_task: Option<DispatchTask>,
     #[serde(default)]
     provider_task: Option<ProviderTask>,
+    /// Upstream Hermes's file, terminal and Python tools inside the worker:
+    /// the operator's ceiling and the class bounds (docs/HERMES-TOOLS-2026-10-27.md).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sandbox: Option<sandbox_tools::Sandbox>,
     /// A command must be selected by its configured name. Its arguments are
     /// fixed by the operator, so a remote connection cannot inject paths or
     /// gain a new executable through this interface.
@@ -2878,6 +2885,12 @@ fn validate(c: &Config) -> Result<()> {
     validate_with_workspace(c, None)
 }
 fn validate_with_workspace(c: &Config, prospective_workspace: Option<&[u8]>) -> Result<()> {
+    if let Some(sandbox) = &c.sandbox {
+        sandbox.validate()?;
+        if c.tool_task.as_ref().and_then(|t| t.room.as_ref()).is_none() {
+            return Err("sandbox tools are granted per room: sandbox requires toolTask.room".into());
+        }
+    }
     for (name, p) in [
         ("mini", &c.mini),
         ("host", &c.host),
@@ -3505,6 +3518,10 @@ struct Runtime {
     /// named code, e.g. `provider-refused:member-day-ceiling`): nothing was
     /// reserved or sent for them.
     prompt_provider_refusals: Vec<String>,
+    /// The sandbox toolsets granted to the running prompt's worker.
+    prompt_sandbox: Vec<&'static str>,
+    /// Whether the running resident prompt's room grants the oracle.
+    prompt_oracle: bool,
     /// The prompt allocated by the current `hermes_session`, and the decision
     /// reached at its boundary; written as one typed record when it ends.
     prompt_decision: Option<(u64, Option<prompt_outcome::Outcome>)>,
@@ -6629,6 +6646,8 @@ impl Runtime {
             prompt_active: false,
             prompt_member: None,
             prompt_provider_refusals: Vec::new(),
+            prompt_sandbox: Vec::new(),
+            prompt_oracle: false,
             prompt_decision: None,
             foreground_operation: None,
             output: None,
@@ -8256,6 +8275,21 @@ impl Runtime {
     }
     /// A product tool constructs ordinary HTTP only. Dispatch below still
     /// checks the current route, signed authority, native permit and settlement.
+    /// A restricted room resident reaches applications only through the Oracle tools, and only
+    /// in a room that grants the oracle; refused by name before any dispatch.
+    fn restricted_application_call(&self, name: &str) -> Result<()> {
+        if !self.room_tools_restricted() { return Ok(()); }
+        if !oracle_tools::is_tool(name) {
+            return Err("this resident accepts only room tools".into());
+        }
+        if self.resident_oracle_applications().is_empty() {
+            return Err("refused: oracle-not-configured: no Oracle lifetime route serves this resident".into());
+        }
+        if !self.prompt_oracle {
+            return Err("refused: oracle-not-granted: this room's founder has not granted the oracle (hermes/tools bit 8)".into());
+        }
+        Ok(())
+    }
     fn application_tool_arguments(&self, name: &str, arguments: &Value) -> Result<Value> {
         if oracle_tools::is_tool(name) {
             let tool = self.config.tool_task.as_ref().ok_or("toolTask absent")?;
@@ -13602,6 +13636,13 @@ impl Runtime {
                 return Err("scoped worker has no durable launch gate".into());
             }
             self.launch_gate(&record.program, unit, "fence")?;
+            // A metered worker's gate records its CPU only when the worker
+            // exits by itself; this stop kills the gate with it. Record the
+            // unit's systemd CPU accounting first, so the resident pays what
+            // the sandbox used rather than the pessimistic wall-time charge.
+            if let Err(error) = record_unit_cpu(&self.config.state_dir, unit) {
+                eprintln!("grain-runtime: worker {unit} CPU not recorded before stop ({error}); the pessimistic charge applies");
+            }
             kill_unit(unit)?;
         }
         for _ in 0..10 {
@@ -14203,6 +14244,23 @@ impl Runtime {
     }
     /// Prepare bounded tool-discovery names from exact retained Mini births.
     /// The catalog never substitutes for admission on a later tool call.
+    /// The Oracle applications a restricted room resident is offered: the operator's
+    /// `applicationServices` behind a pinned lifetime API (docs/oracle-agent-tools.md).
+    fn resident_oracle_applications(&self) -> Vec<String> {
+        self.config.tool_task.as_ref()
+            .filter(|tool| tool.lifetime_api_host_sha256.is_some())
+            .map(|tool| oracle_tools::applications(&tool.application_services))
+            .unwrap_or_default()
+    }
+    /// The upstream catalogue names a restricted resident's session must report beyond the
+    /// room catalogue: the granted sandbox toolsets and the offered Oracle tools.
+    fn resident_extra_tool_names(&self) -> Vec<String> {
+        let mut names = sandbox_tools::names(&self.prompt_sandbox);
+        if !self.resident_oracle_applications().is_empty() {
+            names.extend(["mcp__mini_grain__mini_oracle_discover".to_owned(), "mcp__mini_grain__mini_oracle_call".to_owned()]);
+        }
+        names
+    }
     fn room_tools_restricted(&self) -> bool {
         self.config.tool_task.as_ref().and_then(|tool| tool.room.as_ref())
             .is_some_and(|room| room.restrict_tools)
@@ -14210,7 +14268,11 @@ impl Runtime {
 
     fn tool_catalog(&self) -> Result<mcp::ToolCatalog> {
         if self.room_tools_restricted() {
-            return Ok(mcp::ToolCatalog { room_tools: true, ..Default::default() });
+            // The room catalogue, plus the operator's Oracle tools when a lifetime route serves
+            // them: offered to every prompt, called only where the room grants the oracle.
+            let oracle = self.resident_oracle_applications();
+            return Ok(mcp::ToolCatalog { room_tools: true, api_applications: oracle.clone(),
+                oracle_applications: oracle, ..Default::default() });
         }
         let Some(tool) = self.config.tool_task.as_ref() else {
             return Ok(mcp::ToolCatalog::default());
@@ -14355,6 +14417,7 @@ impl Runtime {
         let recorded = self.record_prompt_outcome(invocation);
         if recorded.is_ok() {
             self.reconcile_after_prompt_record();
+            self.compact_history();
         }
         match (result, recorded) {
             (result, Ok(())) => result,
@@ -14383,6 +14446,22 @@ impl Runtime {
                 "decisionId":decision.to_string(),"action":"post-record-reconcile",
                 "automatic":true,"result":error}));
             let _ = self.save();
+        }
+    }
+
+    /// A room resident's decided history leaves its per-operation files for
+    /// one line each in `history.jsonl` once nothing is retained
+    /// (history_compaction.rs). Never fails the prompt: a refusal is reported
+    /// and the files stay for the next pass.
+    fn compact_history(&mut self) {
+        let Some(room) = self.config.tool_task.as_ref().and_then(|t| t.room.as_ref()) else { return };
+        let (workspace, home) = (room.workspace.clone(), room.home.clone());
+        match history_compaction::compact(&self.journal, &self.config.state_dir, &[workspace.as_path()], &[home.as_path()]) {
+            Ok(Some(summary)) if summary.entries > 0 => eprintln!(
+                "grain-runtime: compacted {} decided operations, {} workspace attempts and {} superseded reads ({} entries) into {}",
+                summary.operations, summary.workspace_attempts, summary.transient, summary.entries, history_compaction::HISTORY),
+            Ok(_) => {}
+            Err(error) => eprintln!("grain-runtime: history compaction refused: {error}"),
         }
     }
 
@@ -14675,6 +14754,15 @@ impl Runtime {
             self.save()?;
         }
         let unit = self.worker_unit(id, &spec);
+        // Sandbox tools need the scoped launcher's bounds and only a
+        // resident's prompt carries the room's grant.
+        self.prompt_sandbox = match (&self.config.sandbox, &unit, invocation.resident_identity()) {
+            (Some(sandbox), Some(_), Some(_)) => sandbox.grant(invocation.prompt()),
+            _ => Vec::new(),
+        };
+        // The oracle is granted per room (hermes/tools bit 8), read like the sandbox grant.
+        self.prompt_oracle = invocation.resident_identity().is_some()
+            && sandbox_tools::oracle_granted(invocation.prompt());
         if let Some(unit) = &unit {
             Self::prove_launcher_gate(&spec.program)?;
             systemd_manager::verify_launcher(&self.config.task, &spec.program)?;
@@ -14697,9 +14785,14 @@ impl Runtime {
         } else {
             broker_path.clone()
         };
+        if let (Some(sandbox), false) = (&self.config.sandbox, self.prompt_sandbox.is_empty()) {
+            sandbox_tools::require_workspace_volume(&workspace, sandbox.workspace_mib)?;
+        }
         let mut command = Command::new(&spec.program);
         command
             .args(&spec.args)
+            .args(sandbox_tools::worker_arguments(&self.prompt_sandbox,
+                self.config.sandbox.as_ref().map_or(0, |s| s.tool_call_seconds)))
             .current_dir(&self.config.cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -14708,6 +14801,9 @@ impl Runtime {
             command.env("HERMES_HOME", &hermes_home);
         }
         self.worker_env(&mut command, &spec, &unit, Some(&broker_path))?;
+        if let (Some(sandbox), false) = (&self.config.sandbox, self.prompt_sandbox.is_empty()) {
+            sandbox.environment(&mut command);
+        }
         unsafe {
             command.pre_exec(|| {
                 libc::umask(0o077);
@@ -14843,7 +14939,7 @@ impl Runtime {
             acp_send(&mut child_stdin, 2, method, params)?;
             let response =
                 self.acp_response(2, &rx, input, &mut child_stdin, &display_tx, &broker, None)?;
-            if self.room_tools_restricted() { room_task::require_acp_catalogue(&response)?; }
+            if self.room_tools_restricted() { room_task::require_acp_catalogue(&response, &self.resident_extra_tool_names())?; }
             if let Some(previous) = &existing_session {
                 if !response.is_object() {
                     return Err("Hermes did not reload the retained session".into());
@@ -15195,6 +15291,8 @@ impl Runtime {
                         if application_api_call.is_some() {
                             let _ = request.reply.send(json!({"isError":true,
                                 "text":"application API call already in progress"}));
+                        } else if let Err(refusal) = self.restricted_application_call(&request.name) {
+                            let _ = request.reply.send(json!({"isError":true,"text":refusal}));
                         } else {
                             match self.application_tool_arguments(&request.name, &request.arguments)
                                 .and_then(|arguments| self.begin_application_api(
@@ -17385,6 +17483,25 @@ fn prove_controller_unit(task: &str) -> Result<()> {
     Ok(())
 }
 
+/// Write `STATE/UNIT.cpu` (`mini-grain-cpu-v1 USEC`, the launch gate's
+/// format) from systemd's CPU accounting of the live unit, unless the gate
+/// already wrote it. Rounded up to the next microsecond.
+fn record_unit_cpu(state_dir: &Path, unit: &str) -> Result<()> {
+    let path = state_dir.join(format!("{unit}.cpu"));
+    if path.try_exists().map_err(|e| e.to_string())? { return Ok(()); }
+    let output = deadline::output(systemd_manager::worker_command(unit)?
+        .args(["show", "-p", "CPUUsageNSec", "--value", &format!("{unit}.service")]), deadline::MANAGER_QUERY)
+        .map_err(|e| deadline::describe("worker CPU accounting", e))?;
+    let text = String::from_utf8(output.stdout).map_err(|e| e.to_string())?;
+    let nsec = text.trim().parse::<u64>().map_err(|_| format!("worker CPU accounting unavailable: {:?}", text.trim()))?;
+    let temporary = path.with_extension("cpu.tmp");
+    let mut file = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temporary)
+        .map_err(|e| format!("cpu record: {e}"))?;
+    file.write_all(format!("mini-grain-cpu-v1 {}\n", nsec.div_ceil(1000)).as_bytes())
+        .and_then(|_| file.sync_all()).map_err(|e| format!("cpu record: {e}"))?;
+    fs::rename(&temporary, &path).map_err(|e| format!("cpu record: {e}"))
+}
+
 fn kill_unit(unit: &str) -> Result<()> {
     let name = format!("{unit}.service");
     let output = deadline::output(systemd_manager::worker_command(unit)?
@@ -19215,6 +19332,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
             capability: "71".into(),
             query_capability: "74".into(),
             policy_control_capability: Some("72".into()),
+            sandbox: None,
             foreground_tool: None,
             dispatch_task: None,
             tool_task: Some(ToolTask {

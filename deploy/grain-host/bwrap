@@ -99,6 +99,27 @@ runtime_max_sec=${MINI_GRAIN_RUNTIME_MAX_SEC:-600}
   echo 'MINI_GRAIN_RUNTIME_MAX_SEC exceeds 1800 seconds' >&2
   exit 64
 }
+# Sandbox tools (docs/HERMES-TOOLS-2026-10-27.md): a resident granted upstream
+# Hermes's file, terminal or Python tools gets a per-worker /scratch tmpfs of
+# MINI_GRAIN_SCRATCH_MIB, the grain class's memory, task and CPU bounds, no
+# single file larger than the scratch, a 16 MiB /tmp, and a CPU record the
+# gate writes outside the sandbox. Absent, the worker is exactly as before.
+scratch_mib=${MINI_GRAIN_SCRATCH_MIB:-}
+memory_max=${MINI_GRAIN_MEMORY_MAX:-2G}
+tasks_max=${MINI_GRAIN_TASKS_MAX:-128}
+cpu_weight=${MINI_GRAIN_CPU_WEIGHT:-}
+cpu_quota=${MINI_GRAIN_CPU_QUOTA:-}
+sandbox_limit() { echo "sandbox bound refused: $1" >&2; exit 64; }
+[[ $memory_max =~ ^[1-9][0-9]{0,4}[MG]$ ]] || sandbox_limit 'MINI_GRAIN_MEMORY_MAX must be N M or N G'
+[[ $memory_max != *G ]] || (( 10#${memory_max%G} <= 8 )) || sandbox_limit 'MINI_GRAIN_MEMORY_MAX above 8G'
+[[ $memory_max != *M ]] || (( 10#${memory_max%M} <= 8192 )) || sandbox_limit 'MINI_GRAIN_MEMORY_MAX above 8G'
+[[ $tasks_max =~ ^[1-9][0-9]{0,3}$ ]] && (( 10#$tasks_max <= 1024 )) || sandbox_limit 'MINI_GRAIN_TASKS_MAX must be 1..1024'
+[[ -z $cpu_weight ]] || { [[ $cpu_weight =~ ^[1-9][0-9]{0,3}$ ]] && (( 10#$cpu_weight <= 1000 )); } || sandbox_limit 'MINI_GRAIN_CPU_WEIGHT must be 1..1000'
+[[ -z $cpu_quota ]] || { [[ $cpu_quota =~ ^[1-9][0-9]{0,2}$ ]] && (( 10#$cpu_quota <= 800 )); } || sandbox_limit 'MINI_GRAIN_CPU_QUOTA must be 1..800 percent'
+if [[ -n $scratch_mib ]]; then
+  [[ $scratch_mib =~ ^[1-9][0-9]{0,3}$ ]] && (( 10#$scratch_mib <= 4096 )) || sandbox_limit 'MINI_GRAIN_SCRATCH_MIB must be 1..4096'
+  [[ $network == none ]] || sandbox_limit 'sandbox tools require --network none'
+fi
 unit=${MINI_GRAIN_UNIT}.service
 controller_unit=${MINI_GRAIN_CONTROLLER_UNIT:-}
 if [[ -n $controller_unit ]]; then
@@ -117,10 +138,18 @@ sandbox=(
   /usr/bin/bwrap --die-with-parent --unshare-user --unshare-pid
   --unshare-ipc --unshare-uts --unshare-cgroup --clearenv
   --ro-bind /usr /usr --symlink usr/bin /bin --symlink usr/lib /lib
-  --symlink usr/lib64 /lib64 --dev /dev --proc /proc --tmpfs /tmp
+  --symlink usr/lib64 /lib64 --dev /dev --proc /proc
   --ro-bind "$runtime_root" /agent --bind "$workspace" /workspace
   --chdir /workspace --setenv HOME /workspace --setenv PATH /usr/bin:/bin
 )
+if [[ -n $scratch_mib ]]; then
+  # A shell runs in here: no nested user namespaces, no capabilities, no
+  # controlling terminal (docs/HERMES-TOOLS-2026-10-27.md §2).
+  sandbox+=(--disable-userns --cap-drop ALL --new-session
+    --size 16777216 --tmpfs /tmp --size $(( 10#$scratch_mib * 1048576 )) --tmpfs /scratch)
+else
+  sandbox+=(--tmpfs /tmp)
+fi
 [[ -z $broker_socket && -z $provider_socket ]] || sandbox+=(--dir /run)
 [[ -z $broker_socket ]] || sandbox+=(--ro-bind "$broker_socket" /run/mini-grain.sock)
 [[ -z $provider_socket ]] || sandbox+=(--ro-bind "$provider_socket" /run/mini-provider.sock)
@@ -158,8 +187,15 @@ trap stop_unit TERM INT HUP
 
 unit_properties=(
   --property=KillMode=control-group "--property=RuntimeMaxSec=${runtime_max_sec}s"
-  --property=MemoryMax=2G --property=TasksMax=128
+  "--property=MemoryMax=$memory_max" "--property=TasksMax=$tasks_max"
 )
+[[ -z $cpu_weight ]] || unit_properties+=("--property=CPUWeight=$cpu_weight")
+[[ -z $cpu_quota ]] || unit_properties+=("--property=CPUQuota=${cpu_quota}%")
+gate_meter=()
+if [[ -n $scratch_mib ]]; then
+  unit_properties+=("--property=LimitFSIZE=${scratch_mib}M")
+  gate_meter=(--meter)
+fi
 controller_manager=${MINI_GRAIN_CONTROLLER_MANAGER:-user}
 [[ $controller_manager == system || $controller_manager == user ]] || usage
 [[ ${MINI_GRAIN_WORKER_MANAGER:-user} == user ]] || usage
@@ -174,7 +210,7 @@ elif [[ $controller_manager == system ]]; then
 fi
 /usr/bin/systemd-run --user --wait --pipe --collect --unit="${MINI_GRAIN_UNIT}" \
   "${unit_properties[@]}" \
-  "$launch_gate" run "$MINI_GRAIN_STATE_DIR" "$MINI_GRAIN_UNIT" -- \
+  "$launch_gate" run "$MINI_GRAIN_STATE_DIR" "$MINI_GRAIN_UNIT" "${gate_meter[@]}" -- \
   "${sandbox[@]}" <&0 >&1 2>&2 &
 runner_pid=$!
 wait "$runner_pid"

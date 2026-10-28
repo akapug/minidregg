@@ -117,7 +117,7 @@ class World:
                 "constructor management custody differs from the genesis-pinned lifecycle policy")
         self.grains = absolute(self.selection["grainsRoot"])
         self.broker = str(absolute(self.selection["brokerSocket"]))
-        require(self.broker in ("/run/mini-spk-broker.sock", str(self.grains / "broker.sock")), "broker socket must be the default or belong to the grains root")
+        require(self.broker == str(f.broker_endpoint(self.grains)), "broker socket must be the selected Store runtime socket")
         self.evidence = absolute(self.selection["evidence"])
         f.protected_parent(self.evidence)
         seed = self.config.get("expectedSeed")

@@ -13,7 +13,8 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 HELPER = ROOT / "scripts/oracle-agent-lifetime-journey.sh"
-OVERLAY = ROOT / "scripts/spk-platform/agent-genesis-overlay.sh"
+ALLOCATION_CHECK = ROOT / "scripts/spk-platform/check-agent-allocation.sh"
+AGENT_LIBRARY = ROOT / "scripts/workroom/agent-enrollment.sh"
 
 
 def factory_lean_probe(predicate, agents):
@@ -21,17 +22,34 @@ def factory_lean_probe(predicate, agents):
     def lean(node):
         if node["type"] == "eq" and set(node) == {"type","slot","value"}:
             return "(.eq " + json.dumps(node["slot"]) + " " + str(int(node["value"])) + ")"
+        if node["type"] == "eqSlots" and set(node) == {"type","left","right"}:
+            return "(.eqSlots " + json.dumps(node["left"]) + " " + json.dumps(node["right"]) + ")"
         if node["type"] in ("all","any") and set(node) == {"type","predicates"}:
             return "(." + node["type"] + " [" + ",".join(map(lean,node["predicates"])) + "])"
         raise ValueError("unexpected emitted factory predicate syntax")
     lines = ["import Pred.Core", "open Minidregg.Pred", "def fixtureLaw : Pred := " + lean(predicate)]
-    for subject in (7,8,9,20010,20011,20012,20013):
+    for subject in (7,8,9,70,20010,20011,20012,20013):
         for verb, mode in ((1,False),(2,False),(2,True)):
             slots = [("request/subject",subject),("request/verb",verb)]
             if mode: slots.append(("birth/mode/grain-backed",1))
             state = "⟨[" + ",".join("("+json.dumps(k)+","+str(v)+")" for k,v in slots) + "]⟩"
             expected = subject == 7 or (subject in ((8,20011) if agents else (8,)) and (verb == 1 or mode))
             lines.append("#guard eval fixtureLaw ⟨[]⟩ " + state + " == " + str(expected).lower())
+    # Factory permission requires all four source-projected coordinates. The
+    # actual grant post root varies with later receipts, so presence is tested
+    # using eqSlots (missing slots fail closed), never writeOnce.
+    for subject in (None,8,9,20010,20011):
+        for verb in (None,0,2,3):
+            for count in (None,0,1,2):
+                for resource in (None,29520,29530,29531):
+                    slots = []
+                    if subject is not None: slots.append(("request/subject",subject))
+                    if verb is not None: slots.append(("request/verb",verb))
+                    if count is not None: slots.append(("birth/count",count))
+                    if resource is not None: slots.append(("birth/"+str(resource),123456))
+                    state = "⟨[" + ",".join("("+json.dumps(k)+","+str(v)+")" for k,v in slots) + "]⟩"
+                    expected = agents and subject == 8 and verb == 2 and count == 1 and resource == 29530
+                    lines.append("#guard eval fixtureLaw ⟨[]⟩ " + state + " == " + str(expected).lower())
     return "\n".join(lines) + "\n"
 
 
@@ -100,38 +118,41 @@ class HarnessTests(unittest.TestCase):
                     with self.assertRaises(ValueError): op.prepare_worker_policy(config_path)
                     self.assertEqual(sum(args[1] == "submit" for _,args in calls), 1 if fault == "wrong-readback" else 0)
 
-    def test_complete_grain_store_overlay_on_frozen_339_source(self):
+    def test_complete_grain_store_configuration_before_bootstrap(self):
         # Run the real grain-store -> positive-base -> native-share-member
-        # transformations. Stub only native executables, stopping exactly at
-        # bootstrap before a Store exists. This is a source composition test.
-        baseline = "339abf3e4b37940be0e69620dbf177470b0aeefc"
+        # configuration and enrollment composition. Stub native executables,
+        # stopping at bootstrap before a Store exists.
         inputs = ["scripts/workroom/provision.sh",
+                  "scripts/workroom/agent-enrollment.sh",
+                  "scripts/spk-platform/check-agent-allocation.sh",
+                  "scripts/spk-platform/grain-store.sh",
+                  "native/resource-client/scenario-genesis.sh",
+                  "native/resource-client/genesis.sh",
+                  "native/resource-client/genesis-params.example.json",
                   "scripts/application-share-issue/native-positive-base.sh",
                   "scripts/grain-birth/native-share-member.sh",
                   "native/resource-client/journey.d/lib/genesis-params.sh",
                   "deploy/candidate/params.sh"]
-        for mode in ("legacy", "agents", "unrelated-keywords", "missing-config", "duplicate-config"):
+        for mode in ("legacy", "agents", "unrelated-keywords", "reformatted", "custom-balances",
+                     "extra-policy", "custody-conflict", "targets-conflict",
+                     "multiple-policy", "unknown-policy", "expected-config", "config-mismatch"):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
+                has_agents = mode not in ("legacy", "expected-config", "config-mismatch")
                 repo = root / "repo"
                 for name in inputs:
-                    path = repo / name
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_bytes(subprocess.check_output(["git", "show", baseline + ":" + name], cwd=ROOT))
-                for name in ("scripts/spk-platform/grain-store.sh", "scripts/spk-platform/agent-genesis-overlay.sh",
-                             "scripts/grain-birth/native-share-member.sh"):
                     path = repo / name
                     path.parent.mkdir(parents=True, exist_ok=True)
                     path.write_bytes((ROOT / name).read_bytes())
                 provision = repo / "scripts/workroom/provision.sh"
                 original = provision.read_text()
-                line = ' "storageRoot":"$EVIDENCE/store","signatureBinary":"$SIGNATURE_BINARY"}'
-                if mode == "missing-config":
-                    provision.write_text(original.replace(line, line.replace("signatureBinary", "changedSignatureBinary")))
-                elif mode == "duplicate-config":
-                    provision.write_text(original.replace(line, line + "\n" + line))
+                line = '"$MINI" bootstrap --host '
+                if mode == "reformatted":
+                    reformatted = original.replace(line, '"$MINI"  bootstrap  --host ')
+                    self.assertNotEqual(reformatted, original)
+                    provision.write_text(reformatted)
                 elif mode == "unrelated-keywords":
-                    provision.write_text(original + "\n# lifecycleManagement agentLifetimeDispatchTargets\n")
+                    provision.write_text(original + "\n# lifecycleManagement agentLifetimeDispatchTargets grainBirthTariff\n")
                 native = root / "native"
                 native.write_text('''#!/usr/bin/env python3
 import hashlib,json,os,pathlib,sys
@@ -139,7 +160,9 @@ args=sys.argv[1:]
 if args[0]=='keygen':
  for option in ('--secret','--public'):
   path=pathlib.Path(args[args.index(option)+1]);path.write_bytes(hashlib.sha256(str(path).encode()).digest())
-elif len(args)==2 and args[1]=='profile': print(json.dumps({'semantics':'1'}))
+elif len(args)==2 and args[1]=='profile':
+ (pathlib.Path(os.environ['OVERLAY_CAPTURE'])/'profile-called').write_text('yes')
+ print(json.dumps({'semantics':'1'}))
 elif args[0]=='bootstrap':
  out=pathlib.Path(os.environ['OVERLAY_CAPTURE'])
  for option,name in (('--config','config.json'),('--source','genesis.json')):
@@ -151,17 +174,53 @@ else: raise SystemExit('unexpected native command: '+repr(args))
                 capture = root / "capture"
                 capture.mkdir()
                 env = {key: value for key, value in os.environ.items()
-                       if key not in ("CANDIDATE", "SPK_AGENT_ALLOCATION", "GENESIS_PARAMS_TREE")
+                       if key not in ("CANDIDATE", "SPK_AGENT_ALLOCATION", "GENESIS_PARAMS_TREE", "MEMBER_INITIAL_BALANCE",
+                                          "GENESIS_PAY_OBSERVER", "EXTRA_CLOCK_TICKERS", "EXTRA_GENESIS_ENROLLMENTS",
+                                          "GENESIS_NOW", "MAX_STEP_SECONDS")
                        and not key.startswith("WORKROOM_")}
                 env.update(OVERLAY_CAPTURE=str(capture), GENESIS_PARAMS_TREE=str(repo))
-                if mode != "legacy":
+                if has_agents:
                     env["SPK_AGENT_ALLOCATION"] = str(ROOT / "deploy/oracle/acceptance/agent-allocation.json")
+                if mode == "custom-balances":
+                    env.update(WORKROOM_SPONSOR_BALANCE="12345", WORKROOM_TOOL_BALANCE="23456")
+                policies = {
+                    "extra-policy": {"providerServices": []},
+                    "custody-conflict": {"completionCustodianKey": "00" * 32},
+                    "targets-conflict": {"agentLifetimeDispatchTargets": []},
+                    "multiple-policy": {},
+                    "unknown-policy": {"storageRoot": "/not-the-fixture-store"},
+                }
+                if mode in policies:
+                    policy = root / "operator-policy.json"
+                    policy.write_text(json.dumps(policies[mode]) + ("\n{}" if mode == "multiple-policy" else ""))
+                    env["WORKROOM_OPERATOR_POLICY"] = str(policy)
+                if mode in ("expected-config", "config-mismatch"):
+                    completion = root / "new-world/custody/completion.pub"
+                    expected = {"domain":8501,"federation":9,"factoryId":10,"resourceBookId":11,
+                        "authorityCellId":12,"issuer":5,"ownerBudget":100000,"lifetime":10000,
+                        "tariffBase":3,"tariffPerBirth":2,"tariffPerGrant":1,"tariffPerInitialPayloadByte":1,
+                        "collector":99,"asset":0,"genesisHeight":10,"expectedSeed":0,
+                        "storageBinary":str(native),"storageRoot":str(root / "new-world/base/workroom/store"),
+                        "signatureBinary":str(native),"grainBirthTariff":{"base":2,"perBirth":1},
+                        "completionCustodianKey":hashlib.sha256(str(completion).encode()).hexdigest(),
+                        "lifecycleManagement":{"managementSubject":8,"managementKeyId":8008}}
+                    if mode == "config-mismatch": expected["lifetime"] += 1
+                    expected_path = root / "expected-operator.json"
+                    expected_path.write_text(json.dumps(expected))
+                    env["WORKROOM_EXPECTED_OPERATOR_CONFIG"] = str(expected_path)
                 result = subprocess.run(["sh", str(repo / "scripts/spk-platform/grain-store.sh"),
                                          str(root / "new-world"), *([str(native)] * 4)],
                                         env=env, capture_output=True, text=True)
-                if mode in ("missing-config", "duplicate-config"):
+                if mode == "config-mismatch":
+                    diagnostics = result.stderr + "\n".join(p.read_text() for p in root.rglob("*.stderr"))
+                    self.assertEqual(result.returncode, 2, diagnostics)
+                    self.assertTrue((capture / "profile-called").exists())
+                    self.assertFalse((capture / "config.json").exists())
+                    self.assertFalse((root / "new-world/base/workroom/deployment").exists())
+                    self.assertIn("differs", diagnostics)
+                    continue
+                if mode in ("custody-conflict", "targets-conflict", "multiple-policy", "unknown-policy"):
                     self.assertEqual(result.returncode, 2)
-                    self.assertIn("configuration shape changed", result.stderr)
                     self.assertFalse((capture / "config.json").exists())
                     continue
                 diagnostics = result.stderr + "\n".join(p.read_text() for p in root.rglob("*.stderr"))
@@ -172,9 +231,30 @@ else: raise SystemExit('unexpected native command: '+repr(args))
                 self.assertEqual(config["grainBirthTariff"], {"base": 2, "perBirth": 1})
                 self.assertEqual(config["tariffPerInitialPayloadByte"], 1)
                 self.assertEqual(genesis["tariffPerInitialPayloadByte"], "1")
+                balances = {entry["key"]["subject"]: entry["initialBalance"] for entry in genesis["enrollments"]}
+                expected_balances = {"7": "12345", "8": "23456", "9": "1"} if mode == "custom-balances" else {
+                    "7": "1000000", "8": "1000000", "9": "1"}
+                self.assertEqual({subject: balances[subject] for subject in ("7", "8", "9")},
+                                 expected_balances)
+                if mode == "extra-policy":
+                    self.assertEqual(config["providerServices"], [])
+                self.assertEqual(genesis["clockControlCapability"], "4093")
+                clock = next(entry for entry in genesis["enrollments"] if entry["key"]["subject"] == "70")
+                self.assertEqual(clock["key"]["keyId"], "7070")
+                self.assertEqual(clock["accountId"], "70")
+                self.assertEqual(clock["initialBalance"], "0")
+                self.assertEqual([clock[key] for key in ("spendCapabilityId", "controlCapabilityId", "factoryObserveCapabilityId")],
+                                 ["4071", "4072", "4073"])
+                self.assertEqual(genesis["clockTickers"], [{"subject": "70", "capability": "4074"}])
+                self.assertEqual(genesis["platform"], {
+                    "ownerBudget": str(config["ownerBudget"]),
+                    "lifetime": str(config["lifetime"]),
+                    "grainBirthTariff": {"base": "2", "perBirth": "1"},
+                    "completionCustodianKey": config["completionCustodianKey"],
+                })
                 self.assertFalse((root / "new-world/base/workroom/deployment").exists())
-                # This is the actual predicate emitted by all production source
-                # transforms, not a separately generated test policy.
+                # This is the actual predicate passed through production configuration,
+                # not a separately generated test policy.
                 original_law = {"type":"any","predicates":[
                     {"type":"eq","slot":"request/subject","value":"7"},
                     {"type":"all","predicates":[
@@ -183,14 +263,19 @@ else: raise SystemExit('unexpected native command: '+repr(args))
                             {"type":"eq","slot":"request/verb","value":"1"},
                             {"type":"eq","slot":"birth/mode/grain-backed","value":"1"}]}]}]}
                 expected_law = json.loads(json.dumps(original_law))
-                if mode != "legacy":
+                if has_agents:
                     addition = json.loads(json.dumps(original_law["predicates"][1]))
                     addition["predicates"][0]["value"] = "20011"
                     expected_law["predicates"].append(addition)
+                    expected_law["predicates"].append({"type":"all","predicates":[
+                        {"type":"eq","slot":"request/subject","value":"8"},
+                        {"type":"eq","slot":"request/verb","value":"2"},
+                        {"type":"eq","slot":"birth/count","value":"1"},
+                        {"type":"eqSlots","left":"birth/29530","right":"birth/29530"}]})
                 self.assertEqual(genesis["factoryPredicate"], expected_law)
                 predicate_file = next(root.glob("new-world/base/workroom.source-stage/factory-predicate.json"))
                 self.assertEqual(json.loads(predicate_file.read_bytes()), expected_law)
-                if mode == "legacy":
+                if not has_agents:
                     # Exact canonical predicate bytes retain the original literal.
                     self.assertEqual(predicate_file.read_text(), json.dumps(original_law,separators=(",",":"))+"\n")
                 else:
@@ -201,10 +286,10 @@ else: raise SystemExit('unexpected native command: '+repr(args))
                     destination = Path(evidence) / (mode + "-predicate.json")
                     with destination.open("x") as out: json.dump(genesis["factoryPredicate"],out,sort_keys=True)
                     with destination.with_suffix(".lean").open("x") as out:
-                        out.write(factory_lean_probe(genesis["factoryPredicate"],mode != "legacy"))
-                if mode == "legacy":
+                        out.write(factory_lean_probe(genesis["factoryPredicate"],has_agents))
+                if not has_agents:
                     self.assertNotIn("agentLifetimeDispatchTargets", config)
-                    self.assertEqual(len(genesis["enrollments"]), 3)
+                    self.assertEqual(len(genesis["enrollments"]), 4)
                 else:
                     targets = config["agentLifetimeDispatchTargets"]
                     self.assertEqual(len(targets), 1)
@@ -212,13 +297,15 @@ else: raise SystemExit('unexpected native command: '+repr(args))
                     self.assertEqual(targets[0]["legacy"]["ticketResource"], 29520)
                     self.assertNotIn("issueIndex", targets[0]["legacy"])
                     self.assertNotIn("grantIssueIndex", targets[0])
-                    self.assertEqual(len(genesis["enrollments"]), 7)
+                    self.assertEqual(len(genesis["enrollments"]), 8)
 
     def test_actual_factory_allocation_guard(self):
         source = (ROOT / "scripts/grain-birth/native-share-member.sh").read_text()
         start = source.index("FACTORY_PREDICATE=")
-        end = source.index("# shellcheck",start)
-        for fault in (None,"empty","relative","missing","symlink","duplicate","other-role","owner","nonnumeric"):
+        end = source.index("# Configuration inputs",start)
+        for fault in (None,"empty","relative","missing","symlink","duplicate","other-role","owner","nonnumeric",
+                      "missing-grant","grant-nonnumeric","grant-leading-zero","grant-session","grant-task","grant-app",
+                      "duplicate-grant","relocated-grant"):
             with self.subTest(fault=fault), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
                 allocation = json.loads((ROOT / "deploy/oracle/acceptance/agent-allocation.json").read_bytes())
@@ -226,6 +313,17 @@ else: raise SystemExit('unexpected native command: '+repr(args))
                 if fault == "other-role": allocation["agents"][0]["tool"]["subject"] = allocation["agents"][0]["dispatch"]["subject"]
                 if fault == "owner": allocation["agents"][0]["tool"]["subject"] = "7"
                 if fault == "nonnumeric": allocation["agents"][0]["tool"]["subject"] = "20011|invalid"
+                if fault == "missing-grant": del allocation["agents"][0]["persistentGrant"]
+                if fault == "grant-nonnumeric": allocation["agents"][0]["persistentGrant"] = "29530|invalid"
+                if fault == "grant-leading-zero": allocation["agents"][0]["persistentGrant"] = "029530"
+                if fault == "grant-session": allocation["agents"][0]["persistentGrant"] = allocation["agents"][0]["session"]
+                if fault == "grant-task": allocation["agents"][0]["persistentGrant"] = allocation["agents"][0]["tool"]["task"]
+                if fault == "grant-app": allocation["agents"][0]["persistentGrant"] = allocation["app"]
+                if fault == "duplicate-grant":
+                    other = json.loads(json.dumps(allocation["agents"][0]))
+                    other["tool"]["subject"] = "20111"
+                    allocation["agents"].append(other)
+                if fault == "relocated-grant": allocation["agents"][0]["persistentGrant"] = "39530"
                 path = root / "allocation.json";path.write_text(json.dumps(allocation))
                 selected = str(path)
                 if fault == "empty": selected = ""
@@ -235,8 +333,64 @@ else: raise SystemExit('unexpected native command: '+repr(args))
                     linked = root / "link.json";linked.symlink_to(path);selected = str(linked)
                 env = dict(os.environ,STAGE=str(root),SPK_AGENT_ALLOCATION=selected)
                 result = subprocess.run(["sh","-eu"],input=source[start:end],env=env,capture_output=True,text=True)
-                self.assertEqual(result.returncode,0 if fault is None else 2,result.stderr)
-                self.assertEqual((root / "factory-predicate.json").exists(),fault is None)
+                valid = fault in (None,"relocated-grant")
+                self.assertEqual(result.returncode,0 if valid else 2,result.stderr)
+                self.assertEqual((root / "factory-predicate.json").exists(),valid)
+                if valid:
+                    atom = json.loads((root / "factory-predicate.json").read_bytes())["predicates"][-1]["predicates"][-1]
+                    slot = "birth/" + allocation["agents"][0]["persistentGrant"]
+                    self.assertEqual(atom,{"type":"eqSlots","left":slot,"right":slot})
+
+    def test_fixed_allocation_guard(self):
+        for fault in (None,"empty","relative","missing","symlink","duplicate","other-role","owner","nonnumeric",
+                      "missing-grant","grant-nonnumeric","grant-leading-zero","grant-session","grant-task","grant-app",
+                      "duplicate-grant","relocated-grant","shell-route","no-agents","multiple-documents",
+                      "clock-subject","clock-account","clock-key","clock-task","clock-grant",
+                      "pay-control","clock-control","clock-spend","clock-account-control",
+                      "clock-observe","clock-tick"):
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                allocation = json.loads((ROOT / "deploy/oracle/acceptance/agent-allocation.json").read_bytes())
+                if fault == "duplicate": allocation["agents"].append(allocation["agents"][0])
+                if fault == "other-role": allocation["agents"][0]["tool"]["subject"] = allocation["agents"][0]["dispatch"]["subject"]
+                if fault == "owner": allocation["agents"][0]["tool"]["subject"] = "7"
+                if fault == "nonnumeric": allocation["agents"][0]["tool"]["subject"] = "20011|invalid"
+                if fault == "missing-grant": del allocation["agents"][0]["persistentGrant"]
+                if fault == "grant-nonnumeric": allocation["agents"][0]["persistentGrant"] = "29530|invalid"
+                if fault == "grant-leading-zero": allocation["agents"][0]["persistentGrant"] = "029530"
+                if fault == "grant-session": allocation["agents"][0]["persistentGrant"] = allocation["agents"][0]["session"]
+                if fault == "grant-task": allocation["agents"][0]["persistentGrant"] = allocation["agents"][0]["tool"]["task"]
+                if fault == "grant-app": allocation["agents"][0]["persistentGrant"] = allocation["app"]
+                if fault == "duplicate-grant":
+                    other = json.loads(json.dumps(allocation["agents"][0]))
+                    other["tool"]["subject"] = "20111"
+                    allocation["agents"].append(other)
+                if fault == "relocated-grant": allocation["agents"][0]["persistentGrant"] = "39530"
+                if fault == "shell-route": allocation["agents"][0]["route"] = "oracle;touch-bad"
+                if fault == "no-agents": allocation["agents"] = []
+                clock_fields = {"clock-subject": ("subject", "70"), "clock-account": ("account", "70"),
+                                "clock-key": ("keyId", "7070"), "clock-task": ("task", "70")}
+                if fault in clock_fields:
+                    field, value = clock_fields[fault]
+                    allocation["agents"][0]["tool"][field] = value
+                if fault == "clock-grant": allocation["agents"][0]["persistentGrant"] = "70"
+                clock_caps = {"pay-control": "4031", "clock-control": "4093", "clock-spend": "4071",
+                              "clock-account-control": "4072", "clock-observe": "4073", "clock-tick": "4074"}
+                if fault in clock_caps: allocation["agents"][0]["plannedCaps"]["grantObserve"] = clock_caps[fault]
+                path = root / "allocation.json"
+                path.write_text(json.dumps(allocation) + ("\n{}" if fault == "multiple-documents" else ""))
+                selected = str(path)
+                if fault == "empty": selected = ""
+                if fault == "relative": selected = "allocation.json"
+                if fault == "missing": selected = str(root / "absent")
+                if fault == "symlink":
+                    linked = root / "link.json";linked.symlink_to(path);selected = str(linked)
+                before = set(root.iterdir())
+                result = subprocess.run(["sh", str(ALLOCATION_CHECK), selected],
+                                        cwd=root, capture_output=True, text=True)
+                valid = fault in (None,"relocated-grant")
+                self.assertEqual(result.returncode,0 if valid else 2,result.stderr)
+                self.assertEqual(set(root.iterdir()), before)  # data validation creates no source or keys
 
     def test_fixed_cases_cover_bounded_operations_and_errors(self):
         cases = json.loads((ROOT / "deploy/oracle/acceptance/agent-cases.json").read_text())
@@ -297,36 +451,58 @@ else: raise SystemExit('unexpected native command: '+repr(args))
             for bad in ["relative/", "/../", "/?q=x/", "/%2e/"]:
                 self.assertFalse(check(dict(modern, signedApiPath=bad), expected))
 
-    def test_allocation_old_and_oracle_generate_native_source(self):
+    def test_allocation_old_and_oracle_validate_without_native_work(self):
         for filename in ["scripts/spk-platform/allocation-v1.json",
                          "deploy/oracle/acceptance/agent-allocation.json"]:
             with self.subTest(filename=filename), tempfile.TemporaryDirectory() as tmp:
-                output = Path(tmp) / "provision.sh"
-                subprocess.run(["sh", str(OVERLAY), str(ROOT / "scripts/workroom/provision.sh"),
-                                str(ROOT / filename), str(output)], check=True)
-                subprocess.run(["sh", "-n", str(output)], check=True)
-                source = output.read_text()
-                self.assertIn('"$MINI" bootstrap', source)
-                self.assertIn('birth-with-agents.json', source)
-                self.assertIn('parent-delegations.jsonl', source)
-                self.assertNotIn('for route in hermes-a hermes-b', source)
+                root = Path(tmp)
+                result = subprocess.run(["sh", str(ALLOCATION_CHECK), str(ROOT / filename)],
+                                        cwd=root, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(list(root.iterdir()), [])
 
-    def test_allocation_collision_and_shell_name_refused(self):
-        original = json.loads((ROOT / "deploy/oracle/acceptance/agent-allocation.json").read_text())
-        for mutation in ["duplicate", "shell", "empty"]:
-            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as tmp:
-                data = json.loads(json.dumps(original))
-                if mutation == "duplicate":
-                    data["agents"][0]["dispatch"]["task"] = data["agents"][0]["tool"]["task"]
-                elif mutation == "shell":
-                    data["agents"][0]["route"] = "oracle;touch-bad"
+    def test_fixed_agent_birth_phase_preserves_existing_resources(self):
+        allocation_path = ROOT / "deploy/oracle/acceptance/agent-allocation.json"
+        allocation = json.loads(allocation_path.read_text())
+        with tempfile.TemporaryDirectory() as tmp:
+            evidence = Path(tmp)
+            (evidence / "agents").mkdir()
+            existing = {"kind": "object", "storage": "content", "target": "8001", "owner": "7"}
+            original = {"subject": "7", "birth": {"resources": [existing], "feePayer": "7"}, "grants": []}
+            birth = evidence / "birth-intent.json"
+            birth.write_text(json.dumps(original))
+            result = subprocess.run(["sh", "-eu", "-c",
+                '. "$1"; EVIDENCE=$2; WORKROOM_AGENT_ALLOCATION=$3; workroom_agent_extend_birth',
+                "birth-phase", str(AGENT_LIBRARY), str(evidence), str(allocation_path)],
+                capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            result = json.loads(birth.read_text())
+            resources = result["birth"].pop("resources")
+            original["birth"].pop("resources")
+            self.assertEqual(result, original)  # authority and fee selectors are preserved
+            self.assertEqual(resources[0], existing)
+            born = {resource["target"]: resource for resource in resources[1:]}
+            roles = [(agent, role) for agent in allocation["agents"]
+                     for role in ("controller", "tool", "dispatch", "provider")]
+            self.assertEqual(set(born), {agent[role]["task"] for agent, role in roles})
+            self.assertEqual(len(resources) - 1, len(born))  # no duplicate births
+            for agent, role in roles:
+                resource = born[agent[role]["task"]]
+                self.assertEqual((resource["kind"], resource["storage"]), ("object", "grain"))
+                self.assertEqual(resource["owner"], agent[role]["subject"])
+                caps = agent["plannedCaps"]
+                owner_cap = "parentOwner" if role == "controller" else role + "Owner"
+                control_cap = "parentControl" if role == "controller" else role + "TaskControl"
+                self.assertEqual(resource["ownerCapability"], caps[owner_cap])
+                self.assertEqual(resource["controlCapability"], caps[control_cap])
+                self.assertEqual(resource["budget"], "100" if role == "controller" else "50")
+                if role == "controller":
+                    self.assertEqual(resource["workerSubjects"],
+                                     [agent[worker]["subject"] for worker in ("tool", "dispatch", "provider")])
+                    self.assertEqual(resource["workerGeneration"], "1")
                 else:
-                    data["agents"] = []
-                path = Path(tmp) / "allocation.json"
-                path.write_text(json.dumps(data))
-                result = subprocess.run(["sh", str(OVERLAY), str(ROOT / "scripts/workroom/provision.sh"),
-                                         str(path), str(Path(tmp) / "out.sh")], capture_output=True)
-                self.assertNotEqual(result.returncode, 0)
+                    self.assertNotIn("workerSubjects", resource)
+            self.assertFalse((evidence / "genesis.json").exists())
 
     def run_probe(self, mode):
         with tempfile.TemporaryDirectory() as tmp:

@@ -1,23 +1,19 @@
-#!/bin/sh
-# Add the integrated agents to the reviewed fresh genesis and first grain birth.
-# This only writes an exact private provision source. It does not run Mini.
-set -eu
-umask 077
+# Fixed enrollment operations for the workroom's explicit lifecycle phases.
+# Source this repository library; callers supply allocation JSON, never code.
+# Each function runs in a subshell so its working names cannot alter the
+# provisioner's state. Files remain under EVIDENCE; native calls use the
+# provisioner's MINI/HOST/CONFIG/SOCKET/SEMANTICS and confirmed function.
 
-if [ "$#" -ne 3 ]; then
-  echo "usage: $0 CHECKED_PROVISION ALLOCATION_JSON NEW_OUTPUT_SOURCE" >&2
-  exit 2
-fi
-SOURCE=$1 ALLOCATION=$2 OUTPUT=$3
-[ -f "$SOURCE" ] && [ -f "$ALLOCATION" ] || exit 2
-[ ! -e "$OUTPUT" ] && [ ! -L "$OUTPUT" ] || {
-  echo "agent provision output already exists" >&2; exit 2;
-}
-command -v jq >/dev/null 2>&1 || exit 2
-
+workroom_agent_validate() (
+  [ "$#" -eq 1 ] || { echo "agent allocation path required" >&2; exit 2; }
+  case "$1" in /*) ;; *) echo "agent allocation must be absolute" >&2; exit 2;; esac
+  [ -f "$1" ] && [ ! -L "$1" ] || {
+    echo "agent allocation absent or linked" >&2; exit 2;
+  }
 # All resource and capability coordinates are distinct from the existing
-# genesis 7/8/9, deployment 10/11/12 and initial workroom resources.
-jq -e '
+# genesis 7/8/9 and clock 70, deployment 10/11/12 and initial workroom resources.
+jq -se '
+  if length == 1 then .[0] else error("allocation must contain one JSON object") end |
   (.agents | length) as $count |
   .protocol == "mini-spk-integrated-allocation-v1" and
   .status == "reserved-coordinates-only" and
@@ -29,14 +25,14 @@ jq -e '
       .subject,.keyId,.account,.factoryObserveCapability,.task] |
       all(.[]; type == "string" and test("^[1-9][0-9]*$"))) and
   ([.agents[] | [.controller,.tool,.dispatch,.provider][] | .subject] +
-    ["7","8","9"] | unique | length == (4 * $count + 3)) and
+    ["7","8","9","70"] | unique | length == (4 * $count + 4)) and
   ([.agents[] | [.controller,.tool,.dispatch,.provider][] | .keyId] +
-    ["7007","8008","9009"] | unique | length == (4 * $count + 3)) and
+    ["7007","8008","9009","7070"] | unique | length == (4 * $count + 4)) and
   ([.humans[].plannedCaps[],.agents[].plannedCaps[],
       (.agents[] | [.controller,.tool,.dispatch,.provider][] |
         .factoryObserveCapability)] |
     all(.[]; type == "string" and test("^[1-9][0-9]*$"))) and
-  (["0","7","8","9","10","11","12","99","7003","7503",
+  (["0","7","8","9","10","11","12","70","99","7003","7503",
       "7901","7902","8001","8301",.app,.packageManifest,.snapshotManifest] +
     [.humans[] | .session,.descriptor,.ticket] +
     [.agents[] | .session,.descriptor,.ticket,.persistentGrant] +
@@ -47,25 +43,24 @@ jq -e '
   (["41","42","43","51","52","53","54","55","56","57",
       "71","72","73","81","82","83","84","85","86",
       "89","90","91","92","93","94","95","96",
-      "141","142","143","144","145","146"] +
+      "141","142","143","144","145","146","4031","4093",
+      "4071","4072","4073","4074"] +
     [.humans[].plannedCaps[]] + [.agents[].plannedCaps[]] +
     [.agents[] | [.controller,.tool,.dispatch,.provider][] |
       .factoryObserveCapability]) as $capabilities |
   ($capabilities | unique | length) == ($capabilities | length)
-' "$ALLOCATION" >/dev/null || {
+' "$1" >/dev/null || {
   echo "agent allocation conflicts with fresh genesis or birth resources" >&2; exit 2;
 }
 
-STAGE=$OUTPUT.stage
-[ ! -e "$STAGE" ] && [ ! -L "$STAGE" ] || exit 2
-mkdir -m 700 "$STAGE"
-trap 'rm -rf -- "$STAGE"' EXIT HUP INT TERM
+)
 
-cat >"$STAGE/preboot" <<'EOF'
-# Agent signing keys are generated only in this private fresh fixture. Each
-# genesis enrollment has its own account and cannot borrow another signer.
+workroom_agent_prepare() (
+# Generate keys and complete enrollment data for the shared genesis template.
+# Each enrollment has its own account and cannot borrow another signer; this
+# phase never reads or writes genesis.json.
 mkdir -m 700 "$EVIDENCE/agents"
-for route in $(jq -er ' .agents[].route' "$SPK_AGENT_ALLOCATION"); do
+for route in $(jq -er ' .agents[].route' "$WORKROOM_AGENT_ALLOCATION"); do
   mkdir -m 700 "$EVIDENCE/agents/$route"
   for role in controller tool dispatch provider; do
     spec=$(jq -c --arg route "$route" --arg role "$role" '
@@ -79,7 +74,7 @@ for route in $(jq -er ' .agents[].route' "$SPK_AGENT_ALLOCATION"); do
         (if $role == "controller" then .plannedCaps.controllerControl
          elif $role == "tool" then .plannedCaps.toolControl
          elif $role == "dispatch" then .plannedCaps.dispatchControl
-         else .plannedCaps.providerControl end)}' "$SPK_AGENT_ALLOCATION")
+         else .plannedCaps.providerControl end)}' "$WORKROOM_AGENT_ALLOCATION")
     [ -n "$spec" ] && [ "$spec" != null ] || exit 2
     key="$EVIDENCE/agents/$route/$role.key"
     pub="$EVIDENCE/agents/$route/$role.pub"
@@ -98,21 +93,13 @@ for route in $(jq -er ' .agents[].route' "$SPK_AGENT_ALLOCATION"); do
       >>"$EVIDENCE/agents/enrollments.jsonl"
   done
 done
-EOF
-
-cat >>"$STAGE/preboot" <<'EOF'
 jq -s '.' "$EVIDENCE/agents/enrollments.jsonl" \
   >"$EVIDENCE/agents/enrollments.json"
-jq --slurpfile extra "$EVIDENCE/agents/enrollments.json" \
-  '.enrollments += $extra[0]' "$EVIDENCE/genesis.json" \
-  >"$EVIDENCE/agents/genesis-with-agents.json"
-mv "$EVIDENCE/agents/genesis-with-agents.json" "$EVIDENCE/genesis.json"
-jq -e '([.enrollments[].key.publicKey] | unique | length) ==
-  (.enrollments | length)' "$EVIDENCE/genesis.json" >/dev/null
-EOF
 
-cat >"$STAGE/prebirth" <<'EOF'
-jq --slurpfile allocation "$SPK_AGENT_ALLOCATION" '
+)
+
+workroom_agent_extend_birth() (
+jq --slurpfile allocation "$WORKROOM_AGENT_ALLOCATION" '
   .birth.resources += [ $allocation[0].agents[] as $agent |
     {kind:"object",storage:"grain",target:$agent.controller.task,
       owner:$agent.controller.subject,ownerCapability:$agent.plannedCaps.parentOwner,
@@ -130,31 +117,31 @@ jq --slurpfile allocation "$SPK_AGENT_ALLOCATION" '
       controlCapability:$agent.plannedCaps.providerTaskControl,budget:"50"}
   ]' "$EVIDENCE/birth-intent.json" >"$EVIDENCE/agents/birth-with-agents.json"
 mv "$EVIDENCE/agents/birth-with-agents.json" "$EVIDENCE/birth-intent.json"
-EOF
+)
 
-cat >"$STAGE/postbirth" <<'EOF'
+workroom_agent_verify_birth() (
 # The one signed birth receipt covers all explicitly allocated agent grains. Verify each
 # owner can separately observe its exact born resource and record that view.
 mkdir -m 700 "$EVIDENCE/agents/verified"
-for route in $(jq -er ' .agents[].route' "$SPK_AGENT_ALLOCATION"); do
+for route in $(jq -er ' .agents[].route' "$WORKROOM_AGENT_ALLOCATION"); do
   for role in controller tool dispatch provider; do
     spec=$(jq -c --arg route "$route" --arg role "$role" \
-      '.agents[] | select(.route == $route) | .[$role]' "$SPK_AGENT_ALLOCATION")
+      '.agents[] | select(.route == $route) | .[$role]' "$WORKROOM_AGENT_ALLOCATION")
     subject=$(printf '%s\n' "$spec" | jq -er .subject)
     task=$(printf '%s\n' "$spec" | jq -er .task)
     case "$role" in
       controller) cap=$(jq -er --arg route "$route" \
         '.agents[] | select(.route == $route) | .plannedCaps.parentOwner' \
-        "$SPK_AGENT_ALLOCATION"); budget=100 ;;
+        "$WORKROOM_AGENT_ALLOCATION"); budget=100 ;;
       tool) cap=$(jq -er --arg route "$route" \
         '.agents[] | select(.route == $route) | .plannedCaps.toolOwner' \
-        "$SPK_AGENT_ALLOCATION"); budget=50 ;;
+        "$WORKROOM_AGENT_ALLOCATION"); budget=50 ;;
       dispatch) cap=$(jq -er --arg route "$route" \
         '.agents[] | select(.route == $route) | .plannedCaps.dispatchOwner' \
-        "$SPK_AGENT_ALLOCATION"); budget=50 ;;
+        "$WORKROOM_AGENT_ALLOCATION"); budget=50 ;;
       provider) cap=$(jq -er --arg route "$route" \
         '.agents[] | select(.route == $route) | .plannedCaps.providerOwner' \
-        "$SPK_AGENT_ALLOCATION"); budget=50 ;;
+        "$WORKROOM_AGENT_ALLOCATION"); budget=50 ;;
     esac
     label="$route-$role"
     jq -n --arg s "$subject" --arg t "$task" --arg c "$cap" \
@@ -184,24 +171,24 @@ for route in $(jq -er ' .agents[].route' "$SPK_AGENT_ALLOCATION"); do
 done
 # Check each parent's actual installed grain policy against the source-owned
 # owner/tool-worker rule; the separate parent child grants are added below.
-for route in $(jq -er ' .agents[].route' "$SPK_AGENT_ALLOCATION"); do
+for route in $(jq -er ' .agents[].route' "$WORKROOM_AGENT_ALLOCATION"); do
   controller=$(jq -c --arg route "$route" \
     '.agents[] | select(.route == $route) | .controller' \
-    "$SPK_AGENT_ALLOCATION")
+    "$WORKROOM_AGENT_ALLOCATION")
   parent_task=$(printf '%s\n' "$controller" | jq -er .task)
   controller_subject=$(printf '%s\n' "$controller" | jq -er .subject)
   tool_subject=$(jq -er --arg route "$route" \
     '.agents[] | select(.route == $route) | .tool.subject' \
-    "$SPK_AGENT_ALLOCATION")
+    "$WORKROOM_AGENT_ALLOCATION")
   dispatch_subject=$(jq -er --arg route "$route" \
     '.agents[] | select(.route == $route) | .dispatch.subject' \
-    "$SPK_AGENT_ALLOCATION")
+    "$WORKROOM_AGENT_ALLOCATION")
   provider_subject=$(jq -er --arg route "$route" \
     '.agents[] | select(.route == $route) | .provider.subject' \
-    "$SPK_AGENT_ALLOCATION")
+    "$WORKROOM_AGENT_ALLOCATION")
   parent_owner=$(jq -er --arg route "$route" \
     '.agents[] | select(.route == $route) | .plannedCaps.parentOwner' \
-    "$SPK_AGENT_ALLOCATION")
+    "$WORKROOM_AGENT_ALLOCATION")
   jq -n --arg s "$controller_subject" --arg t "$parent_task" \
     --arg c "$parent_owner" --arg n "$((55000 + parent_task))" '
     {subject:$s,nonce:$n,purpose:{type:"query",kind:"object",
@@ -238,19 +225,19 @@ done
 # Three separately held parent witnesses per controller. Each delegation is
 # prepared from a fresh signed owner observation, then the named holder signs
 # its own readback. The initial workerSubject is not used as a grant shortcut.
-for route in $(jq -er ' .agents[].route' "$SPK_AGENT_ALLOCATION"); do
+for route in $(jq -er ' .agents[].route' "$WORKROOM_AGENT_ALLOCATION"); do
   controller=$(jq -c --arg route "$route" \
     '.agents[] | select(.route == $route) | .controller' \
-    "$SPK_AGENT_ALLOCATION")
+    "$WORKROOM_AGENT_ALLOCATION")
   parent_task=$(printf '%s\n' "$controller" | jq -er .task)
   controller_subject=$(printf '%s\n' "$controller" | jq -er .subject)
   parent_owner=$(jq -er --arg route "$route" \
     '.agents[] | select(.route == $route) | .plannedCaps.parentOwner' \
-    "$SPK_AGENT_ALLOCATION")
+    "$WORKROOM_AGENT_ALLOCATION")
   for role in tool dispatch provider; do
     holder=$(jq -c --arg route "$route" --arg role "$role" \
       '.agents[] | select(.route == $route) | .[$role]' \
-      "$SPK_AGENT_ALLOCATION")
+      "$WORKROOM_AGENT_ALLOCATION")
     holder_subject=$(printf '%s\n' "$holder" | jq -er .subject)
     case "$role" in
       tool) child_name=parentToolWitness; offset=1 ;;
@@ -259,7 +246,7 @@ for route in $(jq -er ' .agents[].route' "$SPK_AGENT_ALLOCATION"); do
     esac
     child=$(jq -er --arg route "$route" --arg child "$child_name" \
       '.agents[] | select(.route == $route) | .plannedCaps[$child]' \
-      "$SPK_AGENT_ALLOCATION")
+      "$WORKROOM_AGENT_ALLOCATION")
     label="$route-parent-$role"
     nonce=$((60000 + parent_task * 10 + offset * 4))
     jq -n --arg s "$controller_subject" --arg t "$parent_task" \
@@ -324,7 +311,7 @@ for route in $(jq -er ' .agents[].route' "$SPK_AGENT_ALLOCATION"); do
   done
 done
 jq -n --slurpfile receipt "$EVIDENCE/birth-attempt/outcome.json" \
-  --slurpfile allocation "$SPK_AGENT_ALLOCATION" \
+  --slurpfile allocation "$WORKROOM_AGENT_ALLOCATION" \
   --slurpfile born "$EVIDENCE/agents/verified/born-views.jsonl" \
   --slurpfile delegated "$EVIDENCE/agents/verified/parent-delegations.jsonl" '
   {type:"mini-spk-agent-genesis-birth-evidence-v1",
@@ -335,27 +322,5 @@ jq -n --slurpfile receipt "$EVIDENCE/birth-attempt/outcome.json" \
       provider:$agent.provider.task}],
    bornViews:$born,parentDelegations:$delegated}' \
   >"$EVIDENCE/agents/verified/birth-evidence.json"
-EOF
+)
 
-awk -v preboot="$STAGE/preboot" -v prebirth="$STAGE/prebirth" \
-  -v postbirth="$STAGE/postbirth" '
-  /^"\$MINI" bootstrap --host / {
-    while ((getline line < preboot) > 0) print line
-    close(preboot); boot++
-  }
-  /cat >"\$EVIDENCE\/birth-intent.json" <<EOF/ { seen_birth=1 }
-  seen_birth && /^"\$MINI" submit --host / && !birth_inserted {
-    while ((getline line < prebirth) > 0) print line
-    close(prebirth); birth_inserted++
-  }
-  /^confirmed "\$EVIDENCE\/birth-attempt\/outcome.json"/ {
-    print
-    while ((getline line < postbirth) > 0) print line
-    close(postbirth); post++
-    next
-  }
-  { print }
-  END { if (boot != 1 || birth_inserted != 1 || post != 1) exit 2 }
-' "$SOURCE" >"$OUTPUT"
-chmod 700 "$OUTPUT"
-sh -n "$OUTPUT"

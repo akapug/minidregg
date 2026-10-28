@@ -94,16 +94,20 @@ form.row > * { flex: 1 1 10rem; } form.row > button { flex: 0 0 auto; }
 .pane { min-width: 0; background: var(--paper); }
 .pane-title { font-size: 1.15rem; }
 .pane-body { max-width: 62rem; }
-body.js .stage { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 30rem), 1fr)); gap: 1rem; align-content: start; }
-body.js .pane { border: 1px solid var(--rule); border-radius: 6px; display: flex; flex-direction: column; min-height: 12rem; max-height: calc(100vh - 8rem); overflow: hidden; }
-body.js .pane.max { grid-column: 1 / -1; max-height: none; }
-body.js .pane-head { display: flex; align-items: center; gap: .4rem; padding: .35rem .6rem; border-bottom: 1px solid var(--rule); background: var(--paper-2); }
-body.js .pane-head .pane-title { font-size: .95rem; margin: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-body.js .pane-head button { background: transparent; border: 0; color: var(--ink-2); padding: 0 .3rem; font-size: 14px; line-height: 1; }
-body.js .pane-head button:hover { color: var(--ink); }
-body.js .pane-body { padding: .8rem .9rem; overflow: auto; flex: 1 1 auto; max-width: none; }
-body.js .pane.busy .pane-body { opacity: .55; }
-body.js .pane.term-pane .pane-body { padding: 0; background: var(--term-bg); }
+.js .stage { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 30rem), 1fr)); gap: 1rem; align-content: start; }
+.js .pane { border: 1px solid var(--rule); border-radius: 6px; display: flex; flex-direction: column; min-height: 12rem; max-height: calc(100vh - 8rem); overflow: hidden; }
+.js .pane.max { grid-column: 1 / -1; max-height: none; }
+/* The head is in the server's markup (title inside), so dressing it with buttons moves nothing.
+   Without JavaScript it is transparent and the title sits in the flow of the one plain pane. */
+.pane-head { display: contents; }
+.js .pane-head { display: flex; align-items: center; gap: .4rem; padding: .35rem .6rem; border-bottom: 1px solid var(--rule); background: var(--paper-2); min-height: 2.3rem; }
+.js .pane-head .pane-title { font-size: .95rem; margin: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.js .pane-head button { background: transparent; border: 0; color: var(--ink-2); padding: 0 .3rem; font-size: 14px; line-height: 1; }
+.js .pane-head button:hover { color: var(--ink); }
+.js .pane-body { padding: .8rem .9rem; overflow: auto; flex: 1 1 auto; max-width: none; }
+.js .pane.busy .pane-body { opacity: .55; }
+/* chosen by the markup (a terminal inside), not by boot(): the padding does not change when xterm starts */
+.js .pane-body:has(> .term[data-ws]) { padding: 0; background: var(--term-bg); }
 
 /* the terminal */
 .term { height: 100%; min-height: 24rem; width: 100%; background: var(--term-bg); padding: 4px; }
@@ -134,6 +138,10 @@ body.js .pane.term-pane .pane-body { padding: 0; background: var(--term-bg); }
 .tree { list-style: none; margin: .2rem 0 .2rem 1rem; padding: 0 0 0 .8rem; border-left: 1px solid var(--rule); }
 .tree .key { color: var(--ink-2); font: 12px var(--mono); margin-right: .3rem; }
 .tree .val { font: 13px var(--mono); }
+/* Sections that fill in after the page (data-load) hold the room their answer takes, so the
+   answer lands without moving what is below it. */
+[data-load] .fill { min-height: 3.2rem; }
+[data-load="/purse/meter"] .fill { min-height: 6.2rem; }
 .purse .big { font-size: 1.6rem; margin: .2rem 0; } .purse .n { font-weight: 700; }
 .purse meter { width: 100%; max-width: 32rem; height: 1.1rem; }
 .outcome .reason { font-family: var(--mono); color: var(--refused); }
@@ -143,6 +151,15 @@ iframe.grain { width: 100%; height: 70vh; border: 1px solid var(--rule); border-
 td.verdict { font-family: var(--mono); font-size: 13px; } td.verdict.verified, td.verdict.ok { color: var(--admitted); } td.verdict.refused { color: var(--refused); }
 ol.tour { padding-left: 1.2rem; } ol.tour > li.step { margin: 1rem 0 1.4rem; } ol.tour h2 { margin-top: 0; }
 .step-outcome { border-left: 3px solid var(--accent); padding-left: .8rem; margin-top: .6rem; }
+/* the editor (its markup used to carry these as a <style> in the middle of the page, which moved
+   the layout when the parser reached it) */
+.pane-body:has(.editing) { max-width: 90rem; }
+.editing { display: grid; grid-template-columns: minmax(0, 2fr) minmax(16rem, 1fr); gap: 2rem; }
+.editing textarea { display: block; width: 100%; min-height: 22rem; font: 15px/1.6 var(--mono); padding: 1rem; }
+.editing button { padding: .6rem 1rem; margin: .5rem 0; font: inherit; }
+.editing .inspector { border-left: 1px solid var(--rule); padding-left: 1rem; }
+.editing details { margin: .5rem 0; }
+@media (max-width: 800px) { .editing { display: block; } .editing .inspector { border: 0; padding: 0; } }
 /* documents */
 .doc .line { margin: .15rem 0; } .doc .line .n { color: var(--ink-2); font: 11px var(--mono); margin-right: .5rem; }
 .doc .transclusion { border-left: 2px solid var(--accent); padding-left: .6rem; margin: .3rem 0; }
@@ -158,5 +175,5 @@ ol.tour { padding-left: 1.2rem; } ol.tour > li.step { margin: 1rem 0 1.4rem; } o
   .rail a[aria-current="page"], .rail a.open { border-bottom-color: var(--accent); }
   .search { display: none; }
   .stage { padding: 1rem; }
-  body.js .pane { max-height: none; }
+  .js .pane { max-height: none; }
 }

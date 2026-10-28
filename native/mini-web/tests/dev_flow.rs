@@ -288,6 +288,14 @@ fn a_login_code_opens_one_session_whose_terminal_runs_as_the_member_until_logout
     let public = http(port, "GET", "/", &[], "");
     assert!(public.body.contains("public reader"), "{}", public.body);
     assert_eq!(http(port, "GET", "/assets/vendor/xterm.js", &[], "").header("Cache-Control"), Some("public, max-age=3600"));
+    // The page links its stylesheet by a content tag; that exact URL is immutable, the bare one is not.
+    let sheet = public.body.split("href=\"").find(|s| s.starts_with("/assets/app.css?v=")).expect("a tagged stylesheet link").split('"').next().unwrap().to_owned();
+    let tagged = http(port, "GET", &sheet, &[], "");
+    assert_eq!(tagged.header("Cache-Control"), Some("public, max-age=31536000, immutable"));
+    assert_eq!(tagged.header("Content-Type"), Some("text/css; charset=utf-8"));
+    assert_eq!(http(port, "GET", "/assets/app.css", &[], "").header("Cache-Control"), Some("public, max-age=3600"));
+    assert_eq!(http(port, "GET", "/assets/app.css?v=stale", &[], "").header("Cache-Control"), Some("public, max-age=3600"));
+    assert!(public.header("Content-Security-Policy").unwrap().contains("script-src 'self' 'sha256-"), "the head script is allowed by hash, not unsafe-inline");
     assert_eq!(http(port, "GET", "/healthz", &[], "").body, "ok");
 }
 
@@ -296,8 +304,9 @@ fn a_login_code_opens_one_session_whose_terminal_runs_as_the_member_until_logout
 /// grain's origin in a form). A stand-in body (the real helper spawns it on its root-only listener
 /// exactly as it spawns `mini web --body`) answers with planted titles, a form that posts to
 /// another origin, and redirects elsewhere; the real gateway must keep every one inert: the title
-/// escaped in the shell, the CSP forbidding inline script, the session's CSRF token only in forms
-/// that post here, and no redirect off this origin.
+/// escaped in the shell, the CSP allowing no script but this origin's and the one audited head
+/// script (by its pinned hash), the session's CSRF token only in forms that post here, and no
+/// redirect off this origin.
 #[test]
 fn a_planted_body_answer_stays_inert_in_the_shell() {
     let helper = helper_binary();
@@ -391,7 +400,9 @@ while True:
     assert!(page.body.contains("&lt;/title&gt;&lt;script&gt;alert(1)&lt;/script&gt;[U+202E]gnp.exe"), "{}", page.body);
     let csp = page.header("Content-Security-Policy").expect("a CSP");
     let script = csp.split(';').map(str::trim).find(|d| d.starts_with("script-src")).expect("a script-src");
-    assert_eq!(script, "script-src 'self'", "no inline script, no eval, no other origin: {csp}");
+    // The one inline script every page may run is the shell's constant head script (page::EARLY_JS,
+    // held script-to-hash by a page.rs unit test); the body's words change nothing here.
+    assert_eq!(script, "script-src 'self' 'sha256-Du+OJKJSbdUgz5nrHeWWINvez6XKDDU/tyj/5c2uvwo='", "no script but this origin's files and the one audited head script: {csp}");
     assert!(csp.contains("default-src 'none'") && csp.contains("base-uri 'none'") && csp.contains("frame-ancestors 'none'"), "{csp}");
     assert!(csp.contains("form-action 'self' https://*.demo.dregg.online"), "a grain's bootstrap may post to the grain origins and nowhere else: {csp}");
     let stage = page.body.split("<main").nth(1).unwrap();

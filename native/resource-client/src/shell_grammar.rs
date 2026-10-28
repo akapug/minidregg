@@ -221,7 +221,7 @@ pub static CREDIT: Grammar = Grammar { verb: "credit", leaves: &[
 ] };
 pub static TARIFF: Grammar = Grammar { verb: "tariff", leaves: &[
     Leaf { path: &["tariff"], args: &[arg("ROOM", Kind::Ref)], flags: &[], effect: Effect::Read, about: "mini credit --action tariff --room ROOM (a signed read of the room cell's tariff fields)" },
-    Leaf { path: &["tariff"], args: &[arg("ROOM", Kind::Ref), arg("set", Kind::Choice(&["set"])), arg("week|birth|hermes/turn|period|open|hermes/provider", Kind::Choice(&["week", "birth", "hermes/turn", "period", "open", "hermes/provider"])), arg("N", Kind::Number)], flags: &[], effect: Effect::Transition, about: "mini credit --action tariff --set FIELD --value N (one scalar turn on the room cell: only its founder holds write)" },
+    Leaf { path: &["tariff"], args: &[arg("ROOM", Kind::Ref), arg("set", Kind::Choice(&["set"])), arg("week|birth|hermes/turn|period|open|hermes/provider|hermes/tools|hermes/compute", Kind::Choice(&["week", "birth", "hermes/turn", "period", "open", "hermes/provider", "hermes/tools", "hermes/compute"])), arg("N", Kind::Number)], flags: &[], effect: Effect::Transition, about: "mini credit --action tariff --set FIELD --value N (one scalar turn on the room cell: only its founder holds write)" },
 ] };
 pub static TOPUP: Grammar = Grammar { verb: "topup", leaves: &[
     Leaf { path: &["topup"], args: &[arg("ROOM", Kind::Ref), arg("N", Kind::Number), opt("hermes|concierge", Kind::Choice(&["hermes", "concierge"])), opt("again", Kind::Choice(&["again"]))], flags: &[valued("--account", "REF", Kind::Id)], effect: Effect::Transition, about: "mini credit --action topup --room ROOM --amount N [--to hermes|concierge] (one fleet transfer to Hermes's budget account when the room has a Hermes, else to the concierge's runner account)" },
@@ -257,6 +257,8 @@ pub static BEND: Grammar = Grammar { verb: "bend", leaves: &[
     Leaf { path: &["bend", "lookup"], args: &[arg("NAME", Kind::Id)], flags: &[], effect: Effect::Read, about: "mini bend --action lookup: the receipt-only lookup (Host op 213) of the retained ingress of NAME's last publish or run attempt; absence never submits (--lose-reply-once on publish or run: a client-side fault that writes the exact call and never reads the answer)" },
     Leaf { path: &["bend", "retry"], args: &[arg("NAME", Kind::Id)], flags: &[], effect: Effect::Transition, about: "mini bend --action retry: the exact retained bytes of NAME's last attempt submitted again (a replay, never a new nonce)" },
     Leaf { path: &["bend", "show"], args: &[arg("OBJECT", Kind::Ref)], flags: &[], effect: Effect::Read, about: "mini bend --action show: the public view of OBJECT (its pin, declared state, activity record and purse)" },
+    Leaf { path: &["bend", "await"], args: &[arg("OBJECT", Kind::Word), arg("TRANSACTION", Kind::Word)], flags: &[], effect: Effect::Read, about: "mini bend --action await: the activity a birth TRANSACTION made on object cell OBJECT, as JSON: its phase and, while it awaits a reply, the answer slot, its decider and deadline, and the object's declared state" },
+    Leaf { path: &["bend", "answer"], args: &[arg("SLOT", Kind::Word), arg("@FILE", Kind::File)], flags: &[], effect: Effect::Transition, about: "mini bend --action answer: decide answer slot SLOT with the answer in HOME/requests/FILE ({\"reply\": DATA} | {\"refused\": REASON}), one resolve turn signed by me; only the slot's decider is admitted (notDecider), once (a decided slot refuses)" },
 ] };
 pub static JOBS: Grammar = Grammar { verb: "jobs", leaves: &[
     Leaf { path: &["jobs"], args: &[arg("ROOM", Kind::Id)], flags: &[], effect: Effect::Read, about: "mini job --action list --dir WS --room ROOM" },
@@ -356,6 +358,15 @@ pub static CHAT: Grammar = Grammar { verb: "chat", leaves: &[
     Leaf { path: &["chat", "enter"], args: &[arg("ROOM", Kind::Word)], flags: &[], effect: Effect::Local, about: "make ROOM the current room" },
     Leaf { path: &["chat", "rooms"], args: &[], flags: &[], effect: Effect::Local, about: "local: the rooms this session holds" },
     Leaf { path: &["chat", "name"], args: &[arg("SUBJECT", Kind::Subject), arg("NAME", Kind::Word)], flags: &[], effect: Effect::Local, about: "local: a petname for a subject" },
+] };
+/// `feedback`: one report from the member, a signed turn in the member's own feedback room (the operator
+/// founds that room and holds the only other seat; chat.rs `Line::Feedback`). `reports` is the
+/// operator's reading of every such room, newest context included.
+pub static FEEDBACK: Grammar = Grammar { verb: "feedback", leaves: &[
+    Leaf { path: &["feedback"], args: &[arg("TEXT", Kind::Rest)], flags: &[valued("--from", "ATTEMPT", Kind::Id), valued("--clause", "CLAUSE", Kind::Word), valued("--page", "PATH", Kind::Word), valued("--via", "NETWORK", Kind::Word)], effect: Effect::Transition, about: "append {\"type\":\"feedback\",\"text\":TEXT,\"client\":VERSION,\"sha\":CANDIDATE} to my stream in my feedback room (propose + submit); --from ATTEMPT, --clause and --page record where the problem was met" },
+] };
+pub static REPORTS: Grammar = Grammar { verb: "reports", leaves: &[
+    Leaf { path: &["reports"], args: &[], flags: &[valued("--since", "HEIGHT", Kind::Number), valued("-n", "N", Kind::Number), switch("--digest"), switch("--json")], effect: Effect::Read, about: "signed tails of every feedback-NAME room this session founded, merged by height; --digest: one line per report (height, member, first 120 characters)" },
 ] };
 pub static SUMMON: Grammar = Grammar { verb: "summon", leaves: &[
     Leaf { path: &["summon"], args: &[arg("ROOM", Kind::Word), arg("as", Kind::Choice(&["as"])), arg("librarian|gm|runner", Kind::Choice(&["librarian", "gm", "runner"]))], flags: &[valued("--budget", "N", Kind::Number), valued("--every", "N", Kind::Number), valued("--program", "@FILE", Kind::Word), valued("--hermes", "SUBJECT", Kind::Subject), dangerous("--i-know")], effect: Effect::Transition, about: "founder: the till (if none), Hermes's budget account funded N from mine, Hermes on the roster (chat invite), the role's documents and grants, the program document ROOM-hermes-ROLE, the room's hermes fields, the hand-off in HOME/outbox/H" },
@@ -486,9 +497,16 @@ pub static BOARD: Grammar = Grammar { verb: "board", leaves: &[
     Leaf { path: &["board", "take"], args: &[arg("ID", Kind::Id), arg("BOARD", Kind::Ref), arg("TASK", Kind::Number)], flags: &[], effect: Effect::Propose, about: "propose (action invoke: the task's owner field 2*TASK+3 := me)" },
 ] };
 
-pub static GRAMMARS: &[&Grammar] = &[&BOARD, &KEY, &KEYGEN, &KEY_STATUS, &ADOPT_NEXT_KEY, &ROTATE_KEY, &INIT, &ENROLL, &PROVISION, &CREATE, &INVOKE, &KIND, &PROGRAM, &INSTANCE, &APP, &FORGET, &APPS, &DOC, &ROOM, &DELEGATE, &REVOKE, &RENOUNCE, &LAW, &PAY, &CREDIT, &TARIFF, &TOPUP, &MARKET, &BID, &REVEAL, &BIDS, &JOB, &JOBS, &BEND,
+/// `private-compute`: the research-labelled in-process four-party computation (private-backend R1).
+/// A local computation: no Host call, no admission. The label is part of the operation words, so
+/// help, the web form and the page all carry it.
+pub static PRIVATE_COMPUTE: Grammar = Grammar { verb: "private-compute", leaves: &[
+    Leaf { path: &["private-compute"], args: &[arg("LEFT", Kind::Number), arg("RIGHT", Kind::Number)], flags: &[], effect: Effect::Local, about: "local: RESEARCH DEMONSTRATION, single process, n = 4, static f = 1, no simulator, no GOD: four holders in one process add LEFT and RIGHT (each 0..255), none seeing either input, and one curious holder's log is shown as the evidence (about 15 seconds; never an admission, never a service)" },
+] };
+
+pub static GRAMMARS: &[&Grammar] = &[&PRIVATE_COMPUTE, &BOARD, &KEY, &KEYGEN, &KEY_STATUS, &ADOPT_NEXT_KEY, &ROTATE_KEY, &INIT, &ENROLL, &PROVISION, &CREATE, &INVOKE, &KIND, &PROGRAM, &INSTANCE, &APP, &FORGET, &APPS, &DOC, &ROOM, &DELEGATE, &REVOKE, &RENOUNCE, &LAW, &PAY, &CREDIT, &TARIFF, &TOPUP, &MARKET, &BID, &REVEAL, &BIDS, &JOB, &JOBS, &BEND,
     &PROPOSE, &SUBMIT, &LOOKUP, &RETRY, &ATTEMPT, &PUBLISH, &HISTORY, &CAN, &INSPECT, &WHY, &REFS, &READ, &DESCRIBE, &IMPORT, &EXPORT, &INBOX, &HOME, &WHOAMI, &HELP, &EXIT,
-    &SAY, &TAIL, &TOPIC, &PIN, &UNPIN, &REACT, &CHAT, &SUMMON, &ASK, &HERMES, &DISMISS, &STORY, &LOOK, &GO, &TAKE, &ACT, &NARRATE];
+    &SAY, &TAIL, &TOPIC, &PIN, &UNPIN, &REACT, &CHAT, &FEEDBACK, &REPORTS, &SUMMON, &ASK, &HERMES, &DISMISS, &STORY, &LOOK, &GO, &TAKE, &ACT, &NARRATE];
 
 pub fn grammar(verb: &str) -> Option<&'static Grammar> {
     GRAMMARS.iter().copied().find(|g| g.verb == verb)
@@ -732,6 +750,26 @@ fn parse_rest(g: &Grammar, leaf: &'static Leaf, mut rest: &str) -> Result<Parsed
         let end = trimmed.find(char::is_whitespace).unwrap_or(trimmed.len());
         Some((trimmed[..end].to_owned(), skipped + end))
     };
+    // A flag's value is one word, or a double-quoted string with `\\` and `\"` escapes (the
+    // web forms quote every value that is not a plain word, `web::body::quote`).
+    let next_value = |text: &str| -> Option<(String, usize)> {
+        let trimmed = text.trim_start();
+        let skipped = text.len() - trimmed.len();
+        let Some(inner) = trimmed.strip_prefix('"') else { return next_word(text) };
+        let mut out = String::new();
+        let mut chars = inner.char_indices();
+        while let Some((i, c)) = chars.next() {
+            match c {
+                '\\' => match chars.next() {
+                    Some((_, e @ ('\\' | '"'))) => out.push(e),
+                    _ => return None,
+                },
+                '"' => return Some((out, skipped + 1 + i + 1)),
+                c => out.push(c),
+            }
+        }
+        None
+    };
     loop {
         let position = args.len();
         if let Some(a) = leaf.args.get(position) {
@@ -742,7 +780,7 @@ fn parse_rest(g: &Grammar, leaf: &'static Leaf, mut rest: &str) -> Result<Parsed
                     rest = &rest[used..];
                     match f.value {
                         Some((placeholder, kind)) => {
-                            let (v, used) = next_word(rest).ok_or_else(|| usage(g))?;
+                            let (v, used) = next_value(rest).ok_or_else(|| usage(g))?;
                             check(kind, &v, placeholder)?;
                             flags.push((f.name, Some(v)));
                             rest = &rest[used..];
@@ -768,7 +806,7 @@ fn parse_rest(g: &Grammar, leaf: &'static Leaf, mut rest: &str) -> Result<Parsed
             rest = &rest[used..];
             match f.value {
                 Some((placeholder, kind)) => {
-                    let (v, used) = next_word(rest).ok_or_else(|| usage(g))?;
+                    let (v, used) = next_value(rest).ok_or_else(|| usage(g))?;
                     check(kind, &v, placeholder)?;
                     flags.push((f.name, Some(v)));
                     rest = &rest[used..];
@@ -980,5 +1018,15 @@ mod tests {
         let w = words("topup lab 5 again");
         let p = parse(&TOPUP, &w).unwrap();
         assert_eq!((p.opt(2), p.opt(3)), (None, Some("again")));
+    }
+
+    #[test]
+    fn a_flag_value_may_be_a_quoted_string() {
+        let p = parse_line(&FEEDBACK, r#"feedback --clause "a b \"c\" \\ d" --from w-1 text here"#).unwrap();
+        assert_eq!(p.flag("--clause").flatten(), Some(r#"a b "c" \ d"#));
+        assert_eq!(p.flag("--from").flatten(), Some("w-1"));
+        assert_eq!(p.arg(0), "text here");
+        assert!(parse_line(&FEEDBACK, r#"feedback --clause "unterminated text"#).is_err());
+        assert!(parse_line(&FEEDBACK, "feedback --from").is_err());
     }
 }

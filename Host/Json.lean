@@ -1567,12 +1567,32 @@ private def clockTicker (path : String) (json : Lean.Json) : Result NativeHostGe
   pure ⟨⟨← nat (path ++ ".subject") (← field path "subject" obj)⟩,
     ⟨← nat (path ++ ".capability") (← field path "capability" obj)⟩⟩
 
+/-- The genesis platform record's fields (genesis source v8): `ownerBudget`, `lifetime`,
+`grainBirthTariff` (`null` or `{base, perBirth}`) and `completionCustodianKey` (`null` or hex). -/
+private def platformGenesis (path : String) (json : Lean.Json) :
+    Result (Option NativeHost.GrainBirthTariffPin × Option (List UInt8) × Nat × Nat) := do
+  let obj ← exactObject path ["ownerBudget", "lifetime", "grainBirthTariff", "completionCustodianKey"] json
+  let grain ← match ← field path "grainBirthTariff" obj with
+    | .null => pure none
+    | value => do
+        let pinPath := path ++ ".grainBirthTariff"
+        let pin ← exactObject pinPath ["base", "perBirth"] value
+        pure (some (⟨← nat (pinPath ++ ".base") (← field pinPath "base" pin),
+          ← nat (pinPath ++ ".perBirth") (← field pinPath "perBirth" pin)⟩ :
+          NativeHost.GrainBirthTariffPin))
+  let key ← match ← field path "completionCustodianKey" obj with
+    | .null => pure none
+    | value => pure (some (← decodeHex (path ++ ".completionCustodianKey") value))
+  pure (grain, key, ← nat (path ++ ".ownerBudget") (← field path "ownerBudget" obj),
+    ← nat (path ++ ".lifetime") (← field path "lifetime" obj))
+
 private def genesis (path : String) (json : Lean.Json) : Result NativeHostGenesis.Config := do
   let names := ["domain", "factoryId", "resourceBookId", "authorityCellId", "federation",
     "tariffBase", "tariffPerBirth", "tariffPerGrant", "tariffPerInitialPayloadByte",
     "collector", "asset", "expectedSemantics", "issuerEpoch", "genesisHeight",
     "factoryPredicate", "enrollments", "factoryControllerSubject",
-    "factoryControllerCapability", "meterAllowance", "clockTickers", "tailBound", "clockGenesisNow", "clockMaxStepSeconds", "issuanceCap", "payControlCapability"]
+    "factoryControllerCapability", "meterAllowance", "clockTickers", "tailBound", "clockGenesisNow", "clockMaxStepSeconds", "issuanceCap", "payControlCapability",
+    "clockControlCapability", "platform"]
   let observed := (json.getObjVal? "payObserver").toOption.isSome
   let obj ← exactObject path (if observed then names ++ ["payObserver"] else names) json
   let payObserver ← if observed then do
@@ -1590,6 +1610,8 @@ private def genesis (path : String) (json : Lean.Json) : Result NativeHostGenesi
   let clockMaxStepSeconds ← nat (path ++ ".clockMaxStepSeconds") (← field path "clockMaxStepSeconds" obj)
   unless 0 < clockMaxStepSeconds do
     throw s!"{path}.clockMaxStepSeconds must be positive"
+  let (platformGrainBirth, platformCustodianKey, platformOwnerBudget, platformLifetime) ←
+    platformGenesis (path ++ ".platform") (← field path "platform" obj)
   let tailBound ← nat (path ++ ".tailBound") (← field path "tailBound" obj)
   unless 0 < tailBound do
     throw s!"{path}.tailBound must be positive: with L = 0 no record but a certify is ever admitted"
@@ -1617,12 +1639,18 @@ private def genesis (path : String) (json : Lean.Json) : Result NativeHostGenesi
     meterAllowance := ← charge (path ++ ".meterAllowance") (← field path "meterAllowance" obj)
     payControlCapabilityId :=
       ⟨← nat (path ++ ".payControlCapability") (← field path "payControlCapability" obj)⟩
+    clockControlCapabilityId :=
+      ⟨← nat (path ++ ".clockControlCapability") (← field path "clockControlCapability" obj)⟩
     payObserver := payObserver
     clockTickers := ← list (path ++ ".clockTickers") clockTicker (← field path "clockTickers" obj)
     tailBound := tailBound
     clockGenesisNow := clockGenesisNow
     clockMaxStepSeconds := clockMaxStepSeconds
-    issuanceCap := ← nat (path ++ ".issuanceCap") (← field path "issuanceCap" obj) }
+    issuanceCap := ← nat (path ++ ".issuanceCap") (← field path "issuanceCap" obj)
+    platformGrainBirth := platformGrainBirth
+    platformCustodianKey := platformCustodianKey
+    platformOwnerBudget := platformOwnerBudget
+    platformLifetime := platformLifetime }
 
 private def funding (path : String) (json : Lean.Json) : Result ResourceBirth.InitialFunding := do
   let obj ← exactObject path ["source", "destination", "asset", "amount"] json

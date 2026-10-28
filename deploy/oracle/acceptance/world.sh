@@ -16,7 +16,8 @@ world_source_manifest() {
     "$repo/deploy/oracle/acceptance/agent-allocation.json" "$repo/scripts/oracle-agent-lifetime-journey.sh" \
     "$repo/scripts/oracle-stop-inspection-probe.py" "$repo/scripts/oracle-agent-authority-probe.py" \
     "$repo/scripts/spk-platform/grain-journey.sh" "$repo/scripts/spk-platform/grain-store.sh" \
-    "$repo/scripts/spk-platform/prepare-lifetime-route.sh" "$repo/scripts/spk-platform/agent-genesis-overlay.sh" \
+    "$repo/scripts/spk-platform/prepare-lifetime-route.sh" "$repo/scripts/spk-platform/check-agent-allocation.sh" \
+    "$repo/scripts/workroom/agent-enrollment.sh" \
     "$repo/deploy/spk-host/install-user-world" "$repo/deploy/spk-host/controller-world.py"
 }
 

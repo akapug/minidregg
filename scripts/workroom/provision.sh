@@ -10,11 +10,12 @@ fi
 
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 REPO=$(CDPATH='' cd -- "$HERE/../.." && pwd)
-# The grain and share overlays run a STAGED copy of this file, whose own path does not reach the tree:
+# Grain and share wrappers run a staged copy whose own path does not reach the tree:
 # the script that staged it exports GENESIS_PARAMS_TREE (the real source tree) for it.
 GENESIS_PARAMS_TREE=${GENESIS_PARAMS_TREE:-$REPO}
 . "$GENESIS_PARAMS_TREE/native/resource-client/journey.d/lib/genesis-params.sh"
 resolve_params_sh "$GENESIS_PARAMS_TREE" || exit 2
+. "$GENESIS_PARAMS_TREE/scripts/workroom/agent-enrollment.sh"
 HOST=$1
 EVIDENCE=$2
 MINI=${MINI:-"$REPO/native/resource-client/target/debug/mini"}
@@ -26,16 +27,41 @@ WORKROOM_SPONSOR_BALANCE=${WORKROOM_SPONSOR_BALANCE-100}
 WORKROOM_TOOL_BALANCE=${WORKROOM_TOOL_BALANCE-100}
 WORKROOM_PARENT_BUDGET=${WORKROOM_PARENT_BUDGET-100}
 WORKROOM_TOOL_BUDGET=${WORKROOM_TOOL_BUDGET-50}
+WORKROOM_TARIFF_PER_INITIAL_PAYLOAD_BYTE=${WORKROOM_TARIFF_PER_INITIAL_PAYLOAD_BYTE-0}
 # Optional deployment policy is applied before profile/genesis identity. It
 # cannot replace Store coordinates or add old single-application lifecycle pins.
 WORKROOM_OPERATOR_POLICY=${WORKROOM_OPERATOR_POLICY-}
+WORKROOM_FACTORY_PREDICATE=${WORKROOM_FACTORY_PREDICATE-}
+WORKROOM_EXPECTED_OPERATOR_CONFIG=${WORKROOM_EXPECTED_OPERATOR_CONFIG-}
+WORKROOM_INCLUDE_MEMBER=${WORKROOM_INCLUDE_MEMBER-0}
+WORKROOM_AGENT_ALLOCATION=${WORKROOM_AGENT_ALLOCATION-}
+MEMBER_INITIAL_BALANCE=${MEMBER_INITIAL_BALANCE-100}
 WORKROOM_PAY_OBSERVER=${WORKROOM_PAY_OBSERVER-}
-for value in "$WORKROOM_SPONSOR_BALANCE" "$WORKROOM_TOOL_BALANCE" "$WORKROOM_PARENT_BUDGET" "$WORKROOM_TOOL_BUDGET"; do
+# This scenario takes optional enrollments through its WORKROOM inputs only.
+GENESIS_PAY_OBSERVER=
+EXTRA_CLOCK_TICKERS=
+export GENESIS_PAY_OBSERVER EXTRA_CLOCK_TICKERS
+case "$WORKROOM_INCLUDE_MEMBER" in 0|1) ;; *) echo "WORKROOM_INCLUDE_MEMBER must be 0 or 1" >&2; exit 2;; esac
+if [ -n "$WORKROOM_AGENT_ALLOCATION" ]; then
+  workroom_agent_validate "$WORKROOM_AGENT_ALLOCATION"
+fi
+for value in "$WORKROOM_SPONSOR_BALANCE" "$WORKROOM_TOOL_BALANCE" "$WORKROOM_PARENT_BUDGET" "$WORKROOM_TOOL_BUDGET" "$WORKROOM_TARIFF_PER_INITIAL_PAYLOAD_BYTE" "$MEMBER_INITIAL_BALANCE"; do
   case "$value" in ''|0?*|*[!0-9]*) echo "allocation must be canonical decimal" >&2; exit 2;; esac
 done
 if [ -n "$WORKROOM_OPERATOR_POLICY" ]; then
   case "$WORKROOM_OPERATOR_POLICY" in /*) ;; *) echo "operator policy must be absolute" >&2; exit 2;; esac
-  jq -e 'type == "object" and (keys - ["completionCustodianKey","lifecycleManagement","grainBirthTariff","providerServices","disabledEvaluators"] | length == 0)' "$WORKROOM_OPERATOR_POLICY" >/dev/null || { echo "unsupported operator policy field" >&2; exit 2; }
+  jq -se 'length == 1 and (.[0] | type == "object" and (keys - ["completionCustodianKey","lifecycleManagement","grainBirthTariff","providerServices","disabledEvaluators","agentLifetimeDispatchTargets"] | length == 0))' "$WORKROOM_OPERATOR_POLICY" >/dev/null || { echo "unsupported operator policy field or document" >&2; exit 2; }
+fi
+if [ -n "$WORKROOM_FACTORY_PREDICATE" ]; then
+  case "$WORKROOM_FACTORY_PREDICATE" in /*) ;; *) echo "factory predicate must be absolute" >&2; exit 2;; esac
+  [ -f "$WORKROOM_FACTORY_PREDICATE" ] && [ ! -L "$WORKROOM_FACTORY_PREDICATE" ] || exit 2
+  jq -se 'length == 1 and (.[0] | type == "object")' "$WORKROOM_FACTORY_PREDICATE" >/dev/null || exit 2
+fi
+
+if [ -n "$WORKROOM_EXPECTED_OPERATOR_CONFIG" ]; then
+  case "$WORKROOM_EXPECTED_OPERATOR_CONFIG" in /*) ;; *) echo "expected operator config must be absolute" >&2; exit 2;; esac
+  [ -f "$WORKROOM_EXPECTED_OPERATOR_CONFIG" ] && [ ! -L "$WORKROOM_EXPECTED_OPERATOR_CONFIG" ] || exit 2
+  jq -se 'length == 1 and (.[0] | type == "object")' "$WORKROOM_EXPECTED_OPERATOR_CONFIG" >/dev/null || exit 2
 fi
 
 canonical_task() {
@@ -43,11 +69,16 @@ canonical_task() {
     ''|0*|*[!0-9]*) echo "task ID must be a canonical positive decimal: $1" >&2; exit 2 ;;
   esac
   case "$1" in
-    7|8|10|11|12|7003|8001) echo "task ID collides with a provisioned resource: $1" >&2; exit 2 ;;
+    7|8|10|11|12|70|7003|8001) echo "task ID collides with a provisioned resource: $1" >&2; exit 2 ;;
   esac
 }
 canonical_task "$WORKROOM_PARENT_TASK"
 canonical_task "$WORKROOM_TOOL_TASK"
+if [ "$WORKROOM_INCLUDE_MEMBER" = 1 ]; then
+  case "$WORKROOM_PARENT_TASK:$WORKROOM_TOOL_TASK" in
+    9:*|7503:*|*:9|*:7503) echo "task ID collides with member resources" >&2; exit 2;;
+  esac
+fi
 [ "$WORKROOM_PARENT_TASK" != "$WORKROOM_TOOL_TASK" ] || {
   echo "parent and tool task IDs must differ" >&2; exit 2;
 }
@@ -57,7 +88,7 @@ if [ -n "$WORKROOM_PAY_OBSERVER" ]; then
     (keys | sort) == (["subject","keyId","account","spendCapability","controlCapability","factoryObserveCapability","capability","payControlCapability","enrolCapability"] | sort) and
     all(.[]; type == "string" and test("^[1-9][0-9]*$")) and
     ([.[]] | length == (unique | length)) and
-    ([.[]] - ["5","7","8","9","10","11","12","41","42","51","52","53","54","55","71","72","73","81","82","89","90","91","92","93","94","7003","8001","7007","8008",$parent,$tool] | length == 9)
+    ([.[]] - ["5","7","8","9","10","11","12","70","7070","9009","43","56","57","4031","4093","4071","4072","4073","4074","41","42","51","52","53","54","55","71","72","73","81","82","89","90","91","92","93","94","7003","8001","7007","8008",$parent,$tool] | length == 9)
   ' "$WORKROOM_PAY_OBSERVER" >/dev/null || { echo "invalid or colliding pay observer allocation" >&2; exit 2; }
 fi
 
@@ -115,60 +146,85 @@ CONTROLLER_PUBLIC=$(od -An -tx1 -v "$EVIDENCE/controller.pub" | tr -d ' \n')
 TOOL_PUBLIC=$(od -An -tx1 -v "$EVIDENCE/tool.pub" | tr -d ' \n')
 test "$CONTROLLER_PUBLIC" != "$TOOL_PUBLIC"
 
-cat >"$EVIDENCE/operator.json" <<EOF
-{"domain":8501,"federation":9,"factoryId":10,"resourceBookId":11,
- "authorityCellId":12,"issuer":5,"ownerBudget":100000,"lifetime":10000,
- "tariffBase":3,"tariffPerBirth":2,"tariffPerGrant":1,
- "tariffPerInitialPayloadByte":0,"collector":99,"asset":0,
- "genesisHeight":10,"expectedSeed":0,"storageBinary":"$STORE_BINARY",
- "storageRoot":"$EVIDENCE/store","signatureBinary":"$SIGNATURE_BINARY"}
-EOF
-if [ -n "$WORKROOM_OPERATOR_POLICY" ]; then
-  jq --slurpfile policy "$WORKROOM_OPERATOR_POLICY" '. + $policy[0]' "$EVIDENCE/operator.json" >"$EVIDENCE/operator-with-policy.json"
-  mv "$EVIDENCE/operator-with-policy.json" "$EVIDENCE/operator.json"
+# Enrollments are data supplied to the shared genesis template. This script
+# chooses scenario coordinates; genesis.sh owns the serialized source format.
+jq -n --arg public "$TOOL_PUBLIC" --arg balance "$WORKROOM_TOOL_BALANCE" '
+  [{subject:8,keyId:8008,publicKey:$public,accountId:8,
+    spendCapabilityId:42,controlCapabilityId:52,factoryObserveCapabilityId:55,
+    initialBalance:$balance}]' >"$EVIDENCE/extra-enrollments.json"
+if [ "$WORKROOM_INCLUDE_MEMBER" = 1 ]; then
+  "$MINI" keygen --secret "$EVIDENCE/member.key" --public "$EVIDENCE/member.pub" >"$EVIDENCE/member-public.txt"
+  MEMBER_PUBLIC=$(od -An -tx1 -v "$EVIDENCE/member.pub" | tr -d ' \n')
+  jq --arg public "$MEMBER_PUBLIC" --arg balance "$MEMBER_INITIAL_BALANCE" '
+    . + [{subject:9,keyId:9009,publicKey:$public,accountId:9,
+      spendCapabilityId:43,controlCapabilityId:56,factoryObserveCapabilityId:57,
+      initialBalance:$balance}]' "$EVIDENCE/extra-enrollments.json" >"$EVIDENCE/extra-enrollments-member.json"
+  mv "$EVIDENCE/extra-enrollments-member.json" "$EVIDENCE/extra-enrollments.json"
 fi
-"$HOST" "$EVIDENCE/operator.json" profile >"$EVIDENCE/operator-profile.json"
-SEMANTICS=$(decimal "$EVIDENCE/operator-profile.json" semantics)
-cat >"$EVIDENCE/genesis.json" <<EOF
-{"domain":"8501","factoryId":"10","resourceBookId":"11",
- "authorityCellId":"12","federation":"9","tariffBase":"3",
- "tariffPerBirth":"2","tariffPerGrant":"1","tariffPerInitialPayloadByte":"0",
- "collector":"99","asset":"0","expectedSemantics":"$SEMANTICS",
- "issuerEpoch":"2","genesisHeight":"10",
- "factoryPredicate":{"type":"all","predicates":[]},
- "enrollments":[
-  {"key":{"keyId":"7007","keyEpoch":"2","algorithm":"1","subject":"7",
-    "publicKey":"$CONTROLLER_PUBLIC","activeFrom":"0","activeUntil":"1000000","nextKeyDigest":null},
-   "accountId":"7","spendCapabilityId":"41","controlCapabilityId":"51",
-   "factoryObserveCapabilityId":"54","initialBalance":"$WORKROOM_SPONSOR_BALANCE",
-   "accountPredicate":{"type":"all","predicates":[]}},
-  {"key":{"keyId":"8008","keyEpoch":"2","algorithm":"1","subject":"8",
-    "publicKey":"$TOOL_PUBLIC","activeFrom":"0","activeUntil":"1000000","nextKeyDigest":null},
-   "accountId":"8","spendCapabilityId":"42","controlCapabilityId":"52",
-   "factoryObserveCapabilityId":"55","initialBalance":"$WORKROOM_TOOL_BALANCE",
-   "accountPredicate":{"type":"all","predicates":[]}}],
- "factoryControllerSubject":"7","factoryControllerCapability":"53","clockTickers":[],
- "tailBound":"256","clockGenesisNow":"$(date +%s)","clockMaxStepSeconds":"300", "issuanceCap":"1000000000000000",
- "meterAllowance":{"incidences":"10000000","turnBytes":"10000000",
-   "memoryTouches":"10000000","witnessBytes":"10000000",
-   "proofWork":"10000000","storageBytes":"10000000",
-   "networkBytes":"10000000","sideEffectCount":"10000000",
-   "feeDebit":"10000000","leaseByteBlocks":"10000000"}}
-EOF
+if [ -n "$WORKROOM_AGENT_ALLOCATION" ]; then
+  cp "$WORKROOM_AGENT_ALLOCATION" "$EVIDENCE/agent-allocation.json"
+  WORKROOM_AGENT_ALLOCATION="$EVIDENCE/agent-allocation.json"
+  workroom_agent_validate "$WORKROOM_AGENT_ALLOCATION"
+  workroom_agent_prepare
+  jq --slurpfile agents "$EVIDENCE/agents/enrollments.json" '. + $agents[0]' \
+    "$EVIDENCE/extra-enrollments.json" >"$EVIDENCE/extra-enrollments-agents.json"
+  mv "$EVIDENCE/extra-enrollments-agents.json" "$EVIDENCE/extra-enrollments.json"
+fi
+if [ -n "$WORKROOM_OPERATOR_POLICY" ]; then
+  cp "$WORKROOM_OPERATOR_POLICY" "$EVIDENCE/operator-policy.json"
+else
+  printf '{}\n' >"$EVIDENCE/operator-policy.json"
+fi
+if [ -n "$WORKROOM_FACTORY_PREDICATE" ]; then
+  cp "$WORKROOM_FACTORY_PREDICATE" "$EVIDENCE/factory-predicate.json"
+else
+  printf '%s\n' '{"type":"all","predicates":[]}' >"$EVIDENCE/factory-predicate.json"
+fi
+# Clock capability IDs avoid the workroom's existing owner/control IDs.
+jq -n --argjson sponsor "$WORKROOM_SPONSOR_BALANCE" \
+  --argjson byteTariff "$WORKROOM_TARIFF_PER_INITIAL_PAYLOAD_BYTE" \
+  --slurpfile policy "$EVIDENCE/operator-policy.json" \
+  --slurpfile predicate "$EVIDENCE/factory-predicate.json" '
+  {sponsor:{initialBalance:$sponsor},tariffPerInitialPayloadByte:$byteTariff,
+   clock:{spendCapabilityId:4071,controlCapabilityId:4072,
+     factoryObserveCapabilityId:4073,tickCapabilityId:4074},
+   clockControlCapability:4093,operatorPolicy:$policy[0],factoryPredicate:$predicate[0]}' \
+  >"$EVIDENCE/scenario-overrides.json"
 if [ -n "$WORKROOM_PAY_OBSERVER" ]; then
   "$MINI" keygen --secret "$EVIDENCE/pay-observer.key" --public "$EVIDENCE/pay-observer.pub" --no-prerotation >"$EVIDENCE/pay-observer-public.txt"
   OBSERVER_PUBLIC=$(od -An -tx1 -v "$EVIDENCE/pay-observer.pub" | tr -d ' \n')
   jq --slurpfile observer "$WORKROOM_PAY_OBSERVER" --arg public "$OBSERVER_PUBLIC" '
-    $observer[0] as $o | .enrollments += [{
-      key:{keyId:$o.keyId,keyEpoch:"2",algorithm:"1",subject:$o.subject,publicKey:$public,activeFrom:"0",activeUntil:"1000000",nextKeyDigest:null},
-      accountId:$o.account,spendCapabilityId:$o.spendCapability,controlCapabilityId:$o.controlCapability,
-      factoryObserveCapabilityId:$o.factoryObserveCapability,initialBalance:"100",accountPredicate:{type:"all",predicates:[]}}] |
-    .payControlCapability=$o.payControlCapability |
-    .payObserver={subject:$o.subject,capability:$o.capability,enrolCapability:$o.enrolCapability}
-  ' "$EVIDENCE/genesis.json" >"$EVIDENCE/genesis-with-observer.json"
-  mv "$EVIDENCE/genesis-with-observer.json" "$EVIDENCE/genesis.json"
+    $observer[0] as $o | . + [{subject:$o.subject,keyId:$o.keyId,publicKey:$public,
+      accountId:$o.account,spendCapabilityId:$o.spendCapability,
+      controlCapabilityId:$o.controlCapability,factoryObserveCapabilityId:$o.factoryObserveCapability,
+      initialBalance:100}]' "$EVIDENCE/extra-enrollments.json" >"$EVIDENCE/extra-enrollments-observer.json"
+  mv "$EVIDENCE/extra-enrollments-observer.json" "$EVIDENCE/extra-enrollments.json"
+  jq --slurpfile observer "$WORKROOM_PAY_OBSERVER" \
+    '.payControlCapability = ($observer[0].payControlCapability|tonumber)' \
+    "$EVIDENCE/scenario-overrides.json" >"$EVIDENCE/scenario-with-observer.json"
+  mv "$EVIDENCE/scenario-with-observer.json" "$EVIDENCE/scenario-overrides.json"
+  jq '{subject,capability,enrolCapability}' "$WORKROOM_PAY_OBSERVER" >"$EVIDENCE/pay-observer-config.json"
+  GENESIS_PAY_OBSERVER="$EVIDENCE/pay-observer-config.json"
+  export GENESIS_PAY_OBSERVER
 fi
-sh "$GENESIS_PARAMS_SH" fill-source "$EVIDENCE/genesis.json"   # the genesis clock, chosen at genesis time
+SCENARIO_OVERLAY="del(.grainPlatform) | . * $(cat "$EVIDENCE/scenario-overrides.json")"
+HOST="$HOST" STORE="$STORE_BINARY" VERIFIER="$SIGNATURE_BINARY" MINI="$MINI" \
+  GENESIS_PARAMS_SH="$GENESIS_PARAMS_SH" \
+  sh "$GENESIS_PARAMS_TREE/native/resource-client/scenario-genesis.sh" \
+    "$EVIDENCE" "$CONTROLLER_PUBLIC" "$SCENARIO_OVERLAY" "$EVIDENCE/extra-enrollments.json"
+# Pure profile generation above creates no Store. Require exact agreement with
+# any pre-Store qualification config before submitting genesis to bootstrap.
+if [ -n "$WORKROOM_EXPECTED_OPERATOR_CONFIG" ]; then
+  jq -S . "$WORKROOM_EXPECTED_OPERATOR_CONFIG" >"$EVIDENCE/expected-operator-canonical.json"
+  jq -S . "$EVIDENCE/operator.json" >"$EVIDENCE/generated-operator-canonical.json"
+  cmp "$EVIDENCE/expected-operator-canonical.json" "$EVIDENCE/generated-operator-canonical.json" || {
+    echo "operator configuration differs from pre-Store qualification" >&2; exit 2;
+  }
+fi
+cp "$EVIDENCE/profile.json" "$EVIDENCE/operator-profile.json"
+SEMANTICS=$(decimal "$EVIDENCE/operator-profile.json" semantics)
+jq -e '([.enrollments[].key.publicKey] | unique | length) == (.enrollments | length)' \
+  "$EVIDENCE/genesis.json" >/dev/null
 "$MINI" bootstrap --host "$HOST" --config "$EVIDENCE/operator.json" \
   --source "$EVIDENCE/genesis.json" --dir "$EVIDENCE/deployment" >"$EVIDENCE/bootstrap.stdout"
 CONFIG="$EVIDENCE/deployment/pinned-config.json"
@@ -216,10 +272,22 @@ if jq -e 'has("grainBirthTariff")' "$CONFIG" >/dev/null; then
     "$EVIDENCE/birth-intent.json" >"$EVIDENCE/birth-with-policy.json"
   mv "$EVIDENCE/birth-with-policy.json" "$EVIDENCE/birth-intent.json"
 fi
+if [ "$WORKROOM_INCLUDE_MEMBER" = 1 ]; then
+  jq '.birth.resources += [{kind:"object",storage:"grain",target:"7503",
+    owner:"9",ownerCapability:"83",controlCapability:"84",budget:"50"}]' \
+    "$EVIDENCE/birth-intent.json" >"$EVIDENCE/birth-with-member.json"
+  mv "$EVIDENCE/birth-with-member.json" "$EVIDENCE/birth-intent.json"
+fi
+if [ -n "$WORKROOM_AGENT_ALLOCATION" ]; then
+  workroom_agent_extend_birth
+fi
 "$MINI" submit --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
   --intent "$EVIDENCE/birth-intent.json" --intent-kind birth-intent \
   --key "$EVIDENCE/controller.key" --dir "$EVIDENCE/birth-attempt" >"$EVIDENCE/birth.stdout"
 confirmed "$EVIDENCE/birth-attempt/outcome.json"
+if [ -n "$WORKROOM_AGENT_ALLOCATION" ]; then
+  workroom_agent_verify_birth
+fi
 query_task controller-born 7 "$WORKROOM_PARENT_TASK" 71 "$EVIDENCE/controller.key" 30001
 query_task tool-born 8 "$WORKROOM_TOOL_TASK" 81 "$EVIDENCE/tool.key" 30002
 query_task publication-born 7 7003 91 "$EVIDENCE/controller.key" 30009

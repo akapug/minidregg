@@ -56,6 +56,20 @@ inductive Reject where
   | preparation (reason : ResourceBirthController.Concrete.PreparationReject)
   | signature
   | policyUnavailable
+  /-- The branch request does not bind to the branch's resolved law
+  (`ComposedPolicyAdmission.bind`): target, head, domain, semantics or step differ, the
+  head's address is not the one the authority state commits to, or it is not a member of
+  the policy root. Checked before any verdict on the law. -/
+  | policyBinding
+  /-- The compiler cannot lower the branch's resolved law (`supported`). -/
+  | policyUnsupported
+  /-- An input the branch's law reads on the branch's step is out of the compiler's range
+  (`inputsInRange`). -/
+  | policyInputRange
+  /-- Two integers of the branch's step share one field image (`castInjOn`). -/
+  | policyCastAlias
+  /-- The branch's law evaluates false on the branch's step: the law's own verdict, once
+  binding, support, range and cast have passed (`Pending.admitBranch_policyRejected`). -/
   | policyRejected
   /-- A born grant's `ancestors` are not the lineage its birth requires: none
   for a root birth; for a birth under a room, the creator's presented placing
@@ -526,6 +540,8 @@ separate canonical signed ingress and requires each owner's current-key consent.
 inductive FactoryMethod where
   | ordinary
   | reserve
+  /-- Source-bound event27 only; never selected by the generic ingress decoder. -/
+  | lifetimeGrant
   deriving DecidableEq, Repr
 
 /-- No room-descendant scope and no ordinary verbs accompany reservation. -/
@@ -560,12 +576,49 @@ instance reserveTemplateBoundDecidable (template : CanonicalRuntimeProfile.Facto
   unfold ReserveTemplateBound
   infer_instance
 
+/-- Event27's additional authority can only observe its one newborn object.
+The special receiver additionally binds its holder and capability id to the
+source-authored lifetime grant. It is not an ordinary birth template. -/
+def LifetimeObserverGrant (grant : AuthorityGrant) (item : BirthItem Registry) : Prop :=
+  match grant with
+  | ⟨.object, capability⟩ =>
+      item.resourceKind = .object ∧
+      capability.head.scope.targets = .explicit {⟨item.create.cellId⟩} ∧
+      capability.head.scope.verbs = {.observeObject} ∧
+      capability.head.policyId.value = item.create.cellId ∧
+      capability.head.policyEpoch = 0
+  | _ => False
+
+/-- Exactly one object and exactly its owner, control, and read-only observer.
+All three retain the ordinary root issuer, epoch, window and budget bounds.
+There is no arbitrary extra-grant list or caller-supplied predicate. -/
+def LifetimeGrantTemplateBound (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (authority : AuthState) (height : Height) (descriptor : Descriptor Registry) : Prop :=
+  match descriptor.births, descriptor.grants with
+  | [item], [owner, control, observer] =>
+      (∀ grant ∈ descriptor.grants, RootGrantShape template authority height grant) ∧
+      NativeOwnerGrant owner item ∧ PolicyOwnerGrant control item ∧
+      LifetimeObserverGrant observer item
+  | _, _ => False
+
+instance lifetimeObserverGrantDecidable (grant : AuthorityGrant) (item : BirthItem Registry) :
+    Decidable (LifetimeObserverGrant grant item) := by
+  unfold LifetimeObserverGrant
+  split <;> infer_instance
+
+instance lifetimeGrantTemplateBoundDecidable (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (authority : AuthState) (height : Height) (descriptor : Descriptor Registry) :
+    Decidable (LifetimeGrantTemplateBound template authority height descriptor) := by
+  unfold LifetimeGrantTemplateBound
+  split <;> infer_instance
+
 def MethodTemplateBound (method : FactoryMethod)
     (template : CanonicalRuntimeProfile.FactoryTemplate)
     (authority : AuthState) (height : Height) (descriptor : Descriptor Registry) : Prop :=
   match method with
   | .ordinary => TemplateBound template authority height descriptor
   | .reserve => ReserveTemplateBound template authority height descriptor
+  | .lifetimeGrant => LifetimeGrantTemplateBound template authority height descriptor
 
 instance methodTemplateBoundDecidable (method : FactoryMethod)
     (template : CanonicalRuntimeProfile.FactoryTemplate)
@@ -1326,6 +1379,8 @@ def preparePending
     | ordinary => exact checkTemplate prepared height
     | reserve => exact require (ReserveTemplateBound profile.template
         (oldAuthority prepared) height descriptor) .grantTemplate
+    | lifetimeGrant => exact require (LifetimeGrantTemplateBound profile.template
+        (oldAuthority prepared) height descriptor) .grantTemplate
   let templateBound ← templateCheck
   let bornLineage ← require (BornLineage (placementLineage prepared.authority.snapshot.cell)
     descriptor) .roomLineage
@@ -1584,6 +1639,60 @@ structure BranchAccepted [DecidableEq F]
   modeBound : branchRequiresCapability branch = true →
     authorization.evidence.capabilityValue.isSome = true
 
+/-- The plan verdict on one resolved law: the compiler lowers it (`supported`), every input
+it reads on the configuration's step is in range (`inputsInRange`), the step's integers cast
+injectively (`castInjOn`), and the law evaluates true on that step. These are the checks
+`Pending.judgeBranch` makes after binding, in its order; the last is the law's own verdict. -/
+def planVerdict [DecidableEq F] {config : ComposedPolicyAdmission.Config F}
+    (law : ComposedPolicyAdmission.PreparedLaw config) : Bool :=
+  Minidregg.Compiler.supported config.profile.compiler law.predicate &&
+  Minidregg.Compiler.inputsInRange config.profile.compiler law.predicate
+    config.step.oldState config.step.newState &&
+  decide (Minidregg.Compiler.castInjOn F
+    (Minidregg.Compiler.intsOf law.predicate config.step.oldState config.step.newState)) &&
+  Minidregg.Pred.eval law.predicate config.step.oldState config.step.newState
+
+/-- A branch's policy judgement, after its capability or signature evidence: epoch and
+revision current, the law resolved, the request bound to it (`ComposedPolicyAdmission.bind`,
+refused as `policyBinding`), the compiler's three verdicts on the branch's step (refused
+as `policyUnsupported`, `policyInputRange`, `policyCastAlias`), and only then the law's
+own verdict through `law.admit` (refused as `policyRejected`). The authorization is
+`law.admit`'s, unchanged. -/
+def Pending.judgeBranch [DecidableEq F]
+    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {height : Height} (pending : Pending prepared height) (branch : Branch descriptor)
+    (evidence : Evidence (pending.branchConfig branch).portal (oldAuthority prepared)
+      (branchRequest prepared height branch).2) :
+    Except Reject (Authorized (pending.branchConfig branch).portal (oldAuthority prepared)
+      (branchRequest prepared height branch).2) :=
+  let wanted := branchRequest prepared height branch
+  let config := pending.branchConfig branch
+  let old := oldAuthority prepared
+  if epoch : wanted.2.policyEpoch = old.policyEpoch wanted.2.policyId then
+    if revision : wanted.2.policyRevision = old.policyRevision wanted.2.policyId then
+      match config.resolve? with
+      | none => .error .policyUnavailable
+      | some law =>
+          match ComposedPolicyAdmission.bind config wanted.2 evidence law
+              (.policy wanted.2.policyId wanted.2.policyRevision) epoch revision with
+          | none => .error .policyBinding
+          | some _ =>
+            if Minidregg.Compiler.supported config.profile.compiler law.predicate = false then
+              .error .policyUnsupported
+            else if Minidregg.Compiler.inputsInRange config.profile.compiler law.predicate
+                config.step.oldState config.step.newState = false then
+              .error .policyInputRange
+            else if ¬ Minidregg.Compiler.castInjOn F (Minidregg.Compiler.intsOf law.predicate
+                config.step.oldState config.step.newState) then
+              .error .policyCastAlias
+            else
+              match law.admit wanted.2 evidence law.witness
+                  (.policy wanted.2.policyId wanted.2.policyRevision) epoch revision with
+              | none => .error .policyRejected
+              | some admitted => .ok admitted
+    else .error .policyUnavailable
+  else .error .policyUnavailable
+
 def Pending.admitBranch [DecidableEq F]
     {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
     {height : Height} (pending : Pending prepared height) (branch : Branch descriptor)
@@ -1619,36 +1728,25 @@ def Pending.admitBranch [DecidableEq F]
             else .error .signature
           else .error .signature
         else .error .credentialShape
-  if epoch : wanted.2.policyEpoch = old.policyEpoch wanted.2.policyId then
-    if revision : wanted.2.policyRevision = old.policyRevision wanted.2.policyId then
-      match config.resolve? with
-      | none => .error .policyUnavailable
-      | some law =>
-          let witness := law.witness
-          match law.admit wanted.2 evidence witness
-              (.policy wanted.2.policyId wanted.2.policyRevision) epoch revision with
-          | none => .error .policyRejected
-          | some admitted =>
-              let authorization := pending.liftAuthorization branch admitted
-              if modeBound : branchRequiresCapability branch = true →
-                  authorization.evidence.capabilityValue.isSome = true then
-                let accepted : BranchAccepted pending branch :=
-                  { credential := credential
-                    receipt := receipt
-                    envelopeExact := envelopeExact.down
-                    source := source
-                    sourceGuard := source.readGuard
-                    sourceGuardExact := rfl
-                    lawGuards := guards.val
-                    lawGuardsExact := guards.property
-                    lawGuardsBound := guardsBound.down
-                    authorization := authorization
-                    modeBound := modeBound }
-                .ok (show { accepted : BranchAccepted pending branch //
-                  accepted.credential = credential } from ⟨accepted, rfl⟩)
-              else .error .capability
-    else .error .policyUnavailable
-  else .error .policyUnavailable
+  let admitted ← pending.judgeBranch branch evidence
+  let authorization := pending.liftAuthorization branch admitted
+  if modeBound : branchRequiresCapability branch = true →
+      authorization.evidence.capabilityValue.isSome = true then
+    let accepted : BranchAccepted pending branch :=
+      { credential := credential
+        receipt := receipt
+        envelopeExact := envelopeExact.down
+        source := source
+        sourceGuard := source.readGuard
+        sourceGuardExact := rfl
+        lawGuards := guards.val
+        lawGuardsExact := guards.property
+        lawGuardsBound := guardsBound.down
+        authorization := authorization
+        modeBound := modeBound }
+    .ok (show { accepted : BranchAccepted pending branch //
+      accepted.credential = credential } from ⟨accepted, rfl⟩)
+  else .error .capability
 
 /-- **An admitted branch's law accepts that branch's own step.**  The committed
 law of the branch's governing target, resolved from the branch configuration's
@@ -1678,6 +1776,182 @@ theorem BranchAccepted.law_admits_step [DecidableEq F]
   obtain ⟨graph, loaded, _, _, _, _, law⟩ :=
     ComposedPolicyAdmission.verifies_sound _ _ _ checks.2
   exact ⟨graph, loaded, law⟩
+
+/-! #### Where `policyRejected` comes from
+
+`Pending.admitBranch` answers `policyRejected` only from `Pending.judgeBranch`, and that
+only when the request bound to the resolved law, the compiler's three verdicts held on the
+branch's step, and the law evaluated false there (`Pending.admitBranch_policyRejected`,
+`Pending.judgeBranch_policyRejected`). An accepted branch had every one of those verdicts
+true (`BranchAccepted.planVerdict_true`). -/
+
+private theorem branch_bind_error.{u} {α β : Type u} {x : Except Reject α}
+    {f : α → Except Reject β} {reason : Reject} (refused : (x >>= f) = .error reason) :
+    x = .error reason ∨ ∃ a, x = .ok a ∧ f a = .error reason := by
+  cases x with
+  | error other =>
+      left
+      injection refused with same
+      subst same
+      rfl
+  | ok a => exact Or.inr ⟨a, rfl, refused⟩
+
+private theorem require_error {condition : Prop} [Decidable condition] {reason other : Reject}
+    (refused : require condition reason = .error other) : other = reason := by
+  unfold require at refused
+  split at refused
+  · cases refused
+  · injection refused with same
+    exact same.symm
+
+/-- **A bound request under the compiler's three verdicts is admitted when its law
+evaluates true** on the configuration's step: `law.admit` on the law's own witness then
+answers `some`. -/
+theorem admit_some_of_bind [DecidableEq F] {config : ComposedPolicyAdmission.Config F}
+    {kind : ResourceKind} {request : Request kind}
+    {evidence : Evidence config.portal config.snapshot.authState request}
+    {law : ComposedPolicyAdmission.PreparedLaw config} {membership : config.portal.MembershipWitness}
+    {epochExact : request.policyEpoch = config.snapshot.authState.policyEpoch request.policyId}
+    {revisionExact : request.policyRevision =
+      config.snapshot.authState.policyRevision request.policyId}
+    {bound : ComposedPolicyAdmission.Bound config request}
+    (bindExact : ComposedPolicyAdmission.bind config request evidence law membership
+      epochExact revisionExact = some bound)
+    (supportedExact : Minidregg.Compiler.supported config.profile.compiler law.predicate = true)
+    (rangesExact : Minidregg.Compiler.inputsInRange config.profile.compiler law.predicate
+      config.step.oldState config.step.newState = true)
+    (casts : Minidregg.Compiler.castInjOn F
+      (Minidregg.Compiler.intsOf law.predicate config.step.oldState config.step.newState))
+    (evaluated : Minidregg.Pred.eval law.predicate config.step.oldState config.step.newState = true) :
+    ∃ authorized, law.admit request evidence law.witness membership epochExact revisionExact =
+      some authorized := by
+  unfold ComposedPolicyAdmission.bind at bindExact
+  split at bindExact
+  next binding =>
+    split at bindExact
+    next addressExact =>
+      split at bindExact
+      next membershipVerified =>
+        have verified := (ComposedPolicyAdmission.Bound.verifies_iff_eval
+          (⟨evidence, law, binding, membership, epochExact, revisionExact, addressExact,
+            membershipVerified⟩ : ComposedPolicyAdmission.Bound config request)
+          supportedExact rangesExact casts).2 evaluated
+        obtain ⟨authorized, admitted⟩ := ComposedPolicyAdmission.Bound.admit_of_verifies
+          (⟨evidence, law, binding, membership, epochExact, revisionExact, addressExact,
+            membershipVerified⟩ : ComposedPolicyAdmission.Bound config request) verified
+        exact ⟨authorized, (ComposedPolicyAdmission.PreparedLaw.admit_eq law request evidence
+          law.witness membership epochExact revisionExact).trans admitted⟩
+      next => cases bindExact
+    next => cases bindExact
+  next => cases bindExact
+
+/-- **An accepted witness carries the plan verdict.** Whatever witness the compiled check
+accepts, the configuration's resolved law has all three compiler verdicts and evaluates
+true on the configuration's step. -/
+theorem planVerdict_of_verifies [DecidableEq F] {config : ComposedPolicyAdmission.Config F}
+    (law : ComposedPolicyAdmission.PreparedLaw config) {kind : ResourceKind}
+    (request : Request kind) (witness : ComposedPolicyAdmission.Witness F)
+    (accepted : config.verifies request witness = true) : planVerdict law = true := by
+  rw [← law.verifies_eq request witness] at accepted
+  simp only [ComposedPolicyAdmission.PreparedLaw.verifies, Bool.and_eq_true,
+    decide_eq_true_eq] at accepted
+  rcases accepted with ⟨⟨⟨⟨⟨⟨⟨_, _⟩, _⟩, _⟩, _⟩, stepExact⟩, _⟩, checked⟩
+  have step := (canonical_step_matches_iff config.step request
+    witness.compiled.oldState witness.compiled.newState).mp stepExact
+  simp only [ResolvedLawCompilation.checks, compiledLawAccepts, Bool.and_eq_true,
+    decide_eq_true_eq] at checked
+  rcases checked with ⟨_, ⟨⟨supportedExact, ranges⟩, casts⟩, lowered⟩
+  have evaluated := lower_sound config.profile.compiler config.profile.admissible casts
+    supportedExact ranges lowered
+  rw [step.2.2.2.1, step.2.2.2.2] at ranges casts evaluated
+  simp only [planVerdict, Bool.and_eq_true, decide_eq_true_eq]
+  exact ⟨⟨⟨supportedExact, ranges⟩, casts⟩, evaluated⟩
+
+/-- **`judgeBranch` refuses as `policyRejected` only on a law that fails the plan verdict**:
+the branch's law resolved, and (binding, support, range and cast having passed) the law
+evaluates false on the branch's step. -/
+theorem Pending.judgeBranch_policyRejected [DecidableEq F]
+    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {height : Height} (pending : Pending prepared height) (branch : Branch descriptor)
+    (evidence : Evidence (pending.branchConfig branch).portal (oldAuthority prepared)
+      (branchRequest prepared height branch).2)
+    (rejected : pending.judgeBranch branch evidence = .error .policyRejected) :
+    ∃ law : ComposedPolicyAdmission.PreparedLaw (pending.branchConfig branch),
+      (pending.branchConfig branch).resolve? = some law ∧ planVerdict law = false := by
+  unfold Pending.judgeBranch at rejected
+  try dsimp only at rejected
+  split at rejected
+  next =>
+    split at rejected
+    next =>
+      split at rejected
+      next => cases rejected
+      next law resolved =>
+        refine ⟨law, resolved, ?_⟩
+        split at rejected
+        next => cases rejected
+        next bound bindExact =>
+          split at rejected
+          next => cases rejected
+          next unsupported =>
+            split at rejected
+            next => cases rejected
+            next outOfRange =>
+              split at rejected
+              next => cases rejected
+              next aliased =>
+                split at rejected
+                next refusedAdmit =>
+                  cases evaluated : Minidregg.Pred.eval law.predicate
+                      (pending.branchConfig branch).step.oldState
+                      (pending.branchConfig branch).step.newState
+                  · simp only [planVerdict, evaluated, Bool.and_false]
+                  · obtain ⟨authorized, admitted⟩ := admit_some_of_bind bindExact
+                      (by simpa using unsupported) (by simpa using outOfRange)
+                      (by simpa using aliased) evaluated
+                    have contradiction := admitted.symm.trans refusedAdmit
+                    cases contradiction
+                next => cases rejected
+    next => cases rejected
+  next => cases rejected
+
+/-- **`admitBranch` answers `policyRejected` only from its policy judgement**: every earlier
+refusal (envelope, source, guards, evidence) and the mode check name other constructors. -/
+theorem Pending.admitBranch_policyRejected [DecidableEq F]
+    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {height : Height} (pending : Pending prepared height) (branch : Branch descriptor)
+    (credential : BranchCredential)
+    (receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot)
+    (rejected : pending.admitBranch branch credential receipt = .error .policyRejected) :
+    ∃ evidence, pending.judgeBranch branch evidence = .error .policyRejected := by
+  unfold Pending.admitBranch at rejected
+  simp only [bind, Except.bind, require, pure, Except.pure] at rejected
+  repeat' split at rejected
+  all_goals try cases rejected
+  all_goals first
+    | exact ⟨_, ‹_›⟩
+    | (rename_i early; split at early <;> cases early)
+
+/-- **An accepted branch passed the plan verdict**: the law its configuration resolves had
+the compiler's three verdicts and evaluated true on the branch's step. -/
+theorem BranchAccepted.planVerdict_true [DecidableEq F]
+    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {height : Height} {pending : Pending prepared height} {branch : Branch descriptor}
+    (accepted : BranchAccepted pending branch)
+    (law : ComposedPolicyAdmission.PreparedLaw (pending.branchConfig branch)) :
+    planVerdict law = true := by
+  have verified := accepted.authorization.policyVerified
+  obtain ⟨exactRequest, inner⟩ := pending.dispatched_request_exact _ _ _ verified
+  have same : accepted.authorization.policyWitness.1 = branch := by
+    apply pending.requestsDistinct
+    simp only [branchIdentity]
+    rw [← exactRequest]
+  rw [same] at inner
+  have checks := Bool.and_eq_true_iff.mp inner
+  exact planVerdict_of_verifies law _ _ checks.2
+
+#assert_axioms admit_some_of_bind planVerdict_of_verifies BranchAccepted.planVerdict_true
+#assert_axioms Pending.judgeBranch_policyRejected Pending.admitBranch_policyRejected
 
 def Pending.admitBranchNative [DecidableEq F]
     {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
@@ -1769,6 +2043,14 @@ def reserveIngressStream : StreamCodec (Ingress × List (List UInt8)) :=
 def reserveIngressCodec : LawfulCodec (Ingress × List (List UInt8)) :=
   (Tower256ConcreteBackend.StreamCodec.framed reserveIngressFrame reserveIngressStream).toLawful
 
+/-- This frame is private to the event27 receiving path: `decodeIngress`
+continues to recognize only ordinary and reservation births. -/
+def lifetimeGrantIngressFrame : List UInt8 :=
+  "DREGG/AGENT-LIFETIME-GRANT-BIRTH/SIGNED-INGRESS/v1".toUTF8.toList
+
+def lifetimeGrantIngressCodec : LawfulCodec Ingress :=
+  (Tower256ConcreteBackend.StreamCodec.framed lifetimeGrantIngressFrame ingressStream).toLawful
+
 structure DecodedIngress where
   private mk ::
   ingress : Ingress
@@ -1778,18 +2060,21 @@ structure DecodedIngress where
   descriptorCanonical : CanonicalCellRegistry.sourceEncoding.codec.encode descriptor =
     ingress.descriptorBytes
   ownerConsentEnvelopes : Option (List (List UInt8)) := none
+  private lifetimeGrant : Bool := false
 
 def decodeOrdinaryIngress (bytes : List UInt8) : Option DecodedIngress := do
   let ingress ← ingressCodec.decode bytes
   match decoded : CanonicalCellRegistry.sourceEncoding.codec.decode ingress.descriptorBytes with
   | none => none
   | some descriptor => some ⟨ingress, descriptor, decoded,
-      descriptor_decode_canonical Registry decoded, none⟩
+      descriptor_decode_canonical Registry decoded, none, false⟩
 
 def DecodedIngress.method (ingress : DecodedIngress) : FactoryMethod :=
-  if ingress.ownerConsentEnvelopes.isSome then .reserve else .ordinary
+  if ingress.lifetimeGrant then .lifetimeGrant
+  else if ingress.ownerConsentEnvelopes.isSome then .reserve else .ordinary
 
 def DecodedIngress.bytes (ingress : DecodedIngress) : List UInt8 :=
+  if ingress.lifetimeGrant then lifetimeGrantIngressCodec.encode ingress.ingress else
   match ingress.ownerConsentEnvelopes with
   | none => ingressCodec.encode ingress.ingress
   | some owners => reserveIngressCodec.encode (ingress.ingress, owners)
@@ -1801,7 +2086,41 @@ def decodeIngress (bytes : List UInt8) : Option DecodedIngress :=
       match decoded : CanonicalCellRegistry.sourceEncoding.codec.decode raw.1.descriptorBytes with
       | none => none
       | some descriptor => some ⟨raw.1, descriptor, decoded,
-          descriptor_decode_canonical Registry decoded, some raw.2⟩
+          descriptor_decode_canonical Registry decoded, some raw.2, false⟩
+
+/-- Only the lifetime-grant special receiver calls this decoder. The full
+source descriptor and independent app delegation are checked by that receiver. -/
+def decodeLifetimeGrantIngress (bytes : List UInt8) : Option DecodedIngress := do
+  let ingress ← lifetimeGrantIngressCodec.decode bytes
+  match decoded : CanonicalCellRegistry.sourceEncoding.codec.decode ingress.descriptorBytes with
+  | none => none
+  | some descriptor => some ⟨ingress, descriptor, decoded,
+      descriptor_decode_canonical Registry decoded, none, true⟩
+
+theorem decodeLifetimeGrantIngress_method {bytes : List UInt8} {ingress : DecodedIngress}
+    (decoded : decodeLifetimeGrantIngress bytes = some ingress) :
+    ingress.method = .lifetimeGrant := by
+  unfold decodeLifetimeGrantIngress at decoded
+  cases parsed : lifetimeGrantIngressCodec.decode bytes with
+  | none => simp [parsed] at decoded
+  | some raw =>
+      simp only [parsed, bind, Option.bind] at decoded
+      split at decoded
+      · contradiction
+      · cases Option.some.inj decoded
+        rfl
+
+theorem decodeLifetimeGrantIngress_canonical {bytes : List UInt8} {ingress : DecodedIngress}
+    (decoded : decodeLifetimeGrantIngress bytes = some ingress) : ingress.bytes = bytes := by
+  unfold decodeLifetimeGrantIngress at decoded
+  cases parsed : lifetimeGrantIngressCodec.decode bytes with
+  | none => simp [parsed] at decoded
+  | some raw =>
+      simp only [parsed, bind, Option.bind] at decoded
+      split at decoded
+      · contradiction
+      · cases Option.some.inj decoded
+        exact (Tower256ConcreteBackend.StreamCodec.framed lifetimeGrantIngressFrame ingressStream).toLawful_canonical _ _ parsed
 
 theorem decodeOrdinaryIngress_canonical {bytes : List UInt8} {ingress : DecodedIngress}
     (decoded : decodeOrdinaryIngress bytes = some ingress) : ingress.bytes = bytes := by
@@ -1814,6 +2133,26 @@ theorem decodeOrdinaryIngress_canonical {bytes : List UInt8} {ingress : DecodedI
       · contradiction
       · cases Option.some.inj decoded
         exact (Tower256ConcreteBackend.StreamCodec.framed ingressFrame ingressStream).toLawful_canonical _ _ parsed
+
+/-- The generic receiver has no path to the event27-only method, for any
+input bytes. Merely wrapping a descriptor cannot enable the extra observer. -/
+theorem decodeIngress_not_lifetimeGrant {bytes : List UInt8} {ingress : DecodedIngress}
+    (decoded : decodeIngress bytes = some ingress) : ingress.method ≠ .lifetimeGrant := by
+  unfold decodeIngress at decoded
+  split at decoded
+  · unfold decodeOrdinaryIngress at decoded
+    cases parsed : ingressCodec.decode bytes with
+    | none => simp [parsed] at decoded
+    | some raw =>
+        simp only [parsed, bind, Option.bind] at decoded
+        split at decoded
+        · contradiction
+        · cases Option.some.inj decoded
+          simp [DecodedIngress.method]
+  · split at decoded
+    · contradiction
+    · cases Option.some.inj decoded
+      simp [DecodedIngress.method]
 
 theorem decodeIngress_canonical {bytes : List UInt8} {ingress : DecodedIngress}
     (decoded : decodeIngress bytes = some ingress) : ingress.bytes = bytes := by
@@ -1956,7 +2295,7 @@ def ownerConsentRequest
     target := ⟨item.create.cellId⟩
     verb := reserveVerb item.resourceKind
     argsDigest := CanonicalCellRegistry.sourceEncoding.hashBytes
-      ("DREGG/RESOURCE-RESERVE-BIRTH/OWNER-CONSENT/v3".toUTF8.toList ++
+      ("DREGG/RESOURCE-RESERVE-BIRTH/OWNER-CONSENT/v4".toUTF8.toList ++
         CanonicalCellRegistry.sourceEncoding.codec.encode descriptor ++
         Tower256ConcreteBackend.StreamCodec.nat.encode position.val)
     effectsDigest := CanonicalCellRegistry.sourceEncoding.effectsDigest descriptor
@@ -2282,39 +2621,128 @@ def AcceptedBirth.sourceReadGuards {height : Height}
 
 /-! ### The plan-time factory verdict (`NativeHost.birthRefusal`) against admission
 
-Keystones stated before their proofs (ATLAS law 2); the proofs are owed with the receiver
-work. The plan reads the factory branch on the Pending it prepares; a submission prepares
-its own Pending on its own image, so a law installed between plan and submit is judged by
-the submission's Pending, and these statements relate a plan's verdict to the admission of
-the SAME Pending (the image the plan saw, unchanged). -/
+The plan reads the factory branch on the Pending it prepares; a submission prepares its own
+Pending on its own image, so a law installed between plan and submit is judged by the
+submission's Pending, and these statements relate a plan's verdict to the admission of the
+SAME Pending (the image the plan saw, unchanged). Across time, drift only makes a
+submission stale (`factoryVerdict_congr`). -/
 
 variable {descriptor : Descriptor Registry}
 
-/-- The factory branch's verdict as a plan reads it: the law the branch configuration
-resolves, evaluated on the branch's own step. -/
+/-- The branch configuration's step is the branch's step (`PhysicalLawResolution.config`). -/
+theorem Pending.branchConfig_step
+    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {height : Height} (pending : Pending prepared height) (branch : Branch descriptor) :
+    (pending.branchConfig branch).step = pending.branchStep branch := rfl
+
+theorem Pending.branchConfig_profile
+    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {height : Height} (pending : Pending prepared height) (branch : Branch descriptor) :
+    (pending.branchConfig branch).profile = profile.compilerProfile := rfl
+
+/-- The factory branch's verdict as a plan reads it: `planVerdict` (supported, in range,
+cast-injective, and evaluated true) of the law the branch configuration resolves, on the
+branch's own step (`Pending.branchConfig_step`); `none` when no law resolves. -/
 def Pending.factoryVerdict
     {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
     {height : Height} (pending : Pending prepared height) : Option Bool :=
-  (pending.branchConfig .factory).resolve?.map fun law =>
-    Minidregg.Pred.eval law.predicate (pending.branchStep .factory).oldState
-      (pending.branchStep .factory).newState
+  (pending.branchConfig .factory).resolve?.map fun law => planVerdict law
 
-/-- **Keystone, refusal pole (proof owed).** A plan-time refusal is final on that image: no
-factory branch of the same Pending is accepted. -/
+/-- **Keystone, refusal pole.** A plan-time refusal is final on that image: no factory
+branch of the same Pending is accepted, whether the plan refused for the law's verdict, an
+unsupported law, an out-of-range input or a cast alias. -/
 def PlanRefusalSound : Prop :=
   ∀ {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
     {height : Height} (pending : Pending prepared height),
     pending.factoryVerdict = some false → IsEmpty (BranchAccepted pending .factory)
 
-/-- **Keystone, admission pole (proof owed).** A plan-time pass on an unchanged image is not
-refused by the factory law at admission: any refusal of that branch names another cause
-(signature, capability, epoch, a missing source), never `policyRejected`. -/
+/-- **Keystone, admission pole.** A plan-time pass on an unchanged image is not refused by
+the factory law at admission: any refusal of that branch names another cause (signature,
+capability, epoch, a missing source, binding), never `policyRejected`. -/
 def PlanPassNotLawRefused : Prop :=
   ∀ {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
     {height : Height} (pending : Pending prepared height) (credential : BranchCredential)
     (receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot),
     pending.factoryVerdict = some true →
       pending.admitBranch .factory credential receipt ≠ .error .policyRejected
+
+/-- **Keystone, disclosure pole.** Every law refusal at admission was a plan-time refusal on
+the same image: `policyRejected` from the factory branch means the plan verdict is
+`some false`, so `NativeHost.birthRefusal` would have named it. -/
+def LawRefusalDisclosed : Prop :=
+  ∀ {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {height : Height} (pending : Pending prepared height) (credential : BranchCredential)
+    (receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot),
+    pending.admitBranch .factory credential receipt = .error .policyRejected →
+      pending.factoryVerdict = some false
+
+theorem planRefusalSound :
+    PlanRefusalSound (profile := profile) (deployment := deployment) (pins := pins)
+      (durable := durable) (descriptor := descriptor) := by
+  intro prepared height pending verdict
+  refine ⟨fun accepted => ?_⟩
+  revert verdict
+  unfold Pending.factoryVerdict
+  cases (pending.branchConfig .factory).resolve? with
+  | none =>
+      intro verdict
+      change none = some false at verdict
+      cases verdict
+  | some law =>
+      intro verdict
+      change some (planVerdict law) = some false at verdict
+      injection verdict with refused
+      rw [accepted.planVerdict_true law] at refused
+      cases refused
+
+theorem lawRefusalDisclosed :
+    LawRefusalDisclosed (profile := profile) (deployment := deployment) (pins := pins)
+      (durable := durable) (descriptor := descriptor) := by
+  intro prepared height pending credential receipt rejected
+  obtain ⟨evidence, judged⟩ := pending.admitBranch_policyRejected .factory credential receipt rejected
+  obtain ⟨law, resolved, refused⟩ := pending.judgeBranch_policyRejected .factory evidence judged
+  unfold Pending.factoryVerdict
+  rw [resolved]
+  change some (planVerdict law) = some false
+  rw [refused]
+
+theorem planPassNotLawRefused :
+    PlanPassNotLawRefused (profile := profile) (deployment := deployment) (pins := pins)
+      (durable := durable) (descriptor := descriptor) := by
+  intro prepared height pending credential receipt verdict rejected
+  have disclosed := lawRefusalDisclosed pending credential receipt rejected
+  rw [verdict] at disclosed
+  cases disclosed
+
+#assert_axioms planRefusalSound lawRefusalDisclosed planPassNotLawRefused
+
+/-- What a plan discloses about the factory branch: `none` when the plan verdict passes;
+`some none` when no factory law resolves (admission then refuses `policyUnavailable`);
+`some (some law)` when the resolved law fails the plan verdict. -/
+def Pending.factoryRefusal
+    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {height : Height} (pending : Pending prepared height) :
+    Option (Option (ComposedPolicyAdmission.PreparedLaw (pending.branchConfig .factory))) :=
+  (pending.branchConfig .factory).resolve?.elim (some none) fun law =>
+    if planVerdict law then none else some (some law)
+
+/-- The plan passes exactly when the plan verdict is `some true`; with `planRefusalSound`
+and `planPassNotLawRefused`, what the plan says is what admission of the same image does. -/
+theorem Pending.factoryRefusal_eq_none_iff
+    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {height : Height} (pending : Pending prepared height) :
+    pending.factoryRefusal = none ↔ pending.factoryVerdict = some true := by
+  unfold Pending.factoryRefusal Pending.factoryVerdict
+  cases (pending.branchConfig .factory).resolve? with
+  | none =>
+      show some none = none ↔ none = some true
+      simp
+  | some law =>
+      show (if planVerdict law then none else some (some law)) = none ↔
+        some (planVerdict law) = some true
+      cases planVerdict law <;> simp
+
+#assert_axioms Pending.factoryRefusal_eq_none_iff
 
 /-- Teeth of the image premise: the verdict is a function of the branch's resolved law and
 step alone, so a plan and a submission can disagree only if the factory branch they judge
@@ -2326,8 +2754,9 @@ theorem factoryVerdict_congr
       (p₂.branchConfig .factory).resolve?.map (·.predicate))
     (sameStep : p₁.branchStep .factory = p₂.branchStep .factory) :
     p₁.factoryVerdict = p₂.factoryVerdict := by
-  unfold Pending.factoryVerdict
-  rw [← sameStep]
+  simp only [Pending.factoryVerdict, planVerdict, Pending.branchConfig_step,
+    Pending.branchConfig_profile]
+  simp only [← sameStep]
   cases h₁ : (p₁.branchConfig .factory).resolve? <;>
     cases h₂ : (p₂.branchConfig .factory).resolve? <;> simp_all
 

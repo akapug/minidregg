@@ -22,7 +22,7 @@ use crate::canonical::{decimal, lower_hex};
 pub(crate) use crate::canonical::hex;
 
 const COMMITTED: &[u8] = b"DREGG/APPLICATION/AGENT-DISPATCH-COMMITTED-PERMIT/v2";
-const OUTCOME: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v6";
+const OUTCOME: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v8";
 
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)

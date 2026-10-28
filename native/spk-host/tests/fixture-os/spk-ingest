@@ -16,7 +16,7 @@ if [[ ${1:-} == --import-profile ]]; then
   profile=$2
   shift 2
 fi
-case $profile in standard-v1|operator-appliance-v1) ;; *) exit 2 ;; esac
+case $profile in standard-v1|market-large-v1|operator-appliance-v1) ;; *) exit 2 ;; esac
 (( $# == 4 )) || { echo 'usage: spk-ingest --root SPK_ROOT [--import-profile PROFILE] HOST_BINARY HOST_SHA256 INBOX_SPK APP_UID' >&2; exit 2; }
 host_binary=$1 expected_host_sha=$2 package=$3 app_uid=$4
 [[ $expected_host_sha =~ ^[0-9a-f]{64}$ && $app_uid =~ ^[1-9][0-9]{0,9}$ ]] || exit 2

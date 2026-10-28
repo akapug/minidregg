@@ -1,7 +1,8 @@
 # world/story: a co-authored story
 
 `CoAuthor.obend` is a story a crowd writes one chapter at a time. Preview evidence only
-(`preview-cohort.json`, 33 rows); no native receipt exists for this package.
+(`preview-cohort.json`, 33 rows).
+Native: admitted on the activity route on candidate 0ce31391, scenario `story` of `native/resource-client/world-activity-admit.py`, 25/25 rows (every refusal row confirms its refusal); run `scripts/world-native-admit.sh story --route activity --scenario story --entry tell`. Evidence: `docs/evidence/2026-10-27-world-native/story/` (`verdicts.txt`, `results.json`).
 
 ## What it does
 

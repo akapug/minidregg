@@ -4,7 +4,7 @@
 //! Decryption proves confidentiality/integrity binding, NOT native source authority.
 use crate::{
     authenticated_ingress::{CommitteeParty, Envelope},
-    codec::{bad, bytes, Nat, Reader},
+    codec::{bad, bytes, Nat},
     crypto_transit,
 };
 use chacha20poly1305::{
@@ -109,10 +109,10 @@ impl DraftPublic {
         let party = CommitteeParty::decode(&c.bytes()?)?;
         let sequence = c.u64()?;
         let recipient = RecipientSpec {
-            algorithm: cursor_nat(&mut c)?,
-            key_epoch: cursor_nat(&mut c)?,
+            algorithm: c.nat()?,
+            key_epoch: c.nat()?,
             key_id: c.bytes()?,
-            plaintext_bound: usize::try_from(cursor_nat(&mut c)?.value()?)
+            plaintext_bound: usize::try_from(c.nat()?.value()?)
                 .map_err(|_| bad("draft padding bound"))?,
         };
         let semantic_commitment = c.take(64)?.try_into().unwrap();
@@ -212,10 +212,10 @@ impl SealedIngress {
         let mut c = crate::consensus_wire::Cursor::new(&b[FRAME.len()..])?;
         let party = CommitteeParty::decode(&c.bytes()?)?;
         let sequence = c.u64()?;
-        let algorithm = cursor_nat(&mut c)?;
-        let key_epoch = cursor_nat(&mut c)?;
+        let algorithm = c.nat()?;
+        let key_epoch = c.nat()?;
         let key_id = c.bytes()?;
-        let plaintext_bound = cursor_nat(&mut c)?.value()? as usize;
+        let plaintext_bound = c.nat()?.value()? as usize;
         let semantic_commitment = c.take(64)?.try_into().unwrap();
         let hybrid_ciphertext = c.take(crypto_transit::HYBRID_CIPHERTEXT_BYTES)?.try_into().unwrap();
         let nonce = c.take(24)?.try_into().unwrap();
@@ -346,20 +346,6 @@ impl DecryptedEnvelope {
         self.inner
     }
 }
-fn cursor_nat(c: &mut crate::consensus_wire::Cursor<'_>) -> Result<Nat> {
-    let mut b = vec![];
-    loop {
-        let v = c.byte()?;
-        b.push(v);
-        if v == 255 {
-            break;
-        }
-    }
-    let mut r = Reader::new(&b)?;
-    let n = r.nat()?;
-    r.finish()?;
-    Ok(n)
-}
 /// Endpoint-local private message commitment. Its nonce is sampled before the
 /// native INNER credential is signed; public commitment is hiding, not merely a
 /// deterministic body hash. No Debug/Clone; durable seal storage freezes it.
@@ -380,7 +366,7 @@ impl HidingDraft {
     ) -> Result<Self> {
         recipient.validate()?;
         let mut hiding_nonce = [0; 32];
-        File::open("/dev/urandom")?.read_exact(&mut hiding_nonce)?;
+        crate::entropy::os_fill(&mut hiding_nonce)?;
         Self::from_retained(party, sequence, message, recipient, hiding_nonce)
     }
     pub(crate) fn from_retained(
@@ -520,7 +506,7 @@ impl crate::transition_journal::Machine for KeyState {
         let mut c = crate::consensus_wire::Cursor::new(event)?;
         match c.byte()? {
             EVENT_KEY => {
-                let epoch = cursor_nat(&mut c)?;
+                let epoch = c.nat()?;
                 let nonce: [u8; 24] = c.take(24)?.try_into().unwrap();
                 let wrapped = c.bytes()?;
                 let public = c.bytes()?;
@@ -543,7 +529,7 @@ impl crate::transition_journal::Machine for KeyState {
                 Ok(public)
             }
             EVENT_CURRENT => {
-                let epoch = cursor_nat(&mut c)?;
+                let epoch = c.nat()?;
                 c.finish()?;
                 if !self.keys.contains_key(&epoch) {
                     return Err(bad("recipient current epoch is not a retained epoch"));
@@ -608,7 +594,7 @@ fn load_or_create_wrap(path: &std::path::Path) -> Result<zeroize::Zeroizing<[u8;
         return Err(bad("recipient wrap key missing for an existing key journal"));
     }
     let mut k = zeroize::Zeroizing::new([0u8; 32]);
-    File::open("/dev/urandom")?.read_exact(&mut *k)?;
+    crate::entropy::os_fill(&mut *k)?;
     let tmp = path.with_extension("wrapkey.tmp");
     let _ = std::fs::remove_file(&tmp);
     let mut f = std::fs::OpenOptions::new()
@@ -663,7 +649,7 @@ impl RecipientKeyCustody {
         let key =
             crypto_transit::generate_keypair().map_err(|_| bad("recipient key generation"))?;
         let mut nonce = [0u8; 24];
-        File::open("/dev/urandom")?.read_exact(&mut nonce)?;
+        crate::entropy::os_fill(&mut nonce)?;
         let aad = wrap_aad(&self.wal_id, &epoch, &key.public);
         let wrapped = XChaCha20Poly1305::new((&*self.wrap).into())
             .encrypt(XNonce::from_slice(&nonce), Payload { msg: &key.secret, aad: &aad })

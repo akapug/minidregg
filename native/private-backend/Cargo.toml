@@ -16,4 +16,18 @@ zeroize = "=1.9.0"
 # Seeded ML-KEM-768 key generation (hybrid_kem.rs): the crate and version aws-lc-rs links.
 aws-lc-sys = { version = "=0.45.0", default-features = false }
 
+[features]
+# The research-labelled in-process demo (src/demo.rs, src/bin/mini-private-compute.rs): compiles the
+# test fixtures the executed four-party path is built from into a binary. Off by default.
+demo = []
+
+[[bin]]
+name = "mini-private-backend"
+path = "src/main.rs"
+
+[[bin]]
+name = "mini-private-compute"
+path = "src/bin/mini-private-compute.rs"
+required-features = ["demo"]
+
 [workspace]

@@ -229,51 +229,149 @@ def potConserved(t: Transition, before: Game) -> Bool:
     case moved(g): not(isSettled(g)) && pot(tableOf(g)) == pot(tableOf(before))
     case ended(v): v.toA + v.toB == pot(tableOf(before))
 
-# ---- (2) the game as an Activity ----------------------------------------------
+# ---- (2) the game as an Activity on the kernel (Kernel/ObjectiveActivity) ----------
+# One input value (`Opening`); the kernel's `resumed {outcome, view}` response; the kernel's own
+# Plans: `await {write, on, patience}` for the next move (the keeper, one decider, relays each
+# player's typed `Event`) and `transfer {to, amount, write}` for each share of the pot, which the
+# kernel performs FROM THE ACTIVITY'S PURSE (the two stakes: the birth deposit) at the yield and
+# answers `settled` or `refused`. A share of 0 is not paid (the kernel refuses a zero transfer as
+# a Plan); a draw or a voided game pays A, then B. The declared state counts performed payouts.
+
+record Opening:
+  a: Nat
+  b: Nat
+  stake: Nat
+  window: Nat
+  now: Nat
+  keeper: Nat
+  fresh: Bool
+
+record Ledger:
+  moves: Nat
+
+sum EditNat:
+  keep: {}
+  set: Nat
+  add: Nat
+
+record Write:
+  moves: EditNat
+
+record Ask:
+  decider: Nat
+
+record At:
+  at: Nat
+
+sum Source:
+  reply: Ask
+  height: At
 
 record Await:
-  phase: String
-  due: Nat
+  write: Write
+  on: Source
+  patience: Nat
 
-record Payout:
-  toA: Nat
-  toB: Nat
+record Pay:
+  to: Nat
+  amount: Nat
+  write: Write
 
 sum Plan:
   await: Await
-  disburse: Payout
+  transfer: Pay
 
-sum Response:
-  event: Event
+sum Outcome:
+  reply: Event
   settled: {}
   refused: {}
+  unknown: {}
+  timedOut: {}
+  broken: {}
+  upgraded: {}
 
-def awaiting(g: Game) -> Await:
-  {phase: phaseOf(g), due: dueOf(g)}
+record View:
+  version: Nat
+  state: Ledger
+
+record Step:
+  outcome: Outcome
+  view: View
+
+sum Response:
+  resumed: Step
+
+def keepLedger() -> Write:
+  {moves: EditNat.keep()}
+
+def firstWrite(o: Opening) -> Write:
+  if o.fresh then {moves: EditNat.set(0n)} else keepLedger()
+
+def ask(o: Opening, w: Write) -> Plan:
+  Plan.await({write: w, on: Source.reply({decider: o.keeper}), patience: 64n})
+
+def pay(to: Nat, amount: Nat) -> Plan:
+  Plan.transfer({to: to, amount: amount, write: {moves: EditNat.add(1n)}})
 
 # The result is the outcome ("aWins", "bWins", "draw", "voided", "aForfeits",
-# "bForfeits"). Every unfolding of `serve` past a yield costs one admitted turn.
-def serve(g: Game) -> Activity<Plan, Response, String>:
-  match perform(Plan.await(awaiting(g))):
-    case event(e): step(g, react(g, e))
-    case settled(_): serve(g)
-    case refused(_): serve(g)
+# "bForfeits"). Every unfolding past a yield costs one admitted turn; an unanswered
+# await (unknown, timed out, broken) waits again.
+def serve(o: Opening, g: Game, w: Write) -> Activity<Plan, Response, String>:
+  match perform(ask(o, w)):
+    case resumed(r):
+      match r.outcome:
+        case reply(e): step(o, g, react(g, e))
+        case settled(_): serve(o, g, keepLedger())
+        case refused(_): serve(o, g, keepLedger())
+        case unknown(_): serve(o, g, keepLedger())
+        case timedOut(_): serve(o, g, keepLedger())
+        case broken(_): serve(o, g, keepLedger())
+        case upgraded(_): serve(o, g, keepLedger())
 
-def step(g: Game, t: Transition) -> Activity<Plan, Response, String>:
+def step(o: Opening, g: Game, t: Transition) -> Activity<Plan, Response, String>:
   match t:
-    case refused(unchanged): serve(unchanged)
-    case moved(next): serve(next)
-    case ended(v): disburse(g, v)
+    case refused(unchanged): serve(o, unchanged, keepLedger())
+    case moved(next): serve(o, next, keepLedger())
+    case ended(v): disburse(o, g, v)
 
-# The payout is the last Plan; a refused disbursement leaves the game where it was.
-def disburse(g: Game, v: Verdict) -> Activity<Plan, Response, String>:
-  match perform(Plan.disburse({toA: v.toA, toB: v.toB})):
-    case settled(_): v.outcome
-    case refused(_): serve(g)
-    case event(_): serve(g)
+# The payout is the last Plan(s); a refused share leaves the game where it was (A's share) or
+# waits for the next event and pays B's share again (B's, once A's was paid).
+def disburse(o: Opening, g: Game, v: Verdict) -> Activity<Plan, Response, String>:
+  if v.toA == 0n then payB(o, g, v) else payA(o, g, v)
 
-def play(a: Nat, b: Nat, stake: Nat, window: Nat, now: Nat) -> Activity<Plan, Response, String>:
-  serve(start(a, b, stake, window, now))
+def payA(o: Opening, g: Game, v: Verdict) -> Activity<Plan, Response, String>:
+  match perform(pay(tableOf(g).a, v.toA)):
+    case resumed(r):
+      match r.outcome:
+        case settled(_): payB(o, g, v)
+        case refused(_): serve(o, g, keepLedger())
+        case reply(_): serve(o, g, keepLedger())
+        case unknown(_): serve(o, g, keepLedger())
+        case timedOut(_): serve(o, g, keepLedger())
+        case broken(_): serve(o, g, keepLedger())
+        case upgraded(_): serve(o, g, keepLedger())
+
+def payB(o: Opening, g: Game, v: Verdict) -> Activity<Plan, Response, String>:
+  if v.toB == 0n then v.outcome else payBNow(o, g, v)
+
+def payBNow(o: Opening, g: Game, v: Verdict) -> Activity<Plan, Response, String>:
+  match perform(pay(tableOf(g).b, v.toB)):
+    case resumed(r):
+      match r.outcome:
+        case settled(_): v.outcome
+        case refused(_): retryB(o, g, v)
+        case reply(_): retryB(o, g, v)
+        case unknown(_): retryB(o, g, v)
+        case timedOut(_): retryB(o, g, v)
+        case broken(_): retryB(o, g, v)
+        case upgraded(_): retryB(o, g, v)
+
+def retryB(o: Opening, g: Game, v: Verdict) -> Activity<Plan, Response, String>:
+  match perform(ask(o, keepLedger())):
+    case resumed(_): payB(o, g, v)
+
+def play(o: Opening) -> Activity<Plan, Response, String>:
+  serve(o, start(o.a, o.b, o.stake, o.window, o.now), firstWrite(o))
 
 # ---- the named scenario -------------------------------------------------------
 # Player 1 (A) and player 2 (B) stake 10 each; the window is 5 heights; the game

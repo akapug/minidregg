@@ -32,7 +32,7 @@ fn main() {
         import_profile = match args.get(3).and_then(|name| name.parse().ok()) {
             Some(profile) => profile,
             None => {
-                eprintln!("spk-host: import profile must be standard-v1 or operator-appliance-v1");
+                eprintln!("spk-host: import profile must be standard-v1, market-large-v1 or operator-appliance-v1");
                 std::process::exit(2);
             }
         };
@@ -48,6 +48,18 @@ fn main() {
             std::process::exit(minidregg_spk_host::fixture_os::unit_run_main(&args[2..]))
         }
         _ => {}
+    }
+    // The intake bounds of an import profile for a raw package size, for the operator scripts
+    // (spk-ingest, spk-qualify, spk-install-phase), so the table lives once, here:
+    // `import-limits PROFILE RAW_BYTES` prints `RAW_LIMIT DECODED_LIMIT WALL_SECONDS`.
+    if args.len() == 4 && args[1] == "import-limits" {
+        let (Ok(profile), Ok(raw)) = (args[2].parse::<ImportProfile>(), args[3].parse::<u64>()) else {
+            eprintln!("spk-host: import-limits PROFILE RAW_BYTES (standard-v1, market-large-v1 or operator-appliance-v1)");
+            std::process::exit(2);
+        };
+        let limits = profile.limits();
+        println!("{} {} {}", limits.raw_bytes, limits.decoded_bytes, limits.wall_seconds(raw));
+        return;
     }
     if args.len() == 3 && args[1] == "qualify-launch" {
         match qualify_launch(Path::new(&args[2])) {
@@ -278,7 +290,7 @@ fn main() {
         "usage: spk-host qualify VERIFIED_SPK | qualify-launch PRIVATE_CONFIG | inspect-installed IMAGE_DIR APP_UID | materialize VERIFIED_SPK OPERATOR_STORE APP_UID | install-prepare PRIVATE_CONFIG | install-complete PRIVATE_CONFIG | resident-run PRIVATE_CONFIG | resident-stop PRIVATE_CONFIG | human-custodian-init PRIVATE_DIR HOST APP SUBJECT SESSION TICKET web|api | grain VERB ..."
     );
     eprintln!("spk-host: resident-run requires current Mini lifecycle admission and physical unit custody");
-    eprintln!("qualify and materialize accept --import-profile standard-v1|operator-appliance-v1 immediately after the verb");
+    eprintln!("qualify and materialize accept --import-profile standard-v1|market-large-v1|operator-appliance-v1 immediately after the verb");
     std::process::exit(2);
 }
 

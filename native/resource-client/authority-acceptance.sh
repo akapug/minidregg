@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+. "$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)/native/resource-client/journey.d/lib/evidence.sh"
 
 if [ "$#" -ne 2 ]; then
   echo "usage: $0 MINIDREGG_HOST NEW_EVIDENCE_DIRECTORY" >&2
@@ -12,6 +13,8 @@ HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 REPO=$(CDPATH='' cd -- "$HERE/../.." && pwd)
 . "$REPO/native/resource-client/journey.d/lib/genesis-params.sh"
 resolve_params_sh "$REPO" || exit 2
+. "$REPO/native/resource-client/journey.d/lib/wire.sh"
+NO_RECORD=$(response_marker "$REPO" NO_RECORD)
 MINI=${MINI:-"$HERE/target/debug/mini"}
 STORE_BINARY=${STORE_BINARY:-"$REPO/native/hyperdocument-link-sqlite-store/target/debug/minidregg-link-sqlite-store"}
 SIGNATURE_BINARY=${SIGNATURE_BINARY:-"$REPO/native/credential-signature-verifier/target/debug/minidregg-credential-signature-verifier"}
@@ -32,7 +35,7 @@ if [ -e "$EVIDENCE" ]; then
 fi
 mkdir "$EVIDENCE"
 EVIDENCE=$(CDPATH='' cd -- "$EVIDENCE" && pwd)
-SCRIPT_SHA256=$(shasum -a 256 "$0" | awk '{print $1}')
+SCRIPT_SHA256=$(sha256 "$0" | awk '{print $1}')
 
 decimal() {
   jq -er --arg field "$2" '.[$field] |
@@ -94,48 +97,14 @@ ALICE_PUBLIC=$(od -An -tx1 -v "$EVIDENCE/alice.pub" | tr -d ' \n')
 BOB_PUBLIC=$(od -An -tx1 -v "$EVIDENCE/bob.pub" | tr -d ' \n')
 test "$ALICE_PUBLIC" != "$BOB_PUBLIC"
 
-cat >"$EVIDENCE/operator.json" <<EOF
-{"domain":8501,"federation":9,"factoryId":10,"resourceBookId":11,
- "authorityCellId":12,"issuer":5,"ownerBudget":100000,"lifetime":10000,
- "tariffBase":3,"tariffPerBirth":2,"tariffPerGrant":1,
- "tariffPerInitialPayloadByte":0,"collector":99,"asset":0,
- "genesisHeight":10,"expectedSeed":0,"storageBinary":"$STORE_BINARY",
- "storageRoot":"$EVIDENCE/store","signatureBinary":"$SIGNATURE_BINARY"}
-EOF
-"$HOST" "$EVIDENCE/operator.json" profile >"$EVIDENCE/operator-profile.json"
-SEMANTICS=$(decimal "$EVIDENCE/operator-profile.json" semantics)
-
-cat >"$EVIDENCE/genesis.json" <<EOF
-{
- "domain":"8501","factoryId":"10","resourceBookId":"11",
- "authorityCellId":"12","federation":"9","tariffBase":"3",
- "tariffPerBirth":"2","tariffPerGrant":"1","tariffPerInitialPayloadByte":"0",
- "collector":"99","asset":"0","expectedSemantics":"$SEMANTICS",
- "issuerEpoch":"2","genesisHeight":"10",
- "factoryPredicate":{"type":"all","predicates":[]},
- "enrollments":[
-   {"key":{"keyId":"7007","keyEpoch":"2","algorithm":"1","subject":"7",
-     "publicKey":"$ALICE_PUBLIC","activeFrom":"0","activeUntil":"1000000","nextKeyDigest":null},
-    "accountId":"7","spendCapabilityId":"41","controlCapabilityId":"51",
-    "factoryObserveCapabilityId":"54","initialBalance":"100",
-    "accountPredicate":{"type":"all","predicates":[]}},
-   {"key":{"keyId":"8008","keyEpoch":"2","algorithm":"1","subject":"8",
-     "publicKey":"$BOB_PUBLIC","activeFrom":"0","activeUntil":"1000000","nextKeyDigest":null},
-    "accountId":"8","spendCapabilityId":"42","controlCapabilityId":"52",
-    "factoryObserveCapabilityId":"55","initialBalance":"200",
-    "accountPredicate":{"type":"all","predicates":[]}}
- ],
- "factoryControllerSubject":"7","factoryControllerCapability":"53","clockTickers":[],
- "tailBound":"256", "issuanceCap":"1000000000000000",
- "meterAllowance":{"incidences":"10000000","turnBytes":"10000000",
-   "memoryTouches":"10000000","witnessBytes":"10000000",
-   "proofWork":"10000000","storageBytes":"10000000",
-   "networkBytes":"10000000","sideEffectCount":"10000000",
-   "feeDebit":"10000000","leaseByteBlocks":"10000000"}
-}
-EOF
-
-sh "$GENESIS_PARAMS_SH" fill-source "$EVIDENCE/genesis.json"   # the genesis clock, chosen at genesis time
+# The genesis through the one template (scenario-genesis.sh): only what this world differs by.
+jq -n --arg bob "$BOB_PUBLIC" '[
+  {subject: 8, keyId: 8008, publicKey: $bob, accountId: 8, spendCapabilityId: 42,
+   controlCapabilityId: 52, factoryObserveCapabilityId: 55, initialBalance: 200}]' >"$EVIDENCE/enrollments.json"
+HOST=$HOST STORE=$STORE_BINARY VERIFIER=$SIGNATURE_BINARY MINI=$MINI GENESIS_PARAMS_SH=$GENESIS_PARAMS_SH \
+  sh "$HERE/scenario-genesis.sh" "$EVIDENCE" "$ALICE_PUBLIC" 'del(.grainPlatform) | .sponsor.initialBalance = 100' \
+  "$EVIDENCE/enrollments.json"
+SEMANTICS=$(decimal "$EVIDENCE/profile.json" semantics)
 "$MINI" bootstrap --host "$HOST" --config "$EVIDENCE/operator.json" \
   --source "$EVIDENCE/genesis.json" --dir "$EVIDENCE/deployment" \
   >"$EVIDENCE/bootstrap.stdout"
@@ -247,16 +216,34 @@ cat >"$EVIDENCE/alice-denied-intent.json" <<EOF
     "value":"1"}]}}]}}},
  "grants":[{"kind":"object","target":"600","capability":"61"}]}
 EOF
-if "$MINI" submit --host "$HOST" --config "$CONFIG" \
+# The installed law is judged at plan time, on the signed observation (law 10:
+# `NativeHost.invokeRefusal`), so the Host refuses at PREPARE, before anything is signed for
+# submission, and names the law: a NO_RECORD (253) frame the client keeps as
+# pre-submit-refusal.frame (model: scripts/grain-birth/birth-acceptance.sh, worker bare birth).
+status=0
+"$MINI" submit --host "$HOST" --config "$CONFIG" \
   --intent "$EVIDENCE/alice-denied-intent.json" --key "$EVIDENCE/alice.key" \
   --dir "$EVIDENCE/alice-denied-attempt" >"$EVIDENCE/alice-denied.stdout" \
-  2>"$EVIDENCE/alice-denied.stderr"; then
-  echo "Alice mutation unexpectedly passed the installed rule" >&2
-  exit 1
-fi
-test -s "$EVIDENCE/alice-denied-attempt/call.bin"
-refusal "$EVIDENCE/alice-denied-attempt/outcome.json"
-test -f "$EVIDENCE/alice-denied-attempt/signed-observation.bin"
+  2>"$EVIDENCE/alice-denied.stderr" || status=$?
+[ "$status" -eq 3 ] || {
+  echo "Alice mutation: expected a prepare refusal (exit 3), got exit $status" >&2; exit 1; }
+AD="$EVIDENCE/alice-denied-attempt"
+test -f "$AD/signed-observation.bin"
+test ! -e "$AD/plan.bin"
+test ! -e "$AD/call.bin"
+test ! -e "$AD/outcome.json"
+jq -e '.type == "minidregg-pre-submit-refusal-v1" and .stage == "prepare" and
+  .operation == 1' "$AD/pre-submit-refusal.json" >/dev/null
+[ "$(head -c 1 "$AD/pre-submit-refusal.frame" | od -An -tu1 | tr -d ' ')" = "$NO_RECORD" ] || {
+  echo "Alice mutation: prepare refusal is not a NO_RECORD (253) frame" >&2; exit 1; }
+tail -c +2 "$AD/pre-submit-refusal.frame" >"$AD/prepare-refusal.bin"
+"$HOST" "$CONFIG" inspect outcome "$AD/prepare-refusal.bin" "$AD/prepare-refusal.json" \
+  >"$AD/prepare-refusal.inspect.out" 2>&1
+# Decoded by the Host itself: law-denied by the installed rule, whose only write clause is subject 8's.
+jq -e '.type == "refused" and .reason == "law-denied" and .effect == "no-record" and
+  (.leaf | type == "object") and
+  (.explain | type == "string" and contains("verb == write") and contains("subject == 8"))' \
+  "$AD/prepare-refusal.json" >/dev/null
 query_resource alice-after-denial 7 61 "$EVIDENCE/alice.key" 30008
 test "$(challenge_decimal "$EVIDENCE/alice-after-denial/challenge.json" worldRoot)" = "$BEFORE_DENIAL"
 test "$(challenge_decimal "$EVIDENCE/alice-after-denial/challenge.json" height)" = 12
@@ -425,10 +412,10 @@ test ! -e "$EVIDENCE/bob-after-revoke-invoke/outcome.json"
 
 # Historical retry is allowed to return the original receipt, but must leave
 # the current boundary and height unchanged after the later revocation.
-CALL_HASH_BEFORE=$(shasum -a 256 "$EVIDENCE/bob-write-attempt/call.bin" | awk '{print $1}')
+CALL_HASH_BEFORE=$(sha256 "$EVIDENCE/bob-write-attempt/call.bin" | awk '{print $1}')
 "$MINI" retry --attempt "$EVIDENCE/bob-write-attempt" --mode submit \
   >"$EVIDENCE/bob-retry.stdout"
-CALL_HASH_AFTER=$(shasum -a 256 "$EVIDENCE/bob-write-attempt/call.bin" | awk '{print $1}')
+CALL_HASH_AFTER=$(sha256 "$EVIDENCE/bob-write-attempt/call.bin" | awk '{print $1}')
 test "$CALL_HASH_BEFORE" = "$CALL_HASH_AFTER"
 receipt "$EVIDENCE/bob-write-attempt/retry-0001.json" replayed
 for field in transactionId eventId acceptedCount worldRoot; do

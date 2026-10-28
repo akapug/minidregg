@@ -33,29 +33,84 @@ the newest built main that passed the gate; each is reported in one line, and in
   writes its PID file at spawn (`build.pid`, `gate.pid`, `enrol-resume-cN.pid` under the cut's lane dir,
   the chain itself `integ4/cutN.pid`). Stop only by those files.
 
-## Cuts
+## Cuts and builds
 
-| cut | integration sha | candidate | gate |
-|---|---|---|---|
-| r1 | 55e483e0 | hbox `/tank/dregg-build/claude-integration-20261026/C` | rows 118/23/4 (pre-gate-v2) |
-| r2 | 45f45d15 | `/build/candidates/45f45d15…` | rows 112/25/8/3; JWF 24/24 |
-| r3 | 6236826f | `/build/candidates/6236826f…` | rows 131/5/9/3 |
-| 4 | a94bed71 (main 6b824270) | `/build/candidates/a94bed71…` | FAIL: J0 completion key; composed seal |
-| 6 | 23861533 | `/build/candidates/23861533…` | FAIL: tour-chromium timeout; composed apps/connector/residents blocked |
-| 7 | 3315a908 | `/build/candidates/3315a908…` | FAIL: tour-chromium (old jtour); composed at ROOT SETUP (old runner) |
-| 8 | 26418b6b | none (host build killed by memory) | skipped |
-| 9 | 5fdfa393 | none: consent stage red (below) | no gate |
-| 10 | 006cd214 (merged to main by the coordinator) | not built | — |
-| 11 | af84d8cf | folded into 12 | — |
-| 12 | f1ce1626 (main) | stopped by PID for cut 13 (integ8/stop-c12.list) | — |
-| 13 | a75d89d6 (main) | building in integ8 (cut13.sh) | first ship on green |
+| cut | sha | outcome |
+|---|---|---|
+| r1/r2/r3 | 55e483e0 / 45f45d15 / 6236826f | candidates; rows (INTEGRATION-1/2.md) |
+| 4, 6, 7 | a94bed71, 23861533, 3315a908 | candidates `/build/candidates/<sha>`; gate FAIL (named in reports). Cut 7's six orphans (mini serve/web, link-sqlite-store, credential-verifier; cwd integ5/src) stopped by exact PID 2026-10-27 21:28 (integ8/stop-c7-orphans.list); `/build/lanes/integ5` deleted (24G) |
+| 8, 9 | 26418b6b, 5fdfa393 | no candidate (OOM; stale hard-linked olean) |
+| 12 | f1ce1626 | stopped by PID for cut 13 (integ8/stop-c12.list) |
+| 13 | a75d89d6 | host stage OOM-killed by co-tenant memory on swarm.slice |
+| main a7b5afec | — | stopped by PID on the coordinator's word (integ8/stop-main.list) |
+| 14 | aa9366f8 | phase A: host stage rc=1 at 21:14 (integ8/COMMANDS.log) |
+| 14 A2 | 36f719cc5 | host stage rc=1 at 21:37 (903 s, peak 16.1 GB): only Kernel.ResourceBirthPolicyController, lean-audit-c's three proofs that never elaborated; fixed on main 61bf01e1d (verified by `lake env lean` in integ8, seconds per try); no regen ran |
+| 14 A3 | 8103b29a4 | host stage rc=1 at 21:53 (566 s, peak 16.2 GB): only Kernel.PlatformCell (c0b2d6ab1's seventh Admits conjunct unpropagated to four proofs); fixed 26fcdd889 |
+| 14 A4 | 26fcdd889 | host rc=1 at 21:55 (38 s): only Kernel.PlatformInstallReceiver (admitsObserved_decides, decide instances after c0b2d6ab1); fixed cacefcba8 |
+| 14 A5 | cacefcba8 | host rc=1 at 21:58 (41 s): only Kernel.NativeHostReplay:3823 (extendExact: exactCandidate sets headTag since e0916a53f, advance does not; #guard_msgs 4827/4829 follow). Fixed by the deputy, a8eb2c50e (post image = successor up to its head tag; FnSelectedHistoricalStep's admitted_record gains ∃ headTag; reds there go to the deputy) |
+| 14 A6 | a8eb2c50e | host rc=1 at 22:09 (294 s): only Host.Main:2048 (claimOf: the intent subject is a SubjectId; the rate table is keyed by Nat); fixed 43023f83f |
+| 14 A7 | 969929026 | host stage CLEAN at 22:22 (534 s). Regen: A7 rc=2 (seed v5), A7b rc=1 (seed proofs), A7c rc=2 (ADMITTED-INPUT-CONTEXT trailing byte, bumped by hand), A7d rc=2 (DREGG/CLOCK: literal twin in ClockCell vs the registry constant), A7e rc=0 at 23:50 (938 s, peak 20.2 GB, 638 pins). Its diff is main da4a7645e (integ8/regen-A7e.patch); the tool changes are held on local branch integration/regen-tool 21077e063 for after the candidate |
+| full | da4a7645e | `integ4/main-full.sh da4a7645e` (pid file integ4/main-full.pid; build.pid, then gate.pid + enrol-resume.pid under integ8) started 23:53: host clean 00:24:47 (1670 s); consent rc=1 at 00:28 (PersistedCodecTagCensus: the platform install receiver's six identities unregistered). Fixed fbb66b069 |
+| A8 | fbb66b069 | host clean 01:02 (1842 s); regen rc=0 (644 pins, six additions, integ8/regen-A8.patch) → main 1e976af0f; consent rc=65 only because the host artifacts predate the new pins (companion check: PersistedCodecShapes.lean) |
+| full | 1e976af0f | `integ4/main-full.sh` started 01:07 (tests stage green 01:09; host stage from 01:09:25) (main-full.pid 3307367; build.pid, then gate.pid + enrol-resume.pid under integ8). Before relaunching any build, move integ8/{native-out,consent-out,artifacts,fixtures} aside (the host stage refuses existing outputs, rc=73) |
+| 1e976af0f result | — | host clean 01:36 (1635 s), consent clean 01:42 (330 s), rust rc=1 01:45: mini-private-compute (`--features demo`) 19× E0425 `custody::AnchorHandle` (un-pb-twins a078ee6b4 gated it `cfg(test)`; its users are `cfg(any(test, feature = "demo"))`). Fixed 0ce313917 |
+| full | 0ce313917 | CANDIDATE `/build/candidates/0ce31391790a7e2ed9f83eb1b8bb85d6556a0de3` 01:56 (host 231 s, consent 90 s, rust 61 s, pack 9 s; tests green; 23 binaries incl. mini-private-compute). enrol-resume PASS. Gate: tour 51/51 PASS; composed FAIL, a dregg-infra red (render-authorized-keys.sh called `mini enrollment-view` without the v2 Host pin; fixed by infra at dregg-infra 026d132). Composed rerun against that edge: `integ4/composed-rerun.sh TIP EDGE_REV` (pid file integ4/composed-rerun.pid; verdict line in integ8/COMMANDS.log; keep the run root short: a long one overflows the resident codec socket's SUN_LEN) |
+| 0ce31391 composed rerun | edge 026d132 | FAIL 02:22: world up, rooms/churn/documents pass; apps input refused at scripts/spk-platform/same-store-profile.py:29 "broker must belong to selected grains root" (the Python harness still allowed only the global /run socket or <grains>/broker.sock; spk-host has required <grains>/runtime-<store>/broker.sock since 5d23a2394). Fixed bea8928a5 (ws-continuity-fixture.broker_endpoint, the one spelling). The composed run takes its scripts from the candidate's source.tar, so the fix is proven only by the next candidate's gate |
+| full | 1af366fe9 | `integ4/main-full.sh` started 02:25 (main-full.pid 3433976; the launcher subshell 3433959 is its parent; build.pid, then gate.pid + enrol-resume.pid under integ8); tests stage green 02:26; host stage from 02:26:38. Carries the regen tool, rust-check, effects-revival, hermes-b b740e6f0, grain-bare-prepare 746b182d, abuse-caps, snipe-unconfigured, red-jserve-envelope ffe1623f, rows-ledger 0a05ab6b and the broker fix |
+| 1af366fe9 result | — | host clean 02:59 (1995 s); consent rc=1 03:04: census, 37 structural moves plus DREGG/CLOCK/v5 owner-less (430e3fe96's twin deletion; the census counted owners by literal only, nine more pins were already fingerprint 7). Fixed f8c17f0f5 (a registry-constant reference is ownership) |
+| bd37686c0 | — | follow-on host stage rc=1 in 3 s: registry check, literal op 68 at native/spk-host/src/lifecycle_v3_native.rs:728 (7b3564733's test). Fixed f1ecba539 |
+| A9 | f8c17f0f5 | host clean 03:14 (397 s); regen rc=2 03:18: the bare prefixes DREGG/NATIVE-HOST/LOG-TAG and DREGG/OBJECTIVE-BEND/ADMITTED-INPUT-CONTEXT moved in the same round their children were bumped (the tool judged them before the build that births the new name; LOG-TAG was also not declared `prefix_`). Fixed a62cab510 (deferred to the next round; selftest case) |
+| A10 | a62cab510 | `integ4/regen-A10.sh` (pid file integ4/regen-A10.pid) from 03:21: host, regen, consent; diff in integ8/regen-A10.patch. Next: commit it to main, launch `integ4/main-full.sh <tip>` after moving integ8/{native-out,consent-out,artifacts,fixtures} aside |
 
-Cut 11 took: main f392e9bb, hermes e11eef11, custody-drivers e471d6f2, app-market 2a7d092f, hot-path-codec
-acad2eb7, un-assurance e6eac995, un-bend 91f8a83c, un-deputy 3bf7d7be, un-fixtures a6a32103, un-pb-codec
-470f41e7, un-pb-exec 64211340, un-pb-seal 31e65265, un-seats ccb34bc5, un-verify 9f5a7cf4, un-world (newest),
-plus web-frontend 33c13554, lean-l13-laws d8251be0, un-native-rows, un-moves e9d0f2c1, un-pred-census
-already in at cut 10. Held out: lane/lean-critical and lane/un-effects (one flag-day cut, scheduled by the
-coordinator).
+A3's tree (main 8103b29a4) holds everything since aa9366f8: pd-host-rate, oracle-lifetime-grant, oracle-grant-factory,
+lean-audit-c, un-effects 2acd8acf (effect Plan; its codec pins re-emit with this regen), un-pb-twins 134535c2,
+demo-seed, app-recipes (rows validator aeee8349c191e8506 runs them on the candidate; Wekan/WordPress/IPython need
+MINI_IMPORT_PROFILE=market-large-v1), snipe-rate-row (its report at docs/evidence/snipe-rate-row-2026-10-27.md) and
+un-web-front 0da04999 (front-page document; infra's step 9c depends on it). Also since: app-market db312c6f (30e24095f; b2.sh resolved per function against app-recipes, L13 agreed). Correction to that commit message: ExpenseOwl's positive-amount POST is reasoned from upstream, not row-proven (B2's run left GET /expenses empty); unproven until the rows validator runs it.
+After A3's tip (Rust only, in the full build): hermes 68394077 (6f4251c21; contained tools, room fields 1014/1015,
+J14_TOOLS row) and fb15f121b (redteam test initializer for un-web-front's Shell.front_doc; the mini bin's tests did
+not compile). The first candidate carrying both bc88a5ab (frame v8)
+and hermes ea8a991e (e2374f120, the await bridge; any full build from main >= d3a0c41f3): send its sha and path to L4b (ad81db6d6fd317d3a) and
+the coordinator at once; L4b runs J14_TOOLS and J14_AWAIT as one run against it (3315a908 refuses the v8 genesis). Unit
+mini-grain-controller@9870001 is free (it was L4's orphan). Also after A3's tip: e7958d3b9 (NativeHost.birthRejection/birthReason arms for
+f2010f574's platformUnavailable/platformStale; A3 is expected to red at Kernel.NativeHost and its dependents,
+elaboration of the fix pending NativeHostReplay.olean). L1d (formerly L1c; lean-audit-c a281e53b8, e59846239; deletes those two
+constructors with pricedAt, drops e7958d3b9's arms on merge; unbuilt, not to merge until its warm-tree build
+elaborates) seeds its dregg-ref tree from the integ8 copy; tell it when the copy lands.
+
+Next steps: A10 → regen patch onto main → full build at main's tip (it carries 25cfb86bd, custody-b's
+delegated consent, hermes-b 5422506f, the world/ pack 1b870fbdd). On READY the chain runs gate + enrol-resume;
+report "candidate <sha> at <path>: gate <verdict>, reds by name" to the coordinator, and the sha + path to the rows
+validator (aeee8349c191e8506, the app tables wait on 25cfb86bd) and L4b (ad81db6d6fd317d3a). Pending lands:
+lean-audit-c only on L1d's warm-tree green sha; iter-speed successor's census re-pin (a0fd127abfb9aac75) only
+after that candidate is reported.
+
+Red routing: lean-audit-c is L1d's (ad6d6eff243f32816): its green sha comes from and its reds go to L1d directly; Hermes to L4b (ad81db6d6fd317d3a); L13 a1618140607ac439b; un-stream-continuity reds
+(ApplicationStreamContinuityFresh pole proofs, NativeHostReplay.lean:3816) to the deputy a308118209b4a48ea; all
+others through the coordinator. Expected reds, not new: the eight hand-rolled genesis writers (acceptance.sh,
+application-acceptance.sh, authority-acceptance.sh, selected-release-acceptance.sh, grain-runtime/acceptance.sh,
+jpay2.sh, jpay6.sh, scripts/fn-e1e2/setup-mini.sh) until L2 converts them; rows refusing an older world as
+noncanonical/epoch after the re-genesis.
+
+Rules now in force: the Mac runs cargo check and filtered Rust tests only, never Lean (the regen script runs lake
+itself: box only). Lanes may build and run again (ember, baef327e4), but only in warm, incremental trees on
+dregg-ref or hbox, never a fresh tree and never a search from / or ~. The integrator still merges, builds and
+gates main and fixes reds itself.
+
+## Rulings (do not re-ask)
+
+- Intent.credit (L1d item 5, ops 244-247) persists in IntentRecord: durable log frame v3 and
+  `DREGG.DURABLE.IMAGE` v3, shipped with the module conversion's re-genesis so the StoreEpoch moves once. Pending
+  the auditor's acceptance; L1d (ad6d6eff243f32816) coordinates the order with the integrator and the iter-speed
+  successor (a0fd127abfb9aac75).
+- closure.pid on dregg-ref (empty for jobs started before lanes joined group `closure`) is infra's
+  (aed5ecf506cf840af), not the integrator's.
+- Transitive bumps through registry constants: closed, no. Nesting already propagates through the regen's round
+  loop; both stops were spelling forms, now handled.
+- Owner-less pins: the census refuses a registered DREGG identity no definition spells or names, landed once
+  A9/A10's pins show none left (the Mac worktree's uncommitted `ownerless` check; through a box build only).
+- The module conversion's census change (option A, structure-not-name for compiler auxiliaries) is the one planned
+  re-pin; it lands from a0fd127abfb9aac75 after the next candidate is reported.
 
 ## Cut 9's red, and its cause
 
@@ -68,8 +123,11 @@ only `.lake/packages`; Lake's artifact cache restores the build dir as fresh ino
 
 ## Named reds outstanding
 
-- un-pb-twins d8cc7d72: not merged; redoes un-pb-wal's dealer commit/emit in native/private-backend (dzk_store.rs,
-  sh2t_id_store.rs, scripts/check-rust-tests.sh). Waits for the lane to merge main and keep one design.
+- Uncommitted in the Mac worktree: Compiler/PersistedCodecTagCensus.lean `ownerless` (the census refuses a registered DREGG identity no definition spells or names). Unelaborated; land it only through a box build after the candidate.
+
+- None open on main beyond A3's outcome (un-pb-twins landed at 134535c2 via 36ce6bd3d).
+- A lane's "proved" is a claim until the integrator's build elaborates it: lean-audit-c's three proofs never
+  had (fixed 61bf01e1d).
 - Cut 13 carries three flag days (lean-critical, un-effects, hot-path-v4): codec-shapes-regen.py runs once on the
   box if the census reds on moved fingerprints.
 

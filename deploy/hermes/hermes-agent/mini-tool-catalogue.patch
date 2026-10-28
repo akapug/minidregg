@@ -1,6 +1,33 @@
---- a/acp_adapter/server.py	2026-09-19 14:30:54
-+++ b/acp_adapter/server.py	2026-10-27 08:18:15
-@@ -446,10 +446,15 @@
+--- a/acp_adapter/server.py
++++ b/acp_adapter/server.py
+@@ -41,6 +41,26 @@
+ from tools.approval_context import reset_hermes_interactive_context, set_hermes_interactive_context
+ 
+ logger = logging.getLogger(__name__)
++
++# Mini's sandbox toolsets: the only built-in toolsets a restricted resident
++# may load, with the exact tool names each adds (upstream toolsets.py at this
++# pin). The controller grants a subset per prompt in
++# HERMES_MINI_SANDBOX_TOOLSETS and checks the reported names exactly.
++_MINI_SANDBOX_TOOLSETS = {
++    "file": ("read_file", "write_file", "patch", "search_files"),
++    "terminal": ("terminal", "process_manage"),
++    "code_execution": ("execute_code",),
++}
++
++
++def _mini_sandbox_toolsets():
++    granted = os.environ.get("HERMES_MINI_SANDBOX_TOOLSETS", "")
++    return [t for t in _MINI_SANDBOX_TOOLSETS if t in granted.split(",")]
++
++
++def _mini_sandbox_tool_names():
++    return {n for t in _mini_sandbox_toolsets() for n in _MINI_SANDBOX_TOOLSETS[t]}
++
+ 
+ # Runs the synchronous AIAgent off the event loop.
+ _executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="acp-agent")
+@@ -446,10 +466,18 @@
              from agent.memory_manager import inject_memory_provider_tools
  
              agent = state.agent
@@ -12,6 +39,9 @@
 +                # A Mini room resident: the session's tools are exactly the
 +                # MCP servers the client provided, no built-in toolset.
 +                agent.enabled_toolsets = [f"mcp-{s.name}" for s in mcp_servers if s.name]
++                # Plus exactly the sandbox toolsets the controller granted
++                # this prompt (files, terminal, Python inside the worker).
++                agent.enabled_toolsets += _mini_sandbox_toolsets()
 +            else:
 +                agent.enabled_toolsets = _expand_acp_enabled_toolsets(
 +                    getattr(agent, "enabled_toolsets", None) or ["hermes-acp"],
@@ -20,7 +50,7 @@
              agent.tools = get_tool_definitions(
                  enabled_toolsets=agent.enabled_toolsets,
                  disabled_toolsets=getattr(agent, "disabled_toolsets", None), quiet_mode=True,
-@@ -595,10 +600,23 @@
+@@ -595,10 +623,24 @@
                  )
          self._schedule_available_commands_update(state.session_id)
          self._schedule_soon(lambda: self._send_usage_update(state))
@@ -34,7 +64,8 @@
 +            field_meta = dict(field_meta or {})
 +            field_meta["miniToolCatalogue"] = {
 +                "type": "mini-hermes-tool-catalogue-v1",
-+                "valid": bool(names) and all(n.startswith("mcp__mini_grain__") for n in names),
++                "valid": bool(names) and all(
++                    n.startswith("mcp__mini_grain__") or n in _mini_sandbox_tool_names() for n in names),
 +                "names": names,
 +            }
          return {
@@ -45,3 +76,21 @@
          }
  
      async def _attach_session_mcp(self, state: SessionState, mcp_servers: list | None, log: str, *log_args) -> None:
+--- a/tools/file_tools_write_guards.py
++++ b/tools/file_tools_write_guards.py
+@@ -153,6 +153,15 @@
+     if nt_err:
+         return nt_err
+     candidates = (_resolved_or_raw(filepath, task_id), os.path.normpath(_expand_tilde(filepath)))
++    # A Mini room resident's file tools write only its scratch: anything durable
++    # leaves through a Mini tool (a doc line, a say, a publication).
++    if os.environ.get("HERMES_MINI_SANDBOX_TOOLSETS"):
++        real = os.path.realpath(candidates[0])
++        if not any(real == root or real.startswith(root + "/") for root in ("/scratch", "/tmp")):
++            return (
++                f"Refusing to write outside /scratch: {filepath}\n"
++                "This resident's files live in /scratch for this turn only; keep anything "
++                "durable with a Mini tool (mini_doc_append, mini_say).")
+     if any(c.startswith(_SENSITIVE_PATH_PREFIXES) or c in _SENSITIVE_EXACT_PATHS for c in candidates):
+         return (
+             f"Refusing to write to sensitive system path: {filepath}\n"

@@ -100,7 +100,7 @@ its current physical root; a caller-supplied store is not authority. -/
 def manifestAtom (domain : Digest) (app : Nat) : AtomId :=
   let preimage := (StreamCodec.product digestStream StreamCodec.nat).encode (domain, app)
   ⟨⟨(Sp800185Cshake256.hash
-    "DREGG/APPLICATION/MANIFEST-ATOM/v1".toUTF8.toList preimage).digest.value⟩⟩
+    "DREGG/APPLICATION/MANIFEST-ATOM/v2".toUTF8.toList preimage).digest.value⟩⟩
 
 def decodeInstalled (domain : Digest) (manifestResource app : Nat) (version : Int)
     (page : ContentResource.ContentStore) : Option Manifest := do

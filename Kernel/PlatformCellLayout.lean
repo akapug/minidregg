@@ -189,7 +189,7 @@ def valueStream : (space : Namespace) → StreamCodec (Namespace.Value space)
   | .record => platformStream
   | .controller => subjectStream
 
-def wireName : String := "DREGG/PLATFORM/v1"
+def wireName : String := "DREGG/PLATFORM/v2"
 
 def wire : Wire layout where
   name := wireName
@@ -202,7 +202,7 @@ def wire : Wire layout where
     | .record => "unit"
     | .controller => "unit"
   valueCodecId
-    | .record => "DREGG/PLATFORM/RECORD/v1"
+    | .record => "DREGG/PLATFORM/RECORD/v2"
     | .controller => "nat/subject-id/v1"
 
 def materializer : Materializer layout Digest := StoreCodec.materializer wire
@@ -263,6 +263,32 @@ theorem installPatch_record_only (current next : Platform) (op : Op layout)
     (member : op ∈ installPatch current next) : op.address = recordAddress := by
   simp [installPatch] at member; subst member; rfl
 
+/-- An install moves the record to `next` and leaves the controller untouched. -/
+theorem controllerOf_installPatch (store : PlatformStore) (current next : Platform) :
+    controllerOf (Patch.run store (installPatch current next)) = controllerOf store := by
+  simp [installPatch, Patch.run, Op.apply, controllerOf, recordAddress, controllerAddress, Store.set]
+
+theorem recordOf_installPatch (store : PlatformStore) (current next : Platform) :
+    recordOf (Patch.run store (installPatch current next)) = some next := by
+  simp [installPatch, Patch.run, Op.apply, recordOf, recordAddress, Store.set]; rfl
+
+/-- **The cell's writers.** A platform cell is born at genesis holding the deployment's
+controller and is written afterwards only by installs: the kind is kernelOnly with the one
+writer `.platformInstall` (`CanonicalCellRegistry.platform_only_install`), whose one write is
+`installPatch` (`PlatformInstallReceiver.intent_writes_platform_cell`). Any install is allowed
+here, admitted or not, so the invariant below holds of every cell those writers can make. -/
+inductive Reachable (controller : SubjectId) : PlatformStore → Prop
+  | genesis (p : Platform) : Reachable controller (genesisStore controller p)
+  | install {store : PlatformStore} (current next : Platform) (prior : Reachable controller store) :
+      Reachable controller (Patch.run store (installPatch current next))
+
+/-- **The controller stays genesis's** on every cell its writers can make. -/
+theorem Reachable.controller_stays {controller : SubjectId} {store : PlatformStore}
+    (reach : Reachable controller store) : controllerOf store = some controller := by
+  induction reach with
+  | genesis p => exact controllerOf_genesisStore controller p
+  | install current next _ stays => rw [controllerOf_installPatch]; exact stays
+
 #assert_axioms Platform.ofWire_toWire
 #assert_axioms cell_roundtrip
 #assert_axioms recordOf_genesisStore
@@ -272,5 +298,8 @@ theorem installPatch_record_only (current next : Platform) (op : Op layout)
 #assert_axioms empty_unlawful
 #assert_axioms invalid_unlawful
 #assert_axioms installPatch_record_only
+#assert_axioms controllerOf_installPatch
+#assert_axioms recordOf_installPatch
+#assert_axioms Reachable.controller_stays
 
 end Minidregg.Kernel.PlatformCellLayout

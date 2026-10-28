@@ -43,6 +43,15 @@ pub struct DevConfig {
     pub public: Option<(PathBuf, PathBuf)>,
     /// The public reader's enrolled subject (authors delegate `observe` to it).
     pub public_subject: Option<String>,
+    /// The published document the public front page shows (`frontDoc`).
+    pub front_doc: Option<String>,
+}
+
+/// A front-page document name as the body accepts it: a workspace reference name (1-64 of
+/// `[A-Za-z0-9-]`). Anything else is no setting at all, so the front page stays the index.
+pub fn front_doc_name(raw: &str) -> Option<String> {
+    let name = raw.trim();
+    (!name.is_empty() && name.len() <= 64 && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')).then(|| name.to_owned())
 }
 
 impl DevConfig {
@@ -75,7 +84,8 @@ impl DevConfig {
         }
         let public = if v["public"].is_object() { Some(pair(&v["public"], "public")?) } else { None };
         let public_subject = v["publicSubject"].as_str().map(str::to_owned).filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()));
-        Ok(DevConfig { mini: abs("mini")?, host: abs("host")?, config: abs("config")?, socket: abs("socket")?, wrapper: abs("wrapper")?, sessions, public, public_subject })
+        let front_doc = v["frontDoc"].as_str().and_then(front_doc_name);
+        Ok(DevConfig { mini: abs("mini")?, host: abs("host")?, config: abs("config")?, socket: abs("socket")?, wrapper: abs("wrapper")?, sessions, public, public_subject, front_doc })
     }
 }
 
@@ -98,6 +108,9 @@ impl BoxLayout {
     pub fn sessions(&self) -> PathBuf { self.p("/var/lib/mini/sessions") }
     /// The public reader's enrolled subject, written by the operator after `mini-reenroll public`.
     pub fn public_subject_file(&self) -> PathBuf { self.p("/etc/mini/public-subject") }
+    /// The published document the public front page shows, one name, written by the operator (run-sheet
+    /// step 9c: `welcome`). Absent, empty or not a reference name: the front page is the index.
+    pub fn front_doc_file(&self) -> PathBuf { self.p("/etc/mini/front-doc") }
 }
 
 pub enum Layout {
@@ -169,6 +182,14 @@ impl Spawner {
         match &self.layout {
             Layout::Dev(dev) => dev.public_subject.clone(),
             Layout::Box(layout) => fs::read_to_string(layout.public_subject_file()).ok().map(|s| s.trim().to_owned()).filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())),
+        }
+    }
+
+    /// The public front page's document (`/etc/mini/front-doc`, or `frontDoc` in the dev config).
+    pub fn front_doc(&self) -> Option<String> {
+        match &self.layout {
+            Layout::Dev(dev) => dev.front_doc.clone(),
+            Layout::Box(layout) => fs::read_to_string(layout.front_doc_file()).ok().as_deref().and_then(front_doc_name),
         }
     }
 
@@ -252,9 +273,12 @@ impl Spawner {
     }
 
     /// `mini web --body` as the member, serving the inherited listener on fd 3: the child's pid.
+    /// The body is spawned directly, not through the wrapper, so it carries the member's delegated
+    /// consent selection itself (`delegated_consent_env`), as the wrapper exports it for a shell.
     pub fn body(&self, member: &Member, unit: &str, listener: &OwnedFd) -> Result<u32, String> {
         let (mini, host, config, socket, _wrapper) = self.paths();
-        let mut command = self.command(member, unit, &[]);
+        let env = delegated_consent_env(&mini, &host, &config, &member.home)?;
+        let mut command = self.command(member, unit, &env);
         command.arg(mini).arg("web").arg("--body").arg("--listen-fd").arg("3")
             .arg("--dir").arg(&member.workspace).arg("--home").arg(&member.home)
             .arg("--socket").arg(socket).arg("--host").arg(host).arg("--config").arg(config);
@@ -263,6 +287,12 @@ impl Spawner {
         }
         if let Some(subject) = self.public_subject() {
             command.arg("--public-subject").arg(subject);
+        }
+        // Only the public reader's front page shows the operator's document; a member's is their own.
+        if member.anonymous {
+            if let Some(doc) = self.front_doc() {
+                command.arg("--front-doc").arg(doc);
+            }
         }
         let listener_fd = listener.as_raw_fd();
         unsafe {
@@ -276,6 +306,40 @@ impl Spawner {
         let child = command.spawn().map_err(|e| format!("spawn body: {e}"))?;
         Ok(child.id())
     }
+}
+
+/// The delegated full consent selection for a member whose home holds `consent/peer.sock`.
+///
+/// Under split tenancy a member's account cannot read the operator's Store, so its full consent is
+/// answered by a socket-activated worker running as the Store operator (`mini
+/// serve-controller-consent`, the frame's mini-consent@NAME). The client takes that delegation only
+/// from these seven variables together: the listener (peer uid 0, because systemd creates it), the
+/// provider and config digests, and the three local consent paths. This is the same selection the
+/// frame's mini-shell-ssh exports for an ssh or browser shell. Without the socket (a box without
+/// delegation, a dev layout) it is empty and the body keeps the client's default.
+pub fn delegated_consent_env(mini: &Path, host: &Path, config: &Path, home: &Path)
+    -> Result<Vec<(&'static str, String)>, String> {
+    use sha2::{Digest, Sha256};
+    use std::os::unix::fs::FileTypeExt;
+    let socket = home.join("consent/peer.sock");
+    match fs::symlink_metadata(&socket) {
+        Ok(meta) if meta.file_type().is_socket() => {}
+        _ => return Ok(Vec::new()),
+    }
+    let consent = mini.with_file_name("minidregg-client-consent");
+    let digest = |path: &Path| -> Result<String, String> {
+        let bytes = fs::read(path).map_err(|e| format!("delegated consent: {}: {e}", path.display()))?;
+        Ok(Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect())
+    };
+    Ok(vec![
+        ("MINI_CONSENT_SOCKET", socket.display().to_string()),
+        ("MINI_CONSENT_PEER_UID", "0".into()),
+        ("MINI_CONSENT_SHA256", digest(&consent)?),
+        ("MINI_CONSENT_CONFIG_SHA256", digest(config)?),
+        ("MINI_LOCAL_HOST", host.display().to_string()),
+        ("MINI_CONSENT_HOST", consent.display().to_string()),
+        ("MINI_CONSENT_CONFIG", config.display().to_string()),
+    ])
 }
 
 /// A new pty: the master (close-on-exec) and the slave's path.
@@ -373,6 +437,57 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("mini-web-spawn-{}-{}", std::process::id(), crate::new_token().unwrap()));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn delegated_consent_env_only_beside_a_consent_socket_and_pins_both_digests() {
+        use sha2::{Digest, Sha256};
+        // Short on purpose: the scratch binds a Unix socket, and macOS caps its path at 104 bytes.
+        let dir = std::env::temp_dir().join(format!("mws-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let bin = dir.join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        fs::write(bin.join("minidregg-client-consent"), b"provider").unwrap();
+        fs::write(dir.join("config.json"), b"{}").unwrap();
+        let (mini, host, config) = (bin.join("mini"), bin.join("minidregg-host"), dir.join("config.json"));
+        let home = dir.join("h");
+        fs::create_dir_all(home.join("consent")).unwrap();
+        assert!(delegated_consent_env(&mini, &host, &config, &home).unwrap().is_empty(), "no socket: no delegation");
+        fs::write(home.join("consent/peer.sock"), b"").unwrap();
+        assert!(delegated_consent_env(&mini, &host, &config, &home).unwrap().is_empty(), "a regular file is no socket");
+        fs::remove_file(home.join("consent/peer.sock")).unwrap();
+        let _listener = std::os::unix::net::UnixListener::bind(home.join("consent/peer.sock")).unwrap();
+        let env: BTreeMap<_, _> = delegated_consent_env(&mini, &host, &config, &home).unwrap().into_iter().collect();
+        let hex = |b: &[u8]| Sha256::digest(b).iter().map(|x| format!("{x:02x}")).collect::<String>();
+        assert_eq!(env.len(), 7);
+        assert_eq!(env["MINI_CONSENT_SOCKET"], home.join("consent/peer.sock").display().to_string());
+        assert_eq!(env["MINI_CONSENT_PEER_UID"], "0");
+        assert_eq!(env["MINI_CONSENT_SHA256"], hex(b"provider"));
+        assert_eq!(env["MINI_CONSENT_CONFIG_SHA256"], hex(b"{}"));
+        assert_eq!(env["MINI_LOCAL_HOST"], host.display().to_string());
+        assert_eq!(env["MINI_CONSENT_HOST"], bin.join("minidregg-client-consent").display().to_string());
+        assert_eq!(env["MINI_CONSENT_CONFIG"], config.display().to_string());
+        fs::remove_file(bin.join("minidregg-client-consent")).unwrap();
+        assert!(delegated_consent_env(&mini, &host, &config, &home).is_err(), "a socket without its provider refuses");
+    }
+
+    #[test]
+    fn front_doc_is_one_reference_name_or_no_setting() {
+        assert_eq!(front_doc_name("welcome\n").as_deref(), Some("welcome"));
+        for bad in ["", "  ", "../etc/passwd", "a b", "doc/x", &"x".repeat(65)] {
+            assert_eq!(front_doc_name(bad), None, "{bad:?}");
+        }
+        let dir = scratch();
+        let layout = BoxLayout { root: dir.clone() };
+        let spawner = Spawner { layout: Layout::Box(layout.clone()) };
+        assert_eq!(spawner.front_doc(), None, "absent file: the index");
+        fs::create_dir_all(layout.front_doc_file().parent().unwrap()).unwrap();
+        fs::write(layout.front_doc_file(), "welcome\n").unwrap();
+        assert_eq!(spawner.front_doc().as_deref(), Some("welcome"));
+        fs::write(layout.front_doc_file(), "../welcome").unwrap();
+        assert_eq!(spawner.front_doc(), None, "not a reference name: the index");
+        assert_eq!(dev(&dir).front_doc(), None, "dev config without frontDoc");
     }
 
     #[test]

@@ -10,8 +10,9 @@ use crate::{
     codec::{bad, bytes, Generation, Nat},
     consensus_wire::Cursor,
     custody::hash,
+    entropy::Entropy,
     private_send::{self, PrivateSend},
-    reconstruction::Field,
+    reconstruction::{eval, Field},
 };
 use std::{
     collections::BTreeMap,
@@ -89,9 +90,6 @@ impl Profile {
         result
     }
 }
-fn eval(p: &[Field], x: Field) -> Field {
-    p.iter().rev().fold(Field(0), |a, c| a.mul(x).add(*c))
-}
 fn pow(mut x: Field, mut e: usize) -> Field {
     let mut y = Field(1);
     while e > 0 {
@@ -118,14 +116,7 @@ fn phase_bytes(p: &PhaseMessage) -> &[u8] {
         PhaseMessage::Init(b) | PhaseMessage::Echo(b) | PhaseMessage::Ready(b) => b,
     }
 }
-fn entropy(seed: [u8; 32], context: [u8; 32], tag: u8, index: usize) -> [u8; 32] {
-    let mut b = b"DREGG.DZK.RANDOM.V1".to_vec();
-    b.extend(seed);
-    b.extend(context);
-    b.push(tag);
-    b.extend((index as u64).to_le_bytes());
-    hash(&b)
-}
+const RANDOM: &[u8] = b"DREGG.DZK.RANDOM.V1";
 fn challenge(p: &Profile, roots: &[[u8; 32]]) -> Field {
     let mut b = b"DREGG.DZK.CHALLENGE.V1".to_vec();
     b.extend(p.context);
@@ -168,7 +159,7 @@ fn tree(
     let mut salts = vec![];
     let mut level = vec![];
     for i in 0..width {
-        let salt = entropy(seed, p.context, 1, stage * 32 + i);
+        let salt = Entropy::derive(RANDOM, seed, p.context, 1, stage * 32 + i);
         salts.push(salt);
         level.push(leaf(
             p,
@@ -340,7 +331,7 @@ pub fn prove(
     let random_poly: Vec<_> = (0..=p.degree)
         .map(|i| {
             Field(u128::from_le_bytes(
-                entropy(seed, p.context, 0, i)[..16].try_into().unwrap(),
+                Entropy::derive(RANDOM, seed, p.context, 0, i)[..16].try_into().unwrap(),
             ))
         })
         .collect();
@@ -599,11 +590,7 @@ pub struct Message {
     pub context: [u8; 32],
     pub body: Body,
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Send {
-    pub to: u16,
-    pub message: Message,
-}
+pub type Send = crate::codec::Packet<Message>;
 #[derive(Clone)]
 pub struct Dzk {
     pub me: u16,
@@ -691,7 +678,7 @@ impl Dzk {
             for (k, p) in coeff.iter_mut().enumerate() {
                 for l in 0..=self.profile.f {
                     p.push(Field(u128::from_le_bytes(
-                        entropy(seed, self.profile.context, 2, j * 32 + k * 16 + l)[..16]
+                        Entropy::derive(RANDOM, seed, self.profile.context, 2, j * 32 + k * 16 + l)[..16]
                             .try_into()
                             .unwrap(),
                     )));
@@ -835,9 +822,6 @@ impl Dzk {
                 evidence_hash: hash(&b),
             })
         }
-    }
-    pub(crate) fn dealer_inputs(&self) -> Option<&[Vec<Field>]> {
-        self.dealer_inputs.as_deref()
     }
     pub fn verify_private(&self, holder: u16, values: &[Field]) -> Result<Verification> {
         if self.delivered().is_none() {
@@ -1169,5 +1153,18 @@ mod tests {
         encoded.push(0);
         assert!(decode_private(&a, &encoded).is_err());
         assert!(prove(&a, &[vec![Field(1)]], [0; 32]).is_err());
+    }
+}
+
+#[cfg(test)]
+mod pin_helpers {
+    use super::*;
+    #[test]
+    fn pin_dzk_seeded_prg() {
+        let seed: [u8; 32] = std::array::from_fn(|i| i as u8);
+        let ctx: [u8; 32] = std::array::from_fn(|i| 100 + i as u8);
+        assert_eq!(Entropy::derive(RANDOM, seed, ctx, 0, 0), [0x1d, 0x09, 0x04, 0xc0, 0x97, 0xf3, 0x11, 0xe7, 0x8f, 0xf1, 0x44, 0x75, 0x4c, 0x4d, 0xd8, 0x92, 0x3a, 0x9d, 0x2e, 0x53, 0xbd, 0x0e, 0xe5, 0x79, 0x9a, 0xf5, 0x10, 0x54, 0x02, 0x8e, 0x63, 0x1b]);
+        assert_eq!(Entropy::derive(RANDOM, seed, ctx, 1, 0), [0xdc, 0xcb, 0x34, 0xf5, 0x25, 0xfd, 0x36, 0xc5, 0xfb, 0xd7, 0xd5, 0xc6, 0x5c, 0x0f, 0x65, 0x37, 0xea, 0xc7, 0xc7, 0x13, 0x75, 0xf3, 0x5b, 0xbb, 0xc2, 0x51, 0x75, 0x80, 0xfe, 0xd0, 0x58, 0x2c]);
+        assert_eq!(Entropy::derive(RANDOM, seed, ctx, 3, 7), [0xa7, 0xf1, 0x75, 0x10, 0xfd, 0x55, 0xf9, 0x68, 0xfe, 0xd3, 0x63, 0xb4, 0x6c, 0xef, 0x16, 0x74, 0x0b, 0x43, 0xc0, 0x58, 0x87, 0xb9, 0xa6, 0x29, 0xd8, 0x29, 0x89, 0x82, 0x29, 0x26, 0xe9, 0x0d]);
     }
 }

@@ -135,46 +135,39 @@ for s in SUBJECTS:
     keys[s] = nacl.signing.SigningKey.generate()
     fd = os.open(path(f"keys/{s}.key"), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     os.write(fd, bytes(keys[s])); os.close(fd)
+TAIL_BOUND = 1000000
+NEXT_PUBLIC = {}   # subject -> its next public key (hex); genesis.sh commits the digest
 def enrollment(s):
+    # the compact form genesis.sh completes (keyEpoch, activity window, nextKeyDigest, accountPredicate)
     spend, control, observe = CAPS[s]
-    return {"key": {"keyId": str(7000 + s if s >= 20 else 1001 * s), "keyEpoch": "2", "algorithm": "1",
-                    "subject": str(s), "publicKey": keys[s].verify_key.encode().hex(),
-                    "activeFrom": "0", "activeUntil": "1000000", "nextKeyDigest": None},
-            "accountId": str(s), "spendCapabilityId": str(spend), "controlCapabilityId": str(control),
-            "factoryObserveCapabilityId": str(observe), "initialBalance": str(BALANCE[s]),
-            "accountPredicate": {"type": "all", "predicates": []}}
-operator = {"domain": 8501, "federation": 9, "factoryId": 10, "resourceBookId": 11,
-            "authorityCellId": 12, "issuer": 5, "ownerBudget": 100000, "lifetime": 10000,
-            "tariffBase": 3, "tariffPerBirth": 2, "tariffPerGrant": 1,
-            "tariffPerInitialPayloadByte": 0, "collector": 99, "asset": 0, "genesisHeight": 10,
-            "expectedSeed": 0, "storageBinary": STORE, "storageRoot": path("store"),
-            "signatureBinary": VERIFIER,
-            "providerServices": [{"providerResourceId": PURSE, "tariff": {
+    entry = {"subject": s, "keyId": 7000 + s if s >= 20 else 1001 * s,
+             "publicKey": keys[s].verify_key.encode().hex(), "accountId": s, "spendCapabilityId": spend,
+             "controlCapabilityId": control, "factoryObserveCapabilityId": observe, "initialBalance": BALANCE[s]}
+    if s in NEXT_PUBLIC: entry["nextPublicKey"] = NEXT_PUBLIC[s]
+    return entry
+# The provider service pin (the purse's per-route tariff), pinned at genesis.
+operator = {"providerServices": [{"providerResourceId": PURSE, "tariff": {
                 "version": "1", "model": MODEL, "routes": {
                     "user": {"perOp": str(USER_FEE)},
                     "pool": {"perOp": str(POOL_FEE), "inputMicroPerMillion": str(RATE_IN),
                              "outputMicroPerMillion": str(RATE_OUT)},
                     "homelab": {"perOp": str(HOMELAB_FEE), "inputMicroPerMillion": "0",
                                 "outputMicroPerMillion": "0"}}}}]}
-json.dump(operator, open(path("operator.json"), "w"), indent=1)
-profile = json.loads(subprocess.run([HOST, path("operator.json"), "profile"], check=True,
-                                    capture_output=True).stdout)
-genesis = {"domain": "8501", "factoryId": "10", "resourceBookId": "11", "authorityCellId": "12",
-           "federation": "9", "tariffBase": "3", "tariffPerBirth": "2", "tariffPerGrant": "1",
-           "tariffPerInitialPayloadByte": "0", "collector": "99", "asset": "0",
-           "expectedSemantics": profile["semantics"], "issuerEpoch": "2", "genesisHeight": "10",
-           "clockTickers": [], "tailBound":"1000000",
-           "factoryPredicate": {"type": "all", "predicates": []},
-           "enrollments": [enrollment(s) for s in SUBJECTS],
-           "factoryControllerSubject": str(OPERATOR),
-           "factoryControllerCapability": str(FACTORY_CONTROL),
-           "issuanceCap": "1000000000000000",
-           "meterAllowance": {k: "10000000" for k in ("incidences", "turnBytes", "memoryTouches",
-               "witnessBytes", "proofWork", "storageBytes", "networkBytes", "sideEffectCount",
-               "feeDebit", "leaseByteBlocks")}}
-json.dump(genesis, open(path("genesis.json"), "w"), indent=1)
-# The genesis clock: the one candidate helper (the extractors keep the dump line above as their seam).
-subprocess.run(["sh", os.environ["GENESIS_PARAMS_SH"], "fill-source", path("genesis.json")], check=True)
+# genesis seam: extractors adjust TAIL_BOUND, NEXT_PUBLIC and operator["providerServices"] here
+# The genesis is the one template's (scenario-genesis.sh): this journey passes only what its world
+# differs by. OPERATOR is the sponsor (its keyId, account and capabilities are the example's).
+with open(path("enrollments.json"), "w") as out:
+    json.dump([enrollment(s) for s in SUBJECTS if s != OPERATOR], out)
+spend, control, observe = CAPS[OPERATOR]
+overlay = (f"del(.grainPlatform) | .tailBound = {TAIL_BOUND} | .factoryControllerCapability = {FACTORY_CONTROL}"
+           f" | .sponsor.subject = {OPERATOR} | .sponsor.keyId = {1001 * OPERATOR} | .sponsor.accountId = {OPERATOR}"
+           f" | .sponsor.spendCapabilityId = {spend} | .sponsor.controlCapabilityId = {control}"
+           f" | .sponsor.factoryObserveCapabilityId = {observe} | .sponsor.initialBalance = {BALANCE[OPERATOR]}"
+           f" | .providerServices = {json.dumps(operator['providerServices'])}")
+subprocess.run(["sh", os.path.join(os.environ["REPO"], "native/resource-client/scenario-genesis.sh"), DIR,
+                keys[OPERATOR].verify_key.encode().hex(), overlay, path("enrollments.json")], check=True,
+               env=dict(os.environ, HOST=HOST, MINI=MINI, STORE=STORE, VERIFIER=VERIFIER))
+profile = json.load(open(path("profile.json")))
 # The birth intent embeds the FILLED genesis: the Host refuses a birth whose genesis lacks the clock
 # fields the helper wrote ("$.birth.genesis: missing field clockGenesisNow", the real JPAY6 red of a0db11f8).
 genesis = json.load(open(path("genesis.json")))

@@ -1,0 +1,9 @@
+# Welcome to Mini
+You are looking at a shared world that was seeded just before the door opened. Everything here was written by a member through the same verbs you have.
+Read what-is-mini first: it says what this place is in a few lines.
+Try a link: type  doc links welcome  to see where this page points, and  doc backlinks what-is-mini  to see who points at it.
+Try a transclusion: the first lines of what-is-mini are shown inside this page as a live range. Edit the source and this page changes. Type  doc transclusions welcome.
+Try history: type  history  to see every attempt you have made, admitted, refused or undecided, with receipts.
+Try a refusal: house-rules is readable but not writable by you. See a-refusal-explains-itself.
+Try the lobby: a public room with a few posts and a resident called Hermes. Type  tail  after  chat enter lobby.
+Try the story: the-lamplighters-note, then the story room called tale.

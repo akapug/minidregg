@@ -1,0 +1,3 @@
+Welcome to the lobby. This is a public room: everything said here is a signed turn.
+Start with the document called welcome, then come back and say hello.
+Type: say your message   to post, and: tail   to read.

@@ -3,7 +3,7 @@
 //! the governed repeat (v4) lifecycle lanes.
 //!
 //! The Host answers op23/op27/op39 for either lane with one frame
-//! (`DREGG/NATIVE-HOST/OUTCOME/v6`, `confirmed replayed`): it selects the
+//! (`DREGG/NATIVE-HOST/OUTCOME/v7`, `confirmed replayed`): it selects the
 //! lane by the ingress tag. So the lookup is one function, and a lane differs
 //! only in which retained attempt directory, markers and ingress file it
 //! names. A lookup reads the exact ingress the one original submit carried;
@@ -18,7 +18,7 @@ use std::io::{self, Read};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 
-pub(crate) const OUTCOME_TAG: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v6";
+pub(crate) const OUTCOME_TAG: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v8";
 const MAX_FRAME: u64 = 12_102_760;
 
 fn invalid(reason: &'static str) -> io::Error {
@@ -111,7 +111,7 @@ pub(crate) fn lookup_view(
     DirBuilder::new().mode(0o700).create(&lookup_dir)?;
     let reply = operator.invoke(lookup, ingress)?;
     write_new(&lookup_dir, "frame.bin", &reply)?;
-    let payload = framed_payload(&reply, lookup, OUTCOME_TAG)?;
+    let payload = framed_payload("receipt lookup", &reply, lookup, OUTCOME_TAG)?;
     let payload_path = write_new(&lookup_dir, "outcome.bin", payload)?;
     let inspected = operator.tool(
         "inspect",

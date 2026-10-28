@@ -34,10 +34,21 @@ fn refused(s: &str)->io::Error { io::Error::new(io::ErrorKind::PermissionDenied,
 fn stable(meta: &Metadata) -> (u64,u64,u32,u64,u64,i64,i64,i64,i64) {
     (meta.dev(),meta.ino(),meta.mode(),meta.nlink(),meta.len(),meta.mtime(),meta.mtime_nsec(),meta.ctime(),meta.ctime_nsec())
 }
+/// What a pinned inode must keep for its provenance to hold. A file keeps its whole stable
+/// state. A directory keeps its identity, type and permission bits, but not its timestamps,
+/// link count or size: those move whenever an entry is added or removed. Shared root-owned
+/// ancestors such as `/var/lib/mini-spk-worlds` gain an entry every time another world is
+/// registered, and that changes nothing about who may write the directory. (dregg-build,
+/// 2026-10-27: a resident pinned that directory at 19:41:29, another world was registered
+/// beneath it at 19:41:40, and the resident refused its own journal at 19:42:47.)
+fn provenance_key(meta: &Metadata) -> (u64,u64,u32,u64,u64,i64,i64,i64,i64) {
+    if meta.is_dir() { (meta.dev(),meta.ino(),meta.mode(),0,0,0,0,0,0) } else { stable(meta) }
+}
 fn unchanged(pin: &Pin, observed: &Metadata) -> bool {
     let Ok(current) = pin.file.metadata() else { return false; };
-    stable(&current) == stable(&pin.original) && stable(observed) == stable(&pin.original)
+    provenance_key(&current) == provenance_key(&pin.original) && provenance_key(observed) == provenance_key(&pin.original)
         && (current.uid(),current.gid()) == (observed.uid(),observed.gid())
+        && (current.uid(),current.gid()) == (pin.original.uid(),pin.original.gid())
 }
 /// Exact pre-namespace owner/group, only for the same unchanged held inode.
 /// Once bootstrap has captured custody, an unknown inode is never blessed by
@@ -421,6 +432,26 @@ pub(crate) fn enter_registered(bwrap: &Path, bwrap_sha256: &str, operator_uid: u
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pinned_directory_keeps_provenance_across_new_entries_but_not_mode_changes() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("mini-pin-{}", std::process::id()));
+        fs::create_dir(&dir).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+        let pin = Pin { file: File::open(&dir).unwrap(), original: fs::metadata(&dir).unwrap() };
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        fs::create_dir(dir.join("another-world")).unwrap();
+        assert!(unchanged(&pin, &fs::metadata(&dir).unwrap()), "a new entry is not a provenance change");
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o775)).unwrap();
+        assert!(!unchanged(&pin, &fs::metadata(&dir).unwrap()), "a group-writable mode is");
+        let file = dir.join("pinned-file");
+        fs::write(&file, b"one").unwrap();
+        let file_pin = Pin { file: File::open(&file).unwrap(), original: fs::metadata(&file).unwrap() };
+        fs::write(&file, b"two!").unwrap();
+        assert!(!unchanged(&file_pin, &fs::metadata(&file).unwrap()), "a file keeps its whole state");
+        fs::remove_dir_all(&dir).unwrap();
+    }
 
 
     fn registry() -> crate::volume_helper::Registry {

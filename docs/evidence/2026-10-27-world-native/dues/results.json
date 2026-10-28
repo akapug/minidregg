@@ -1,0 +1,282 @@
+{
+ "rows": [
+  {
+   "step": "extract-quote-is-the-policy-ceiling",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "published": {
+     "extractTicks": "3200000"
+    },
+    "policy": 3200000
+   },
+   "group": null
+  },
+  {
+   "step": "publish",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "publish"
+  },
+  {
+   "step": "create",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "create"
+  },
+  {
+   "step": "birth",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "birth"
+  },
+  {
+   "step": "born-awaiting-the-keeper-ledger-0",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "source": {
+     "decider": "40",
+     "kind": "reply",
+     "slot": "89634224557012154990595125222021360552530650409493953115230032406652866852218",
+     "slotCell": "139747600229423047359178248856377720916364560149151070131743118402336456857315"
+    },
+    "state": {
+     "fields": [
+      {
+       "name": "paid",
+       "value": {
+        "tag": "natural",
+        "value": "0"
+       }
+      }
+     ],
+     "tag": "record"
+    }
+   },
+   "group": "dues"
+  },
+  {
+   "step": "discharge-0",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "dues"
+  },
+  {
+   "step": "deliver-discharge-0",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "dues"
+  },
+  {
+   "step": "period-0-paid-exactly-amount-from-the-purse",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "source": {
+     "kind": "performed",
+     "reason": null,
+     "verdict": "settled"
+    },
+    "room": [
+     100000000000,
+     100200000000
+    ],
+    "state": {
+     "fields": [
+      {
+       "name": "paid",
+       "value": {
+        "tag": "natural",
+        "value": "200000000"
+       }
+      }
+     ],
+     "tag": "record"
+    },
+    "purse": [
+     300000000,
+     98141087
+    ]
+   },
+   "group": "dues"
+  },
+  {
+   "step": "deliver-settled-0",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "dues"
+  },
+  {
+   "step": "replay-0",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "dues"
+  },
+  {
+   "step": "deliver-replay-0",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "dues"
+  },
+  {
+   "step": "replayed-period-pays-nothing",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "source": {
+     "decider": "40",
+     "kind": "reply",
+     "slot": "44295376877213084664358621567555596838255894512967227180314426257231648407371",
+     "slotCell": "146584882575329225228586035928770984095877320730937331802356907073601255728515"
+    },
+    "room": 100200000000
+   },
+   "group": "dues"
+  },
+  {
+   "step": "discharge-1",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "dues"
+  },
+  {
+   "step": "deliver-discharge-1",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "dues"
+  },
+  {
+   "step": "period-1-refused-unfunded-moves-nothing",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "source": {
+     "kind": "performed",
+     "reason": "unfunded",
+     "verdict": "refused"
+    },
+    "room": 100200000000,
+    "state": {
+     "fields": [
+      {
+       "name": "paid",
+       "value": {
+        "tag": "natural",
+        "value": "200000000"
+       }
+      }
+     ],
+     "tag": "record"
+    },
+    "purse": 92564348
+   },
+   "group": "dues"
+  },
+  {
+   "step": "deliver-refused-1",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "dues"
+  },
+  {
+   "step": "period-1-still-owed-awaiting",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "source": {
+     "decider": "40",
+     "kind": "reply",
+     "slot": "15818509692603467033193484139521258052338368256560280130196704022344614132238",
+     "slotCell": "202056702983807392834645725002775798683480145334656789488736199831823433788884"
+    }
+   },
+   "group": "dues"
+  }
+ ],
+ "totals": [
+  {
+   "after": "born",
+   "height": "14",
+   "total": "0"
+  },
+  {
+   "after": "paid-0",
+   "height": "16",
+   "total": "0"
+  },
+  {
+   "after": "awaiting-1",
+   "height": "17",
+   "total": "0"
+  },
+  {
+   "after": "replay-refused",
+   "height": "19",
+   "total": "0"
+  },
+  {
+   "after": "unfunded-1",
+   "height": "21",
+   "total": "0"
+  },
+  {
+   "after": "still-owed-1",
+   "height": "22",
+   "total": "0"
+  }
+ ],
+ "objects": {
+  "obj": {
+   "object": "16012085292047831168",
+   "capability": "15009714232621267654"
+  }
+ },
+ "allPass": true,
+ "pin": "52678537649034187859932662785906826641569040782463430622806495369053396355199",
+ "height": "22"
+}

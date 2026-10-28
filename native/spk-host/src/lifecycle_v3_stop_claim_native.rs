@@ -37,7 +37,7 @@ fn inspection_request(plan: &[u8], committed: &[u8]) -> io::Result<Vec<u8>> {
 }
 
 fn inspection_reply(frame: &[u8]) -> io::Result<&[u8]> {
-    let payload = framed_payload(frame, STOP_INSPECT_OPERATION, b"")?;
+    let payload = framed_payload("stop inspect", frame, STOP_INSPECT_OPERATION, b"")?;
     if payload.len() as u64 > MAX_INSPECTION {
         return Err(invalid("STOP current source inspection bound refused"));
     }
@@ -262,7 +262,7 @@ pub(crate) fn submit_once(
     write_new(attempt_dir, "op26-frame.bin", &response)?;
     // Only the pinned Host's fresh installed CAS-winner path emits this tag;
     // replay and op27 return a distinct receipt-only Outcome. Retain first.
-    let committed = framed_payload(&response, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, COMMITTED_TAG)?.to_vec();
+    let committed = framed_payload("lifecycle claim submit", &response, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, COMMITTED_TAG)?.to_vec();
     let committed_path = write_new(attempt_dir, "committed-v3.bin", &committed)?;
     let committed_json = operator.tool(
         "inspect",
@@ -410,12 +410,12 @@ mod tests {
     #[test]
     fn historical_outcome_cannot_be_fresh_callback() {
         let mut reply = Vec::new();
-        let payload = b"DREGG/NATIVE-HOST/OUTCOME/v6:replayed";
+        let payload = b"DREGG/NATIVE-HOST/OUTCOME/v7:replayed";
         reply.extend_from_slice(&(payload.len() as u32 + 1).to_le_bytes());
         reply.push(26);
         reply.extend_from_slice(payload);
-        assert!(framed_payload(&reply, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, COMMITTED_TAG).is_err());
+        assert!(framed_payload("lifecycle claim submit", &reply, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, COMMITTED_TAG).is_err());
         reply[4] = 27;
-        assert!(framed_payload(&reply, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, COMMITTED_TAG).is_err());
+        assert!(framed_payload("lifecycle claim submit", &reply, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, COMMITTED_TAG).is_err());
     }
 }

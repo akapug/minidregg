@@ -113,6 +113,7 @@ readers() {
   local kst=""; [ "$(selftests kernel-transport)" = 0 ] && kst=--no-self-test
   run kernel-transport $SB bash scripts/check-kernel-transport.sh $kst
   run import-boundary bash scripts/check-import-boundary.sh
+  run platform-field-readers python3 -I scripts/check-platform-field-readers.py
   run proof-hygiene   bash scripts/check-proof-hygiene.sh
   run build-surfaces  python3 scripts/lean-build-surfaces.py check
   # The pure-script pins local-gates runs and this list lacked (W20-GATE-MUTATION, 2026-10-05): each is
@@ -126,6 +127,7 @@ readers() {
   run policy-portal   bash scripts/check-canonical-policy-portal.sh
   run shell-paths     bash scripts/check-shell-paths.sh
   run host-operations bash -c 'python3 scripts/host-operations.py check && python3 scripts/test-host-operations.py'
+  run codec-identities bash -c 'python3 scripts/codec-shapes-regen.py --selftest && python3 scripts/codec-shapes-regen.py --twins'
   run gen-sheetlaw    python3 scripts/gen-sheetlaw.py --check
   # The story law files and Kernel/StoryLaw.lean (generated region) are the client's own generator output: build `mini` and
   # require that `mini story-law` still produces exactly the embedded text (a stale embed is how a theorem
@@ -138,6 +140,10 @@ readers() {
   # a row in scripts/pipeline/fixture-authorities.txt (cv 01a1147b-103d).
   run fixture-authority bash scripts/pipeline/check-fixture-authority.sh "$FROM..$TO"
   run intent-vector-authority python3 scripts/pipeline/check-intent-vector-authority.py
+  # The receiving pipeline's one live verifier: one Ran.mk, no Ran instance, no hand-built Verifier (plants: ran-instance, second-mint, handbuilt)
+  run receiver-verifier bash scripts/check-receiver-verifier.sh
+  # Ran.mk is mentioned, by term and theorems included, only by receiverVerifier (plants: unfolded oracleAnswered, live Answered); scan root AxiomCensusResearch, whose import closure (1307 modules) contains Host.Main's (781; difference empty, measured with scripts/lean_imports.py); on first run check both plants fail by name before trusting green; needs AxiomCensusResearch built
+  run ran-mint $SB bash scripts/check-ran-mint.sh
   python3 "$H/rust-rows.py" "$SRC" "$FROM" "$TO" "$B/tmp-rust-rows-$TAG.sh" > "$L/gate-$TAG-rust-rows.txt" 2>&1 || echo "rust-rows RED (selector failed)" | tee -a "$S"
   cat "$L/gate-$TAG-rust-rows.txt"
   run rust-rows       $SB bash "$B/tmp-rust-rows-$TAG.sh"

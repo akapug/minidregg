@@ -1,6 +1,8 @@
 //! Durable Linux per-operation systemd ExecStart gate for Mini grain workers.
 //! `run` is the unit MainPID: exec for legacy same-manager gates, or a pidfd
-//! supervisor for controller-incarnation-bound gates.
+//! supervisor for controller-incarnation-bound gates. `run --meter` always
+//! supervises and, when the worker exits, records the unit cgroup's CPU time
+//! in `STATE_DIR/UNIT.cpu` (`mini-grain-cpu-v1 USEC`), outside the sandbox.
 use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -262,7 +264,7 @@ fn ready(file: &File, timeout: i32) -> Result<bool, String> {
     }
     Ok(p.revents != 0)
 }
-fn supervise(controller: File, mut command: Command, mut gate: File) -> Result<(), String> {
+fn supervise(controller: Option<File>, mut command: Command, mut gate: File) -> Result<(), String> {
     let monitor = std::process::id() as i32;
     unsafe {
         command.pre_exec(move || {
@@ -282,8 +284,10 @@ fn supervise(controller: File, mut command: Command, mut gate: File) -> Result<(
             Ok(())
         });
     }
-    if ready(&controller, 0)? {
-        return Err("controller exited before worker spawn".into());
+    if let Some(controller) = &controller {
+        if ready(controller, 0)? {
+            return Err("controller exited before worker spawn".into());
+        }
     }
     let mut child = command.spawn().map_err(|e| format!("worker spawn: {e}"))?;
     loop {
@@ -302,7 +306,11 @@ fn supervise(controller: File, mut command: Command, mut gate: File) -> Result<(
                 return Err(error.to_string());
             }
         }
-        match ready(&controller, 100) {
+        let Some(controller) = &controller else {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            continue;
+        };
+        match ready(controller, 100) {
             Ok(false) => {}
             result => {
                 // `started` already forbids replay. Kill before any potentially
@@ -320,6 +328,47 @@ fn supervise(controller: File, mut command: Command, mut gate: File) -> Result<(
     }
 }
 
+/// The CPU time of this process's own cgroup (the worker unit's): cgroup v2
+/// `cpu.stat` `usage_usec`, which counts every descendant, exited ones too.
+fn unit_cpu_usec() -> Result<u64, String> {
+    let cgroup = fs::read_to_string("/proc/self/cgroup").map_err(|e| format!("own cgroup: {e}"))?;
+    let path = cgroup
+        .lines()
+        .find_map(|line| line.strip_prefix("0::"))
+        .ok_or("no cgroup v2 membership")?;
+    if !path.starts_with('/') || path.contains("..") {
+        return Err("cgroup path refused".into());
+    }
+    let stat = fs::read_to_string(format!("/sys/fs/cgroup{path}/cpu.stat"))
+        .map_err(|e| format!("cpu.stat: {e}"))?;
+    stat.lines()
+        .find_map(|line| line.strip_prefix("usage_usec "))
+        .and_then(|n| n.trim().parse::<u64>().ok())
+        .ok_or("cpu.stat has no usage_usec".into())
+}
+
+/// Write `DIR/UNIT.cpu` once, atomically and privately.
+fn record_cpu(dir: &Path, unit: &str, usec: u64) -> Result<(), String> {
+    let gate = gate_path(dir, unit)?;
+    let path = gate.with_extension("cpu");
+    let temporary = gate.with_extension("cpu.tmp");
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .custom_flags(O_NOFOLLOW)
+        .mode(0o600)
+        .open(&temporary)
+        .map_err(|e| format!("cpu record: {e}"))?;
+    file.write_all(format!("mini-grain-cpu-v1 {usec}\n").as_bytes())
+        .and_then(|_| file.sync_all())
+        .map_err(|e| format!("cpu record write: {e}"))?;
+    fs::hard_link(&temporary, &path).map_err(|e| format!("cpu record publish: {e}"))?;
+    fs::remove_file(&temporary).map_err(|e| format!("cpu record publish: {e}"))?;
+    File::open(dir)
+        .and_then(|f| f.sync_all())
+        .map_err(|e| format!("cpu record directory sync: {e}"))
+}
+
 fn run() -> Result<(), String> {
     let args: Vec<_> = env::args_os().collect();
     if args.len() == 2 && args[1] == "--controller-manager-protocol" {
@@ -331,7 +380,7 @@ fn run() -> Result<(), String> {
         return Ok(());
     }
     if args.len() < 4 {
-        return Err("usage: launch-gate init|fence|run STATE_DIR UNIT [-- ABS_COMMAND ...]".into());
+        return Err("usage: launch-gate init|fence|run STATE_DIR UNIT [--meter] [-- ABS_COMMAND ...]".into());
     }
     let mode = args[1].to_str().ok_or("mode must be UTF-8")?;
     let dir = Path::new(&args[2]);
@@ -388,8 +437,10 @@ fn run() -> Result<(), String> {
             lock(&file, LOCK_UN)?;
             println!("fenced {unit}");
         }
-        "run" if args.len() >= 6 && args[4] == "--" => {
-            let command = Path::new(&args[5]);
+        "run" if args.len() >= 6 && (args[4] == "--" || (args[4] == "--meter" && args.len() >= 7 && args[5] == "--")) => {
+            let meter = args[4] == "--meter";
+            let first = if meter { 6 } else { 5 };
+            let command = Path::new(&args[first]);
             if !command.is_absolute() {
                 return Err("worker command must be absolute".into());
             }
@@ -412,9 +463,21 @@ fn run() -> Result<(), String> {
             // then kills/audits that unique unit. If it races after unlock but
             // before exec, SIGKILL still prevents the exec.
             let mut command = Command::new(command);
-            command.args(&args[6..]);
+            command.args(&args[first + 1..]);
+            if meter {
+                // The record is written whatever the worker's end; a missing
+                // record is charged pessimistically by the controller.
+                let result = supervise(controller, command, file);
+                let recorded = unit_cpu_usec().and_then(|usec| record_cpu(dir, unit, usec));
+                return match (result, recorded) {
+                    (Ok(()), Ok(())) => Ok(()),
+                    (Err(e), Ok(())) => Err(e),
+                    (Ok(()), Err(r)) => Err(format!("worker ended; {r}")),
+                    (Err(e), Err(r)) => Err(format!("{e}; {r}")),
+                };
+            }
             if let Some(controller) = controller {
-                return supervise(controller, command, file);
+                return supervise(Some(controller), command, file);
             }
             let error = command.exec();
             return Err(format!("worker exec: {error}"));

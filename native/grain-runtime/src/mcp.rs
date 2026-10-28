@@ -378,7 +378,8 @@ fn tools_for_catalog(catalog: &ToolCatalog) -> Value {
                 "application":application_selector},
                 "required":["family","application"],"additionalProperties":false}}));
     }
-    if !catalog.api_applications.is_empty() {
+    // A restricted room resident reaches applications only through the Oracle tools below.
+    if !catalog.api_applications.is_empty() && !(catalog.room_tools && !catalog.resource_workspace) {
         tools.push(json!({"name":"mini_gitweb_read",
             "description":"Read one bounded UTF-8 file from a named Mini GitWeb app through fresh authorized Git smart-HTTP requests.",
             "inputSchema":{"type":"object","properties":{
@@ -939,6 +940,18 @@ mod tests {
             let name = tool["name"].as_str().unwrap();
             assert!(crate::resource_tools::is_room_tool(name) || name == "mini_room_attempts", "{name}");
         }
+    }
+
+    #[test]
+    fn a_restricted_room_resident_is_offered_the_oracle_tools_and_no_raw_application_api() {
+        let apps = vec!["oracle-app".to_owned()];
+        let catalog = tools_for_catalog(&ToolCatalog { room_tools: true, api_applications: apps.clone(),
+            oracle_applications: apps, ..Default::default() });
+        let names: Vec<&str> = catalog["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
+        assert!(names.contains(&"mini_oracle_discover") && names.contains(&"mini_oracle_call"));
+        assert!(!names.contains(&"mini_application_api"), "only the Oracle tools reach applications");
+        assert!(names.iter().all(|n| crate::resource_tools::is_room_tool(n) || *n == "mini_room_attempts"
+            || crate::oracle_tools::is_tool(n)), "{names:?}");
     }
 
     #[test]

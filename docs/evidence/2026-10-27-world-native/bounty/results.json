@@ -1,0 +1,364 @@
+{
+ "rows": [
+  {
+   "step": "extract-quote-is-the-policy-ceiling",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "published": {
+     "extractTicks": "3200000"
+    },
+    "policy": 3200000
+   },
+   "group": null
+  },
+  {
+   "step": "publish",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "publish"
+  },
+  {
+   "step": "create",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "create"
+  },
+  {
+   "step": "birth",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "birth"
+  },
+  {
+   "step": "born-awaiting-the-keeper-ledger-0",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "source": {
+     "decider": "40",
+     "kind": "reply",
+     "slot": "80302973430049881258991347285778055873459371420291017801275886793128602096665",
+     "slotCell": "184876790224806129297418833965071453595728198064029281685104159820589856267071"
+    },
+    "state": {
+     "fields": [
+      {
+       "name": "moves",
+       "value": {
+        "tag": "natural",
+        "value": "0"
+       }
+      }
+     ],
+     "tag": "record"
+    }
+   },
+   "group": "bounty"
+  },
+  {
+   "step": "resolve-claim",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "bounty"
+  },
+  {
+   "step": "deliver-claim",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "bounty"
+  },
+  {
+   "step": "resolve-submit",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "bounty"
+  },
+  {
+   "step": "deliver-submit",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "bounty"
+  },
+  {
+   "step": "resolve-approve",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "bounty"
+  },
+  {
+   "step": "deliver-approve",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "bounty"
+  },
+  {
+   "step": "approved-pays-exactly-the-reward-from-the-purse",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "source": {
+     "kind": "performed",
+     "reason": null,
+     "verdict": "settled"
+    },
+    "claimant": [
+     100000000000,
+     100200000000
+    ],
+    "state": {
+     "fields": [
+      {
+       "name": "moves",
+       "value": {
+        "tag": "natural",
+        "value": "1"
+       }
+      }
+     ],
+     "tag": "record"
+    },
+    "purse": [
+     300000000,
+     92634031
+    ]
+   },
+   "group": "bounty"
+  },
+  {
+   "step": "deliver-settled",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "bounty"
+  },
+  {
+   "step": "paid-once-and-finished",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "phase": null,
+    "state": {
+     "fields": [
+      {
+       "name": "moves",
+       "value": {
+        "tag": "natural",
+        "value": "1"
+       }
+      }
+     ],
+     "tag": "record"
+    }
+   },
+   "group": "bounty"
+  },
+  {
+   "step": "create-poor",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "bounty-teeth-unfunded"
+  },
+  {
+   "step": "birth-underfunded",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "bounty-teeth-unfunded"
+  },
+  {
+   "step": "resolve-expire-underfunded",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "bounty-teeth-unfunded"
+  },
+  {
+   "step": "deliver-expire-underfunded",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "bounty-teeth-unfunded"
+  },
+  {
+   "step": "refund-refused-unfunded-moves-nothing",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "source": {
+     "kind": "performed",
+     "reason": "unfunded",
+     "verdict": "refused"
+    },
+    "version": [
+     "1",
+     "1"
+    ],
+    "state": {
+     "fields": [
+      {
+       "name": "moves",
+       "value": {
+        "tag": "natural",
+        "value": "0"
+       }
+      }
+     ],
+     "tag": "record"
+    }
+   },
+   "group": "bounty-teeth-unfunded"
+  },
+  {
+   "step": "deliver-refused-underfunded",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "bounty-teeth-unfunded"
+  },
+  {
+   "step": "refused-disbursement-waits-for-the-next-event",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "source": {
+     "decider": "40",
+     "kind": "reply",
+     "slot": "79108302184896280877473823749222666635263247411797474243774734921597553891031",
+     "slotCell": "179374740021447821085684219988523265049027365640388235341395843654183701456984"
+    }
+   },
+   "group": "bounty-teeth-unfunded"
+  }
+ ],
+ "totals": [
+  {
+   "after": "born",
+   "height": "15",
+   "total": "0"
+  },
+  {
+   "after": "resolved-claim",
+   "height": "16",
+   "total": "0"
+  },
+  {
+   "after": "after-claim",
+   "height": "17",
+   "total": "0"
+  },
+  {
+   "after": "resolved-submit",
+   "height": "18",
+   "total": "0"
+  },
+  {
+   "after": "after-submit",
+   "height": "19",
+   "total": "0"
+  },
+  {
+   "after": "resolved-approve",
+   "height": "20",
+   "total": "0"
+  },
+  {
+   "after": "after-approve",
+   "height": "21",
+   "total": "0"
+  },
+  {
+   "after": "after-settled",
+   "height": "22",
+   "total": "0"
+  },
+  {
+   "after": "birth-underfunded-view",
+   "height": "24",
+   "total": "0"
+  },
+  {
+   "after": "resolved-expire-underfunded",
+   "height": "25",
+   "total": "0"
+  },
+  {
+   "after": "after-expire-underfunded",
+   "height": "26",
+   "total": "0"
+  },
+  {
+   "after": "after-refused-underfunded",
+   "height": "27",
+   "total": "0"
+  }
+ ],
+ "objects": {
+  "obj": {
+   "object": "16295987909804860326",
+   "capability": "17455112744344991636"
+  },
+  "poor": {
+   "object": "15937742442991324416",
+   "capability": "13836291787145232980"
+  }
+ },
+ "allPass": true,
+ "pin": "22275743588097240331953449984033984264616186218902799144594962569246754312464",
+ "height": "27"
+}

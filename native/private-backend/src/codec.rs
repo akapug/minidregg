@@ -69,6 +69,13 @@ pub fn bytes(b: &[u8], o: &mut Vec<u8>) {
     Nat::new(b.len() as u64).put(o);
     o.extend(b);
 }
+/// One addressed message of a party's outbox. Each protocol module names its
+/// own `Send` as `Packet<its Message>`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Packet<M> {
+    pub to: u16,
+    pub message: M,
+}
 pub struct Reader<'a> {
     b: &'a [u8],
     i: usize,

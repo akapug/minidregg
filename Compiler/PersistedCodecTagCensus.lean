@@ -110,6 +110,24 @@ def registeredIdentity (name : Name) (info : ConstantInfo) : TermElabM (List UIn
   else
     unsafe evalExpr (List UInt8) (mkApp (mkConst ``List [.zero]) (mkConst ``UInt8)) value
 
+/-- The registry identities a definition names through their constants
+(`PersistedCodecTags.world_root_v2`) rather than by spelling the literal. Such a
+definition owns the identity exactly as a literal spelling does; without this,
+every identity written once (in the registry only) had no owners and its
+fingerprint covered nothing. Version constants (`Nat`) compose identities and own
+none themselves. -/
+def registryReferences (env : Environment) (e : Expr) : TermElabM (List (List UInt8)) := do
+  let mut out := []
+  for d in (dependencies e).eraseDups do
+    if d.toString.startsWith "Minidregg.Compiler.PersistedCodecTags." &&
+        Minidregg.Compiler.PersistedCodecTags.tagAttribute.hasTag env d then
+      if let some info := env.find? d then
+        let type := info.type.consumeMData
+        if type.isConstOf ``String ||
+            (type.isAppOfArity ``List 1 && type.appArg!.isConstOf ``UInt8) then
+          out := (← registeredIdentity d info) :: out
+  return out
+
 /-- Persisted identities are excluded from fingerprints: an identity names a
 shape, it is not part of it (a nested codec's identity still counts through the
 definition that spells it). -/
@@ -216,6 +234,8 @@ elab "#assert_persisted_codec_tags" : command => do
         owners := owners.insert bytes ((owners.getD bytes #[]).push name)
         unless registered.contains bytes do
           unregistered := unregistered.push (name, source, tag)
+      for bytes in (← liftTermElabM <| registryReferences env info.value) do
+        owners := owners.insert bytes ((owners.getD bytes #[]).push name)
       let deps := dependencies info.value
       if packageDeclaration env name then
         packageRefs := packageRefs.insert name
@@ -275,6 +295,8 @@ elab "#emit_persisted_codec_shapes " path:str : command => do
           owners := owners.insert bytes ((owners.getD bytes #[]).push name)
       for tag in literals info.value do
         let bytes := tag.toUTF8.toList
+        owners := owners.insert bytes ((owners.getD bytes #[]).push name)
+      for bytes in (← liftTermElabM <| registryReferences env info.value) do
         owners := owners.insert bytes ((owners.getD bytes #[]).push name)
       let deps := dependencies info.value
       if packageDeclaration env name then

@@ -79,10 +79,12 @@ printf 'ROOT SETUP BEGIN store=%s\n' "$store" | tee -a "$run/root-setup.log"
 sudo -n -- "$installer" install "$run/bin/mini-spk-volume-helper" "$helper" "$store" "$deployment" "$host" "$op_uid" "$start" 16 >>"$run/root-setup.log" 2>&1
 printf 'ROOT SETUP store=%s helper=%s\n' "$store" "$helper" | tee -a "$run/root-setup.log"
 registry=/etc/mini-spk-volumes/$store.json
-# MINI_IMPORT_PROFILE is the operator's physical intake budget for materialising a package
-# (standard-v1: 120 s; operator-appliance-v1: 1800 s, the oracle runtime's 15,155 members).
+# MINI_IMPORT_PROFILE is the operator's physical intake budget for materialising a package:
+# standard-v1 (256 MiB raw, 768 MiB decoded), market-large-v1 (512 MiB, 2 GiB: the market's
+# class L apps) or operator-appliance-v1 (the oracle runtime). The wall clock scales with each
+# package's size (spk-host import-limits).
 import_profile=${MINI_IMPORT_PROFILE:-standard-v1}
-case $import_profile in standard-v1|operator-appliance-v1) ;; *) echo "unknown MINI_IMPORT_PROFILE $import_profile" >&2; exit 2;; esac
+case $import_profile in standard-v1|market-large-v1|operator-appliance-v1) ;; *) echo "unknown MINI_IMPORT_PROFILE $import_profile" >&2; exit 2;; esac
 jq -n --slurpfile registry "$registry" --arg binary "$run/bin/spk-host" --arg sha "$(sha256sum "$run/bin/spk-host" | cut -d ' ' -f1)" --arg ingest "$run/bin/spk-ingest" --arg op "$op_name" \
   --arg bwrap "$bwrap" --arg bwrapSha "$(sha256sum "$bwrap" | cut -d ' ' -f1)" --arg importProfile "$import_profile" '
   $registry[0] as $r | {protocol:"mini-spk-broker-config-v3",store:$r.store,grainsRoot:$r.grainsRoot,spkRoot:($r.grainsRoot+"/spk"),brokerSocket:($r.grainsRoot+"/runtime-"+$r.store+"/broker.sock"),operatorUser:$op,unitPrefix:"mini",spkHost:$binary,spkHostSha256:$sha,bwrap:$bwrap,bwrapSha256:$bwrapSha,ingestHelper:$ingest,volumeHelper:$r.helper,appUids:$r.appUids,residentHomeReadOnlyPaths:[],importProfile:$importProfile}' >"$root/broker/config.json"
@@ -92,7 +94,8 @@ systemctl --user daemon-reload
 systemctl --user start "mini-spk-broker@$store.service"
 socket=$root/runtime-$store/broker.sock
 # A loaded box starts the broker slowly: wait up to two minutes for its socket.
-for attempt in $(seq 1 1200); do [[ ! -S $socket ]] || break; sleep 0.1; done
+# The broker binds its socket and then sets its mode: wait for the finished state, not the bind.
+for attempt in $(seq 1 1200); do [[ -S $socket && $(stat -c '%u:%a' "$socket" 2>/dev/null) == "$op_uid:600" ]] && break; sleep 0.1; done
 [[ -S $socket && $(stat -c '%u:%a' "$socket") == "$op_uid:600" ]] || { echo 'operator broker socket custody failed' >&2; exit 1; }
 # The Store's services, the workroom's metered tasks and the grain-host profile.
 BIN="$run/bin" GRAINS_ROOT="$root" BROKER_SOCKET="$socket" "$here/grain-journey.sh" phase "$run/w" services workroom profile

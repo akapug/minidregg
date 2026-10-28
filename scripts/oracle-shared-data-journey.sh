@@ -125,6 +125,13 @@ done
 for tool in jq curl python3 sha256sum timeout; do command -v "$tool" >/dev/null || fail "missing $tool"; done
 [[ -f $spk && ! -L $spk && -f $inventory && ! -L $inventory && -d $source && ! -L $source ]] || fail 'inputs absent or linked'
 [[ -f $benchmark && ! -L $benchmark ]] || fail 'qualified STOP benchmark absent or linked'
+# Refuse a receipt from an older Host before creating a Store or copying data.
+# The final report still checks the full cold/served comparison and controls.
+[[ -f $base/minidregg-host && -x $base/minidregg-host ]] || fail 'Host executable absent'
+jq -e --arg host "$(sha256sum "$base/minidregg-host" | cut -d ' ' -f1)" '
+  .schema == "mini-stop-inspection-continuation-v1" and .passed == true
+  and .host_sha256 == $host
+' "$benchmark" >/dev/null || fail 'STOP benchmark must qualify the selected Host binary'
 [[ $(stat -c '%s' "$spk") -le 268435456 ]] || fail 'runtime exceeds Mini signed package admission cap'
 # The publisher, signed package inspector and Mini decide identity/acceptance.
 # These are preflight and evidence pins only.
@@ -155,7 +162,7 @@ trap world_cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 export ORACLE_IMPORT_PROFILE=${ORACLE_IMPORT_PROFILE:-operator-appliance-v1}
-case "$ORACLE_IMPORT_PROFILE" in standard-v1|operator-appliance-v1) ;; *) fail 'unknown operator import profile';; esac
+case "$ORACLE_IMPORT_PROFILE" in standard-v1|market-large-v1|operator-appliance-v1) ;; *) fail 'unknown operator import profile';; esac
 controller_create_verb=controller-create
 if [[ $mode == recover-foreground ]]; then
   world_recover_foreground "$run" "$repo"
@@ -178,7 +185,7 @@ fi
 printf '%s\n' "$disk_plan" >"$run/disk-plan.json"
 jq --argjson bytes "$(stat -c '%s' "$spk")" '
   {selected_profile:(.importProfile // "standard-v1"),
-   deadline_seconds:(if .importProfile=="operator-appliance-v1" then 1800 else 120 end),
+   deadline_seconds:(([60 + 3 * (($bytes + 1048575) / 1048576 | floor), (if .importProfile=="standard-v1" or .importProfile==null then 900 else 1800 end)] | min)),
    signed_spk_bytes:$bytes,mini_raw_admission_cap_bytes:268435456}'   "$GRAINS_ROOT/broker/config.json" >"$run/import-profile.json"
 {
   sha256sum "$spk" "$inventory" "$benchmark"

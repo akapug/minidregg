@@ -21,8 +21,8 @@ use crate::{
     acss_id::{self, AcssId},
     acss_id_store::{self, AcssMachine},
     asks::PhaseMessage,
-    codec::{bad, bytes, Generation, Nat},
-    consensus_wire::Cursor,
+    codec::{bad, bytes, Generation},
+    consensus_wire::{get_phase, put_phase, Cursor},
     custody::hash,
     entropy::Entropy,
     reconstruction::Field,
@@ -57,7 +57,7 @@ pub fn encode_message(m: &Message) -> Vec<u8> {
         }
         Body::InitialResult(p) => {
             b.push(1);
-            sh2t_id_store::put_phase(p, &mut b);
+            put_phase(p, &mut b);
         }
         Body::MaskedPoint(v) => {
             b.push(2);
@@ -65,7 +65,7 @@ pub fn encode_message(m: &Message) -> Vec<u8> {
         }
         Body::MaskedResult(p) => {
             b.push(3);
-            sh2t_id_store::put_phase(p, &mut b);
+            put_phase(p, &mut b);
         }
         Body::ChallengePoint(x) => {
             b.push(4);
@@ -73,11 +73,11 @@ pub fn encode_message(m: &Message) -> Vec<u8> {
         }
         Body::ChallengeResult(p) => {
             b.push(5);
-            sh2t_id_store::put_phase(p, &mut b);
+            put_phase(p, &mut b);
         }
         Body::ChallengeAgreement(p) => {
             b.push(6);
-            sh2t_id_store::put_phase(p, &mut b);
+            put_phase(p, &mut b);
         }
         Body::CheckPoint(v) => {
             b.push(7);
@@ -85,11 +85,11 @@ pub fn encode_message(m: &Message) -> Vec<u8> {
         }
         Body::CheckResult(p) => {
             b.push(8);
-            sh2t_id_store::put_phase(p, &mut b);
+            put_phase(p, &mut b);
         }
         Body::CheckAgreement(p) => {
             b.push(9);
-            sh2t_id_store::put_phase(p, &mut b);
+            put_phase(p, &mut b);
         }
         Body::FaultPoint(v) => {
             b.push(10);
@@ -102,7 +102,7 @@ pub fn encode_message(m: &Message) -> Vec<u8> {
         }
         Body::FaultResult(p) => {
             b.push(12);
-            sh2t_id_store::put_phase(p, &mut b);
+            put_phase(p, &mut b);
         }
     }
     b
@@ -113,24 +113,23 @@ pub fn decode_message(b: &[u8]) -> Result<Message> {
         return Err(bad("King wire domain"));
     }
     let context = c.fixed32()?;
-    let phase = |c: &mut Cursor| -> Result<PhaseMessage> { sh2t_id_store::phase(c) };
     let body = match c.byte()? {
         0 => Body::InitialPoint(sh2t_id_store::fields(&mut c)?),
-        1 => Body::InitialResult(phase(&mut c)?),
+        1 => Body::InitialResult(get_phase(&mut c)?),
         2 => Body::MaskedPoint(sh2t_id_store::fields(&mut c)?),
-        3 => Body::MaskedResult(phase(&mut c)?),
+        3 => Body::MaskedResult(get_phase(&mut c)?),
         4 => Body::ChallengePoint(Field(u128::from_le_bytes(c.take(16)?.try_into().unwrap()))),
-        5 => Body::ChallengeResult(phase(&mut c)?),
-        6 => Body::ChallengeAgreement(phase(&mut c)?),
+        5 => Body::ChallengeResult(get_phase(&mut c)?),
+        6 => Body::ChallengeAgreement(get_phase(&mut c)?),
         7 => Body::CheckPoint(sh2t_id_store::fields(&mut c)?),
-        8 => Body::CheckResult(phase(&mut c)?),
-        9 => Body::CheckAgreement(phase(&mut c)?),
+        8 => Body::CheckResult(get_phase(&mut c)?),
+        9 => Body::CheckAgreement(get_phase(&mut c)?),
         10 => Body::FaultPoint(sh2t_id_store::fields(&mut c)?),
         11 => Body::FaultSh2t {
             dealer: c.u16()?,
             message: sh2t_id_store::decode_message(&c.bytes()?)?,
         },
-        12 => Body::FaultResult(phase(&mut c)?),
+        12 => Body::FaultResult(get_phase(&mut c)?),
         _ => return Err(bad("King wire tag")),
     };
     c.finish()?;
@@ -141,36 +140,10 @@ pub fn decode_message(b: &[u8]) -> Result<Message> {
     Ok(m)
 }
 fn king_outbox(ps: &[triple_king::Send]) -> Vec<u8> {
-    let mut b = vec![];
-    Nat::new(ps.len() as u64).put(&mut b);
-    for p in ps {
-        b.extend(p.to.to_le_bytes());
-        bytes(&encode_message(&p.message), &mut b);
-    }
-    b
+    crate::consensus_wire::put_outbox(ps, encode_message)
 }
 fn parse_king_outbox(b: &[u8], n: usize) -> Result<Vec<triple_king::Send>> {
-    let mut c = Cursor::new(b)?;
-    let len = acss_id_store::count(&mut c)?;
-    if len > crate::codec::MAX / 40 {
-        return Err(bad("King outbox bound"));
-    }
-    let mut out = vec![];
-    for _ in 0..len {
-        let to = c.u16()?;
-        if to as usize >= n {
-            return Err(bad("King outbox recipient"));
-        }
-        out.push(triple_king::Send {
-            to,
-            message: decode_message(&c.bytes()?)?,
-        });
-    }
-    c.finish()?;
-    if king_outbox(&out) != b {
-        return Err(bad("King outbox canonical"));
-    }
-    Ok(out)
+    crate::consensus_wire::get_outbox(b, n, crate::codec::MAX / 40, "King", decode_message, encode_message)
 }
 
 /// One preparation source: the public identity of the dealer whose ACSS-Id
@@ -638,7 +611,8 @@ mod tests {
     use super::*;
     use crate::{
         reconstruction::Field,
-        triple_king::tests::{test_generation, AnchorFixture},
+        triple_king::tests::test_generation,
+        custody::AnchorHandle,
     };
     use std::{
         collections::VecDeque,
@@ -685,7 +659,7 @@ mod tests {
     }
     struct Cluster {
         stores: Vec<KingStore>,
-        anchors: Vec<AnchorFixture>,
+        anchors: Vec<AnchorHandle>,
         roots: Vec<PathBuf>,
         queue: VecDeque<(u16, Out)>,
     }
@@ -701,7 +675,7 @@ mod tests {
                 .collect::<Vec<_>>();
             let anchors = roots
                 .iter()
-                .map(|r| AnchorFixture::new(r))
+                .map(|r| AnchorHandle::new(r))
                 .collect::<Vec<_>>();
             let stores = (0..N)
                 .map(|i| {
@@ -933,7 +907,7 @@ mod tests {
                 (t.holder(), vec![a, b, cc])
             })
             .collect::<Vec<_>>();
-        let polys = acss_id::polynomial(&points, 3).unwrap();
+        let polys = crate::reconstruction::polynomial(&points, 3).unwrap();
         assert_ne!(polys[0][0], Field(0));
         assert_ne!(polys[1][0], Field(0));
         assert_eq!(polys[0][0].mul(polys[1][0]), polys[2][0]);
@@ -941,10 +915,7 @@ mod tests {
             let tuple = t.triples()[0];
             for (i, v) in [tuple.0, tuple.1, tuple.2].iter().enumerate() {
                 let x = Field(t.holder() as u128 + 1);
-                let at = polys[i]
-                    .iter()
-                    .rev()
-                    .fold(Field(0), |a, k| a.mul(x).add(*k));
+                let at = crate::reconstruction::eval(&polys[i], x);
                 assert_eq!(*v, at, "holder {} component {i}", t.holder());
             }
         }
@@ -1282,5 +1253,43 @@ mod tests {
             (3, 3),
             "one dealer event per ACSS and per Sh2t instance"
         );
+    }
+}
+
+#[cfg(test)]
+mod pin_wire {
+    use super::*;
+    use crate::asks::PhaseMessage as PinPhase;
+    fn pin_sends() -> Vec<triple_king::Send> {
+        vec![
+            triple_king::Send { to: 1, message: Message { context: [7; 32], body: Body::InitialResult(PinPhase::Echo(vec![1])) } },
+            triple_king::Send { to: 3, message: Message { context: [7; 32], body: Body::InitialResult(PinPhase::Ready(vec![1])) } },
+        ]
+    }
+    /// Outbox wire: Nat count, then per packet u16 LE recipient and the
+    /// length-prefixed message wire; canonical, bounded, recipient-checked.
+    #[test]
+    fn pin_outbox_wire() {
+        let ps = pin_sends();
+        let b = king_outbox(&ps);
+        let mut want = vec![2, 255];
+        for s in &ps {
+            want.extend(s.to.to_le_bytes());
+            let m = encode_message(&s.message);
+            crate::codec::Nat::new(m.len() as u64).put(&mut want);
+            want.extend(m);
+        }
+        assert_eq!(&b[..4], &[2, 255, 1, 0]);
+        assert_eq!(b, want);
+        assert_eq!(parse_king_outbox(&b, 4).unwrap(), ps);
+        assert!(parse_king_outbox(&b, 3).is_err(), "recipient 3 is outside n = 3");
+        let mut trailing = b.clone();
+        trailing.push(0);
+        let b = trailing;
+        assert!(parse_king_outbox(&b, 4).is_err(), "trailing bytes refuse");
+        let mut huge = vec![];
+        crate::codec::Nat::new(crate::codec::MAX as u64).put(&mut huge);
+        let b = huge;
+        assert!(parse_king_outbox(&b, 4).is_err(), "an absurd count refuses");
     }
 }

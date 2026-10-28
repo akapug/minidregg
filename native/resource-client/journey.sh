@@ -72,7 +72,7 @@
 #   MINI HOST STORE VERIFIER CONFIG SOCKET       the pinned binaries and the live service
 #   SPONSOR_WS NEWCOMER_WS SPONSOR_SUBJECT NEWCOMER_SUBJECT
 #   SHELL_BIN HERMES_BIN SPK_HOST_BIN CANDIDATE  manifest entries ("" when absent)
-#   HOOK_TIMEOUT_S (default 3600)
+#   HOOK_TIMEOUT_S (default: the step's own bound, else 3600)
 # A hook that binds a Unix socket (its own Store, a grain controller) sources
 # journey.d/lib/shortdir.sh and runs under `journey_shortdir NAME`, NAME's
 # longest socket declared in that file's table: nothing binds under the run
@@ -121,7 +121,7 @@ HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 SELF="$HERE/$(basename -- "$0")"
 . "$HERE/journey.d/lib/shortdir.sh"
 
-STEPS=(J0 J1 J2 J3 J12X J4 P7KR THIN JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KIX KF KH K12C JMKT K12I K12T K12N K12E K12M K12R K12H WEB JWF KW K10C JLI KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12W JNAMES JDV JPD J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JGATE JDISCLOSE JESC JFLEETIN JSLK JR17 JAUDIT)
+STEPS=(J0 J1 J2 J3 J12X J4 P7KR THIN JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KIX KF KH K12C JMKT K12I K12T K12N K12E K12M K12R K12H WEB JWF KW K10C JLI KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12W JNAMES JDV JPD J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JFEEDBACK JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JGATE JDISCLOSE JESC JFLEETIN JSLK JR17 JAUDIT)
 # The two journeys (docs/JOURNEY.md "Two journeys"; DEMO-PREFIX lane L9). SPINE, the tree-neutral J0-J8
 # of the 2026-09-29 bake-off, runs in both. Every other step is in exactly one set:
 #   demo    what the public demo's surfaces need: the ssh shell, documents and the web, rooms, Hermes
@@ -132,7 +132,7 @@ STEPS=(J0 J1 J2 J3 J12X J4 P7KR THIN JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K1
 # JOURNEY_SET=demo|kernel selects SPINE + that set (unset: every step). A step in no set, in two, or a
 # set naming no step refuses every run before anything starts: a new step must be placed.
 SPINE=(J0 J1 J2 J3 J4 J5 J6 J7 J8)
-DEMO_STEPS=(J12X JSERVE THIN KC KT K10 KIX K10C JLI KTPL JPRIV1 JCHAT J14 J17 K12C K12T K12M K12H K12R K12I WEB JWF J12 J12W JNAMES JDV JPD M3 M4 M5 M6 M7 M8 JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JGATE JDISCLOSE JESC JFLEETIN JSLK JR17 JAUDIT)
+DEMO_STEPS=(J12X JSERVE THIN KC KT K10 KIX K10C JLI KTPL JPRIV1 JCHAT JFEEDBACK J14 J17 K12C K12T K12M K12H K12R K12I WEB JWF J12 J12W JNAMES JDV JPD M3 M4 M5 M6 M7 M8 JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JGATE JDISCLOSE JESC JFLEETIN JSLK JR17 JAUDIT)
 KERNEL_STEPS=(P7KR G K4 KBW JJ K11 KCH KF KH JMKT K12N K12E KW J15 JN2 JN3 JN3P JN5 JSYNC BD J13 JJOB1 JJOB JJOBM KCL J12A JINSPECT JLS)
 journey_sets_check() {
   local id n bad=""
@@ -359,6 +359,7 @@ TITLE[JJOB]="the job floor: a Nock job posted, run, checked by re-execution, set
 TITLE[JJOBM]="a job's money: escrow, bond, payout and slash as Book turns (own Store)"
 TITLE[KCL]="K-FIELD-CLOSURE: an undeclared field is refused by name; an open cell admits it"
 TITLE[J12A]="can NAME: each held verb dry-run, nothing committed (own Store)"
+TITLE[JFEEDBACK]="members report a problem into their own feedback room; the operator reads it with its context; no member reads another's"
 TITLE[JCHAT]="friends talk in a room: say, tail, topic, pin, react, the Discord bridge"
 TITLE[JINSPECT]="inspect views: cap tree, law, why, turn, receipt; nothing committed (own Store)"
 TITLE[JLS]="law-sat: an unsatisfiable law is caught at install; can --any's write is admitted (own Store)"
@@ -403,7 +404,7 @@ fail() { DETAIL="$*"; return 1; }
 # refusal) AND names the Host's decoded RefusalReason for `host refused
 # <stage>` AND the encoded refusal carries the native outcome v6 tag. A client
 # crash, a parse error or an undecoded frame is not a refusal.
-REFUSAL_TAG=44524547472f4e41544956452d484f53542f4f5554434f4d452f7636   # DREGG/NATIVE-HOST/OUTCOME/v6
+REFUSAL_TAG=44524547472f4e41544956452d484f53542f4f5554434f4d452f7638   # DREGG/NATIVE-HOST/OUTCOME/v8
 refused() {
   local name=$1
   [ "$(cat "$SD/$name.rc")" = 3 ] || return 1
@@ -1061,9 +1062,10 @@ needs_env() {
   [ -z "$missing" ] && return 0
   DETAIL="UNCONFIGURED: not supplied:$missing"; return 5
 }
-# hook ID EXIT-TEXT [MANIFEST-KEY]
+# hook ID EXIT-TEXT [MANIFEST-KEY [BOUND_S]]: BOUND_S is the step's own wall
+# bound (default 3600); HOOK_TIMEOUT_S overrides it; the journey budget caps both.
 hook() {
-  local id=$1 exit_text=$2 need=${3:-} file rc
+  local id=$1 exit_text=$2 need=${3:-} bound=${HOOK_TIMEOUT_S:-${4:-3600}} file rc
   file=$HERE/journey.d/$id.sh
   if [ ! -f "$file" ]; then
     DETAIL="UNBUILT: no journey.d/$id.sh. Green when: $exit_text"; return 3
@@ -1073,7 +1075,7 @@ hook() {
   fi
   export JOURNEY_RUN=$RUN JOURNEY_WORLD=$W JOURNEY_STEP_DIR=$SD MINI HOST STORE VERIFIER CONFIG SOCKET \
     SPONSOR_WS NEWCOMER_WS SPONSOR_SUBJECT NEWCOMER_SUBJECT SHELL_BIN HERMES_BIN SPK_HOST_BIN CANDIDATE
-  local hook_cap; hook_cap=$(cap_s "${HOOK_TIMEOUT_S:-3600}")
+  local hook_cap; hook_cap=$(cap_s "$bound")
   timeout "$hook_cap" "$file" >"$SD/hook.out" 2>"$SD/hook.err"
   rc=$?
   ARTIFACT=$(tail -1 "$SD/hook.out")
@@ -1085,7 +1087,7 @@ hook() {
     ARTIFACT=${ARTIFACT//"$origin"/"$SD/rt"}; DETAIL=${DETAIL//"$origin"/"$SD/rt"}
   fi
   if [ "$rc" = 124 ]; then
-    DETAIL="hook killed at its ${hook_cap}s limit (HOOK_TIMEOUT_S ${HOOK_TIMEOUT_S:-3600}, journey budget left $(budget_left || echo none)s): $DETAIL"; return 1
+    DETAIL="hook killed at its ${hook_cap}s limit (bound ${bound}s, journey budget left $(budget_left || echo none)s): $DETAIL"; return 1
   fi
   # Exit 5 is the hook's own UNCONFIGURED: an input from outside the tree is absent, named on its last stderr line.
   [ "$rc" != 5 ] || { DETAIL="UNCONFIGURED: $DETAIL"; return 5; }
@@ -1112,6 +1114,7 @@ step_JPD() { hook jprotected-docs "private comments and text on the JDV Store: i
 step_J12W() { hook j12w "a friend pulls a doc to a file, edits it in their editor and pushes: the minimal createAtom/editAtom/tombstone actions in one proposal; an edit of a line someone changed since the pull is refused by the Host (staleAtom) and the refusal names the line; restart and audit leave the doc identical (DEOS #4, P-DOC-WRITE)" shell; }
 step_K10() { hook j10-kernel "K-ROOM 3b rows: a note born --in lab is read through under lab by its owner and an invitee; an outside cell, a third key with either capability, a signature-only read and a birth into a ghost room are refused (lane k-world)"; }
 step_JCHAT() { hook jchat "friends talk in a room through the shell: say/tail merged by height, topic/pin by the founder (a member's shown ignored), reactions, replies, a late joiner, an outsider and a forged author refused by the Host, concurrent says with no re-plan and one order for every reader across a restart, a tampered held payload unreadable, the Discord bridge both ways with no loop (lane P-CHAT)"; }
+step_JFEEDBACK() { hook jfeedback "feedback: a member reports from a refusal context into the feedback-NAME room the operator founded; reports/tail show the text with client, attempt, clause and page; reports --digest is the relay line; a second member cannot read it (lane pd-feedback)"; }
 step_K11() { hook j11-kernel "K-STREAM rows: per-author streams born in a room, six appends planned before submission admitted with zero re-plans, a non-member and a forged author refused, tail identical across a restart (lane k-stream)"; }
 step_KCH() { hook jchan-epoch "CH-EPOCH rows: e0 e1 e2 admitted; a gap, an out-of-order record, E-1 roots and a non-sequencer refused by name; a wrong-length opening refused maskLength; tail in order; cold audit (lane ch-epoch)"; }
 step_KIX() { hook j10-index "K-INDEX rows: who lists members with their last visible write, since lists only later writes, at differs across a write above and below the checkpoint and equals the read now, a height above now is refused, a cold reopen prints the same index (lane k-index)"; }
@@ -1121,7 +1124,8 @@ step_JMKT() { hook jmarket "SEALED-MARKET rows: friends bid sealed (price, qty) 
 step_K10C() { hook j10c "K-ROOM 3c rows: a founder room, a narrowed invite, a member birth admitted and a stranger birth refused notRoomMember, re-delegation by a non-sponsor, an ordinary law change leaves grants standing while a placement law refuses birthRefused, a leave renounces the member grant and takes the attenuated invite with it (notHolder for a stranger, alreadyRevoked twice, exact retry replays, re-invite is a new grant), a kick still works, a realm refuses fake wells, restart and audit (lanes k-room-3c, k-renounce)" shell; }
 step_JLI() { hook jlawinherit "Current room exports constrain existing children through real signed read, mutation and install paths; pinned prior revisions conjoin, actual cycles refuse, hidden ancestors stay hidden and exact retries replay" shell; }
 step_KTPL() { hook jtemplates "P-DOC-TEMPLATES rows: room new --template workroom births lab/index (only the founder writes the map), lab/wall (a stream), lab/notes, lab/tasks with the map's links; the same file piped into mini shell by hand births the same shape; a member reads the map and is refused editing it by its clause while writing notes; a bad template stops at its line; social welcomes a member with their own stream; story; restart and audit (lane p-templates)" shell; }
-step_J14() { hook j14 "P-HERMES-ROOM rows on the ACP room resident: A summons Hermes into lab as librarian with a budget; grain-runtime create births Hermes's grain (parent, tool task, provider purse) and its controller config; the controller unit runs the worker under bwrap with --network none, reaching the model only through its Unix gateway, the provider bridge and the key broker on A's own key; a resident pass links both of B's docs from lab-index and writes a digest; A's ask is answered from the signed history; an edit of a doc Hermes holds no grant on is refused by the Host; topup; dismiss revokes and returns the remainder; the budget account conserves; cold audit (lane p-hermes-room; needs GRAIN_RUNTIME, TEST_PROVIDER, LAUNCH_GATE, sudo, a user systemd manager)" shell; }
+step_J14() { hook j14 "P-HERMES-ROOM rows on the ACP room resident: A summons Hermes into lab as librarian with a budget; grain-runtime create births Hermes's grain (parent, tool task, provider purse) and its controller config; the controller unit runs the worker under bwrap with --network none, reaching the model only through its Unix gateway, the provider bridge and the key broker on A's own key; a resident pass links both of B's docs from lab-index and writes a digest; A's ask is answered from the signed history; an edit of a doc Hermes holds no grant on is refused by the Host; topup; dismiss revokes and returns the remainder; the budget account conserves; cold audit (lane p-hermes-room; needs GRAIN_RUNTIME, TEST_PROVIDER, LAUNCH_GATE, sudo, a user systemd manager)" shell \
+  "$( [ -n "${J14_TIER:-}" ] && echo 5400 || echo 3600 )"; }  # the tier row (subscribe, cap, expiry) ran past 3600 s
 step_J15() { hook j15 "P-STORY rows: story new tale --from tale births the room and the table; the author edits before the seal and is refused after it (sealed); players join a sealed story only; legal moves admitted; a skip, a rewind, an absent take, a second take, a conditional exit without the key refused naming the table's clause; one player cannot move another's cell; the author can neither move nor re-law a player's cell; the GM narrates, a player is refused; the Host-decoded law on a cell is law.player.json; restart mid-story keeps each place; both reach an end; cold audits (lane p-story)" shell; }
 step_J17() { hook j17 "P-CREDIT rows: B with 0 credit is refused bookRefused; the sponsor credits 1000; pay lab week lands on the till ledger; the concierge delegates member under lab with notAfter = h + period and journals the entry; B writes; restart; past notAfter B is refused outside-validity; B pays again and writes; an underpayment issues nothing; a free room issues on request; balances conserve; cold audit (lane p-credit; needs GRAIN_RUNTIME)" shell; }
 step_JPRIV1() { hook jpriv1 "J-PRIV-1 rows (hybrid X25519 + ML-KEM-768 wraps; devnet quality, privacy not audited; run alone by rooms-e2e.sh): a private room founded and keyed, a member invited by its signed declaration, the founder key moved by a published transition, sealed lines read by members, the operator's signed view and the Store bytes hold no plaintext while a public control line is found, an outsider refused, the keys law refuses a member's wrap, a kick rotates and rewraps (the kicked member keeps the past and opens nothing new), --past, forget, a hosted invitee refused without --i-know, restart and audit (lane priv-rooms)" shell; }
@@ -1242,6 +1246,7 @@ run_step JJOBM J0
 run_step KCL J1
 run_step J12A J0
 run_step JCHAT J0
+run_step JFEEDBACK J0
 run_step JINSPECT J0
 run_step JLS J0
 run_step JPAY1 J0

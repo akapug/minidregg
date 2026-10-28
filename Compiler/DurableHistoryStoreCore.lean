@@ -250,16 +250,9 @@ private def readerWith (mint : DurableCheckpointCodec.MacKey → Digest → Stor
   let store := mint key loaded.logStart
   let height := loaded.image.accepted.length
   let head ← if height = 0 then pure (Head.genesis store loaded.worldRoot) else do
-    let tag ← match loaded.headTag with
-      | some tag => pure tag
-      | none =>
-          match ← transport.read height false with
-          | .ok (some stored) =>
-              match stored.entries.head? with
-              | some entry => pure entry.tag
-              | none => return .error "durable head entry missing"
-          | .ok none => return .error "durable store is not initialized"
-          | .error message => return .error message
+    let tag ← match ← loaded.headTagOrRead transport with
+      | .ok tag => pure tag
+      | .error message => return .error message
     match Head.verify store height tag loaded.chain frontier with
     | .ok head => pure head
     | .error refusal => return .error refusal.message

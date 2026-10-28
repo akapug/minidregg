@@ -1,0 +1,23 @@
+candidate 0ce31391790a7e2ed9f83eb1b8bb85d6556a0de3  method world/activity/Effects.obend  entry effects  flags none
+extract-quote-is-the-policy-ceiling          check     ok {"published": {"extractTicks": "3200000"}, "policy": 3200000}
+publish                                      installed confirmed  
+create                                       installed confirmed  
+birth                                        installed confirmed  
+{"record": {"activity": "109183153639784851116031697198093116703968674604300171588038894236709964624384", "checkpointBytes": "1571", "checkpointDecodes": true, "checkpointDigest": "55621575305176542286733247952736549391672501224906657022189382367231934096415", "escrow": {"account": "7", "payer": "7", "resume": {"coreBytes": "10754", "domainWork": "0", "extractTicks": "3200000", "feeDebit": "0", "heap": "200000", "incidences": "0", "inputBytes": "0", "leaseByteBlocks": "0", "memoryTouches": "0", "networkBytes": "0", "outputBytes": "200000", "outputNodes": "20000", "proofWork": "0", "replayBytes
+commit-performed-at-birth                    check     ok {"source": {"kind": "performed", "reason": null, "verdict": "settled"}, "state": {"fields": [{"name": "total", "value": {"tag": "natural", "value": "5"}}], "tag
+deliver-from-the-purse-refused               refused   refused operation-rejected Minidregg.Kernel.ObjectiveActivityReceiver.Reject.notAccountOwner
+deliver-commit                               installed confirmed  
+transfer-performed-moves-exactly-1           check     ok {"source": {"kind": "performed", "reason": null, "verdict": "settled"}, "second": [100000000000, 100000000001], "state": {"fields": [{"name": "total", "value": 
+deliver-transfer                             installed confirmed  
+birth-unfunded                               installed confirmed  
+deliver-commit-unfunded                      installed confirmed  
+transfer-refused-unfunded-moves-nothing      check     ok {"source": {"kind": "performed", "reason": "unfunded", "verdict": "refused"}, "second": [100000000001, 100000000001], "version": ["3", "3"]}
+birth-reserved                               installed confirmed  
+deliver-commit-reserved                      installed confirmed  
+transfer-refused-reserved-moves-nothing      check     ok {"source": {"kind": "performed", "reason": "reserved", "verdict": "refused"}, "second": [100000000001, 100000000001], "version": ["4", "4"]}
+create-lawful                                installed confirmed  
+birth-lawful                                 installed confirmed  
+deliver-law-refused                          refused   refused operation-rejected Refusal.lawDenied { path := [2], clause := Minidregg.Pred.Pred.le "state/total" 5, before := some 5, after := some 6 }))
+law-refused-delivery-writes-and-moves-nothing check     ok {"total": 5, "version": ["1", "1"]}
+{"rows": 19, "failed": []}
+overall rc=0

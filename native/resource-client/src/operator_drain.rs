@@ -220,7 +220,9 @@ fn request(socket: &Path, value: &Value) -> Result<Value, String> {
     let deadline = Instant::now() + Duration::from_secs(2);
     let mut stream = crate::public_proxy::connect(&path, &stopping, deadline)
         .map_err(|e| format!("operator control connect: {e}"))?;
-    if transport::peer_uid(&stream)? != mini_sdk::private::euid() {
+    // The private operator's own control socket answers from this uid; a
+    // resident's activated route answers from its pinned listener creator.
+    if transport::peer_uid(&stream)? != crate::operator_peer::selected(&path)? {
         return Err("operator control peer UID mismatch".into());
     }
     transport::write_frame(
@@ -260,6 +262,64 @@ fn request(socket: &Path, value: &Value) -> Result<Value, String> {
         return Err("operator control response process mismatch".into());
     }
     Ok(response)
+}
+
+/// A status request exactly as `command` sends it without a drain: the drain
+/// action, and anything else, never reaches the private control socket.
+fn status_request(frame: &[u8]) -> Result<Value, &'static str> {
+    let value: Value = serde_json::from_slice(frame).map_err(|_| "control request must be JSON")?;
+    let object = value.as_object().ok_or("control request must be an object")?;
+    let digest = |key: &str| object.get(key).and_then(Value::as_str).is_some_and(hex_digest);
+    if object.len() != 7 || value["format"] != FORMAT || value["action"] != "status"
+        || !value["instanceId"].is_null() || !value["processId"].is_null()
+        || !digest("configSha256") || !digest("hostSha256") || !digest("requestNonce") {
+        return Err("only the status action passes the resident control route");
+    }
+    Ok(value)
+}
+
+fn status_exchange(mut client: std::os::unix::net::UnixStream, upstream: &Path, resident_uid: u32) -> Result<(), String> {
+    if transport::peer_uid(&client)? != resident_uid {
+        return Err("resident control peer UID mismatch".into());
+    }
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let frame = transport::read_frame_bounded(&mut transport::DeadlinePipe { reader: &mut client, deadline }, MAX_CONTROL_FRAME)
+        .map_err(|e| e.to_string())?.ok_or("control closed")?;
+    let reply = match status_request(&frame) {
+        Err(reason) => {
+            let nonce = serde_json::from_slice::<Value>(&frame).ok().map(|v| v["requestNonce"].clone()).unwrap_or(Value::Null);
+            serde_json::to_vec(&json!({"format":FORMAT,"requestNonce":nonce,"refused":reason})).map_err(|e| e.to_string())?
+        }
+        Ok(value) => {
+            let stopping = AtomicBool::new(false);
+            let mut private = crate::public_proxy::connect(upstream, &stopping, deadline).map_err(|e| e.to_string())?;
+            if transport::peer_uid(&private)? != mini_sdk::private::euid() {
+                return Err("upstream control peer UID mismatch".into());
+            }
+            transport::write_frame(&mut transport::DeadlinePipeWrite { writer: &mut private, deadline },
+                &serde_json::to_vec(&value).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+            transport::read_frame_bounded(&mut transport::DeadlinePipe { reader: &mut private, deadline }, MAX_CONTROL_FRAME)
+                .map_err(|e| e.to_string())?.ok_or("upstream control closed")?
+        }
+    };
+    transport::write_frame(&mut transport::DeadlinePipeWrite { writer: &mut client, deadline }, &reply).map_err(|e| e.to_string())
+}
+
+/// The resident's control route: one status exchange per connection, served
+/// one at a time (a status answer is a few hundred bytes).
+pub(crate) fn serve_status_proxy(listener: UnixListener, upstream: &Path, resident_uid: u32, stop: &AtomicBool) {
+    if listener.set_nonblocking(true).is_err() { return; }
+    while !stop.load(Ordering::Acquire) {
+        match listener.accept() {
+            Ok((client, _)) => {
+                if client.set_nonblocking(false).is_ok() {
+                    let _ = status_exchange(client, upstream, resident_uid);
+                }
+            }
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(20)),
+            Err(_) => std::thread::sleep(Duration::from_millis(20)),
+        }
+    }
 }
 
 pub(crate) fn command(
@@ -317,6 +377,20 @@ pub(crate) fn command(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn resident_control_route_passes_status_only() {
+        let hex = "a".repeat(64);
+        let status = json!({"format":FORMAT,"action":"status","instanceId":null,"processId":null,
+            "configSha256":hex,"hostSha256":hex,"requestNonce":hex});
+        assert!(status_request(&serde_json::to_vec(&status).unwrap()).is_ok());
+        let mut drain = status.clone();
+        drain["action"] = json!("drain"); drain["instanceId"] = json!(hex); drain["processId"] = json!(7);
+        assert!(status_request(&serde_json::to_vec(&drain).unwrap()).is_err());
+        let mut extra = status.clone();
+        extra["more"] = json!(1);
+        assert!(status_request(&serde_json::to_vec(&extra).unwrap()).is_err());
+        assert!(status_request(b"not json").is_err());
+    }
     fn state() -> State {
         State {
             close: AtomicBool::new(false),

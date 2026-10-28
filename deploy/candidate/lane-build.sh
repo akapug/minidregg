@@ -5,6 +5,7 @@
 #
 #   LANE_DIR=/abs/lane  deploy/candidate/lane-build.sh host    [build-native-host.sh args: --incremental-suffix-from ...]
 #   LANE_DIR=/abs/lane  deploy/candidate/lane-build.sh consent                      (after host: a companion of that build)
+#   LANE_DIR=/abs/lane  deploy/candidate/lane-build.sh rust-check                   (no Lean needed: `cargo check` of every rust role)
 #   LANE_DIR=/abs/lane  deploy/candidate/lane-build.sh rust
 #   LANE_DIR=/abs/lane  deploy/candidate/lane-build.sh pack OUT_DIR
 #
@@ -59,6 +60,21 @@ case $step in
     unchanged_since host
     native "$LANE_DIR/consent-out" "$LANE_DIR/artifacts/minidregg-client-consent" \
       --root Host.ClientConsentSession --usage-prefix 'minidregg-client-consent:' --companion-of "$LANE_DIR/native-out" ;;
+  rust-check)
+    # The rust step's exact role list, features included, as `cargo check --release`: a cfg or
+    # feature red shows here in minutes, before the host stage, instead of after it.
+    rust=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' rust-toolchain.toml)
+    [ -n "$rust" ] || { echo "lane-build: no Rust channel in rust-toolchain.toml" >&2; exit 1; }
+    export CARGO_TARGET_DIR=$LANE_DIR/rust-check-target
+    { python3 deploy/candidate/package.py --rust-roles
+      if grep -q -- '--fixture-roles' deploy/candidate/package.py; then python3 deploy/candidate/package.py --fixture-roles; fi
+    } >"$LANE_DIR/logs/rust-check-roles.txt"
+    while read -r _ crate bin features; do
+      (cd "$src" && cargo "+$rust" check --release --offline --locked -j "${MINI_CANDIDATE_CARGO_JOBS:-4}" \
+        --manifest-path "$src/native/$crate/Cargo.toml" --bin "$bin" ${features:+--features "$features"}) </dev/null >"$LANE_DIR/logs/check-$crate-$bin.log" 2>&1 \
+        || { echo "FAIL check $crate/$bin${features:+ --features $features}"; grep -m5 -A6 '^error' "$LANE_DIR/logs/check-$crate-$bin.log"; exit 1; }
+    done <"$LANE_DIR/logs/rust-check-roles.txt"
+    echo "rust-check done $(date -u +%H:%M:%S)" ;;
   rust)
     rust=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' rust-toolchain.toml)
     [ -n "$rust" ] || { echo "lane-build: no Rust channel in rust-toolchain.toml" >&2; exit 1; }
@@ -74,10 +90,10 @@ case $step in
     printf '%s\n' "$src" >"$LANE_DIR/logs/rust-build.root"
     git rev-parse HEAD >"$LANE_DIR/logs/rust-build.commit"
     python3 deploy/candidate/package.py --rust-roles >"$LANE_DIR/logs/rust-roles.txt"
-    while read -r _ crate bin; do
+    while read -r _ crate bin features; do
       echo "== $crate/$bin $(date -u +%H:%M:%S)"
       (cd "$src" && cargo "+$rust" build --release --offline --locked -j "${MINI_CANDIDATE_CARGO_JOBS:-4}" \
-        --manifest-path "$src/native/$crate/Cargo.toml" --bin "$bin") </dev/null >"$LANE_DIR/logs/cargo-$crate-$bin.log" 2>&1 \
+        --manifest-path "$src/native/$crate/Cargo.toml" --bin "$bin" ${features:+--features "$features"}) </dev/null >"$LANE_DIR/logs/cargo-$crate-$bin.log" 2>&1 \
         || { echo "FAIL $crate/$bin"; tail -30 "$LANE_DIR/logs/cargo-$crate-$bin.log"; exit 1; }
       install -m 0555 "$CARGO_TARGET_DIR/release/$bin" "$LANE_DIR/artifacts/$bin"
     done <"$LANE_DIR/logs/rust-roles.txt"
