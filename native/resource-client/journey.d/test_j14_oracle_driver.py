@@ -66,4 +66,27 @@ class CheckpointTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,'unsupported'):
                     driver.Journey.from_checkpoint(checkpoint)
 
+class WorkspaceTransportTests(unittest.TestCase):
+    def test_only_socket_changes_and_original_pins_remain_retained(self):
+        with tempfile.TemporaryDirectory(prefix='j14-routing-',dir='/tmp') as temp:
+            root=Path(temp);sockets=root/'sockets';sockets.mkdir();work=root/'workspaces';work.mkdir()
+            sponsor=root/'sponsor';sponsor.mkdir();host=root/'host';host.write_bytes(b'Host')
+            old=sockets/'operator.sock';new=sockets/'operator-v2.sock';config=root/'config.json'
+            driver.write(old.with_suffix('.config'),{'store':'same','domain':1})
+            driver.write(config,{'store':'same','domain':1,'agentLifetimeDispatchTargets':[{'grantResource':17}]})
+            before={'socket':str(old),'host':str(host),'hostSha256':driver.sha(host),'config':str(config),
+                    'subject':'7','key':'private-key-path','birthContext':'retained-birth'}
+            path=sponsor/'workspace.json';driver.write(path,before);path.chmod(0o600)
+            j=driver.Journey.__new__(driver.Journey);j.root=root;j.sockets=sockets;j.workspaces=work;j.host=str(host)
+            j.c={'operatorSocket':str(new),'hostConfig':str(config),'sponsorWorkspace':str(sponsor)}
+            j.migrate_workspace_transport();after=driver.read(path)
+            self.assertEqual(after,{**before,'socket':str(new)})
+            j.migrate_workspace_transport();self.assertEqual(driver.read(path),after)
+            record=driver.read(root/'workspace-transport/00.json')
+            self.assertEqual(driver.read(record['before']),before)
+            self.assertEqual(driver.read(old.with_suffix('.config')),{'store':'same','domain':1})
+            value=driver.read(config);value['store']='foreign';config.write_text(driver.json.dumps(value))
+            with self.assertRaisesRegex(ValueError,'identical native Store'):
+                j.migrate_workspace_transport()
+
 if __name__=='__main__':unittest.main()

@@ -75,7 +75,7 @@ class Journey:
         repeated. Other failure phases need their exact native recovery path.
         """
         os.umask(0o077)
-        j=cls.__new__(cls);j.root=Path(os.environ['JOURNEY_STEP_DIR'])/'oracle';j.logs=j.root/'commands'
+        j=cls.__new__(cls);j.root=Path(os.environ['JOURNEY_STEP_DIR'])/'oracle';j.logs=j.root/'commands';j.lock_root()
         if checkpoint is None:
             failure=read(j.root/'failure.json')
             if failure['phase']!='world' or (j.root/'context-after-world.json').exists() or (j.root/'broker').exists():
@@ -137,6 +137,7 @@ class Journey:
 
     def resume_world(self):
         self.restart_transport()
+        self.migrate_workspace_transport()
         self.c['nativeProfile']=str(self.run('native-profile',[self.host,self.c['hostConfig'],'profile']))
 
     def __del__(self):
@@ -342,7 +343,47 @@ class Journey:
         self.spawn('operator-v2',[self.mini,'serve-operator','--host',self.host,'--config',self.c['hostConfig'],'--socket',sock]);self.world_pid=None
         self.wait_socket(sock)
         self.spawn('participant',[self.mini,'serve-public-proxy','--socket',self.c['publicSocket'],'--upstream',sock,'--config',self.c['hostConfig']]);self.wait_socket(self.c['publicSocket'])
+        self.migrate_workspace_transport()
         native=self.run('native-profile',[self.host,self.c['hostConfig'],'profile']);self.c['nativeProfile']=str(native)
+
+    def migrate_workspace_transport(self):
+        """Explicit same-Store routing change; preserve every authority field."""
+        old=self.sockets/'operator.sock';new=self.c['operatorSocket']
+        if str(old)==new:return
+        old_config=old.with_suffix('.config');before_config=read(old_config);after_config=read(self.c['hostConfig'])
+        semantic=lambda value:{k:v for k,v in value.items() if k!='agentLifetimeDispatchTargets'}
+        if semantic(before_config)!=semantic(after_config):raise ValueError('workspace migration requires identical native Store settings')
+        archive=self.root/'workspace-transport';archive.mkdir(mode=0o700,exist_ok=True)
+        for index,path in enumerate([Path(self.c['sponsorWorkspace'])/'workspace.json',*sorted(self.workspaces.glob('*/workspace.json'))]):
+            record=archive/f'{index:02d}.json'
+            if record.exists():
+                pins=read(record)
+                if str(path)!=pins['workspace']:raise ValueError('workspace routing inventory changed')
+                before=Path(pins['before']).read_bytes();after=Path(pins['after']).read_bytes()
+                if hashlib.sha256(before).hexdigest()!=pins['beforeSha256'] or hashlib.sha256(after).hexdigest()!=pins['afterSha256']:
+                    raise ValueError('retained workspace routing bytes changed')
+            else:
+                if path.is_symlink() or path.stat().st_uid!=os.getuid() or path.stat().st_mode&0o077:
+                    raise ValueError('workspace routing requires private operator custody')
+                before=path.read_bytes();value=json.loads(before)
+                if value['socket']!=str(old) or value['config']!=self.c['hostConfig'] or value['host']!=self.host or value['hostSha256']!=sha(self.host):
+                    raise ValueError('workspace routing source pins differ')
+                value['socket']=new;after=(json.dumps(value,indent=2)+'\n').encode()
+                previous=archive/f'{index:02d}-before.json';successor=archive/f'{index:02d}-after.json'
+                for target,data in [(previous,before),(successor,after)]:
+                    with target.open('xb') as out:out.write(data);out.flush();os.fsync(out.fileno())
+                write(record,{'workspace':str(path),'before':str(previous),'after':str(successor),
+                    'beforeSha256':sha(previous),'afterSha256':sha(successor),'oldSocket':str(old),'newSocket':new,
+                    'oldConfig':str(old_config),'oldConfigSha256':sha(old_config),'newConfigSha256':sha(self.c['hostConfig'])})
+            current=path.read_bytes()
+            if current==after:continue
+            if current!=before:raise ValueError('workspace changed outside retained routing transition')
+            temporary=path.with_name('workspace.transport-next.json')
+            with temporary.open('xb') as out:out.write(after);out.flush();os.fsync(out.fileno())
+            os.replace(temporary,path)
+            directory=os.open(path.parent,os.O_RDONLY)
+            try:os.fsync(directory)
+            finally:os.close(directory)
 
     def prepare_platform(self):
         env=dict(os.environ,MINI_IMPORT_PROFILE='operator-appliance-v1')
