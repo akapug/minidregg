@@ -26,6 +26,9 @@ pub enum Method {
     Unlock,
     Report,
     Options,
+    /// Internal hosted descriptor. The resident consumes it before WebSession
+    /// dispatch; it is never serialized as an HTTP method toward an app.
+    HostedConversation,
 }
 
 impl Method {
@@ -705,6 +708,7 @@ pub async fn dispatch_web(
                 fill_context(p.init_context(), &request.context, stream.clone());
                 parse_response(call.send().promise.await?.get()?, &state, max_response)?
             }
+            Method::HostedConversation => return Err(error("hosted descriptor requires the admitted resident interpreter")),
             Method::Propfind => {
                 let mut call = session.propfind_request();
                 let mut p = call.get();

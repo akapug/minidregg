@@ -67,6 +67,7 @@ pub(crate) struct SessionBinding {
     pub app: u64,
     pub process_generation: u64,
     pub session_resource: u64,
+    pub session_generation: String,
     pub subject: u64,
     pub projection_fingerprint: [u8; 32],
     /// Human grant identity supplied by fixed custody after source projection.
@@ -278,6 +279,7 @@ enum Command {
     Dispatch {
         binding: Box<SessionBinding>,
         request: Box<WebRequest>,
+        hosted: Option<crate::hosted_conversation::Custody>,
         max_response_bytes: usize,
         deadline: Instant,
         cancelled: Arc<AtomicBool>,
@@ -368,6 +370,13 @@ impl PrequeueGuard<'_> {
             identity: self.identity,
             worker_released: false,
         }
+    }
+
+    pub(crate) fn dispatch_hosted(
+        self,binding:SessionBinding,request:WebRequest,max_response_bytes:usize,
+        timeout:Duration,cancelled:Arc<AtomicBool>,custody:crate::hosted_conversation::Custody,
+    ) -> Result<(WebResponse,DispatchFence),CancellableFailure> {
+        self.driver.dispatch_cancellable_retained(binding,request,max_response_bytes,timeout,self.identity,cancelled,Some(custody))
     }
 
     pub(crate) fn dispatch(
@@ -555,6 +564,7 @@ impl RpcDriver {
                 local.block_on(&runtime, async move {
                     let mut sessions: HashMap<SessionKey, CachedSession> = HashMap::new();
                     let mut use_clock = 0_u64;
+                    let mut conversations = crate::hosted_conversation::Pool::default();
                     tokio::task::spawn_local(async move {
                         let _ = rpc.await;
                     });
@@ -579,6 +589,7 @@ impl RpcDriver {
                             Command::Dispatch {
                                 binding,
                                 request,
+                                hosted,
                                 max_response_bytes,
                                 deadline,
                                 cancelled,
@@ -608,6 +619,15 @@ impl RpcDriver {
                                         ));
                                     }
                                     let left = remaining(deadline)?;
+                                    if request.method == minidregg_spk_rpc::Method::HostedConversation {
+                                        let custody = hosted.as_ref().ok_or_else(|| invalid("hosted retention custody absent"))?;
+                                        return tokio::select! {
+                                            biased;
+                                            _ = wait_cancelled(&cancelled) => Err(invalid("hosted caller disconnected; completion uncertain")),
+                                            result = tokio::time::timeout(left, conversations.execute(&session,&binding,&request,custody,deadline)) =>
+                                                result.map_err(|_| invalid("hosted command timeout; completion uncertain"))?,
+                                        };
+                                    }
                                     tokio::select! {
                                         biased;
                                         _ = wait_cancelled(&cancelled) => Err(io::Error::new(io::ErrorKind::Interrupted,
@@ -847,6 +867,13 @@ impl RpcDriver {
         identity: DispatchIdentity,
         cancelled: Arc<AtomicBool>,
     ) -> Result<(WebResponse, DispatchFence), CancellableFailure> {
+        self.dispatch_cancellable_retained(binding,request,max_response_bytes,timeout,identity,cancelled,None)
+    }
+    fn dispatch_cancellable_retained(
+        &mut self, binding: SessionBinding, request: WebRequest,
+        max_response_bytes: usize, timeout: Duration, identity: DispatchIdentity,
+        cancelled: Arc<AtomicBool>, hosted: Option<crate::hosted_conversation::Custody>,
+    ) -> Result<(WebResponse, DispatchFence), CancellableFailure> {
         if cancelled.load(Ordering::Acquire) {
             return Err(CancellableFailure::no_enqueue(
                 io::Error::new(
@@ -878,6 +905,7 @@ impl RpcDriver {
             .try_send(Command::Dispatch {
                 binding: Box::new(binding),
                 request: Box::new(request),
+                hosted,
                 max_response_bytes,
                 deadline,
                 cancelled: Arc::clone(&cancelled),
@@ -1045,6 +1073,7 @@ mod tests {
             app: 91,
             process_generation: 2,
             session_resource: 6208,
+            session_generation: "1".into(),
             subject: 8,
             projection_fingerprint: [7; 32],
             ticket_resource: Some("6408".into()),

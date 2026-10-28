@@ -355,13 +355,21 @@ impl ResidentLifetimeAgent<'_> {
                 .finish_dispatch_uncertain_released(&identity, fence);
             return Err(error);
         }
-        let (web_reply, success_fence) = match prequeue.dispatch(
-            physical.binding,
-            physical.request,
-            MAX_APP_RESPONSE,
-            Duration::from_secs(30),
-            Arc::clone(cancelled),
-        ) {
+        let delivery = if method == crate::hosted_conversation::METHOD {
+            let api_prefix = match &binding.route {
+                Some(crate::agent_api_lifetime_v3::HostedRoute::Web { .. }) => None,
+                Some(crate::agent_api_lifetime_v3::HostedRoute::Api { signed_prefix }) => Some(signed_prefix.clone()),
+                None => Some(self.signed_api_path.to_owned()),
+            };
+            prequeue.dispatch_hosted(physical.binding,physical.request,MAX_APP_RESPONSE,
+                Duration::from_secs(30),Arc::clone(cancelled),crate::hosted_conversation::Custody {
+                    directory:client_dir.clone(),api_prefix,
+                })
+        } else {
+            prequeue.dispatch(physical.binding,physical.request,MAX_APP_RESPONSE,
+                Duration::from_secs(30),Arc::clone(cancelled))
+        };
+        let (web_reply, success_fence) = match delivery {
             Ok(reply) => reply,
             Err(failure) => {
                 let (error, fence) = failure.into_parts();

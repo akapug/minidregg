@@ -86,6 +86,9 @@ fn cookies(value: &str) -> io::Result<Vec<Cookie>> {
             .trim()
             .split_once('=')
             .ok_or_else(|| invalid("malformed app cookie"))?;
+        if name == "__Host-mini_spk_session" {
+            return Err(invalid("custody session cookie is not an app cookie"));
+        }
         if name.is_empty()
             || name.len() > 8192
             || value.len() > 8192
@@ -222,6 +225,7 @@ pub(crate) fn physical_web_input(
 
 fn call_for(method: &str) -> io::Result<Call> {
     Ok(match method {
+        crate::hosted_conversation::METHOD => Call::Exchange(Method::HostedConversation),
         "GET" => Call::Exchange(Method::Get),
         "HEAD" => Call::Exchange(Method::Head),
         "POST" => Call::Exchange(Method::Post),
@@ -308,6 +312,7 @@ fn project(
             app: matched.app,
             process_generation: matched.app_generation,
             session_resource,
+            session_generation: matched.session_generation.clone(),
             subject,
             projection_fingerprint: matched.session_fingerprint,
             ticket_resource: None,
@@ -428,7 +433,7 @@ fn project_http(
         return Err(invalid("WebSession context category exceeds bound"));
     }
     let body = match call {
-        Call::Exchange(Method::Post | Method::Put | Method::Patch | Method::Proppatch) => Some(Body {
+        Call::Exchange(Method::Post | Method::Put | Method::Patch | Method::Proppatch | Method::HostedConversation) => Some(Body {
             mime_type: content_type.unwrap_or("").to_owned(),
             encoding: content_encoding.unwrap_or("").to_owned(),
             bytes: http.body.to_vec(),
@@ -945,4 +950,30 @@ mod tests {
         preflight_web_input(&open, "Friend", "friend", origin, true).unwrap();
         assert!(preflight_web_input(&open, "Friend", "friend", origin, false).is_err());
     }
+}
+
+/// Lower the fixed HTTP half of an admitted compound hosted descriptor through
+/// the same ordinary header/body projection as every other WebSession request.
+pub(crate) fn hosted_http(value: &serde_json::Value, binding: &SessionBinding,
+    api_prefix: Option<&str>) -> io::Result<WebRequest> {
+    let text = |key: &str| value[key].as_str().ok_or_else(|| invalid("hosted HTTP text field absent"));
+    let method=text("method")?;
+    let call=call_for(method)?;
+    let Call::Exchange(method) = call else { return Err(invalid("nested hosted HTTP must be an exchange")); };
+    if method == Method::HostedConversation { return Err(invalid("nested conversation refused")); }
+    let headers=value["headers"].as_array().ok_or_else(||invalid("hosted HTTP headers absent"))?.iter().map(|header| {
+        Ok((header["name"].as_str().ok_or_else(||invalid("hosted header name absent"))?.to_owned(),
+            header["value"].as_str().ok_or_else(||invalid("hosted header value absent"))?.to_owned()))
+    }).collect::<io::Result<Vec<_>>>()?;
+    let body=crate::canonical::unhex(text("bodyHex")?).ok_or_else(||invalid("hosted HTTP body hex refused"))?;
+    let query=text("query")?;
+    let path=if query.is_empty() { text("path")?.to_owned() } else { format!("{}?{query}",text("path")?) };
+    let route=match binding.kind {
+        SessionKind::Web => Route::Browser,
+        SessionKind::Api => Route::Api { signed_path:api_prefix.ok_or_else(||invalid("hosted API prefix custody absent"))? },
+    };
+    let http=HttpProjection { method:text("method")?,path_and_query:&path,ordered_headers:&headers,body:&body,route };
+    let (app_path,query)=crate::dispatch_inspection::app_route_path(&http)?;
+    let parts=project_http(&call,&http,&binding.params.display_name,&binding.params.preferred_handle,&binding.params.base_path)?;
+    Ok(WebRequest { method,path_and_query:if query.is_empty() {app_path} else {format!("{app_path}?{query}")},context:parts.context,body:parts.body,dav:parts.dav })
 }

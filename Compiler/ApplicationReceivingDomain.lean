@@ -7,6 +7,7 @@ module
 
 public import Init
 public import Effects.Revival.HostedDav
+public import Effects.Revival.HostedConversation
 
 @[expose] public section
 
@@ -81,6 +82,7 @@ def receivingContract : List UInt8 :=
    "hosted-route-v4-api-exact-signed-prefix-or-web-protected-same-member-origin;" ++
    "hosted-route-kind-matches-current-source-enrollment-before-physical-delivery;" ++
    "dav-method-specific-parameters-and-exact-values:").toUTF8.toList ++
-   Minidregg.Effects.Revival.HostedDav.contract
+   Minidregg.Effects.Revival.HostedDav.contract ++
+   Minidregg.Effects.Revival.HostedConversation.contract
 
 end Minidregg.Compiler.ApplicationReceivingDomain
