@@ -66,3 +66,14 @@ af7a93e7b8ba729d4, copying the deputy.
   scratch/elab.pid); lane-check it there as lanes (takes closure-lock itself), then send the elaborated sha and file:line
   ranges to the statements auditor af7a93e7b8ba729d4, copying the deputy. Remove the worktree after.
 - Also queued by the deputy (A-C, after the gate red): the confirming rows; see the deputy's messages.
+
+## What 3baaa9d73 (statement file) still lacks, for the successor after the auditor's pass
+- Stated, not proven: the determinacy lemma (`lemma_plan_height_determined`: the grants' notBefore fixes p), the four
+  poles and `premise_inhabited` are Props with no proofs.
+- Not Lean: the real change to `Accepted` is a comment block (the three replaced fields `planHeight`,
+  `planHeight_not_future`, `planHeight_open`, `sourceDescriptor` at planHeight, `appPrepared`/`appChecked` at planHeight);
+  it must become a structure or a modified `Accepted` once the auditor has read it.
+- Not Lean: the app-delegation-leg window check (appRequestFromSourceBytes puts `height` into the signed request, so
+  that leg also needs the plan height; its epoch/revision stay checked at submit) is a comment, not a Prop.
+- The file is scratch/, outside the lakefile; its elaboration result (lane-check on /build/lanes/b3-elab2, output in
+  /build/lanes/b3-elab2/lane-check.out) decides whether the syntax needs repair.
