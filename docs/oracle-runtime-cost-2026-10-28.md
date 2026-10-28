@@ -12,9 +12,30 @@ have to pass admission. Both application-attachment render calls select this
 served path; a refused served request fails without detached fallback. The
 old standalone inspection remains available for explicit operator use. This
 removes two redundant full audits from an attachment's normal preparation.
-No new wall-time measurement is claimed until the successor Host is built and
-qualified. The reported old q3 cohort direct inspection took about 138 seconds
-under contention; it is not a measurement of this change.
+Native qualification now passes on an immutable copy of the compatible
+349e59ef1 q2 Store. With source 0dc11da74 Host 58f51c29… and Mini 633dc1cb…,
+the first served inspection took 187.967 seconds wall /183.378 CPU; the warm
+repeat took 6.084 seconds wall /5.878 CPU. Both outputs were byte-identical to
+the retained 349e native detached projection (SHA-256
+`597a024dd69f83e6a7fdd62584ff89c552a3d9ff887a1e18c02774b45b9018a2`).
+Wrong configuration bytes, wrong Host image and malformed ingress refused.
+Copied database, anchor, config, checkpoint key, grant call and helper hashes
+remained unchanged. The complete control run peaked at 651 MiB; the retained
+Host's measured RSS was 363,296 KiB (high-water 364,804 KiB).
+
+These are old-source 0dc measurements, excluding the newer perf-rake changes.
+The warm path still costs about 6 seconds through the pinned native CLI; its
+remaining cost has not been attributed by this experiment. Evidence is
+`/build/lanes/oracle-served-inspection/qualify-grant-q2/report.json`.
+
+The old q3 Store cannot qualify this successor: its schema-reference epoch is
+`83993641253503633648600516393053872193399020045692075866967416733349573947215`,
+while q2 and this Host use
+`40935230399413234554304749310817889385198722988963778775138874371714494804140`.
+The actual open refused q3 before replay, although the storeless profile JSON
+matched. No epoch was forced and no Store was migrated. The reported earlier
+q3 direct inspection of about 138 seconds under contention is a separate cohort
+measurement and is not an attributable comparison to these numbers.
 
 Independent consent is a separate cost. `ClientConsentCore.verifyInitial`
 resumes a retained anchor when possible, otherwise verifies the whole history.
