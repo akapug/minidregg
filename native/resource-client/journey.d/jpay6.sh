@@ -785,10 +785,18 @@ try:
         time.sleep(3)
         return owner if owner.poll() is None else None
     owner = wait_for("owner connection to the restarted controller", owner_connected, 600, 2)
+    # Recovery fences the uncertain send rather than settling it: the journaled
+    # record is sendStarted with no outcome (decision class crash-after-send) and
+    # the "provider reservation fenced" note; the "uncertain:crash-after-send"
+    # outcome string belongs to the LATER audited class-settle
+    # (provider_meter_class_inner), which this journey never drives.
     def recovered():
         j = journal()
-        notes = " ".join(str(n) for n in (j.get("unresolvedExternal") or []))
-        return j.get("connection") == "fenced" and "uncertain" in notes and j.get("providerAttempt") is not None
+        attempt = j.get("providerAttempt")
+        decision = ((attempt or {}).get("decision") or {}).get("class") or {}
+        return (j.get("connection") == "fenced" and attempt is not None
+                and attempt.get("sendStarted") is True and attempt.get("outcome") is None
+                and decision.get("kind") == "crash-after-send")
     wait_for("owner recovery", recovered, 900)
     # the connector prints the controller's replies on stdout, its own errors on stderr;
     # the attach-time recovery runs signed queries first, so its reply can trail the
@@ -807,7 +815,8 @@ try:
     row("recovery records the provider attempt as uncertain and keeps the hold",
         "sendStarted true, outcome null, hold reserveConfirmed, connection fenced",
         f"sendStarted={attempt.get('sendStarted')} outcome={attempt.get('outcome')} hold={hold.get('reserve')}/{hold.get('reserveConfirmed')} "
-        f"connection={j.get('connection')} note={[n for n in j.get('unresolvedExternal') or [] if 'uncertain' in str(n)][:1]}",
+        f"connection={j.get('connection')} decision={(((attempt.get('decision') or {}).get('class') or {}).get('kind'))}"
+        f" note={[n for n in j.get('unresolvedExternal') or [] if 'fenced' in str(n)][:1]}",
         attempt.get("sendStarted") is True and attempt.get("outcome") is None and hold.get("reserveConfirmed") is True)
     time.sleep(30)
     held, _ = mini_query("purse-held", PROVIDER, PURSE, 101)
