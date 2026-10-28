@@ -204,7 +204,7 @@ def readRequest (prepared : PreparedInvocation deployment profile ambient ground
   { requestFor ground.authority profile.semantics ambient command command.targets[i]
       (prepared.targets i).before.payload.root with
     verb := observeVerb command.targets[i].kind
-    effectsDigest := (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.OBSERVE/v7".toUTF8.toList
+    effectsDigest := (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.OBSERVE/v8".toUTF8.toList
       ((StreamCodec.product bytesStream StreamCodec.nat).encode
         (commandBytes ground.authority.domain profile.semantics command,
           command.targets[i].target))).digest }
