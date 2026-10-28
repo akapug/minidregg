@@ -88,7 +88,7 @@ Its hbox worlds: /tank/rows-2d8b7ed5-apps/w-{featured,b1,b2,b4,b6,rt,fixups}. Mi
 ## Featured on 76758dba6 (validator a373556d56d56744d): 9 PASS of 13
 - PASS: EtherCalc lifecycle + write, DokuWiki lifecycle + write, Datasette lifecycle + recorded read, HedgeDoc/Davros/HledgerWeb lifecycles.
 - HedgeDoc write "close frame" (socket.io): same family as IPython's kernel websocket; given to B8 (a13f0bc9626b1320a), fix at the cause for both.
-- Davros write, HledgerWeb write (empty detail lines) and sntfy lifecycle (get-m exit 22 on /): given to B7 (abf203f357754001b) after its run; recipes must name their failures first.
+- Davros write, HledgerWeb write and sntfy lifecycle: ONE cause (B7 abf203f357754001b): featured-qualify gave the owner session role 0, the package's weakest (sntfy `api` lacks administration -> 401/400; Davros and hledger-web `viewer`). Fixed at 817e8c7f1 (owner basis allAccess, which a grain owner holds and the Lean enrollment admits; failing write rows now print status + 160 body bytes; failing lifecycle rows name the phase). Rerun of l/m/o queued behind the B7 table (job2.pid under /tank/lanes/app-market-b7). Sha to the integrator once green.
 - spk-host io errors must name operation + path (coordinator): B3 faerie (a85d12892ea6de3ca) after its run, lane/un-spk-ioctx, one context wrapper, red-first missing-socket test.
 
 ## Next three
