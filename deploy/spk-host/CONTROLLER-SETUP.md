@@ -19,6 +19,7 @@ controller-tool STORE HELPER REQUEST_ID TOOL ARGUMENTS_JSON
 controller-tool-result STORE HELPER REQUEST_ID
 controller-tool-ack STORE HELPER REQUEST_ID
 controller-journal STORE HELPER
+controller-status STORE HELPER
 controller-service-logs STORE HELPER
 controller-consent-storage STORE HELPER
 controller-runtime-upgrade STORE HELPER OPERATOR_BINARY
@@ -209,6 +210,12 @@ remain preserved and refuse. It preserves
 identity, configuration, journal, keys, other binaries and unit definitions.
 This installs explicitly selected operator code; a matching source/qualified
 native build remains a separate deployment obligation.
+
+`controller-status` produces a stopped-state proof: all controller units and
+the registered public listener must be stopped. Capture it before restarting
+the world's public services. It refuses a running listener even when the
+controller itself is stopped; use `controller-service-logs` for service
+diagnostics instead of treating this proof command as a live health check.
 
 `controller-mini-upgrade` applies the same stopped, archived replacement to
 the controller's Mini executable and private home copy. The separate
