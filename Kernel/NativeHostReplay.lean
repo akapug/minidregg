@@ -1394,6 +1394,27 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       NativeAdmission config opened
         (accepted.intent config opened cursor registration ingress)
 
+/-- **Keystone M2-b at the replay arms (`credit_confined`).** Every admission the replay can
+re-admit carries no meter credit, except a meter refill, whose intent is exactly the
+accepted refill's (`MeterRefillReceiver.intent`: no write, no charge, its marker's nullifier,
+the signed amount as credit, `MeterRefillReceiver.AcceptedRefill.sound`). Replay compares
+the complete record codec (`recordMatches`), credit included, so a committed record whose
+credit its arm does not reproduce is refused. -/
+theorem NativeAdmission.credit_confined {config : Config} {opened : Opened config}
+    {intent : DataIntent rootBytes} (admission : NativeAdmission config opened intent) :
+    intent.credit = 0 ∨
+      ∃ (ingress : MeterRefillReceiver.DecodedIngress)
+        (accepted : MeterRefillReceiver.AcceptedRefill config.deployment config.profile.semantics
+          ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress),
+        intent = MeterRefillReceiver.intent accepted := by
+  cases admission
+  all_goals first
+    | exact Or.inr ⟨_, _, rfl⟩
+    | exact Or.inl rfl
+
+#assert_axioms NativeAdmission.credit_confined
+
+
 structure OrdinaryAt (config : Config) (opened : Opened config)
     (intent : DataIntent rootBytes) where
   command : DeclaredResourceController.Command
