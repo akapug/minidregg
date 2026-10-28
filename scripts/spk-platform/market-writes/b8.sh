@@ -17,8 +17,9 @@ write_IPythonNotebook() {
   [[ $k =~ ^20 && -n $kid ]] || { echo "0 POST /api/kernels $k: $(head -c 120 "$body" | tr -d '\n')"; return; }
   local code="print('resident computed', 6*7)" res
   res=$(python3 -I "$here/market-writes/jupyter-exec.py" "$dir" "$kid" "$code" 2>&1 | tail -1)
+  local kst; req GET "/api/kernels/$kid" >/dev/null; kst=$(head -c 160 "$body" | tr -d '\n')
   req DELETE "/api/kernels/$kid" >/dev/null
-  [[ $res == *'"ok": true'* && $res == *'resident computed 42'* ]] || { echo "0 execute_request on kernel $kid: ${res:0:200}"; return; }
+  [[ $res == *'"ok": true'* && $res == *'resident computed 42'* ]] || { echo "0 execute_request on kernel $kid: ${res:0:200}; kernel after: $kst"; return; }
   local nb; nb=$(jq -cn --arg code "$code" --argjson res "$res" --arg spec "$spec" \
     '{type:"notebook",content:{nbformat:4,nbformat_minor:0,metadata:{kernelspec:{name:$spec,display_name:$spec}},
       cells:[{cell_type:"code",execution_count:1,metadata:{},source:$code,outputs:[{output_type:"stream",name:"stdout",text:$res.stdout}]}]}}')
