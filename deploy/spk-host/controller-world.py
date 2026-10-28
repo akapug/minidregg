@@ -1244,7 +1244,7 @@ def stage(store, helper, bundle_arg, bins_arg, upstream_arg, public_arg, worker=
     return {**r, 'stage': str(base / 'stage.json'), **({'consent': consent_record(base, r, pending)} if has_consent(r) else {})}
 
 
-def checked_units(base, r, partial=False, consent_upgrade_hashes=(), runtime_upgrade_hashes=()):
+def checked_units(base, r, partial=False, consent_upgrade_hashes=(), runtime_upgrade_hashes=(), proxy_upgrade_hashes=()):
     stage_path = base / 'stage.json'
     if partial and not stage_path.exists():
         stage_path = base / 'stage-pending.json'
@@ -1257,7 +1257,7 @@ def checked_units(base, r, partial=False, consent_upgrade_hashes=(), runtime_upg
             continue
         actual = sha(read_file(UNITS / n, 0, 16384))
         require(actual == stage['units'][n] or (has_consent(r) and n == r['units'][4]
-                and actual in consent_upgrade_hashes), 'controller unit changed')
+                and actual in consent_upgrade_hashes) or (n == r['units'][2] and actual in proxy_upgrade_hashes), 'controller unit changed')
     for n in binary_names(r):
         if partial and not (base / 'bin' / n).exists() and not (base / 'bin' / n).is_symlink():
             continue
@@ -1466,6 +1466,76 @@ def runtime_upgrade(store, helper, source_arg):
     checked_units(base, r)
     return {'store': store, 'runtimeUpgrade': str(intent_path), 'runtimeSha256': source_sha,
             'previousRuntimeSha256': intent['oldBinarySha256'], 'stageSha256': intent['newStageSha256']}
+
+
+def relocated_operator_stage(stage, unit, proxy_unit, upstream, identity):
+    old = f'--upstream {stage["upstreamSocket"]} --config '.encode()
+    new = f'--upstream {upstream} --config '.encode()
+    require(unit.count(old) == 1, 'operator proxy does not have one exact upstream argument')
+    changed_unit = unit.replace(old, new)
+    changed = strict_json(encoded(stage))
+    changed['upstreamSocket'] = str(upstream)
+    changed['upstreamIdentity'] = identity
+    changed['units'][proxy_unit] = sha(changed_unit)
+    return changed, changed_unit
+
+
+def operator_endpoint_upgrade(store, helper, socket_arg):
+    """Stopped transport relocation; Store/config/custody/native intents stay fixed."""
+    _, base, r = load(store, helper)
+    stopped_controller_units(r)
+    upstream = canonical(socket_arg); op = r['operatorUid']
+    ancestry(upstream.parent, {0, op}); metadata(upstream.parent, op, 0o700)
+    endpoint = metadata(upstream, op, 0o600)
+    require(stat.S_ISSOCK(endpoint.st_mode), 'operator successor is not a private socket')
+    settings = read_file(base / 'proxy/config.json', op, 1048576, required_mode=0o600)
+    require(read_file(upstream.with_suffix('.config'), op, 1048576, required_mode=0o600) == settings,
+            'operator successor has different Store settings')
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as peer:
+        peer.settimeout(2); peer.connect(str(upstream))
+        _, uid, _ = struct.unpack('3i', peer.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+        require(uid == op, 'operator successor peer identity differs')
+    stage_path = base / 'stage.json'; unit_path = UNITS / r['units'][2]
+    name = 'operator-endpoint-' + sha(str(upstream).encode())
+    intent_path = base / (name + '.json')
+    def archive(digest, kind):
+        require(re.fullmatch('[0-9a-f]{64}', digest), 'operator endpoint archive hash malformed')
+        return base / 'configs' / (name + '-' + digest + '.' + kind)
+    if not intent_path.exists() and not intent_path.is_symlink():
+        stage = checked_units(base, r)
+        old_stage = read_file(stage_path, 0, 65536, required_mode=0o600)
+        require(strict_json(old_stage) == stage, 'operator endpoint stage changed')
+        old_unit = read_file(unit_path, 0, 16384, required_mode=0o644)
+        next_stage, next_unit = relocated_operator_stage(stage, old_unit, r['units'][2], upstream,
+                                                        [endpoint.st_dev, endpoint.st_ino])
+        new_stage = encoded(next_stage)
+        intent = {'protocol': 'mini-controller-operator-endpoint-v1', 'store': store, 'upstream': str(upstream),
+                  'oldStageSha256': sha(old_stage), 'newStageSha256': sha(new_stage),
+                  'oldUnitSha256': sha(old_unit), 'newUnitSha256': sha(next_unit)}
+        for raw, kind in ((old_stage, 'stage'), (new_stage, 'stage'), (old_unit, 'service'), (next_unit, 'service')):
+            publish_exact(archive(sha(raw), kind), raw)
+        publish_exact(intent_path, encoded(intent))
+    intent = strict_json(read_file(intent_path, 0, 4096, required_mode=0o600))
+    require(set(intent) == {'protocol', 'store', 'upstream', 'oldStageSha256', 'newStageSha256', 'oldUnitSha256', 'newUnitSha256'}
+            and intent['protocol'] == 'mini-controller-operator-endpoint-v1' and intent['store'] == store
+            and intent['upstream'] == str(upstream), 'operator endpoint intent differs')
+    kept = {}
+    for key, kind in (('oldStage', 'stage'), ('newStage', 'stage'), ('oldUnit', 'service'), ('newUnit', 'service')):
+        digest = intent[key + 'Sha256']; kept[key] = read_file(archive(digest, kind), 0, 65536, required_mode=0o600)
+        require(sha(kept[key]) == digest, 'operator endpoint archive differs')
+    old_stage, new_stage = strict_json(kept['oldStage']), strict_json(kept['newStage'])
+    expected_stage, expected_unit = relocated_operator_stage(old_stage, kept['oldUnit'], r['units'][2], upstream,
+                                                            new_stage['upstreamIdentity'])
+    require(expected_stage == new_stage and expected_unit == kept['newUnit'], 'operator endpoint change exceeds transport coordinates')
+    require(sha(read_file(stage_path, 0, 65536, required_mode=0o600)) in
+            (intent['oldStageSha256'], intent['newStageSha256']), 'stage is outside operator endpoint transition')
+    checked_units(base, r, proxy_upgrade_hashes=(intent['oldUnitSha256'], intent['newUnitSha256']))
+    replace_root_record(unit_path, kept['newUnit'], 0o644)
+    replace_root_record(stage_path, kept['newStage'], 0o600)
+    run(['/usr/bin/systemctl', 'daemon-reload']); checked_units(base, r)
+    return {'store': store, 'operatorEndpointUpgrade': str(intent_path), 'operatorSocket': str(upstream),
+            'previousOperatorSocket': old_stage['upstreamSocket'], 'stageSha256': intent['newStageSha256'],
+            'observedSocketIdentity': [endpoint.st_dev, endpoint.st_ino]}
 
 
 def enroll(store, helper, source_arg):
@@ -2181,6 +2251,7 @@ def main(args):
             result = upgrade_public_listener(store,helper,*extra)
         elif action == 'controller-consent-storage' and not extra: result = consent_storage_upgrade(store, helper)
         elif action == 'controller-runtime-upgrade' and len(extra) == 1: result = runtime_upgrade(store, helper, extra[0])
+        elif action == 'controller-operator-endpoint' and len(extra) == 1: result = operator_endpoint_upgrade(store, helper, extra[0])
         elif action == 'controller-enroll' and len(extra) == 1:
             fcntl.flock(lock, fcntl.LOCK_UN)
             return enroll(store, helper, extra[0])

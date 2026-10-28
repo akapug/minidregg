@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import stat
 import subprocess
+import socket
 import sys
 import tempfile
 import unittest
@@ -172,6 +173,39 @@ class ControllerWorldTests(unittest.TestCase):
             with self.assertRaises(ValueError): check()
             (home / 'unexpected').unlink(); (base / 'worker-birth-spec.json').write_bytes(b'{}')
             with self.assertRaises(ValueError): check()
+
+    def test_operator_endpoint_changes_only_transport_and_replays_exact_transition(self):
+        base=self.root/'base';base.mkdir();(base/'configs').mkdir();(base/'proxy').mkdir()
+        units=self.root/'units';units.mkdir();private=self.root/'private';private.mkdir(mode=0o700)
+        endpoint=private/'operator.sock';listener=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+        self.addCleanup(listener.close);listener.bind(str(endpoint));listener.listen(4);endpoint.chmod(0o600)
+        for path in (base/'proxy/config.json',endpoint.with_suffix('.config')):
+            path.write_bytes(b'{"sameStore":true}');path.chmod(0o600)
+        old_unit=b'ExecStart=/fixed/mini serve-agent-operator-proxy --upstream /old/operator.sock --config /fixed/config.json\n'
+        unit=units/'proxy.service';unit.write_bytes(old_unit);unit.chmod(0o644)
+        old_stage={'upstreamSocket':'/old/operator.sock','upstreamIdentity':[1,2],
+                   'units':{'proxy.service':c.sha(old_unit)},'binaries':{'mini':'original-pin'},'nativeIdentity':'unchanged'}
+        stage_path=base/'stage.json';stage_path.write_bytes(c.encoded(old_stage));stage_path.chmod(0o600)
+        record={'operatorUid':self.uid,'store':'0123456789abcdef','units':['runtime.service','proxy.socket','proxy.service']}
+        original_read,original_write=c.read_file,c.write_new
+        def owned_read(path,owner,*args,**kwargs):return original_read(path,self.uid if owner==0 else owner,*args,**kwargs)
+        def owned_write(path,content,uid=0,gid=0,mode=0o600):return original_write(path,content,self.uid,self.gid,mode)
+        with patch.object(c,'load',return_value=({},base,record)),patch.object(c,'UNITS',units),patch.object(c,'stopped_controller_units'),patch.object(c,'checked_units',return_value=old_stage),patch.object(c,'run'),patch.object(c,'read_file',side_effect=owned_read),patch.object(c,'write_new',side_effect=owned_write):
+            result=c.operator_endpoint_upgrade(record['store'],'helper',str(endpoint))
+            new_stage=json.loads(stage_path.read_bytes());self.assertEqual(new_stage['upstreamSocket'],str(endpoint))
+            self.assertEqual(new_stage['binaries'],old_stage['binaries']);self.assertEqual(new_stage['nativeIdentity'],'unchanged')
+            self.assertEqual(unit.read_bytes(),old_unit.replace(b'/old/operator.sock',str(endpoint).encode()))
+            retained=Path(result['operatorEndpointUpgrade']).read_bytes()
+            # Either exact publication half is recoverable after interruption.
+            unit.write_bytes(old_unit)
+            again=c.operator_endpoint_upgrade(record['store'],'helper',str(endpoint))
+            self.assertEqual(again['stageSha256'],result['stageSha256']);self.assertEqual(Path(result['operatorEndpointUpgrade']).read_bytes(),retained)
+            bad={**new_stage,'nativeIdentity':'changed'};stage_path.write_bytes(c.encoded(bad))
+            with self.assertRaisesRegex(ValueError,'outside operator endpoint'):c.operator_endpoint_upgrade(record['store'],'helper',str(endpoint))
+            stage_path.write_bytes(c.encoded(new_stage));endpoint.with_suffix('.config').write_bytes(b'{"sameStore":false}')
+            with self.assertRaisesRegex(ValueError,'different Store settings'):c.operator_endpoint_upgrade(record['store'],'helper',str(endpoint))
+            private.chmod(0o710)
+            with self.assertRaisesRegex(ValueError,'mode refused'):c.operator_endpoint_upgrade(record['store'],'helper',str(endpoint))
 
     def test_api_recovery_and_reconciliation_are_fixed_native_admin_commands(self):
         r = self.record(); base = self.root / 'base'; request = 'ab' * 16
