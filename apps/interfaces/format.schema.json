@@ -164,6 +164,19 @@
                       {
                         "type": "object"
                       }
+                    ],
+                    "allOf": [
+                      {
+                        "if": {
+                          "type": "object",
+                          "required": [
+                            "csv"
+                          ]
+                        },
+                        "then": {
+                          "$ref": "#/$defs/CsvExpression"
+                        }
+                      }
                     ]
                   },
                   "base64": {
@@ -593,5 +606,30 @@
     "sources"
   ],
   "additionalProperties": false,
-  "$schema": "https://json-schema.org/draft/2020-12/schema"
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "CsvExpression": {
+      "type": "object",
+      "properties": {
+        "csv": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {}
+              }
+            },
+            {
+              "type": "object"
+            }
+          ]
+        }
+      },
+      "required": [
+        "csv"
+      ],
+      "additionalProperties": false
+    }
+  }
 }

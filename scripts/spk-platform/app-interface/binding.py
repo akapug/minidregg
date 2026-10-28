@@ -5,7 +5,9 @@ This Python driver stays in the qualification harness. Production custody/admiss
 remain in Lean/Rust; see docs/APP-INTERFACE-2026-10-28.md for the native receiving seam.
 """
 import base64
+import csv
 import hashlib
+import io
 import json
 import re
 import time
@@ -145,6 +147,15 @@ def resolve(x, args, context, results=None):
         return hashlib.sha256(value.encode('utf-8')).hexdigest()
     if set(x) == {'concat'}:
         return ''.join(str(resolve(v, args, context, results)) for v in x['concat'])
+    if set(x) == {'csv'}:
+        rows = resolve(x['csv'], args, context, results)
+        if not isinstance(rows, list) or any(
+                not isinstance(row, list) or any(not isinstance(cell, str) for cell in row)
+                for row in rows):
+            raise Refusal('csv-input-invalid')
+        out = io.StringIO(newline='')
+        csv.writer(out, lineterminator='\r\n').writerows(rows)
+        return out.getvalue()
     if set(x) == {'path'} and isinstance(x['path'], list):
         return encode_path(x['path'], args)
     return {k: resolve(v, args, context, results) for k, v in x.items()}
@@ -461,11 +472,15 @@ class Engine:
 
 
 def scenario_assertions(step, value, context, results):
+    def json_equal(a, b):
+        # Python considers True == 1, unlike the native JSON value contract.
+        return json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
     for check in step.get('assert', []):
         if 'contains' in check:
             expected = resolve(check['contains'], {}, context, results)
             ok = isinstance(value, list) and any(
-                isinstance(v, dict) and all(v.get(k) == x for k, x in expected.items()) for v in value)
+                (isinstance(v, dict) and all(k in v and json_equal(v[k], x) for k, x in expected.items()))
+                if isinstance(expected, dict) else json_equal(v, expected) for v in value)
         else:
             got = value
             try:
