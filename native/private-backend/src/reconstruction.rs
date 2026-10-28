@@ -46,3 +46,76 @@ impl Field {
         Ok(x)
     }
 }
+/// The Lagrange basis weight of node `k` at `t` over `xs`: the product over
+/// j != k of (t - x_j) / (x_k - x_j). The field has characteristic 2, so
+/// subtraction is addition. Refuses (rather than panics) on a repeated node.
+pub fn lagrange(xs: &[Field], k: usize, t: Field) -> Result<Field> {
+    let (mut num, mut den) = (Field(1), Field(1));
+    for (j, x) in xs.iter().enumerate() {
+        if j != k {
+            num = num.mul(t.add(*x));
+            den = den.mul(xs[k].add(*x));
+        }
+    }
+    Ok(num.mul(den.inv()?))
+}
+fn nodes<V>(points: &[(u16, V)]) -> Vec<Field> {
+    points.iter().map(|(h, _)| Field(*h as u128 + 1)).collect()
+}
+/// The vector-valued interpolation at `at` of the points `(holder, values)`
+/// placed at x = holder + 1, each of `count` components.
+pub fn interpolate_at<V: AsRef<[Field]>>(
+    points: &[(u16, V)],
+    at: Field,
+    count: usize,
+) -> Result<Vec<Field>> {
+    let xs = nodes(points);
+    let mut out = vec![Field(0); count];
+    for (i, (_, values)) in points.iter().enumerate() {
+        let values = values.as_ref();
+        if values.len() != count {
+            return Err(bad("point vector"));
+        }
+        let weight = lagrange(&xs, i, at)?;
+        for (o, v) in out.iter_mut().zip(values) {
+            *o = o.add(weight.mul(*v));
+        }
+    }
+    Ok(out)
+}
+/// The coefficient vectors (lowest degree first), one per component, of the
+/// polynomials through the points `(holder, values)` placed at x = holder + 1.
+pub fn polynomial<V: AsRef<[Field]>>(
+    points: &[(u16, V)],
+    count: usize,
+) -> Result<Vec<Vec<Field>>> {
+    let xs = nodes(points);
+    let mut out = vec![vec![Field(0); points.len()]; count];
+    for (i, (_, values)) in points.iter().enumerate() {
+        let values = values.as_ref();
+        if values.len() != count {
+            return Err(bad("polynomial vector"));
+        }
+        let mut basis = vec![Field(1)];
+        let mut denominator = Field(1);
+        for (j, xj) in xs.iter().enumerate() {
+            if i != j {
+                denominator = denominator.mul(xs[i].add(*xj));
+                let mut next = vec![Field(0); basis.len() + 1];
+                for (k, c) in basis.iter().enumerate() {
+                    next[k] = next[k].add(c.mul(*xj));
+                    next[k + 1] = next[k + 1].add(*c);
+                }
+                basis = next;
+            }
+        }
+        let inverse = denominator.inv()?;
+        for (row, value) in out.iter_mut().zip(values) {
+            let scale = value.mul(inverse);
+            for (slot, c) in row.iter_mut().zip(&basis) {
+                *slot = slot.add(c.mul(scale));
+            }
+        }
+    }
+    Ok(out)
+}

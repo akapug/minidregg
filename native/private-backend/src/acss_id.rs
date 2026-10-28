@@ -9,7 +9,7 @@ use crate::{
     custody::hash,
     dzk::{self, Dzk, RejectedProof, Verification, VerifiedShares},
     private_send::{self, PrivateSend},
-    reconstruction::Field,
+    reconstruction::{interpolate_at, polynomial, Field},
 };
 use std::{
     collections::BTreeMap,
@@ -713,57 +713,6 @@ fn valid_one(p: &PhaseMessage, init: bool) -> Result<()> {
         return Err(bad("ACSS request/RA value"));
     }
     Ok(())
-}
-fn interpolate_at(points: &[(u16, Vec<Field>)], at: Field, count: usize) -> Result<Vec<Field>> {
-    let mut out = vec![Field(0); count];
-    for (i, (holder, values)) in points.iter().enumerate() {
-        if values.len() != count {
-            return Err(bad("point vector"));
-        }
-        let xi = Field(*holder as u128 + 1);
-        let mut coefficient = Field(1);
-        for (j, (other, _)) in points.iter().enumerate() {
-            if i != j {
-                let xj = Field(*other as u128 + 1);
-                coefficient = coefficient.mul(at.add(xj)).mul(xi.add(xj).inv()?);
-            }
-        }
-        for k in 0..count {
-            out[k] = out[k].add(coefficient.mul(values[k]));
-        }
-    }
-    Ok(out)
-}
-pub(crate) fn polynomial(points: &[(u16, Vec<Field>)], count: usize) -> Result<Vec<Vec<Field>>> {
-    let mut out = vec![vec![Field(0); points.len()]; count];
-    for (i, (holder, values)) in points.iter().enumerate() {
-        if values.len() != count {
-            return Err(bad("polynomial vector"));
-        }
-        let xi = Field(*holder as u128 + 1);
-        let mut basis = vec![Field(1)];
-        let mut denominator = Field(1);
-        for (j, (other, _)) in points.iter().enumerate() {
-            if i != j {
-                let xj = Field(*other as u128 + 1);
-                denominator = denominator.mul(xi.add(xj));
-                let mut next = vec![Field(0); basis.len() + 1];
-                for (k, c) in basis.iter().enumerate() {
-                    next[k] = next[k].add(c.mul(xj));
-                    next[k + 1] = next[k + 1].add(*c);
-                }
-                basis = next;
-            }
-        }
-        let inverse = denominator.inv()?;
-        for ell in 0..count {
-            let scale = values[ell].mul(inverse);
-            for k in 0..basis.len() {
-                out[ell][k] = out[ell][k].add(basis[k].mul(scale));
-            }
-        }
-    }
-    Ok(out)
 }
 pub(crate) fn correct_polynomials(
     points: &BTreeMap<u16, Vec<Field>>,

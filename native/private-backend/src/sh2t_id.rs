@@ -8,7 +8,7 @@ use crate::{
     codec::{bad, Generation, Nat},
     custody::hash,
     private_send::{self, PrivateSend},
-    reconstruction::Field,
+    reconstruction::{polynomial, Field},
 };
 use std::{
     collections::BTreeMap,
@@ -877,10 +877,12 @@ impl Sh2tId {
                 let pts = self.points[group]
                     .iter()
                     .take(2 * self.f + 1)
-                    .map(|(i, (v, m))| (*i, v.clone(), m.clone()))
+                    .map(|(i, (v, m))| (*i, v.as_slice(), m.as_slice()))
                     .collect::<Vec<_>>();
-                let vp = interpolate(&pts, self.per_group, false)?;
-                let mp = interpolate(&pts, self.per_group, true)?;
+                let vpts = pts.iter().map(|(i, v, _)| (*i, *v)).collect::<Vec<_>>();
+                let mpts = pts.iter().map(|(i, _, m)| (*i, *m)).collect::<Vec<_>>();
+                let vp = polynomial(&vpts, self.per_group)?;
+                let mp = polynomial(&mpts, self.per_group)?;
                 let own = self
                     .accepted
                     .as_ref()
@@ -910,7 +912,7 @@ impl Sh2tId {
                     b.extend((group as u64).to_le_bytes());
                     b.extend(self.me.to_le_bytes());
                     b.extend(self.matrix.output.as_ref().unwrap());
-                    for (i, v, m) in &pts {
+                    for &(i, v, m) in &pts {
                         b.extend(i.to_le_bytes());
                         for x in v.iter().chain(m) {
                             b.extend(x.0.to_le_bytes());
@@ -1037,42 +1039,6 @@ fn valid_one(p: &PhaseMessage, init: bool) -> Result<()> {
         Ok(())
     }
 }
-fn interpolate(
-    points: &[(u16, Vec<Field>, Vec<Field>)],
-    count: usize,
-    masks: bool,
-) -> Result<Vec<Vec<Field>>> {
-    let mut out = vec![vec![Field(0); points.len()]; count];
-    for (i, (holder, v, m)) in points.iter().enumerate() {
-        let vals = if masks { m } else { v };
-        if vals.len() != count {
-            return Err(bad("point length"));
-        }
-        let xi = alpha(*holder as usize);
-        let mut basis = vec![Field(1)];
-        let mut denom = Field(1);
-        for (j, (other, _, _)) in points.iter().enumerate() {
-            if i != j {
-                let xj = alpha(*other as usize);
-                let mut next = vec![Field(0); basis.len() + 1];
-                for (k, c) in basis.iter().enumerate() {
-                    next[k] = next[k].add(c.mul(xj));
-                    next[k + 1] = next[k + 1].add(*c);
-                }
-                basis = next;
-                denom = denom.mul(xi.add(xj));
-            }
-        }
-        let inv = denom.inv()?;
-        for (ell, value) in vals.iter().enumerate() {
-            for (k, c) in basis.iter().enumerate() {
-                out[ell][k] = out[ell][k].add(value.mul(*c).mul(inv));
-            }
-        }
-    }
-    Ok(out)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1483,15 +1449,11 @@ mod pin_helpers {
     #[test]
     fn pin_interpolate_values_and_masks() {
         let p = pin_p();
-        let pts = vec![
-            (0u16, vec![p[0], p[1]], vec![p[2], p[1]]),
-            (2, vec![p[1], p[2]], vec![p[0], p[0]]),
-            (3, vec![p[2], p[0]], vec![p[1], p[2]]),
-        ];
-        let v = interpolate(&pts, 2, false).unwrap();
-        assert_eq!(v, vec![vec![Field(0xe6fcc0defa32b3efe5af2d2474f13231), Field(0x3ae217b780bb674404bc9d274805a5af), Field(0xdd3d920ef32219441fcf0a9b4aa0a58e)], vec![Field(0xe44d91f9ec1c941f3017f93978914e3d), Field(0x1d5d18a90d42066c907d8635d080c6c8), Field(0xf901ab63a50bf40428f3d5b764cc660a)]]);
-        assert_eq!(interpolate(&pts, 2, true).unwrap(), vec![vec![Field(0xdd2e889c112e36d6a850343348045a2d), Field(0x27bf0f1e8df9612894c11b1298856367), Field(0x243c396d5629ed40373cdf2c2e6cc384)], vec![Field(0x5137c77e2d2fb92f9cc73f4a00f9f60a), Field(0xe1b3a8ef93f9a6d40e8a9eae3cfbb537), Field(0xb0954da2fa83798c1ad40b5ff0dfadc2)]]);
-        assert!(interpolate(&pts, 3, false).is_err());
+        let values = vec![(0u16, vec![p[0], p[1]]), (2, vec![p[1], p[2]]), (3, vec![p[2], p[0]])];
+        let masks = vec![(0u16, vec![p[2], p[1]]), (2, vec![p[0], p[0]]), (3, vec![p[1], p[2]])];
+        assert_eq!(polynomial(&values, 2).unwrap(), vec![vec![Field(0xe6fcc0defa32b3efe5af2d2474f13231), Field(0x3ae217b780bb674404bc9d274805a5af), Field(0xdd3d920ef32219441fcf0a9b4aa0a58e)], vec![Field(0xe44d91f9ec1c941f3017f93978914e3d), Field(0x1d5d18a90d42066c907d8635d080c6c8), Field(0xf901ab63a50bf40428f3d5b764cc660a)]]);
+        assert_eq!(polynomial(&masks, 2).unwrap(), vec![vec![Field(0xdd2e889c112e36d6a850343348045a2d), Field(0x27bf0f1e8df9612894c11b1298856367), Field(0x243c396d5629ed40373cdf2c2e6cc384)], vec![Field(0x5137c77e2d2fb92f9cc73f4a00f9f60a), Field(0xe1b3a8ef93f9a6d40e8a9eae3cfbb537), Field(0xb0954da2fa83798c1ad40b5ff0dfadc2)]]);
+        assert!(polynomial(&values, 3).is_err());
     }
     #[test]
     fn pin_sh2t_seeded_prg() {

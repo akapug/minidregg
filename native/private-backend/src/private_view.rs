@@ -36,7 +36,7 @@ use crate::{
     codec::Generation,
     entropy::Entropy,
     private_output_store::tests::{drive_tapped, stores_from_completed_descriptor},
-    reconstruction::Field,
+    reconstruction::{lagrange, Field},
     transcript::{Frame, Tap, Wire},
     triple_king::{
         acss_seed_count, per_group,
@@ -81,17 +81,6 @@ fn operand_deltas(net: &Network, a: &[bool], b: &[bool]) -> (Vec<Field>, Vec<Fie
     }
     (dl, dr)
 }
-fn lagrange(xs: &[Field], k: usize, t: Field) -> Field {
-    let mut num = Field(1);
-    let mut den = Field(1);
-    for (j, x) in xs.iter().enumerate() {
-        if j != k {
-            num = num.mul(t.add(*x));
-            den = den.mul(xs[k].add(*x));
-        }
-    }
-    num.mul(den.inv().unwrap())
-}
 /// King extraction exactly as PreparedBasis::reserve_new computes it, applied to
 /// the dealers' secrets (constant terms) — the simulator knows honest dealings.
 fn extract(dealings: &[PrepDealing], offset: usize, batch: usize, m: usize) -> Vec<Field> {
@@ -134,13 +123,13 @@ fn equivocate_preparation(
     let complete = |used: &[Field]| -> Vec<Field> {
         let mut d = vec![Field(0); m];
         d[1..=COUNT].copy_from_slice(used);
-        let rest = (1..=COUNT).fold(Field(0), |s, k| s.add(d[k].mul(lagrange(&xs, k, r))));
-        d[0] = rest.mul(lagrange(&xs, 0, r).inv().unwrap());
+        let rest = (1..=COUNT).fold(Field(0), |s, k| s.add(d[k].mul(lagrange(&xs, k, r).unwrap())));
+        d[0] = rest.mul(lagrange(&xs, 0, r).unwrap().inv().unwrap());
         for i in COUNT + 1..m {
             let at = Field(i as u128 + 1);
-            d[i] = (0..=COUNT).fold(Field(0), |s, k| s.add(d[k].mul(lagrange(&xs, k, at))));
+            d[i] = (0..=COUNT).fold(Field(0), |s, k| s.add(d[k].mul(lagrange(&xs, k, at).unwrap())));
         }
-        let at_r = (0..=COUNT).fold(Field(0), |s, k| s.add(d[k].mul(lagrange(&xs, k, r))));
+        let at_r = (0..=COUNT).fold(Field(0), |s, k| s.add(d[k].mul(lagrange(&xs, k, r).unwrap())));
         assert_eq!(at_r, Field(0));
         d
     };
@@ -272,7 +261,7 @@ fn reconstruct(states: &[AcssId], holders: [u16; 2]) -> u64 {
         .iter()
         .map(|h| (*h, accepted(&states[*h as usize])))
         .collect::<Vec<_>>();
-    let polys = acss_id::polynomial(&points, states[0].count).unwrap();
+    let polys = crate::reconstruction::polynomial(&points, states[0].count).unwrap();
     polys.iter().enumerate().fold(0, |v, (i, p)| {
         assert!(p[0] == Field(0) || p[0] == Field(1));
         v | ((p[0].0 as u64) << i)
@@ -465,13 +454,13 @@ fn retired_public_coefficient_dealing_is_decoded_by_the_curious_holder() {
 #[test]
 fn pin_lagrange_weights() {
     let xs = [Field(1), Field(2), Field(3), Field(4)];
-    assert_eq!(lagrange(&xs, 0, Field(0x00000000000000000000000000000000)), Field(0x5555555555555555555555555555557f));
-    assert_eq!(lagrange(&xs, 0, Field(0x00000000000000000000000000000009)), Field(0xffffffffffffffffffffffffffffffa8));
-    assert_eq!(lagrange(&xs, 0, Field(0xfeedfacefeedfacefeedfacefeedface)), Field(0xa12de536a6462b3bc4c45743c3afcc0a));
-    assert_eq!(lagrange(&xs, 2, Field(0x00000000000000000000000000000000)), Field(0xb6db6db6db6db6db6db6db6db6db6def));
-    assert_eq!(lagrange(&xs, 2, Field(0x00000000000000000000000000000009)), Field(0xb6db6db6db6db6db6db6db6db6db6da7));
-    assert_eq!(lagrange(&xs, 2, Field(0xfeedfacefeedfacefeedfacefeedface)), Field(0xd2b0729fde0972b5b89b46bfb422f7cb));
-    assert_eq!(lagrange(&xs, 3, Field(0x00000000000000000000000000000000)), Field(0x1c71c71c71c71c71c71c71c71c71c712));
-    assert_eq!(lagrange(&xs, 3, Field(0x00000000000000000000000000000009)), Field(0x49249249249249249249249249249266));
-    assert_eq!(lagrange(&xs, 3, Field(0xfeedfacefeedfacefeedfacefeedface)), Field(0xdd734e83230d29897c8b1e4982f56438));
+    assert_eq!(lagrange(&xs, 0, Field(0x00000000000000000000000000000000)).unwrap(), Field(0x5555555555555555555555555555557f));
+    assert_eq!(lagrange(&xs, 0, Field(0x00000000000000000000000000000009)).unwrap(), Field(0xffffffffffffffffffffffffffffffa8));
+    assert_eq!(lagrange(&xs, 0, Field(0xfeedfacefeedfacefeedfacefeedface)).unwrap(), Field(0xa12de536a6462b3bc4c45743c3afcc0a));
+    assert_eq!(lagrange(&xs, 2, Field(0x00000000000000000000000000000000)).unwrap(), Field(0xb6db6db6db6db6db6db6db6db6db6def));
+    assert_eq!(lagrange(&xs, 2, Field(0x00000000000000000000000000000009)).unwrap(), Field(0xb6db6db6db6db6db6db6db6db6db6da7));
+    assert_eq!(lagrange(&xs, 2, Field(0xfeedfacefeedfacefeedfacefeedface)).unwrap(), Field(0xd2b0729fde0972b5b89b46bfb422f7cb));
+    assert_eq!(lagrange(&xs, 3, Field(0x00000000000000000000000000000000)).unwrap(), Field(0x1c71c71c71c71c71c71c71c71c71c712));
+    assert_eq!(lagrange(&xs, 3, Field(0x00000000000000000000000000000009)).unwrap(), Field(0x49249249249249249249249249249266));
+    assert_eq!(lagrange(&xs, 3, Field(0xfeedfacefeedfacefeedfacefeedface)).unwrap(), Field(0xdd734e83230d29897c8b1e4982f56438));
 }

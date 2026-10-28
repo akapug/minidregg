@@ -320,24 +320,8 @@ impl Asks {
                         .take(self.f + 1)
                         .map(|(i, s)| (*i, s))
                         .collect();
-                    let interpolate_at = |at: Field| -> Result<Vec<Field>> {
-                        let mut result = vec![Field(0); WORDS];
-                        for (i, (sender, words)) in points.iter().enumerate() {
-                            let xi = Field(*sender as u128 + 1);
-                            let mut coefficient = Field(1);
-                            for (j, (other, _)) in points.iter().enumerate() {
-                                if i != j {
-                                    let xj = Field(*other as u128 + 1);
-                                    coefficient =
-                                        coefficient.mul(at.add(xj)).mul(xi.add(xj).inv()?);
-                                }
-                            }
-                            for (k, w) in words.iter().enumerate() {
-                                result[k] = result[k].add(coefficient.mul(*w));
-                            }
-                        }
-                        Ok(result)
-                    };
+                    let interpolate_at =
+                        |at: Field| crate::reconstruction::interpolate_at(&points, at, WORDS);
                     let mut coherent = true;
                     for i in 0..self.n {
                         if self.h(i as u16 + 1, &interpolate_at(Field(i as u128 + 1))?)

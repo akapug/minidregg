@@ -934,7 +934,7 @@ mod tests {
                 (t.holder(), vec![a, b, cc])
             })
             .collect::<Vec<_>>();
-        let polys = acss_id::polynomial(&points, 3).unwrap();
+        let polys = crate::reconstruction::polynomial(&points, 3).unwrap();
         assert_ne!(polys[0][0], Field(0));
         assert_ne!(polys[1][0], Field(0));
         assert_eq!(polys[0][0].mul(polys[1][0]), polys[2][0]);
