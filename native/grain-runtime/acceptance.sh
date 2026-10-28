@@ -263,7 +263,7 @@ cat >"$EVIDENCE/birth-intent.json" <<EOF
     "ownerCapability":"81","controlCapability":"82","budget":"50"},
    {"kind":"object","storage":"declared","target":"$PUBLICATION_TARGET","owner":"7",
     "ownerCapability":"91","controlCapability":"92",
-    "predicate":{"type":"all","predicates":[]}}],
+    "predicate":{"type":"all","predicates":[]},"fields":["0"]}],
   "sourceCapabilities":["41"],"funding":[],"feePayer":"7"},
  "grants":[{"kind":"object","target":"10","capability":"54"},
    {"kind":"account","target":"7","capability":"41"}]}
