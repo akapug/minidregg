@@ -7,9 +7,13 @@ imports only `Theory.Store`, `Theory.TypedAuthorization` and the stream codecs, 
 proofs build on a small closure.  The live keystones over the deployed controller are in
 `Effects.Revival.Statements`, which imports this file.
 -/
-import Theory.Store
-import Theory.TypedAuthorization
-import Compiler.Tower256ConcreteBackend
+module
+
+public import Theory.Store
+public import Theory.TypedAuthorization
+public import Compiler.Tower256ConcreteBackend
+
+@[expose] public section
 
 namespace Minidregg.Effects.Revival
 
@@ -216,6 +220,8 @@ a silent twin), every entry lawful — the floor obligations as proof FIELDS. -/
 structure LawfulRegistry (Ctx Cell : Type) : Type 1 where
   entries : Registry Ctx Cell
   nodup : (entries.map Prod.fst).Nodup
+  /-- Codes are one octet: the payload tag on the wire (`payloadStream`'s tag byte). -/
+  octet : ∀ entry ∈ entries, entry.1 < 256
   lawful : ∀ code e, entries.lookup code = some e → e.Lawful
 
 /-! ## §4. `Dispatches` — a predicate on ANY candidate dispatcher. -/
@@ -416,5 +422,172 @@ def CompletenessTeeth : Prop := ¬ (toyEntry entryBSpec).Lawful
 /-- **Premise inhabitation.**  A lawful registry exists: entry A's. -/
 def CompletenessPremise : Prop :=
   ∃ L : LawfulRegistry Unit ToyStore, L.entries = [(0, toyEntry entryASpec)]
+
+/-! ## §6. One dispatch source by construction, and registry extension.
+
+**One source.**  `noTwin` alone only says a supplied legacy list is disjoint from the
+registry; it cannot see a hand arm that still exists beside a registered code (two equal
+implementations are extensionally indistinguishable).  `composeDispatch R legacy` is the
+only shape the host dispatcher may have: the registry decides every registered code and the
+legacy arm sees ONLY codes the registry lacks, so a hand arm for a registered code is
+unreachable by construction.  The structural half of the rule is not a `Prop`: at each
+migration step the legacy arm's input type loses the migrated constructor (the `Payload`
+inductive drops `content`), so the old arm no longer typechecks, and a build census checks
+that the replaced computation has no remaining production caller (docs/EFFECTS-REVIVAL.md §8).
+
+**Extension.**  Adding entries must not change what any old code means: every byte string
+under an old code is decoded, interpreted and executed exactly as before (`Extends`,
+`ExtensionPreserves`).  Accepting a previously unregistered code is an intentional
+compatibility change; `SafeExtension` makes the policy explicit: a retired code is never
+rebound. -/
+
+/-- The host dispatcher's one permitted shape. -/
+def composeDispatch {Ctx Cell : Type} (R : Registry Ctx Cell)
+    (legacy : Nat → List UInt8 → Ctx → Cell → Except DispatchRefusal Cell) :
+    Nat → List UInt8 → Ctx → Cell → Except DispatchRefusal Cell :=
+  fun code bytes ctx cell =>
+    match R.lookup code with
+    | none => legacy code bytes ctx cell
+    | some _ => dispatch R code bytes ctx cell
+
+/-- `d` has the one permitted shape over `R`. -/
+def OneSource {Ctx Cell : Type} (R : Registry Ctx Cell)
+    (d : Nat → List UInt8 → Ctx → Cell → Except DispatchRefusal Cell) : Prop :=
+  ∃ legacy, d = composeDispatch R legacy
+
+/-- **The legacy census** (pass 27): the hand arms' own input type has no constructor at a
+registered code.  This is what shows deletion: when a code migrates, the legacy input type
+must lose its constructor before the census is provable.  (`OneSource` below is only its
+extensional shadow: any dispatcher agreeing with `dispatch R` on registered codes satisfies
+it.) -/
+def LegacyDisjoint {P Ctx Cell : Type} (tagOf : P → Nat) (R : Registry Ctx Cell) : Prop :=
+  ∀ p : P, tagOf p ∉ R.map Prod.fst
+
+/-- A toy legacy input type: one payload, at tag 2. -/
+inductive ToyLegacy where
+  | other
+  deriving DecidableEq
+
+def toyLegacyTag : ToyLegacy → Nat
+  | .other => 2
+
+/-- **Census satisfiable**: the toy legacy type has no constructor at the pole's codes. -/
+def LegacyCensusSatisfiable : Prop := LegacyDisjoint toyLegacyTag toyPole
+
+/-- **Census teeth**: a legacy type that still carries a registered code (tag 0) fails it. -/
+def LegacyCensusTeeth : Prop := ¬ LegacyDisjoint (fun (_ : Unit) => 0) toyPole
+
+/-- **One-source satisfiable**: the pole's own dispatcher is one-source (legacy refuses). -/
+def OneSourceSatisfiable : Prop := OneSource toyPole (dispatch toyPole)
+
+/-- **One-source teeth**: a dispatcher that reads registered code 0 by another arm (the
+ghost) is not one-source over the pole, whatever its legacy arm. -/
+def OneSourceTeeth : Prop := ¬ OneSource toyPole (dispatch toyGhostPole)
+
+/-- `R'` extends `R`: every old code keeps its handler. -/
+def Extends {Ctx Cell : Type} (R R' : Registry Ctx Cell) : Prop :=
+  ∀ code e, R.lookup code = some e → R'.lookup code = some e
+
+/-- **EXTENSION KEYSTONE.**  Under an extension, every byte string under an old code is
+dispatched exactly as before: decoding, header, selection, interpretation and execution,
+acceptances and refusals alike. -/
+def ExtensionPreserves (Ctx Cell : Type) : Prop :=
+  ∀ R R' : Registry Ctx Cell, Extends R R' → ∀ code, R.lookup code ≠ none →
+    ∀ bytes ctx cell, dispatch R' code bytes ctx cell = dispatch R code bytes ctx cell
+
+/-- The explicit policy for newly accepted codes: an extension that never rebinds a
+retired code. -/
+def SafeExtension {Ctx Cell : Type} (R R' : Registry Ctx Cell) (retired : List Nat) : Prop :=
+  Extends R R' ∧ ∀ code ∈ retired, R'.lookup code = none
+
+/-- **Extension satisfiable**: the pole extends entry A's registry, adding code 1. -/
+def ExtensionSatisfiable : Prop := SafeExtension [(0, toyEntry entryASpec)] toyPole []
+
+/-- **Extension teeth**: rebinding an old code is not an extension (the ghost pole
+rebinds code 0), and a safe extension may not rebind a retired code. -/
+def ExtensionTeeth : Prop :=
+  ¬ Extends toyPole toyGhostPole ∧ ¬ SafeExtension [(0, toyEntry entryASpec)] toyPole [1]
+
+/-! ### Prefix consumption (review gap 3).
+
+A registered operation is not a whole wire message.  The deployed target decoder reads the
+payload's tag octet, then the payload, then the target's later fields (`targetStream` is a
+product with `payloadStream` in its middle).  So the registry is also read as a PREFIX: one
+octet, the entry's own `decodePrefix`, and the suffix handed back untouched to the enclosing
+decoder.  An extension must preserve that reading on every old code too, not only the
+dispatch of a whole operation (`ExtensionPreserves`). -/
+
+/-- A candidate prefix reader: bytes ↦ the code, the operation's bytes, the suffix. -/
+abbrev PrefixReader := List UInt8 → Option (Nat × List UInt8 × List UInt8)
+
+/-- The registry's prefix reader: the tag octet, then the entry's own prefix decoder; the
+operation's bytes are its canonical encoding. -/
+def readPrefix {Ctx Cell : Type} (R : Registry Ctx Cell) : PrefixReader
+  | [] => none
+  | tag :: rest =>
+    match R.lookup tag.toNat with
+    | none => none
+    | some e => (e.spec.opStream.decodePrefix rest).map fun decoded =>
+        (tag.toNat, e.spec.opStream.encode decoded.1, decoded.2)
+
+/-- `read` reads `R` as a prefix.
+* `consume`: after a registered code's octet, exactly one operation's encoding is consumed
+  and every suffix is handed back untouched;
+* `refuse`: an octet at no registered code is refused, never read by another entry;
+* `canonical`: whatever it accepts is a registered code's octet, one operation's encoding
+  and the suffix, nothing else. -/
+structure ConsumesPrefix {Ctx Cell : Type} (R : Registry Ctx Cell) (read : PrefixReader) :
+    Prop where
+  consume : ∀ code e, R.lookup code = some e → code < 256 → ∀ (op : e.O) (suffix : List UInt8),
+    read (UInt8.ofNat code :: (e.spec.opStream.encode op ++ suffix)) =
+      some (code, e.spec.opStream.encode op, suffix)
+  refuse : ∀ (tag : UInt8) rest, R.lookup tag.toNat = none → read (tag :: rest) = none
+  canonical : ∀ bytes code opBytes suffix, read bytes = some (code, opBytes, suffix) →
+    ∃ e, R.lookup code = some e ∧ code < 256 ∧ (∃ op : e.O, opBytes = e.spec.opStream.encode op) ∧
+      bytes = UInt8.ofNat code :: (opBytes ++ suffix)
+
+/-- **PREFIX KEYSTONE.**  `readPrefix R` reads every registry as a prefix, and an extension
+reads every old code's prefix exactly as before (the bytes consumed and the suffix handed
+back alike). -/
+def PrefixKeystone (Ctx Cell : Type) : Prop :=
+  (∀ R : Registry Ctx Cell, ConsumesPrefix R (readPrefix R)) ∧
+  (∀ R R' : Registry Ctx Cell, Extends R R' → ∀ code, R.lookup code ≠ none → code < 256 →
+    ∀ rest, readPrefix R' (UInt8.ofNat code :: rest) = readPrefix R (UInt8.ofNat code :: rest))
+
+/-- A reader that decodes the operation from ALL the remaining bytes (a top-level decode
+where a prefix decode belongs): it hands the enclosing decoder no suffix. -/
+def readWhole {Ctx Cell : Type} (R : Registry Ctx Cell) : PrefixReader
+  | [] => none
+  | tag :: rest =>
+    match R.lookup tag.toNat with
+    | none => none
+    | some e => (e.spec.opStream.toLawful.decode rest).map fun op =>
+        (tag.toNat, e.spec.opStream.encode op, [])
+
+/-- A fail-open reader: an octet at no registered code is read by entry A's decoder. -/
+def readFailOpen : PrefixReader
+  | [] => none
+  | tag :: rest =>
+    match toyPole.lookup tag.toNat with
+    | none => readPrefix toyPole (0 :: rest)
+    | some _ => readPrefix toyPole (tag :: rest)
+
+/-- The pole with code 1 rebound to entry A's codec (a natural number where a boolean was). -/
+def toyRebindPole : Registry Unit ToyStore := [(0, toyEntry entryASpec), (1, toyEntry entryASpec)]
+
+/-- **Prefix satisfiable**: the pole is read as a prefix, and code 0's `5` followed by a
+suffix `[7]` consumes exactly `5`'s encoding and hands back `[7]`. -/
+def PrefixSatisfiable : Prop :=
+  ConsumesPrefix toyPole (readPrefix toyPole) ∧
+  readPrefix toyPole (0 :: (StreamCodec.nat.encode 5 ++ [7])) = some (0, StreamCodec.nat.encode 5, [7])
+
+/-- **Prefix teeth**: a reader that consumes the whole rest fails `consume`; a fail-open
+reader fails `refuse`; and rebinding code 1's codec (not an extension) changes what an old
+code's prefix reads. -/
+def PrefixTeeth : Prop :=
+  ¬ ConsumesPrefix toyPole (readWhole toyPole) ∧
+  ¬ ConsumesPrefix toyPole readFailOpen ∧
+  readPrefix toyRebindPole (1 :: StreamCodec.bool.encode true) ≠
+    readPrefix toyPole (1 :: StreamCodec.bool.encode true)
 
 end Minidregg.Effects.Revival

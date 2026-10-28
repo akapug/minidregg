@@ -206,8 +206,12 @@ The commits that follow the opening.  The Host arm belongs to the platform lane 
 2. **Transfer (activity `Effect.transfer`).**  The substrate is the Book: `Prim =
    CanonicalResourceKernel.Operation`, `step` the floor-guarded posting, `writes = {(source,
    asset), (destination, asset)}`, `field = balance asset`.  `sem` is `transferVerdict`
-   over `(config, funds, reserve, written)` as `Ctx`, returning
-   `Except EffectRefusal (List Operation)` with `unfunded`, `reserved`, `closed` by name.
+   over `(config, funds, reserve, written)` as `Ctx`.  A refused verdict (`unfunded`,
+   `reserved`, `closed`) is NOT the declaration's refusal.  It is an accepted yield whose
+   await records `.performed (.refused reason)` and that commits nothing, so `sem` returns
+   `.ok []` with the verdict in the emitted await, never `.error`.  The gate is `TwoLevels`
+   (`ActivityStatements.lean`, proved of today's `commitYield`) for the derived executor
+   projected to a `YieldCommit`.
    `commitYield`'s `performed` branch dispatches through an activity registry (the same
    `Handler` type, over the activity's turn cell).  Deleted in the same commit:
    `Effect.transfer`, `effectOps`, `withEffect`, the transfer branch of `commitYield`, and
@@ -308,6 +312,15 @@ controller) worth keeping for the inversion work.
 `materialize_logical`, `storeSubstrate_framed`, `Substrate.run_frame`, `engineKeystone`,
 `completenessKeystone`, `enginePremise`, `engineSatisfiable`, `engineTeeth`,
 `entryA_lawful`, `completenessSatisfiable`, `completenessTeeth`, `completenessPremise`.
+`Effects/Revival/ContentProofs.lean`: `contentComplete` (`ContentComplete`), via a
+syntactic invariant `Emits` over the lowering's progress proved helper by helper and action
+by action (`step_emits`, `run_emits`), `run_executes`, and the rotation's guard (no content
+write touches the blinding).  The declared table `contentActionFrame` held for all fifteen
+actions with no change.  `contentNarrowed_incomplete` (the narrowed half of `ContentTeeth`: a
+link is admitted and written at `annotations`, outside the narrowed frame) sits beside it, so
+`ContentComplete` carries its teeth (law 2); the ghost half waits for the fixture.  The
+Statements closure is now built in the hbox tree too, so the
+live proofs check there in seconds.
 
 **Where to check.**  The kernel-free files: hbox `/tank/lanes/effects-revival/src`, a
 private small-closure tree (packages a real copy of the warm base's, `.lake/native` built by
@@ -317,21 +330,102 @@ PID file `check.pid`, log `check.log`); seconds per file.  The live file (kernel
 dregg-ref, via the concatenation check in `/build/lanes/effects-revival-scratch/` under
 the closure lock (contended by host builds; expect waits).
 
-**Proof order (remaining).**
-1. `ContentComplete`, action by action over the write sites of `ContentResource.step`.
-   **Risk:** `contentActionFrame` is a declared table.  If an action writes a field the
-   table omits, fix the table, not the statement's meaning, and tell the auditor.  This
-   needs the kernel closure: either build `Kernel.ContentResource`'s closure on hbox once
-   (it is smaller than the controller's) or check on dregg-ref.
-2. The doc-write fixture inhabitant (`Fixtures/NativeDocWriteFixture*`).  It needs a
-   non-empty rotation and serves `ContentAccepted`, `HostAccepted` and the ghost clauses of
-   `ContentTeeth`/`HostTeeth`.
-3. `ContentAgreement contentSpec`: unfold the content arm of `computeTarget`, then
-   `ContentResource.prepareCell_ok_of_run`, `Patch.run_append`, the validate semantics,
-   and `(storeSubstrate L).run s ps = some s' ↔ Patch.ValidFrom s ps ∧ Patch.run s ps = s'`.
-   For the header clauses, case on the kind (the match in `payloadVerb`).
-4. `HostKeystone` lands with the migration commit, not before (§5 step 1).  Coordinate it
-   with the platform lane (L1).
+**Pending merge (module-conversion window).**  The integrator holds `3c98e54d3`
+(ContentProofs) until iter-speed's module conversion lands on main.  When the integrator
+announces it: merge main into this branch, convert `Effects/Revival/ContentProofs.lean`
+and `Effects.lean` (and any Revival file the conversion missed) with
+`scripts/lean-modularize.py`, re-check on hbox (`hcheck.sh Effects.Revival.ContentProofs`),
+push, and send the integrator the sha.
+
+**Owed, in order** (the astra architecture review's Effects gaps, 2026-10-28, are items 2-6;
+its text: `scratchpad/astra/arch.out.md`, final section; it read `c7d983746`, before the
+Engine/Statements split).
+1. The module-conversion merge above.
+2. **One dispatch source by construction** (review gap 1).  `noTwin` only proves a supplied
+   legacy list disjoint from the registry.  Stated (Engine §6, Statements §8; pass 27):
+   `LegacyDisjoint tagOf R` (the hand arms' input type has no constructor at a registered
+   code), with toy satisfiable/teeth, and the live `HostLegacyCensus` over `Payload`, FALSE
+   today (`HostLegacyCensusRefutedToday`: `Payload.content` is tag 1) and provable exactly
+   when the migration deletes that constructor.  `OneSource`/`composeDispatch` stay only as
+   the extensional shadow (any dispatcher agreeing on registered codes satisfies it).
+   Proved (pass 27 accepted): `legacyCensusSatisfiable`, `legacyCensusTeeth`,
+   `oneSourceSatisfiable`, `oneSourceTeeth`, `hostLegacyCensusRefutedToday`.  Owed: the
+   census itself, at the migration commit.
+3. **The bridge to the deployed receiver** (gap 2).  `HostKeystone` is about a wrapper this
+   lane wrote.  Stated (Statements §8; pass 27): `PrepareFactors E`: the deployed
+   `ResourceTransaction.prepareTarget` (post packed, refusals named) equals the content
+   handler's dispatch followed by `genericChecks`, which reads only the pre/post cells, the
+   policy source and the audience, never the payload (its signature shows it).  Acceptance,
+   acceptance up to a generic refusal, and refusal by name are corollaries.  Proof owed; it
+   needs `ContentAgreement` and `ContentComplete`.  At the migration commit
+   `prepareTarget`'s registered branch calls `dispatch`, and this is that commit's gate.
+4. **Registry extension** (gap 3).  Stated now (Engine §6): `Extends`, `ExtensionPreserves`
+   (every byte string under an old code dispatches exactly as before: decode, header,
+   selection, interpretation, execution, refusals), `SafeExtension` (the explicit policy for
+   newly accepted codes: a retired code is never rebound), with satisfiable and teeth;
+   `LawfulRegistry` gains `octet` (every code < 256, the payload tag byte).  Proved:
+   `extensionPreserves`, `extensionSatisfiable`, `extensionTeeth`.
+   **Prefix consumption** (stated, Engine §6 and Statements §8; to the auditor): `readPrefix R`
+   (the tag octet, then the entry's own `decodePrefix`, the suffix handed back), the predicate
+   `ConsumesPrefix R read` on any candidate reader (consume exactly one operation, refuse an
+   unregistered octet, accept only canonical spellings), `PrefixKeystone` (every registry is
+   read as a prefix; an extension reads every old code's prefix as before), toy
+   `PrefixSatisfiable`/`PrefixTeeth` (a whole-rest reader, a fail-open reader, a codec rebind),
+   and live `ContentPrefixAgreement` (on code 1 the deployed `payloadStream.decodePrefix` reads
+   exactly what the registry's reader reads) with `ContentPrefixAccepts` and
+   `ContentPrefixTeeth` (code 3 disagrees).
+   **Whole-epoch compatibility (design; no local handler upgrade is promised until it is
+   built).**  Today `StoreEpoch.current.schemaRefs` is one hash of the whole persisted corpus
+   (every tag entry, every structural fingerprint, every cell descriptor), and a Store opens
+   only when its epoch EQUALS the Host's (`StoreEpoch.differing`).  So adding a handler (a new
+   `DREGG/EFFECT/<NAME>/vN` identity) or bumping one moves the epoch and every existing Store
+   is refused: each registry change is a re-genesis.  That is the promise until the following
+   exists:
+   1. The seed carries the corpus itself (the canonical list of identity:fingerprint entries
+      and cell descriptors), not only its hash; the hash stays as the label's commitment.
+   2. Opening becomes a relation: a Store written under corpus S opens under Host corpus H
+      exactly when every entry of S is in H byte for byte (H ⊇ S, one fingerprint per
+      identity), and the registry delta is a `SafeExtension` (no retired code rebound).  Then
+      `ExtensionPreserves` and `PrefixKeystone` say every logged byte string under an old code
+      decodes, is consumed and dispatches exactly as when it was written.
+   3. A changed fingerprint at an existing identity is never compatible.  A codec change is a
+      new identity `/v(N+1)`, and the old one stays registered for reading old records.
+   4. The first record a Host writes under a code outside S moves the Store's epoch to H, as an
+      appended epoch step in the log, so an older Host refuses the Store by name.
+   5. The statement to prove when this is built: `EpochCompatible S H` (2) implies that
+      replaying the Store's log under H yields the states it yielded under S.
+   For the demo this costs nothing: re-genesis at the homelab is planned anyway.
+5. **The generic engine is a leaf** (gap 4): done.  `Effects/Revival/Engine.lean` imports
+   only `Theory.Store`, `Theory.TypedAuthorization` and the stream codecs; controllers import
+   it at migration.  `Statements.lean` (the live content instance) is the only file importing
+   the controller.
+6. **Activity refusals have two levels** (review, §6).  Stated
+   (`Effects/Revival/ActivityStatements.lean`; to the auditor): `TwoLevels candidate`, a
+   predicate on any yield judgment over `YieldInput` (`commitYield`'s arguments): an
+   effect-level refusal (`TransferRefused`: the turn's guards pass, the verdict refuses) is an
+   ACCEPTED yield whose await records `.performed (.refused reason)` and commits nothing else;
+   every refusal of today's `commitYield` stays a turn refusal under its name.
+   `TwoLevelsSatisfiable` (today's kernel), `TwoLevelsPremise` (an effect-level refusal
+   exists), `TwoLevelsTeeth` (the collapsed judgment is refuted).  At step 2 the transfer
+   declaration's derived executor, projected to a `YieldCommit`, must satisfy it.
+7. The accepted-branch witnesses, by KERNEL proof on hand-built cells (ContentProofs),
+   superseding the fixture route: `contentAccepted : ContentAccepted` and
+   `hostAccepted : HostAccepted` (a link admitted at a content cell holding only its blinding,
+   through `contentAgreement` and the host dispatch), `contentTeeth : ContentTeeth` (at that
+   blinded cell the live patch carries the rotation, so `contentGhost` disagrees).  Still owed:
+   `HostTeeth` (`Effects/Revival/HostTeethProofs.lean`, in progress).  Its ghost half needs one
+   hash fact (a ratchet step moves the zero blinding), the single compiled evaluation.  The
+   doc-write fixture is red (its recorded frames no longer decode).  Its regeneration is owed
+   to the integrator's umbrellas stage, from the first READY candidate carrying the conversion
+   plus M2, which the integrator names.  It is no longer a witness for this lane.
+8. `ContentAgreement contentSpec`: **PROVED** (`contentAgreement`, ContentProofs, pinned), so
+   `LiveKeystone` holds (`contentAgreement` with `contentComplete`), its poles by item 7.  Also proved (pass 28
+   statements): `prefixKeystone`, `prefixSatisfiable`, `prefixTeeth` (EngineProofs),
+   `contentPrefixAgreement`, `contentPrefixAccepts`, `contentPrefixTeeth` (ContentProofs),
+   `twoLevelsSatisfiable`, `twoLevelsPremise`, `twoLevelsTeeth`
+   (`Effects/Revival/ActivityProofs.lean`, imported by Effects.lean).
+9. `HostKeystone`, `PrepareFactors` and `HostLegacyCensus` land with the migration commit (§5 step 1), with the
+   platform lane (L1).
 
 **Not done, not this lane's:**
 - the migration itself (§5);
