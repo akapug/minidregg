@@ -65,7 +65,7 @@ the newest built main that passed the gate; each is reported in one line, and in
 
 A3's tree (main 8103b29a4) holds everything since aa9366f8: pd-host-rate, oracle-lifetime-grant, oracle-grant-factory,
 lean-audit-c, un-effects 2acd8acf (effect Plan; its codec pins re-emit with this regen), un-pb-twins 134535c2,
-demo-seed, app-recipes (rows validator aeee8349c191e8506 runs them on the candidate; Wekan/WordPress/IPython need
+demo-seed, app-recipes (the rows validator runs them on the candidate; Wekan/WordPress/IPython need
 MINI_IMPORT_PROFILE=market-large-v1), snipe-rate-row (its report at docs/evidence/snipe-rate-row-2026-10-27.md) and
 un-web-front 0da04999 (front-page document; infra's step 9c depends on it). Also since: app-market db312c6f (30e24095f; b2.sh resolved per function against app-recipes, L13 agreed). Correction to that commit message: ExpenseOwl's positive-amount POST is reasoned from upstream, not row-proven (B2's run left GET /expenses empty); unproven until the rows validator runs it.
 After A3's tip (Rust only, in the full build): hermes 68394077 (6f4251c21; contained tools, room fields 1014/1015,
@@ -81,8 +81,9 @@ elaborates) seeds its dregg-ref tree from the integ8 copy; tell it when the copy
 
 Next steps: A10 → regen patch onto main → full build at main's tip (it carries 25cfb86bd, custody-b's
 delegated consent, f79044d79 and c11b235ee (grain-runtime NO_RECORD refusals; a0d58aaef), hermes-b 5422506f, custody-b 97aab6054 (55e8a05d9; the profiled grain bootstrap twin deleted), un-tale-welcome bc6c837ba (docs), the world/ pack 1b870fbdd, red-jli-refname 81349cec2 (JLI reruns on it), un-tale-welcome 19bb968e0 (f5602a8cd; the door joins members to door.json's story)). On READY the chain runs gate + enrol-resume;
-report "candidate <sha> at <path>: gate <verdict>, reds by name" to the coordinator, and the sha + path to the rows
-validator (aeee8349c191e8506, the app tables wait on 25cfb86bd), infra (ae95a4eac63b0715e; reruns the seed in the demo-dry container on the first candidate carrying 25cfb86bd, f73893fce, 52c0eae22 and 19bb968e0), L4b (ad81db6d6fd317d3a) and the deputy
+report "candidate <sha> at <path>: gate <verdict>, reds by name" to the coordinator (who starts a fresh rows
+validator from docs/ROWS-OWED.md section 0a with it: the old one, aeee8349c191e8506, stopped at its ceiling; never send
+it a candidate), and the sha + path to infra (ae95a4eac63b0715e; reruns the seed in the demo-dry container on the first candidate carrying 25cfb86bd, f73893fce, 52c0eae22 and 19bb968e0), L4b (ad81db6d6fd317d3a) and the deputy
 (a308118209b4a48ea, owns the app market; wants the first candidate carrying 25cfb86bd). Pending lands:
 lean-audit-c only on L1e's warm-tree green sha (e2dae30ee queued on dregg-ref; b7412f32a and three more unbuilt behind it); iter-speed successor's census re-pin (a0fd127abfb9aac75) only
 after that candidate is reported.
