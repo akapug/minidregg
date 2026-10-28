@@ -887,6 +887,19 @@ fn digest_covered(text: &str) -> u64 {
 /// for each unanswered "since H" question; round 3 writes (index links for
 /// unlinked documents, a digest section every N entries, answers, an edit a
 /// member asked for); round 4 reports each refused edit in the stream.
+/// The text of the request this prompt answers. The resident's brief names the
+/// selected request by identity (`selectedRequest`: binding, cell, sequence,
+/// author) and carries exactly that one entry, text included, in
+/// `recentMemberEntries` (resident_requests::select); a maintenance brief has
+/// no selection, so no text.
+fn selected_text(brief: &Value) -> &str {
+    let selected = &brief["selectedRequest"];
+    if !selected.is_object() { return ""; }
+    brief["recentMemberEntries"].as_array().into_iter().flatten()
+        .find(|e| e["cell"] == selected["cell"] && e["sequence"] == selected["sequence"] && e["author"] == selected["author"])
+        .and_then(|e| e["text"].as_str()).unwrap_or("")
+}
+
 /// The sandbox tools (docs/HERMES-TOOLS-2026-10-27.md §7): when the selected
 /// request asks for sandbox work and the session offers the terminal and the
 /// file tools, write and run a small Python script in /scratch, run the
@@ -902,7 +915,7 @@ fn sandbox_reply_for(request: &Value, log: &Path) -> Option<Result<(Value, &'sta
         _ => return None,
     };
     let brief: Value = serde_json::from_str(text.rsplit_once("Assignment: ").map_or(text.as_str(), |(_, r)| r).trim()).ok()?;
-    if !brief["selectedRequest"]["text"].as_str().unwrap_or("").contains("sandbox") { return None; }
+    if !selected_text(&brief).contains("sandbox") { return None; }
     let terminal = room_tool(request, "terminal")?;
     let write_file = room_tool(request, "write_file")?;
     let current = &messages[user..];
@@ -930,7 +943,7 @@ fn sandbox_reply_for(request: &Value, log: &Path) -> Option<Result<(Value, &'sta
     if !issued.iter().any(|id| id == "sb-run") {
         // Host paths are filled in by the journey from what it names in the brief
         // request text after `paths:`; absent, the probe names a fixed host path.
-        let paths: Vec<&str> = brief["selectedRequest"]["text"].as_str().unwrap_or("")
+        let paths: Vec<&str> = selected_text(&brief)
             .split_once("paths:").map(|(_, p)| p.split_whitespace().collect()).unwrap_or_default();
         let fill = |command: &str| command.replace("$MINI_J14_HOST_KEYS", paths.first().copied().unwrap_or("/var/lib/mini"))
             .replace("$MINI_J14_HOST_STATE", paths.get(1).copied().unwrap_or("/var/lib/mini"))
@@ -967,7 +980,7 @@ fn await_reply_for(request: &Value, log: &Path) -> Option<Result<(Value, &'stati
         _ => return None,
     };
     let brief: Value = serde_json::from_str(text.rsplit_once("Assignment: ").map_or(text.as_str(), |(_, r)| r).trim()).ok()?;
-    let ask = brief["selectedRequest"]["text"].as_str().unwrap_or("").to_owned();
+    let ask = selected_text(&brief).to_owned();
     if !ask.split_whitespace().any(|w| w == "await") { return None; }
     let pending = room_tool(request, "mini_pending_awaits")?;
     let answer = room_tool(request, "mini_answer_await")?;
@@ -1043,7 +1056,7 @@ fn oracle_reply_for(request: &Value, log: &Path) -> Option<Result<(Value, &'stat
         _ => return None,
     };
     let brief: Value = serde_json::from_str(text.rsplit_once("Assignment: ").map_or(text.as_str(), |(_, r)| r).trim()).ok()?;
-    let ask = brief["selectedRequest"]["text"].as_str().unwrap_or("");
+    let ask = selected_text(&brief);
     let question = ask.split_once("oracle:")?.1.trim().to_owned();
     // The same room ask keeps its application request identity across a
     // transport retry; a later ask (even with identical text) has a new one.
@@ -1614,6 +1627,36 @@ fn main() -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    /// The sandbox, await and oracle branches key on the text of the request
+    /// the brief selected: the one `recentMemberEntries` entry whose identity
+    /// `selectedRequest` names (the resident's brief carries no text in the
+    /// identity). A maintenance brief, or an entry that is not the selected
+    /// one, takes no branch.
+    #[test]
+    fn branches_read_the_selected_entry_text_not_the_identity() {
+        let entry = |seq: u64, text: &str| json!({"author":"20","cell":"201","sequence":seq,"height":95,"kind":"say","n":seq,"text":text,"to":"8"});
+        let identity = json!({"author":"20","binding":{"roomCell":"99"},"cell":"201","sequence":2});
+        let tools: Vec<Value> = ["mini_pending_awaits", "mini_answer_await", "terminal", "write_file"]
+            .iter().map(|name| json!({"type":"function","function":{"name":name}})).collect();
+        let request = |brief: Value| json!({"model": MODEL, "tools": tools.clone(),
+            "messages":[{"role":"user","content":format!("Carry out this. Assignment: {brief}")}]});
+        let log = std::env::temp_dir().join(format!("selected-text-{}.log", std::process::id()));
+        let selected = json!({"me":"8","selectedRequest":identity,"recentMemberEntries":[entry(2, "please answer await 5 6")]});
+        assert_eq!(super::selected_text(&selected), "please answer await 5 6");
+        let (message, _, stage) = super::await_reply_for(&request(selected), &log).unwrap().unwrap();
+        assert_eq!(stage, "await-read");
+        assert_eq!(message["tool_calls"][0]["function"]["name"], "mini_pending_awaits");
+        let sandbox = json!({"me":"8","selectedRequest":identity,"recentMemberEntries":[entry(2, "compute it in the sandbox paths: /a")]});
+        assert!(super::sandbox_reply_for(&request(sandbox), &log).is_some());
+        // Maintenance (no selection) and a mismatched entry: no branch.
+        let maintenance = json!({"me":"8","recentMemberEntries":[]});
+        assert_eq!(super::selected_text(&maintenance), "");
+        assert!(super::await_reply_for(&request(maintenance), &log).is_none());
+        let other = json!({"me":"8","selectedRequest":identity,"recentMemberEntries":[entry(1, "please answer await 5 6")]});
+        assert!(super::await_reply_for(&request(other.clone()), &log).is_none());
+        assert!(super::sandbox_reply_for(&request(other), &log).is_none());
+    }
+
     #[test]
     fn oracle_fixture_uses_the_general_query_contract_and_preserves_the_answer() {
         use super::*;

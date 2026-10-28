@@ -2455,7 +2455,8 @@ epoch projections, the placement lineage and the platform terms (the loaded imag
 used for immutable deployment coordinates. -/
 def birthAt (path : String) (json : Lean.Json)
     (deployed : NativeHost.Config) (height : Nat) (epochs : BirthEpochs)
-    (lineage : CapabilityId → Option (Finset CapabilityId)) (terms : BirthTerms) :
+    (lineage : CapabilityId → Option (Finset CapabilityId)) (terms : BirthTerms)
+    (providerRoutes : List (Nat × ProviderMetering.Schedule) := []) :
     Result Draft := do
   let raw ← object path json
   let source ← genesis (path ++ ".genesis") (← field path "genesis" raw)
@@ -2463,17 +2464,20 @@ def birthAt (path : String) (json : Lean.Json)
     (fun reason => s!"{path}.genesis: refused: {repr reason}")
   unless NativeHost.seedIdentity built.seed == deployed.expectedSeed do
     throw s!"{path}.genesis: differs from the pinned seed"
-  birth path json none (some deployed) (some height) (some epochs) [] (some lineage)
+  birth path json none (some deployed) (some height) (some epochs) providerRoutes (some lineage)
     (some terms)
 
 /-- `birthAt` at a verifier-loaded image's height, authority epochs, lineage and platform
-record. -/
+record. A grain resource whose target the deployment routes through a provider schedule is
+born with that route's policy, as the offline authoring of the same source is. -/
 def birthCurrent (path : String) (json : Lean.Json)
     (deployed : NativeHost.Config) (height : Nat) (authority : AuthState)
     (lineage : CapabilityId → Option (Finset CapabilityId))
-    (current : PlatformCellLayout.Platform) :
+    (current : PlatformCellLayout.Platform)
+    (providerRoutes : List (Nat × ProviderMetering.Schedule) := []) :
     Result Draft :=
   birthAt path json deployed height (.ofAuthority authority) lineage (.ofRecord current)
+    providerRoutes
 
 /-- **One birth author.** The loaded authors (`Host.CurrentResourceBirthAuthoring`,
 `Host.SourceAgreementBirth`) and the thin-consent provider (`Host.ThinBirthConsent.author`) call
@@ -2482,9 +2486,11 @@ birth re-authors to the box's own bytes by construction (no twin to drift: the H
 deleted, law 1). -/
 theorem birthCurrent_eq_birthAt (path : String) (json : Lean.Json) (deployed : NativeHost.Config)
     (height : Nat) (authority : AuthState) (lineage : CapabilityId → Option (Finset CapabilityId))
-    (current : PlatformCellLayout.Platform) :
-    birthCurrent path json deployed height authority lineage current =
-      birthAt path json deployed height (.ofAuthority authority) lineage (.ofRecord current) := rfl
+    (current : PlatformCellLayout.Platform)
+    (providerRoutes : List (Nat × ProviderMetering.Schedule)) :
+    birthCurrent path json deployed height authority lineage current providerRoutes =
+      birthAt path json deployed height (.ofAuthority authority) lineage (.ofRecord current)
+        providerRoutes := rfl
 
 def subjectKeyStatusJson (subject : Nat) (status : SubjectKeyRotation.Status) : Lean.Json := .mkObj
   [("type", "subject-key-status-v1"),

@@ -8033,7 +8033,8 @@ def runCommandStdio (_arguments : List String) (_configPath _command : String) (
                             let json ← IO.ofExcept (Minidregg.Host.Json.parse source)
                             let intent ← IO.ofExcept (←
                               Minidregg.Host.CurrentResourceBirthAuthoring.intentLoadedAuthorized
-                                pinnedConfig opened signedObservationBytes json)
+                                pinnedConfig opened signedObservationBytes json
+                                (← IO.ofExcept settings.providerRoutes))
                             unless intent.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "resource birth intent exceeds host frame bound")
                             return ((91 : UInt8), intent)

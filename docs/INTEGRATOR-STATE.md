@@ -108,7 +108,8 @@ the newest built main that passed the gate; each is reported in one line, and in
 | rehearsal plan | — | coordinator 10-28: b26630168 is NOT the rehearsal cut; run its gate fully (conversion proof, fresh-genesis baseline; the validator and market run on it). The rehearsal candidate is the NEXT build, launched the moment all three blockers are on main: consent reconnect (landed), public-reader 403 (deputy's faerie), Hermes birthStale (L4c), plus the held Lean branches merged and converted by their owners (lean-audit-c/-m2 L1e, thin-birth, effects-revival a26c13b24522dee35, OwnTracks). Keep the coordinator and infra posted |
 | b26630168 host | — | host stage CLEAN 11:11 (3243 s, cold under modules); consent from 11:11, then umbrellas (non-fatal for this candidate), rust, pack, gate-cut6 + enrol-resume |
 | main since b26630168 | 222cb1c2d | app-market-b5 efdb8563d (recipe fixes; spk-host resident_privilege: HackerCMS /var/www, one safe sibling hop under O_NOFOLLOW) and app-market-b7 9a905de6e (HledgerWeb, TextEditor recipes); scripts pass bash -n / py_compile. Held, owners report first: cx-oracle, cx-store-sweep, un-route-latency (codex workers), oracle-grant-factory b81a38663 (codex's own; coordinator asks ember) |
-| A12b | — | `integ4/regen-A12b.sh` (pid file integ4/regen-A12b.pid; regen-A12.sh was stopped by its PID file before it ran because it did not move outputs aside) waits for the b26630168 chain (main-full.pid), moves outputs aside, then at main's tip: host, codec-shapes-regen.py (M2: DURABLE.IMAGE/LOG/SEED and dependents), consent. Its diff is saved as integ8/regen-A12.patch for the Mac to commit to main; then the full build from that commit (fresh genesis; the rehearsal candidate is the first build carrying the public-reader 403 and birthStale fixes). Report the incremental rebuild time of the follow-up build to the coordinator |
+| A12c | — | 11:29: A12b stopped by its PID file (it waited for the whole chain incl. the gate). `integ4/regen-A12c.sh` (pid file regen-A12c.pid 424092; launcher subshell in regen-A12c.parent.pid) starts when the b26630168 BUILD (integ8/build.pid) and its enrol-resume end (the gate reads only integ8/src's object store via harness-overlay; NO_NIGHTLY), moves outputs aside, then at main's tip (>= 9bed7b1e0): host (seats 3, SWARM_MEM_MAX=18G beside the gate), codec-shapes-regen.py, consent. Patch: integ8/regen-A12.patch → commit to main; re-record Fixtures.NativeAcceptedFixture and NativeDocWriteFixture from that build (tell a26c13b24522dee35 and L1e); then the full build (fresh genesis). Report the incremental rebuild time of the follow-up build to the coordinator |
+| main since b26630168 | 9bed7b1e0 | lean-audit-c 0f1a7ac4b (L1e green 53d66406f: Host.Json's birth-authoring copy deleted, birthCurrent_eq_birthAt) as e9bca48bd; the ownerless census check (9bed7b1e0; main's only fingerprint-7 pin is the exempt version constant "6"); codex's oracle-grant-factory b81a38663 + 7d6d659be pushed to main directly (no Lean) |
 Gate harness rule (coordinator, 10-28): the tour and composed harness (scripts/, native/resource-client/*.sh|*.py, journey.d/) come from main at gate time over the candidate's source.tar and binaries (`integ4/harness-overlay.sh DEST SHA`; `HARNESS=<sha>` in tour-run2.sh and composed-full2.sh; gate-cut4.sh resolves main's tip, adds `harnessCommit` to the gate file after gate-from-runs.py, which binds only the candidate's SHA256SUMS). Infra was asked to copy harnessCommit in gate-from-runs.py itself (optional).
 Runner rule (coordinator, 10-28): launch builds with `integ4/main-full2.sh`, which gates with `gate-cut5.sh`: it copies tour-run2.sh, composed-full2.sh and harness-overlay.sh into `$G/runner` at gate start, runs only from that copy and writes `runnerSha256sums` beside `harnessCommit` in the gate file. Never edit a script a running job reads; change it under a new name.
 Merge-subject slip: 8e7940fea and 1a3240483 name the un-deputy sha in their subjects; their parents are un-story-install 733dd948f and red-authority-zero-field 108083a35. 733dd948f was a red-first test (shared_names.rs:1144), cleared by a8376ce8f (d2b639068).
@@ -139,10 +140,10 @@ lean-audit-c is green at 82c17c448 (L1e, tip de1375846 doc-only) but lands after
 between L1e and iter-speed (a0fd127abfb9aac75): (1) this candidate reported; (2) iter-speed re-derives the conversion on
 main's tip with land.py and sends its sha (one planned StoreEpoch move; the next candidate needs a fresh genesis);
 (3) L1e merges the conversion into lean-audit-c and lean-audit-c-m2 (M2 adds World.Turn.credit and the v3 frames) and
-sends a green sha; all of it rides one codec regen. The uncommitted `ownerless` census check merges 3-way onto
-iter-speed's PersistedCodecTagCensus.lean, never overwriting it. lane/thin-birth 1e0f741d3 LANDED on main eda65ced8 (after the 7027e0ace report, before the conversion; so land.py converts its Lean (Kernel/NativeThinBirth, NativeThinConsent, Host/ThinBirthConsent, ClientConsentCore, SourceAgreementJson, HostOperations) and it rides the one regen; told a0fd127abfb9aac75 and L1e. On the first built main carrying it, run `journey.sh --only JP2` (row 19 thin birth succeeds; the swapped-plan row refused birthSourceChanged). After it lands, delete dregg-ref:/build/lanes/thin-birth-scratch/ and /build/lanes/thin-birth (finished session lane), listed in COMMANDS.log first.
+sends a green sha; all of it rides one codec regen. The `ownerless` census check is on main (9bed7b1e0), merged onto
+iter-speed's PersistedCodecTagCensus.lean. lane/thin-birth 1e0f741d3 LANDED on main eda65ced8 (after the 7027e0ace report, before the conversion; so land.py converts its Lean (Kernel/NativeThinBirth, NativeThinConsent, Host/ThinBirthConsent, ClientConsentCore, SourceAgreementJson, HostOperations) and it rides the one regen; told a0fd127abfb9aac75 and L1e. On the first built main carrying it, run `journey.sh --only JP2` (row 19 thin birth succeeds; the swapped-plan row refused birthSourceChanged). After it lands, delete dregg-ref:/build/lanes/thin-birth-scratch/ and /build/lanes/thin-birth (finished session lane), listed in COMMANDS.log first.
 
-Infra is a298031c78e86d651 (10-28; older mentions of ae95a4eac63b0715e/aed5ecf506cf840af in the table are history). Red routing: lean-audit-c and lean-audit-c-m2 are L1e's (a58f907aef8926430; L1d ad6d6eff243f32816 has stopped): its green sha comes from and its reds go to L1e directly; when the module conversion lands on main, tell L1e (it merges the conversion into lean-audit-c and sends a green sha) and L1d's old address; Hermes to L4b (ad81db6d6fd317d3a); L13 a1618140607ac439b; un-stream-continuity reds
+Infra is a298031c78e86d651 (10-28; older mentions of ae95a4eac63b0715e/aed5ecf506cf840af in the table are history). Red routing: lean-audit-c and lean-audit-c-m2 are L1e's (a58f907aef8926430; L1d ad6d6eff243f32816 has stopped): its green sha comes from and its reds go to L1e directly; when the module conversion lands on main, tell L1e (it merges the conversion into lean-audit-c and sends a green sha) and L1d's old address; Hermes to L4c (a6c2f758a0dac46fe; L4b ad81db6d6fd317d3a has stopped); L13 a1618140607ac439b; un-stream-continuity reds
 (ApplicationStreamContinuityFresh pole proofs, NativeHostReplay.lean:3816) to the deputy a308118209b4a48ea; all
 others through the coordinator. Expected reds, not new: the eight hand-rolled genesis writers (acceptance.sh,
 application-acceptance.sh, authority-acceptance.sh, selected-release-acceptance.sh, grain-runtime/acceptance.sh,
@@ -158,8 +159,12 @@ gates main and fixes reds itself.
 
 - thin-birth: landed after the conversion at fb0acbfbe (main 6fd993d43); its lane-check on dregg-ref was still running at landing, reds come back to ad0906325ab57d1c3. lane/thin-birth Phase-3 work lands only on a sha its owner sends after the auditor accepts.
 - effects-revival LANDED 10-28 at 65b813888 (main 4d059a29b) and ae0c78a01 (main ac4247487, HostTeeth proved; converted, `lake build Effects` green on hbox);
-  owner a26c13b24522dee35 still owes Fixtures/NativeDocWriteFixture.lean regenerated from the conversion(+M2)
-  candidate after READY. Its reds from the next build go to that owner.
+  Its reds from the next build go to a26c13b24522dee35.
+- Fixtures (coordinator 10-28): the integrator re-records BOTH Fixtures.NativeAcceptedFixture and
+  NativeDocWriteFixture from the A12c build, then sends that sha to effects (a26c13b24522dee35) and L1e
+  (a58f907aef8926430). After that, the umbrellas stage blocks again (reds the candidate) from the next build on.
+- Held until their owners report (codex workers, shas via the coordinator): cx-oracle, cx-store-sweep,
+  un-route-latency. oracle-grant-factory b81a38663 came in by codex's own push to main (9bed7b1e0 row).
 - Held for the build after the conversion candidate (one .lean file): lane/app-market-b5 84938f78c
   (Kernel/ApplicationSpkPackageIdentity.lean, safeApiTail admits a final segment with no trailing slash; OwnTracks
   re-qualifies on the candidate carrying it; deputy a308118209b4a48ea). Land after the conversion, re-converted if
@@ -195,8 +200,8 @@ gates main and fixes reds itself.
   (a298031c78e86d651), not the integrator's.
 - Transitive bumps through registry constants: closed, no. Nesting already propagates through the regen's round
   loop; both stops were spelling forms, now handled.
-- Owner-less pins: the census refuses a registered DREGG identity no definition spells or names, landed once
-  A9/A10's pins show none left (the Mac worktree's uncommitted `ownerless` check; through a box build only).
+- Owner-less pins: the census refuses a registered DREGG identity no definition spells or names, on main 9bed7b1e0;
+  first elaborated by A12c.
 - The module conversion's census change (option A, structure-not-name for compiler auxiliaries) is the one planned
   re-pin; it lands from a0fd127abfb9aac75 after the next candidate is reported.
 
@@ -211,7 +216,6 @@ only `.lake/packages`; Lake's artifact cache restores the build dir as fresh ino
 
 ## Named reds outstanding
 
-- Uncommitted in the Mac worktree: Compiler/PersistedCodecTagCensus.lean `ownerless` (the census refuses a registered DREGG identity no definition spells or names). Unelaborated; land it only through a box build after the candidate.
 
 - None open on main beyond A3's outcome (un-pb-twins landed at 134535c2 via 36ce6bd3d).
 - A lane's "proved" is a claim until the integrator's build elaborates it: lean-audit-c's three proofs never

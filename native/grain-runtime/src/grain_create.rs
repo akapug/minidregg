@@ -526,9 +526,16 @@ fn signed_step_on(spec: &Spec, socket: &Path, attempt: &Path, what: &str, submit
     Err(format!("{what}: undecided after exact lookup; rerun `grain-runtime create` with the same spec to look it up again (attempt {})", attempt.display()))
 }
 
+/// How many fresh read-and-author generations one create tries before it stops
+/// and says so; each is one signed read and one Host authoring, never a fee.
+const AUTHOR_GENERATIONS: usize = 8;
+
 /// Read authority and author through the live Host before signing a fresh birth.
 /// Read-only generations are retained separately: a crash before submit can
 /// acquire a fresh window without replacing any possibly admitted signed call.
+/// The Host authors only against the exact image the signed read observed, so a
+/// World that moved in between (a clock tick, a certify) refuses that
+/// generation; the next generation reads again.
 fn author_birth(spec: &Spec, socket: &Path, source: &Path, genesis: &Value, work: &Path) -> Result<PathBuf> {
     let factory = genesis["factoryId"].as_str().ok_or("genesis lacks factoryId")?;
     let grants: Vec<_> = spec.sponsor.grants.iter()
@@ -536,30 +543,40 @@ fn author_birth(spec: &Spec, socket: &Path, source: &Path, genesis: &Value, work
     if grants.len() != 1 {
         return Err("grain birth requires exactly one sponsor factory observation grant".into());
     }
-    let generation = (0u64..).find_map(|number| {
-        let path = work.join(format!("birth-author-{number}"));
-        match fs::DirBuilder::new().mode(0o700).create(&path) {
-            Ok(()) => Some(Ok(path)),
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => None,
-            Err(error) => Some(Err(format!("create birth author generation: {error}"))),
+    let mut last = String::new();
+    for _ in 0..AUTHOR_GENERATIONS {
+        let generation = (0u64..).find_map(|number| {
+            let path = work.join(format!("birth-author-{number}"));
+            match fs::DirBuilder::new().mode(0o700).create(&path) {
+                Ok(()) => Some(Ok(path)),
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => None,
+                Err(error) => Some(Err(format!("create birth author generation: {error}"))),
+            }
+        }).ok_or("birth author generation exhausted")??;
+        let query_source = generation.join("factory-query.json");
+        let query = json!({"subject":spec.sponsor.subject,"nonce":spec.nonce,
+            "purpose":{"type":"query","kind":"object","target":factory,"view":"resource"},
+            "grants":[grants[0]]});
+        write_private_new(&query_source, &serde_json::to_vec(&query).map_err(|e| e.to_string())?)?;
+        let observation = generation.join("factory-query");
+        if let Err(error) = run(Command::new(&spec.mini).arg("query").arg("--host").arg(&spec.host)
+            .arg("--config").arg(&spec.host_config).arg("--socket").arg(socket)
+            .arg("--intent").arg(&query_source).args(["--intent-kind", "intent", "--view", "resource"])
+            .arg("--key").arg(&spec.sponsor.key).arg("--dir").arg(&observation), "mini query birth factory") {
+            last = error;
+            continue;
         }
-    }).ok_or("birth author generation exhausted")??;
-    let query_source = generation.join("factory-query.json");
-    let query = json!({"subject":spec.sponsor.subject,"nonce":spec.nonce,
-        "purpose":{"type":"query","kind":"object","target":factory,"view":"resource"},
-        "grants":[grants[0]]});
-    write_private_new(&query_source, &serde_json::to_vec(&query).map_err(|e| e.to_string())?)?;
-    let observation = generation.join("factory-query");
-    run(Command::new(&spec.mini).arg("query").arg("--host").arg(&spec.host)
-        .arg("--config").arg(&spec.host_config).arg("--socket").arg(socket)
-        .arg("--intent").arg(&query_source).args(["--intent-kind", "intent", "--view", "view-resource"])
-        .arg("--key").arg(&spec.sponsor.key).arg("--dir").arg(&observation), "mini query birth factory")?;
-    let author = generation.join("author");
-    run(Command::new(&spec.mini).arg("current-resource-intent").arg("--host").arg(&spec.host)
-        .arg("--config").arg(&spec.host_config).arg("--socket").arg(socket)
-        .arg("--source").arg(source).arg("--signed-observation").arg(observation.join("signed-observation.bin"))
-        .arg("--dir").arg(&author), "mini author current grain birth")?;
-    Ok(author.join("intent.bin"))
+        let author = generation.join("author");
+        match run(Command::new(&spec.mini).arg("current-resource-intent").arg("--host").arg(&spec.host)
+            .arg("--config").arg(&spec.host_config).arg("--socket").arg(socket)
+            .arg("--source").arg(source).arg("--signed-observation").arg(observation.join("signed-observation.bin"))
+            .arg("--dir").arg(&author), "mini author current grain birth") {
+            Ok(_) if author.join("intent.bin").is_file() => return Ok(author.join("intent.bin")),
+            Ok(_) => last = format!("mini author current grain birth left no intent in {}", author.display()),
+            Err(error) => last = error,
+        }
+    }
+    Err(format!("grain birth: {AUTHOR_GENERATIONS} read-and-author generations without an intent; last: {last}"))
 }
 
 fn submit_birth(spec: &Spec, socket: &Path, source: &Path, genesis: &Value, work: &Path) -> Result<()> {
@@ -827,6 +844,7 @@ esac
         let rows: Vec<_> = calls.lines().collect();
         assert_eq!(rows.len(), 4);
         assert!(rows[0].starts_with("query "));
+        assert!(rows[0].contains("--view resource "), "the query must name a view `mini query` accepts: {}", rows[0]);
         assert!(rows[1].starts_with("current-resource-intent "));
         assert!(rows[1].contains("factory-query/signed-observation.bin"));
         assert!(rows[2].contains("author/intent.bin --intent-kind binary"));
@@ -842,6 +860,25 @@ esac
         assert_eq!(again.lines().count(), 5);
         assert!(again.lines().last().unwrap().starts_with("retry "));
         assert!(!fixture.0.join("birth-author-1").exists());
+    }
+
+    #[test]
+    fn create_birth_reads_again_when_the_host_refuses_an_authoring() {
+        let fixture = BirthFixture::new(); fixture.install_mini();
+        // The first authoring is refused (the World moved after the read), as the Host
+        // refuses an observation of an image it no longer holds.
+        let mini = fs::read_to_string(fixture.0.join("mini")).unwrap().replace(
+            " current-resource-intent) printf current-canonical-birth > \"$dir/intent.bin\";;",
+            " current-resource-intent) if [ ! -e \"$root/refused-once\" ]; then : > \"$root/refused-once\"; exit 1; fi; printf current-canonical-birth > \"$dir/intent.bin\";;");
+        assert!(mini.contains("refused-once"));
+        fs::write(fixture.0.join("mini"), mini).unwrap();
+        let spec = fixture.spec(); let socket = Path::new("/s");
+        let source = fixture.0.join("source.json"); fs::write(&source, b"{}").unwrap();
+        let authored = author_birth(&spec, socket, &source, &json!({"factoryId":"2"}), &fixture.0).unwrap();
+        assert_eq!(authored, fixture.0.join("birth-author-1/author/intent.bin"));
+        let calls = fs::read_to_string(fixture.0.join("calls")).unwrap();
+        assert_eq!(calls.lines().filter(|row| row.starts_with("query ")).count(), 2);
+        assert!(!fixture.0.join("birth-author-0/author/intent.bin").exists());
     }
 
     #[test]
