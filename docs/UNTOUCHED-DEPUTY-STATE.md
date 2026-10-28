@@ -85,6 +85,12 @@ Its hbox worlds: /tank/rows-2d8b7ed5-apps/w-{featured,b1,b2,b4,b6,rt,fixups}. Mi
 - 886c43dfd (un-market-install) on main (aae3e2e37). Gate on 76758dba6 FAILED in the integrator's own composed harness (`..` in the socket path), fixed by it at 171e5af5b.
 14adcc13a (un-bend-seed: absent object refused by name; seed makes lobby-tally first; jbend 33/0 on 76758dba6; the seed line awaits infra's demo-dry rerun), 789b9b478 (journey repeat suffix), a8376ce8f (story GM install), 50ec8de76 (importProfile), 353a6d11d (pb helpers), 20f28ac31 (commons split + world READMEs). Infra told a8376ce8f fixes its demo-dry story red; the door README already says author = the seed's SEED_HOST (bc6c837ba).
 
+## Featured on 76758dba6 (validator a373556d56d56744d): 9 PASS of 13
+- PASS: EtherCalc lifecycle + write, DokuWiki lifecycle + write, Datasette lifecycle + recorded read, HedgeDoc/Davros/HledgerWeb lifecycles.
+- HedgeDoc write "close frame" (socket.io): same family as IPython's kernel websocket; given to B8 (a13f0bc9626b1320a), fix at the cause for both.
+- Davros write, HledgerWeb write (empty detail lines) and sntfy lifecycle (get-m exit 22 on /): given to B7 (abf203f357754001b) after its run; recipes must name their failures first.
+- spk-host io errors must name operation + path (coordinator): B3 faerie (a85d12892ea6de3ca) after its run, lane/un-spk-ioctx, one context wrapper, red-first missing-socket test.
+
 ## Next three
 1. Read B3/B5/B7/B8 on 76758dba6 (each serial under the world-up flock); fix reds (recipes or spk-host); every app green on lifecycle + write into FEATURED in apps.rs (B3 does its own commit; DiagramsNet stays out); target 2-3 dozen.
 2. japps w5 verdict (a4e312352a7091f59) -> validator for ROWS-OWED §0; a candidate carrying e7df47d87 then confirms restart -> renew -> write; SQLite failure 15 two-world start (a6603277e4ffe2d70).
