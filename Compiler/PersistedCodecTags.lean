@@ -242,7 +242,7 @@ namespace Minidregg.Compiler.PersistedCodecTags
 @[persisted_codec_tag] abbrev objective_activity_tx_abandon_v1 : String := "DREGG/OBJECTIVE/ACTIVITY/TX/ABANDON/v1"
 @[persisted_codec_tag] abbrev job_money_event_v1 : String := "DREGG.JOB.MONEY.EVENT/v1"
 @[persisted_codec_tag] abbrev joint_install_promise_request_v1 : String := "DREGG/JOINT/INSTALL-PROMISE/REQUEST/v1"
-@[persisted_codec_tag] abbrev durable_log_byte_v2 : List UInt8 := "DREGG.DURABLE.LOG".toUTF8.toList ++ [3]
+@[persisted_codec_tag] abbrev durable_log_byte_v4 : List UInt8 := "DREGG.DURABLE.LOG".toUTF8.toList ++ [4]
 @[persisted_codec_tag] abbrev fn_selected_poll_coverage_v2 : String := "DREGG/FN/SELECTED-POLL-COVERAGE/v2"
 @[persisted_codec_tag] abbrev native_host_log_leaf_v1 : String := "DREGG/NATIVE-HOST/LOG-LEAF/v1"
 @[persisted_codec_tag] abbrev objective_bend_selected_declaration_v1 : String := "DREGG.OBJECTIVE-BEND.SELECTED-DECLARATION/v1"
