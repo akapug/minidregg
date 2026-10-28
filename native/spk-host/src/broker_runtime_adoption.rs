@@ -1,6 +1,7 @@
 //! Per-Store root runtime adoption. The broker's baseline and other Stores
 //! retain their existing images. A pending record fences START until all exact
 //! supervisor instances are rendered and systemd acknowledges daemon-reload.
+use crate::io_context::IoContext;
 use super::*;
 use minidregg_compatible_upgrade_custody as custody;
 use std::collections::BTreeSet;
@@ -119,7 +120,7 @@ impl Broker {
     }
     fn store_apps(&self, store: &str) -> io::Result<BTreeSet<String>> {
         let mut apps = BTreeSet::new();
-        for entry in fs::read_dir(self.broker_dir().join("placements"))? {
+        for entry in fs::read_dir(self.broker_dir().join("placements")).ctx("list", &(self.broker_dir().join("placements")))? {
             let entry = entry?;
             let placement: Placement =
                 serde_json::from_slice(&read_private_operator(&entry.path(), MAX_CONFIG)?)?;
@@ -205,7 +206,7 @@ impl Broker {
         let mut checked_units = BTreeSet::new();
         for app in apps {
             let app_dir = self.root().join(store).join("host/apps").join(app);
-            for entry in fs::read_dir(&app_dir)? {
+            for entry in fs::read_dir(&app_dir).ctx("list", &app_dir)? {
                 let entry = entry?;
                 let name = entry.file_name().to_string_lossy().into_owned();
                 let Some(generation) = name.strip_prefix('g').filter(|g| decimal(g)) else {
@@ -238,7 +239,7 @@ impl Broker {
             unit_quiescent(&supervisor_unit(&self.config.unit_prefix, store, app))?;
         }
         // Also fence installed units whose retained operator journal disappeared.
-        for entry in fs::read_dir(self.broker_dir().join("units"))? {
+        for entry in fs::read_dir(self.broker_dir().join("units")).ctx("list", &(self.broker_dir().join("units")))? {
             let name = entry?.file_name().to_string_lossy().into_owned();
             if self.unit_store(&name)?.as_deref() == Some(store) {
                 let (_, app, _) = Self::check_resident_unit_name(&name)?;
@@ -264,7 +265,7 @@ impl Broker {
                 if !meta.is_file()
                     || meta.uid()!=self.operator_uid
                     || meta.mode() & 0o022 != 0
-                    || !fs::read_to_string(&path)?.starts_with(&format!(
+                    || !fs::read_to_string(&path).ctx("read", &path)?.starts_with(&format!(
                         "# rendered by mini-spk-broker store={store} app={app}\n"
                     ))
                 {
@@ -280,7 +281,7 @@ impl Broker {
         Ok(unit)
     }
     pub(super) fn render_adopted_supervisors(&self) -> io::Result<()> {
-        for entry in fs::read_dir(self.broker_dir().join("runtimes"))? {
+        for entry in fs::read_dir(self.broker_dir().join("runtimes")).ctx("list", &(self.broker_dir().join("runtimes")))? {
             let name = entry?.file_name().to_string_lossy().into_owned();
             let store = name
                 .strip_suffix(".json")

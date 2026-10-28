@@ -2,6 +2,7 @@
 //! Transport authenticates the operator; only the fresh native admission passed
 //! by the resident may add a listener. A retry acknowledges the original add and
 //! cannot revive its sessions or replace an existing route's credentials.
+use crate::io_context::IoContext;
 use crate::dispatch_author::FixedAuthoring;
 use crate::dispatch_native::{connect_deadline, private_dir, write_new};
 use crate::http_entrance::{CustodianPolicy, EntranceKind};
@@ -310,7 +311,7 @@ pub(crate) fn refuse_retained_registrations(journal: &Path) -> io::Result<()> {
         Ok(_) => {}
     }
     private_dir(&directory)?;
-    if fs::read_dir(directory)?.next().transpose()?.is_some() {
+    if fs::read_dir(&directory).ctx("list", &directory)?.next().transpose()?.is_some() {
         return Err(invalid(
             "retained route seal requires lifecycle STOP and a new generation",
         ));
@@ -377,10 +378,10 @@ impl RegistrationPublisher<'_> {
         let final_path = self
             .directory
             .join(format!("{}.json", self.request.registration_nonce_hex));
-        fs::hard_link(&pending, &final_path)?;
-        File::open(self.directory)?.sync_all()?;
-        fs::remove_file(&pending)?;
-        File::open(self.directory)?.sync_all()?;
+        fs::hard_link(&pending, &final_path).ctx("link", &pending)?;
+        File::open(self.directory).ctx("open", &self.directory)?.sync_all()?;
+        fs::remove_file(&pending).ctx("remove", &pending)?;
+        File::open(self.directory).ctx("open", &self.directory)?.sync_all()?;
         self.published = Some(reply.clone());
         Ok(())
     }
@@ -403,7 +404,7 @@ impl RouteControl {
         if !seals_directory.exists() {
             use std::os::unix::fs::DirBuilderExt;
             fs::DirBuilder::new().mode(0o700).create(&seals_directory)?;
-            File::open(directory)?.sync_all()?;
+            File::open(&directory).ctx("open", &directory)?.sync_all()?;
         }
         let lock = OpenOptions::new()
             .read(true)
@@ -412,7 +413,7 @@ impl RouteControl {
             .truncate(false)
             .mode(0o600)
             .custom_flags(libc::O_NOFOLLOW)
-            .open(directory.join(".resident-route-control.lock"))?;
+            .open(directory.join(".resident-route-control.lock")).ctx("open", &(directory.join(".resident-route-control.lock")))?;
         let meta = lock.metadata()?;
         if !meta.is_file()
             || meta.nlink() != 1
@@ -435,11 +436,11 @@ impl RouteControl {
                 check_socket(&old)?;
                 match connect_deadline(&socket, Instant::now() + Duration::from_millis(100)) {
                     Err(e) if e.kind() == io::ErrorKind::ConnectionRefused => {
-                        let now = fs::symlink_metadata(&socket)?;
+                        let now = fs::symlink_metadata(&socket).ctx("inspect", &socket)?;
                         if (now.dev(), now.ino()) != (old.dev(), old.ino()) {
                             return Err(invalid("route stale socket changed"));
                         }
-                        fs::remove_file(&socket)?;
+                        fs::remove_file(&socket).ctx("remove", &socket)?;
                     }
                     _ => {
                         return Err(io::Error::new(
@@ -450,9 +451,9 @@ impl RouteControl {
                 }
             }
         }
-        let listener = UnixListener::bind(&socket)?;
-        fs::set_permissions(&socket, fs::Permissions::from_mode(0o600))?;
-        let meta = fs::symlink_metadata(&socket)?;
+        let listener = UnixListener::bind(&socket).ctx("bind", &socket)?;
+        fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)).ctx("set permissions", &socket)?;
+        let meta = fs::symlink_metadata(&socket).ctx("inspect", &socket)?;
         check_socket(&meta)?;
         Ok(Self {
             listener,
@@ -573,7 +574,7 @@ impl Drop for RouteControl {
     fn drop(&mut self) {
         if let Ok(meta) = fs::symlink_metadata(&self.socket) {
             if (meta.dev(), meta.ino()) == self.identity {
-                let _ = fs::remove_file(&self.socket);
+                let _ = fs::remove_file(&self.socket).ctx("remove", &self.socket);
             }
         }
     }
@@ -587,7 +588,7 @@ pub fn register(socket: &Path, request: &RouteRegistration) -> io::Result<RouteR
             .parent()
             .ok_or_else(|| invalid("route socket parent absent"))?,
     )?;
-    check_socket(&fs::symlink_metadata(socket)?)?;
+    check_socket(&fs::symlink_metadata(&socket).ctx("inspect", &socket)?)?;
     let deadline = Instant::now() + Duration::from_secs(65);
     let mut stream = connect_deadline(socket, deadline)?;
     if peer_uid(&stream)? != unsafe { libc::geteuid() } {

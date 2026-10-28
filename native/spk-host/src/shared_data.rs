@@ -8,6 +8,7 @@
 //! the operator and filesystem custody, just like the protected SPK image store.
 //! Mode bits do not stop a privileged operator rewriting both data and receipt.
 
+use crate::io_context::IoContext;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -303,7 +304,7 @@ fn open_directory_path(path: &Path, protected: bool, app_uid: Option<u32>) -> io
     if !path.is_absolute() {
         return Err(invalid("data directory must be absolute"));
     }
-    let mut current = File::open("/")?;
+    let mut current = File::open("/").ctx("open", &"/")?;
     for part in path.components().skip(1) {
         let Component::Normal(part) = part else {
             return Err(invalid("directory path must be normalized"));
@@ -581,7 +582,7 @@ pub fn publish(
         ));
     }
     let mut random = [0u8; 16];
-    File::open("/dev/urandom")?.read_exact(&mut random)?;
+    File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut random)?;
     let stage_name = format!(".publish-{}-{}", std::process::id(), hex(&random));
     let stage = mkdir_at(&store_fd, &stage_name, 0o700)?;
     let attempt = (|| -> io::Result<()> {

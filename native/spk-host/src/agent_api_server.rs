@@ -3,6 +3,7 @@
 //! op46 event21 committed permit is the only delivery authority.
 #![allow(dead_code)] // Resident listener is enabled only with the reverse v2 reserve client.
 
+use crate::io_context::IoContext;
 use crate::agent_api_custody::AgentCustody;
 use crate::agent_api_native::{authorize_once, hex, ReserveSubmit, RetainedReserve};
 use crate::agent_api_wire::{self, FixedBinding, OrdinaryHeader, Reply, Request};
@@ -139,7 +140,7 @@ fn protected_agent_socket_parent(
     }
     let owner_uid = unsafe { libc::geteuid() };
     for (depth, ancestor) in parent.ancestors().enumerate() {
-        let metadata = fs::symlink_metadata(ancestor)?;
+        let metadata = fs::symlink_metadata(&ancestor).ctx("inspect", &ancestor)?;
         let root_owned = crate::namespace_identity::root_owned(ancestor, &metadata);
         let sticky_root = depth > 0 && root_owned && metadata.mode() & 0o1000 != 0;
         if !metadata.is_dir()
@@ -238,7 +239,7 @@ impl Drop for AgentApiListener {
             if metadata.file_type().is_socket()
                 && (metadata.dev(), metadata.ino()) == self.socket_identity
             {
-                let _ = fs::remove_file(&self.socket);
+                let _ = fs::remove_file(&self.socket).ctx("remove", &self.socket);
             }
         }
     }
@@ -273,13 +274,13 @@ impl AgentApiListener {
             return Err(invalid("agent socket pin refused"));
         }
         protected_agent_socket_parent(parent, expected_uid, true)?;
-        let listener = UnixListener::bind(path)?;
-        let bound = fs::symlink_metadata(path)?;
+        let listener = UnixListener::bind(&path).ctx("bind", &path)?;
+        let bound = fs::symlink_metadata(&path).ctx("inspect", &path)?;
         let setup = (|| {
-            fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+            fs::set_permissions(path, fs::Permissions::from_mode(0o600)).ctx("set permissions", &path)?;
             exact_acl(path, expected_uid, false, true)?;
             listener.set_nonblocking(true)?;
-            let metadata = fs::symlink_metadata(path)?;
+            let metadata = fs::symlink_metadata(&path).ctx("inspect", &path)?;
             if !metadata.file_type().is_socket()
                 || metadata.uid() != unsafe { libc::geteuid() }
                 || (metadata.dev(), metadata.ino()) != (bound.dev(), bound.ino())
@@ -295,7 +296,7 @@ impl AgentApiListener {
                     current.file_type().is_socket()
                         && (current.dev(), current.ino()) == (bound.dev(), bound.ino())
                 }) {
-                    let _ = fs::remove_file(path);
+                    let _ = fs::remove_file(&path).ctx("remove", &path);
                 }
                 return Err(error);
             }
@@ -362,7 +363,7 @@ impl AgentApiListener {
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(None),
             Err(error) => return Err(error),
         };
-        let metadata = fs::symlink_metadata(&self.socket)?;
+        let metadata = fs::symlink_metadata(&self.socket).ctx("inspect", &self.socket)?;
         if !metadata.file_type().is_socket()
             || metadata.uid() != unsafe { libc::geteuid() }
             || (metadata.dev(), metadata.ino()) != self.socket_identity

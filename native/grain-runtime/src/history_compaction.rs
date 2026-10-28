@@ -59,6 +59,26 @@ fn outcome(path: &Path) -> Value {
         .and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or(Value::Null)
 }
 
+/// Every attempt directory a room write record names
+/// (`WORKSPACE/room-operations/*.json`, `HOME/requests/*.json`).
+fn referenced_attempts(workspace: &Path, homes: &[&Path]) -> Result<std::collections::BTreeSet<PathBuf>> {
+    let mut out = std::collections::BTreeSet::new();
+    let mut dirs = vec![workspace.join("room-operations")];
+    dirs.extend(homes.iter().map(|h| h.join("requests")));
+    for dir in dirs {
+        let Ok(listing) = fs::read_dir(&dir) else { continue };
+        for entry in listing {
+            let path = entry.map_err(|e| e.to_string())?.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") { continue; }
+            let Ok(bytes) = bounded_regular_file(&path, 1 << 20) else { continue };
+            if let Ok(value) = serde_json::from_slice::<Value>(&bytes) {
+                if let Some(a) = value["attempt"].as_str() { out.insert(PathBuf::from(a)); }
+            }
+        }
+    }
+    Ok(out)
+}
+
 fn remove(path: &Path) -> Result<()> {
     let meta = fs::symlink_metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
     if meta.is_dir() { fs::remove_dir_all(path) } else { fs::remove_file(path) }
@@ -135,11 +155,19 @@ pub(crate) fn compact(journal: &Journal, state: &Path, workspaces: &[&Path], hom
     for workspace in workspaces {
         let attempts = workspace.join("attempts");
         let Ok(listing) = fs::read_dir(&attempts) else { continue };
+        // Room write records (RoomTools::lookup) name their attempt
+        // directories; those stay whatever they hold.
+        let referenced = referenced_attempts(workspace, homes)?;
         for entry in listing {
             let entry = entry.map_err(|e| e.to_string())?;
             let path = entry.path();
-            // Only a decided workspace attempt: one with its outcome.
-            if !path.join("outcome.json").is_file() { continue; }
+            if referenced.contains(&path) { continue; }
+            // A decided attempt (its outcome or result), or a finished signed
+            // read (its view, and no call or submission of any kind).
+            let decided = path.join("outcome.json").is_file() || path.join("result.json").is_file();
+            let read = path.join("view.json").is_file() && !path.join("call.bin").exists()
+                && !path.join("submit.json").exists() && !path.join("plan.json").exists();
+            if !decided && !read { continue; }
             let name = entry.file_name().to_string_lossy().into_owned();
             lines.push(json!({"workspace":workspace,"attempt":name,"outcome":outcome(&path.join("outcome.json"))}));
             summary.workspace_attempts += 1;
@@ -208,6 +236,13 @@ mod tests {
         fs::create_dir_all(ws.join("attempts/hr-g2")).unwrap();
         fs::write(ws.join("attempts/hr-g2/outcome.json"), br#"{"transactionId":"w2"}"#).unwrap();
         fs::create_dir_all(ws.join("attempts/undecided")).unwrap();
+        fs::create_dir_all(ws.join("attempts/a-write")).unwrap();
+        fs::write(ws.join("attempts/a-write/result.json"), b"{}").unwrap();
+        fs::create_dir_all(ws.join("room-operations")).unwrap();
+        fs::write(ws.join("room-operations/g7-write.json"),
+            serde_json::to_vec(&json!({"attempt": ws.join("attempts/a-write")})).unwrap()).unwrap();
+        fs::create_dir_all(ws.join("attempts/a-read")).unwrap();
+        fs::write(ws.join("attempts/a-read/view.json"), b"{}").unwrap();
         for id in 1..=3 { decided(&state, id); }
         fs::write(state.join("journal.json"), b"{}").unwrap();
         fs::write(state.join("resident-origin-0000000000000002.admitted.json"), b"{}").unwrap();
@@ -229,7 +264,7 @@ mod tests {
         assert!(!home.join("chat/reads/lab/feed.old").exists() && home.join("chat/reads/lab/feed.new").exists()
             && home.join("chat/reads/lab/roster.only").exists());
         assert!(!ws.join("sources/q-123.json").exists() && ws.join("sources/apps-bootstrap.json").exists());
-        assert_eq!((summary.operations, summary.workspace_attempts), (3, 1));
+        assert_eq!((summary.operations, summary.workspace_attempts), (3, 2));
         for id in 1..=3u64 {
             assert!(!state.join(format!("attempt-{id:016}")).exists() && !state.join(format!("query-{id:016}")).exists());
             assert_eq!(retained_outcome(&state, id).unwrap().unwrap(), before[id as usize - 1], "exact lookup survives the prune");
@@ -237,8 +272,10 @@ mod tests {
         // Kept: the journal, the resident's records, an undecided workspace attempt.
         assert!(state.join("journal.json").exists() && state.join("resident-origin-0000000000000002.admitted.json").exists());
         assert!(ws.join("attempts/undecided").exists() && !ws.join("attempts/hr-g2").exists());
+        assert!(ws.join("attempts/a-write").exists(), "a room write record's attempt stays for RoomTools::lookup");
+        assert!(!ws.join("attempts/a-read").exists(), "a finished signed read goes");
         let history = fs::read_to_string(state.join(HISTORY)).unwrap();
-        assert_eq!(history.lines().count(), 4);
+        assert_eq!(history.lines().count(), 5);
         // A second pass finds nothing more and changes nothing.
         assert_eq!(compact(&journal, &state, &[ws.as_path()], &[home.as_path()]).unwrap().unwrap(), Summary::default());
         assert_eq!(fs::read_to_string(state.join(HISTORY)).unwrap(), history);

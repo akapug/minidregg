@@ -594,8 +594,28 @@ tools-run.sh with `C=` that candidate, J14_TOOLS=1 J14_AWAIT=1, root `hroot-q2`;
   redteam, dismiss: "recorded payment is not confirmed; exact recovery only"). Fixed in 56f6741a:
   the record is read before the first signal. Host ops unchanged (1-5, 17, 19, 96-98, 144).
   The sandbox ask still never reaches the tools brief (see run 4).
-- run 6 (`hb-q2-6`, candidate 7027e0ace, tree 56f6741a, PID file
-  `/build/lanes/hermes-tier-run/hb-q2-6.pid`): the same run again.
+- run 6 (`hb-q2-6`, 7027e0ace, 211/233): the CPU fix works (each tools prompt ~5.6 s = 1 compute
+  turn, paid); compaction ran 4 times (g 49 MiB / 9,767 inodes for 7 prompts, 7 model calls).
+  Remaining reds (tools 127-136, await 159-167, redteam 179-195): those passes' briefs had no
+  selectedRequest and no recentMemberEntries (a maintenance pass), so the test provider never took
+  its sandbox/await/redteam branch. Hypothesis: certifying between the ask and the pass hides the
+  ask from the brief. aa325a6c moves the certify to after each pass.
+- run 7 (`hb-q2-7`, 76758dba6 genesis, tree aa325a6c, 211/233): the same 22 reds. Moving the
+  certify did not help. **Diagnosis so far (the open red):** the resident serves requests late,
+  FIFO, about two passes behind. The ask and nogrant passes ran maintenance prompts (their briefs
+  have no `selectedRequest`), the tools pass served alice's first ask (author 1205…, sequence 1;
+  `strings resident-tools.jsonl | grep -o 'selectedRequest.\{0,900\}'`), and so on. Every
+  brief's `acceptedHeight` is 49. Six requests completed in total (resident/request-*-completed.json).
+  The ask/nogrant checks pass anyway because the test librarian answers from history. Next step:
+  why `resident_requests::select` (entries `kind == say`, `to == me`, `height > acceptedHeight`
+  from `prepare_resident`'s tail page) misses the newest ask in its own pass. Compare the pass's
+  `sourceRequests` with the room tail at that moment (run J14 once with `--only J14` and inspect the
+  resident's prepared assignment).
+- run 7 footprint: g 49 MiB / 9,767 inodes, of which the room workspace's attempts/ held 22 MiB and
+  5,271 inodes (finished reads and result.json writes, which compaction skipped). d06cb6fc compacts
+  them, except attempts a room write record names.
+- run 8 (`hb-q2-8`, candidate aae3e2e37, tree d06cb6fc, PID file
+  `/build/lanes/hermes-tier-run/hb-q2-8.pid`): the footprint measurement for infra.
 - Every J14 pass runs from main's scripts and a candidate's source (coordinator); a J5 red from an
   older tree is a stale harness.
 

@@ -1,6 +1,7 @@
 //! The operator-owned monotonic operation-id ledger the launch-bound lifecycle
 //! authoring (BEGIN, claim, STOP) allocates from before source planning.
 
+use crate::io_context::IoContext;
 use crate::dispatch_native::private_dir;
 use std::fs::File;
 use std::fs::OpenOptions;
@@ -30,8 +31,8 @@ pub(crate) fn allocate_operation_id(ledger: &Path) -> io::Result<String> {
         .create(true)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(&lock_path)?;
-    let lock_named = std::fs::symlink_metadata(&lock_path)?;
+        .open(&lock_path).ctx("open", &lock_path)?;
+    let lock_named = std::fs::symlink_metadata(&lock_path).ctx("inspect", &lock_path)?;
     let lock_meta = lock.metadata()?;
     if !lock_meta.is_file()
         || lock_meta.nlink() != 1
@@ -57,17 +58,17 @@ pub(crate) fn allocate_operation_id(ledger: &Path) -> io::Result<String> {
             // returning it; an interrupted empty creation stays refused.
             file.write_all(b"2\n")?;
             file.sync_all()?;
-            File::open(parent)?.sync_all()?;
+            File::open(&parent).ctx("open", &parent)?.sync_all()?;
             return Ok("1".to_owned());
         }
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => OpenOptions::new()
             .read(true)
             .append(true)
             .custom_flags(libc::O_NOFOLLOW)
-            .open(ledger)?,
+            .open(&ledger).ctx("open", &ledger)?,
         Err(error) => return Err(error),
     };
-    let named = std::fs::symlink_metadata(ledger)?;
+    let named = std::fs::symlink_metadata(&ledger).ctx("inspect", &ledger)?;
     let meta = file.metadata()?;
     if !meta.is_file()
         || meta.nlink() != 1
@@ -98,7 +99,7 @@ pub(crate) fn allocate_operation_id(ledger: &Path) -> io::Result<String> {
     let current = expected - 1;
     writeln!(file, "{expected}")?;
     file.sync_all()?;
-    File::open(parent)?.sync_all()?;
+    File::open(&parent).ctx("open", &parent)?.sync_all()?;
     Ok(current.to_string())
 }
 

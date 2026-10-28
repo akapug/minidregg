@@ -6,6 +6,7 @@
 #[path = "install_v3.rs"]
 mod install_v3;
 
+use crate::io_context::IoContext;
 #[cfg(test)]
 use crate::dispatch_native::write_new;
 use crate::dispatch_native::{private_dir, PrivateOperator};
@@ -35,7 +36,7 @@ fn open_private_file(path: &Path, maximum: u64) -> io::Result<std::fs::File> {
         .ok_or_else(|| invalid("private parent absent"))?;
     let owner = unsafe { libc::geteuid() };
     for ancestor in parent.ancestors() {
-        let meta = fs::symlink_metadata(ancestor)?;
+        let meta = fs::symlink_metadata(&ancestor).ctx("inspect", &ancestor)?;
         if !meta.is_dir()
             || meta.file_type().is_symlink()
             || (meta.uid() != 0 && meta.uid() != owner)
@@ -48,9 +49,9 @@ fn open_private_file(path: &Path, maximum: u64) -> io::Result<std::fs::File> {
     let file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(path)?;
+        .open(&path).ctx("open", &path)?;
     let meta = file.metadata()?;
-    let named = fs::symlink_metadata(path)?;
+    let named = fs::symlink_metadata(&path).ctx("inspect", &path)?;
     if !path.is_absolute()
         || !meta.is_file()
         || meta.nlink() != 1

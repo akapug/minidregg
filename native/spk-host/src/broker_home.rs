@@ -1,6 +1,7 @@
 //! The resident unit's hardening drop-in, and the root-declared read-only
 //! inventory of home paths it reads. This affects the operator resident only;
 //! the app's bwrap root stays separate.
+use crate::io_context::IoContext;
 use super::*;
 use std::collections::BTreeSet;
 use std::os::unix::fs::FileTypeExt;
@@ -36,13 +37,13 @@ pub(super) fn validate(paths: &[PathBuf], uid: u32) -> io::Result<()> {
     let mut seen = BTreeSet::new();
     for path in paths {
         text(path)?;
-        if !seen.insert(path) || fs::canonicalize(path)? != *path {
+        if !seen.insert(path) || fs::canonicalize(&path).ctx("resolve", &path)? != *path {
             return Err(invalid("resident visibility path duplicated or symlinked"));
         }
         let mut prefix = PathBuf::from("/");
         for part in path.components().skip(1) {
             prefix.push(part);
-            let meta = fs::symlink_metadata(&prefix)?;
+            let meta = fs::symlink_metadata(&prefix).ctx("inspect", &prefix)?;
             if meta.file_type().is_symlink()
                 || ![0, uid].contains(&meta.uid())
                 || meta.mode() & 0o022 != 0
@@ -53,7 +54,7 @@ pub(super) fn validate(paths: &[PathBuf], uid: u32) -> io::Result<()> {
                 )));
             }
         }
-        let meta = fs::symlink_metadata(path)?;
+        let meta = fs::symlink_metadata(&path).ctx("inspect", &path)?;
         if meta.is_file() {
             if meta.nlink() != 1 {
                 return Err(invalid("resident visibility file has multiple links"));
@@ -64,7 +65,7 @@ pub(super) fn validate(paths: &[PathBuf], uid: u32) -> io::Result<()> {
             if path.components().count() < 4 {
                 return Err(invalid("broad resident directory visibility refused"));
             }
-            let sockets = fs::read_dir(path)?.filter_map(Result::ok).any(|e| {
+            let sockets = fs::read_dir(&path).ctx("list", &path)?.filter_map(Result::ok).any(|e| {
                 fs::symlink_metadata(e.path()).is_ok_and(|m| {
                     m.file_type().is_socket() && m.uid() == uid && m.mode() & 0o002 == 0
                 })
@@ -123,7 +124,7 @@ pub(super) fn render(
     if home(socket_parent) {
         needed.insert(socket_parent.to_path_buf());
     }
-    let actual_socket = fs::symlink_metadata(&socket)?;
+    let actual_socket = fs::symlink_metadata(&socket).ctx("inspect", &socket)?;
     if !actual_socket.file_type().is_socket() || actual_socket.uid() != broker.operator_uid {
         return Err(invalid(
             "resident Mini endpoint is not this operator's socket",

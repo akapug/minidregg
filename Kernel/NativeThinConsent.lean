@@ -244,11 +244,11 @@ theorem computeTarget_root (snapshot : AuthoritySnapshot) (semantics : Digest) (
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
     | scalar actions =>
-        simp only [computeTarget] at computed
-        split at computed
-        · cases computed
-        · rename_i cell _
-          exact cell.candidate.modeEvidence.rootExact
+        simp only [computeTarget, scalarLeg] at computed
+        repeat' split at computed
+        all_goals first
+          | (rename_i cell _; exact cell.candidate.modeEvidence.rootExact)
+          | cases computed
     | world actions =>
         by_contra moved
         have hb : (root != pre.root) = true := bne_iff_ne.mpr moved

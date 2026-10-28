@@ -233,7 +233,9 @@ if [ "$mode" = --box ]; then
       # The publishing origin: restart the stopped Hacker Slides grain and read its /var/www
       # through the resident's www.sock (the socket the front reaches through the connector).
       app_a_dir=$state/apps/$app_a
-      if jenv $J start-a >"$W/www-world.out" 2>"$W/www-world.err"; then
+      # The restart moved the app to a new serving generation, so the owner session is re-enrolled
+      # (enroll-a2 renews it) before the write: the first enrollment names the old generation.
+      if jenv $J start-a enroll-a2 >"$W/www-world.out" 2>"$W/www-world.err"; then
         www=$(curl -sS --max-time 120 --unix-socket "$app_a_dir/www.sock" -H 'Host: grain.test' -o "$W/www-index.body" -D - http://grain.test/ 2>&1 | head -1 | tr -d '\r')
         post=$(curl -sS --max-time 30 --unix-socket "$app_a_dir/www.sock" -X POST -o /dev/null -w '%{http_code}' http://grain.test/ 2>&1)
         esc=$(curl -sS --max-time 30 --unix-socket "$app_a_dir/www.sock" -o /dev/null -w '%{http_code}' --path-as-is 'http://grain.test/../g2/resident.json' 2>&1)

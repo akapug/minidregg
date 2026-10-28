@@ -441,14 +441,27 @@ open Minidregg.Pred
 /-- The write guard (`request/verb` 2 is `write`, `CredentialAuthorityEntryCodec.verbTag`). -/
 def writeGuard : Pred := .not (.eq "request/verb" 2)
 
-/-- The clause as its author wrote it: a disjunction's write guards are dropped, and a
-guarded single clause is that clause. On a refused write every guard is false, so it is
-never the reason. -/
-def explained : Pred → Pred
+/-- The selector guard of a neutral law component (`LawComposition.neutralComponent`, the lift
+every installed law goes through: `Component.guarded` is `any [ not selector, law ]`). Its
+selector selects every step, so the guard is false on every step and never the reason. -/
+def neutralGuard : Pred := .not (Minidregg.Theory.LawComposition.Selector.predicate {})
+
+/-- One step of `explained`: a disjunction's write guards and neutral selector guards are
+dropped, and a guarded single clause is that clause. -/
+def explainedStep : Pred → Pred
   | .anyL ps =>
-      match ps.toList.filter (· != writeGuard) with
+      match ps.toList.filter (fun q => q != writeGuard && q != neutralGuard) with
       | [clause] => if ps.toList.length = 1 then .anyL ps else clause
       | rest => if rest.length = ps.toList.length then .anyL ps else Pred.any rest
+  | clause => clause
+
+/-- The clause as its author wrote it. On a refused write every write guard is false, and a
+neutral selector guard is false on every step, so neither is ever the reason. An installed
+law is its author's clause under the neutral component's guard (`any [ not (all [ open, open,
+open ]), any [ not (verb == write), field 2 <= 3 ] ]`), so the guard is dropped first and the
+author's own guarded clause then explained (`field 2 <= 3`). -/
+def explained : Pred → Pred
+  | .anyL ps => explainedStep (explainedStep (.anyL ps))
   | clause => clause
 
 /-- The slot an explained clause reads: an atom's, or a negated atom's. -/
@@ -1073,6 +1086,26 @@ theorem owner_told_value :
     narrowed none vaultLaw (write 1 4242) (write 1 4242) =
       some ⟨[], vaultLaw, some 4242, some 4242⟩ := by
   decide
+
+/-- `vaultLaw` as the kernel installs it: the one neutral component of a law with no
+selector (`LawComposition.neutralComponent`, `effective` over one node). -/
+def installedVaultLaw : Pred :=
+  Pred.all [(Minidregg.Theory.LawComposition.neutralComponent vaultLaw).guarded]
+
+/-- **The owner is told the author's clause and its value on the law as installed** (JDISCLOSE
+narrow-owner). The neutral selector guard the installation adds is not the reason, so the
+owner reads `field 2 <= 3 (value 9)`, not the guarded wrapper with no value. -/
+theorem owner_told_value_installed :
+    (narrowed none installedVaultLaw (write 1 9) (write 1 9)).map render =
+      some "field 2 <= 3 (value 9)" := by
+  native_decide
+
+/-- The narrowed requester still learns nothing over field 2 on the installed law, whatever
+field 2 holds. -/
+theorem narrowed_hides_uncovered_installed :
+    narrowed bobFields installedVaultLaw (write 1 4242) (write 1 4242) = none ∧
+      narrowed bobFields installedVaultLaw (write 1 5) (write 1 5) = none := by
+  native_decide
 
 end NarrowSample
 
