@@ -73,6 +73,19 @@ class AttachmentTests(unittest.TestCase):
     def rewrite(self, path, value):
         Path(path).write_text(json.dumps(value))
 
+    def test_root_export_supports_private_controller_host_metadata(self):
+        config = M.read(self.contract["paths"]["controllerConfig"])
+        config["hostConfig"] = "/private/controller/host-config.json"
+        self.rewrite(self.contract["paths"]["controllerConfig"], config)
+        export = self.file("exported-host.json", M.read(self.config))
+        self.contract["paths"]["controllerHostConfigExport"] = export
+        self.rewrite(self.path, self.contract)
+        op = M.Attachment(self.path, "prepare-config")
+        self.assertEqual(M.read(op.root / "attachment.json")["files"]["controllerHostConfigExport"], export)
+        self.rewrite(export, {"expectedSeed": "another-store"})
+        with self.assertRaisesRegex(ValueError, "same Store"):
+            M.Attachment(self.path, "issue-grant")
+
     def test_same_store_and_binary_pins_before_phase_side_effects(self):
         self.rewrite(self.config, {"expectedSeed": "other"})
         with self.assertRaisesRegex(ValueError, "same pinned Store"):

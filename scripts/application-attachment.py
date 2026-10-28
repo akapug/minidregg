@@ -18,6 +18,9 @@ Input protocol: mini-application-attachment-v1. All paths are absolute.
   sessionProfile: native allowedSessionFamilies profile, including genesis,
                   template, factory/payer selectors and grain tariff
   names (optional): application, family, route, display, handle, serviceProtocol
+For a private controller home, paths.controllerHostConfigExport may select the
+root installer's controller-host-config-export snapshot instead of directly
+reading the controller's private Host metadata file.
 
 prepare-config emits an installable update and nextTool. Install it through the
 controller's supported account route before invoking mini_create_application_session.
@@ -144,7 +147,9 @@ class Attachment:
         self.validate_controller(config)
         if sha(config["host"]) != sha(self.host) or sha(config["mini"]) != sha(self.mini):
             raise ValueError("controller and attachment binaries differ")
-        if read(config["hostConfig"]) != read(self.config) or config["hostSocket"] != str(self.public):
+        controller_host = paths.get("controllerHostConfigExport", config["hostConfig"])
+        self.absolute(controller_host)
+        if read(controller_host) != read(self.config) or config["hostSocket"] != str(self.public):
             raise ValueError("controller and attachment must use the same Store config and participant socket")
         profile = read(self.profile)
         if (read(profile["miniConfig"]) != read(self.config) or profile["miniOperatorSocket"] != str(self.operator)
@@ -158,6 +163,8 @@ class Attachment:
         files = {field: paths[field] for field in ("mini", "host", "spkHost", "hostConfig", "profile")}
         if "grainRuntime" in paths:
             files["grainRuntime"] = str(self.absolute(paths["grainRuntime"]))
+        if "controllerHostConfigExport" in paths:
+            files["controllerHostConfigExport"] = paths["controllerHostConfigExport"]
         files.update({"orchestrator": str(Path(__file__).resolve()),
                       "routeRenderer": str(self.repo / "scripts/spk-platform/prepare-lifetime-route.sh"),
                       "allocation": str(self.allocation_path),
