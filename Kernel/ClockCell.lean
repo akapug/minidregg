@@ -25,9 +25,10 @@ Every resource-invocation law reads it: `slots` projects `clock/now`,
 `clock/day` (`now / 86400`) and `clock/slot` into the law's state
 (`DeclaredResourceController.now_slot_exact`).
 
-Wire: `DREGG/CLOCK/v4` (v3 predates the platform cell kind, v2 the Book's floors section), with immutable `maxStepSeconds : Nat` at its own namespace.
+Wire: `PersistedCodecTags.clock_v4`, `DREGG/CLOCK/v{clockWireVersion}` (the version lives only there), with immutable `maxStepSeconds : Nat` at its own namespace.
 The old clock cell shape refuses; re-genesis seeds `now` from explicit params.
 -/
+import Compiler.PersistedCodecTags
 import Compiler.StoreCodec
 import Theory.AxiomPin
 
@@ -153,7 +154,7 @@ def valueStream : (space : Namespace) → StreamCodec (Namespace.Value space)
   | .clock => clockStream
   | .maxStepSeconds => StreamCodec.nat
 
-def wireName : String := "DREGG/CLOCK/v5"
+def wireName : String := Minidregg.Compiler.PersistedCodecTags.clock_v4
 
 def wire : Wire layout where
   name := wireName

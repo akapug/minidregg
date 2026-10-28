@@ -9,9 +9,12 @@ usage: scripts/codec-shapes-regen.py [--check]
    `#assert_persisted_codec_tags` on a temporary copy, writing fresh pins.
 2. An identity whose fingerprint moved is BUMPED where it is spelled: a
    `.../vN` string literal becomes `.../v(N+1)` in every *.lean and native/**/*.rs
-   file that spells it exactly.  An identity with no `/vN` suffix (a raw version
-   byte, a bare prefix) cannot be bumped mechanically: it is listed and the
-   script exits 2 without writing pins.
+   file that spells it exactly; a trailing version byte (`"P".toUTF8.toList ++ [N]`)
+   becomes `[N+1]` the same way; and a registry version constant that composes the
+   identity (`abbrev V : Nat := N` used as `s!"P/v{V}"` or `++ [UInt8.ofNat V]` in
+   Compiler/PersistedCodecTags) becomes N+1, once per round however many identities
+   share it.  An identity with none of these forms (a bare prefix) cannot be bumped
+   mechanically: it is listed and the script exits 2 without writing pins.
 3. Repeats until no fingerprint moves (a bumped identity moves the fingerprint
    of every codec that nests it), then writes the pins module.
 4. A BARE PREFIX (an identity with no version of its own: `Compiler/PersistedCodecTags`
@@ -24,6 +27,10 @@ usage: scripts/codec-shapes-regen.py [--check]
    identity without a `/vN` still exits 2. `--selftest` checks this rule.
 A source file whose text contains `codec-shapes-regen: frozen` (a frozen descriptor
 of an earlier deployment, which must keep spelling the OLD names) is never rewritten.
+Every run first refuses a TWIN: a literal spelling, outside the registry, of an
+identity the registry composes from a version constant (a bump of the constant would
+miss the literal). `--twins` runs only that check (no Lean); `--selftest` checks the
+bump forms and the twin rule on fixtures.
 --check: emit and compare only; exit 1 if the pins are out of date.
 """
 import os, pathlib, re, shutil, subprocess, sys, tempfile
@@ -154,31 +161,174 @@ def selftest():
         ("only an old child gone, no new one born: refused",
          classify(moved, baseline, {p: ("2" * 16, "P")}, set(), {"P"}, ok_src), ([], ["P"])),
     ]
+    hx = lambda t: t.encode().hex()
+    tags = "T.lean"
+    byte_files = {tags: 'abbrev x : List UInt8 := "P/Q".toUTF8.toList ++ [5]',
+                  "A.lean": 'def f := "P/Q".toUTF8.toList ++ [5] ++ y'}
+    seed_files = {tags: 'abbrev s : String := "P/S"\nabbrev sv : Nat := 4\n'
+                        'abbrev b : List UInt8 := s.toUTF8.toList ++ [UInt8.ofNat sv]'}
+    clock_files = {tags: 'abbrev cv : Nat := 4\nabbrev c : String := s!"P/C/v{cv}"',
+                   "A.lean": 'def w : String := "P/C/v4"'}
+    clock_once = {tags: clock_files[tags], "A.lean": "def w : String := Tags.c"}
+    cases += [
+        ("trailing version byte spelled as a literal: bumped everywhere",
+         plan_bump(hx("P/Q") + "05", "P/Q?", byte_files, tags),
+         ("P/Q?", {tags: 'abbrev x : List UInt8 := "P/Q".toUTF8.toList ++ [6]',
+                   "A.lean": 'def f := "P/Q".toUTF8.toList ++ [6] ++ y'}, [])),
+        ("trailing version byte from a registry constant: the constant bumped",
+         plan_bump(hx("P/S") + "04", "P/S?", seed_files, tags),
+         ("P/S?", {tags: seed_files[tags].replace("sv : Nat := 4", "sv : Nat := 5")}, ["sv"])),
+        ("a constant another identity bumped this round: not bumped twice",
+         plan_bump(hx("P/S") + "04", "P/S?", seed_files, tags, {"sv"}), ("P/S?", {}, ["sv"])),
+        ("/vN from a registry constant and a literal twin: both bumped",
+         plan_bump(hx("P/C/v4"), "P/C/v4", clock_files, tags),
+         ("P/C/v5", {tags: clock_files[tags].replace(":= 4", ":= 5"),
+                     "A.lean": 'def w : String := "P/C/v5"'}, ["cv"])),
+        ("a bare prefix has no version form: not bumped",
+         plan_bump(hx("P/Q"), "P/Q", byte_files, tags), None),
+        ("a literal twin of a composed identity: refused",
+         composite_twins(clock_files, tags), [("A.lean", '"P/C/v4"')]),
+        ("a trailing-byte twin of a composed identity: refused",
+         composite_twins({**seed_files, "B.lean": '"P/S".toUTF8.toList ++ [4]'}, tags)[0][0], "B.lean"),
+        ("the identity spelled once, through the registry: accepted",
+         composite_twins(clock_once, tags), []),
+    ]
     failed = [name for name, got, want in cases if got != want]
     for name, got, want in cases:
         print(("ok   " if got == want else "FAIL ") + name + ("" if got == want else f": {got} != {want}"))
     sys.exit(1 if failed else 0)
 
 
-def bump(identity_text):
-    match = re.fullmatch(r"(.*/v)(\d+)", identity_text)
-    if not match:
+NAT_DECL = re.compile(r'abbrev (\w+) : Nat := (\d+)')
+STRING_DECL = re.compile(r'abbrev (\w+) : String := "([^"]*)"')
+
+
+def version_forms(hexid, text):
+    """The two version forms of an identity: `.../vN` text -> ("v", prefix, N);
+    printable bytes then one version byte -> ("byte", prefix, N); else None."""
+    match = re.fullmatch(r"(.*/v)(\d+)", text)
+    if match:
+        return "v", match.group(1), int(match.group(2))
+    raw = bytes.fromhex(hexid)
+    if len(raw) > 1 and all(32 <= b < 127 and b != 34 for b in raw[:-1]) and raw[-1] < 32:
+        return "byte", raw[:-1].decode(), raw[-1]
+    return None
+
+
+def version_constants(form, prefix, n, tags_text):
+    """Registry Nat constants that carry this identity's version: `s!"P/v{V}"` or
+    `<"P" or a String abbrev spelling P>.toUTF8.toList ++ [UInt8.ofNat V]`, V = n."""
+    nats = {name: int(value) for name, value in NAT_DECL.findall(tags_text)}
+    names = {name for name, value in STRING_DECL.findall(tags_text) if value == prefix}
+    found = []
+    for v, value in nats.items():
+        if value != n:
+            continue
+        if form == "v":
+            hit = f's!"{prefix}{{{v}}}"' in tags_text
+        else:
+            heads = [re.escape(f'"{prefix}"')] + [rf"\b{re.escape(x)}" for x in names]
+            hit = re.search(rf"(?:{'|'.join(heads)})\.toUTF8\.toList\s*\+\+\s*\[UInt8\.ofNat {v}\]",
+                            tags_text) is not None
+        if hit:
+            found.append(v)
+    return found
+
+
+def plan_bump(hexid, text, files, tags_name, done=frozenset()):
+    """The edits that bump one identity, over `files` ({name: text}): every literal
+    spelling (`"P/vN"`, or `"P".toUTF8.toList ++ [N]`) and every registry version
+    constant that composes it (`V : Nat := N` in `tags_name`), unless a constant is
+    in `done` (already bumped this round by an identity sharing it).
+    Returns (new identity text, {name: new text}, constants bumped) or None."""
+    forms = version_forms(hexid, text)
+    if forms is None:
         return None
-    new = f"{match.group(1)}{int(match.group(2)) + 1}"
-    old_literal, new_literal = f'"{identity_text}"', f'"{new}"'
-    touched = []
-    for path in spelled_files():
-        text = path.read_text(errors="surrogateescape")
-        if old_literal in text:
-            path.write_text(text.replace(old_literal, new_literal), errors="surrogateescape")
-            touched.append(str(path.relative_to(ROOT)))
-    return new, touched
+    form, prefix, n = forms
+    edits = {}
+    if form == "v":
+        old, new = f'"{prefix}{n}"', f'"{prefix}{n + 1}"'
+        for name, body in files.items():
+            if old in body:
+                edits[name] = body.replace(old, new)
+        new_text = f"{prefix}{n + 1}"
+    else:
+        literal = re.compile(rf'({re.escape(chr(34) + prefix + chr(34))}\.toUTF8\.toList\s*\+\+\s*\[){n}\]')
+        for name, body in files.items():
+            if literal.search(body):
+                edits[name] = literal.sub(lambda m: f"{m.group(1)}{n + 1}]", body)
+        new_text = f"{prefix}?"
+    constants = []
+    if tags_name in files:
+        tags = edits.get(tags_name, files[tags_name])
+        for v in version_constants(form, prefix, n, files[tags_name]):
+            if v not in done:
+                tags = re.sub(rf"abbrev {v} : Nat := {n}\b", f"abbrev {v} : Nat := {n + 1}", tags)
+            constants.append(v)
+        if constants and tags != files[tags_name]:
+            edits[tags_name] = tags
+    if not edits and not (constants and set(constants) <= set(done)):
+        return None
+    return new_text, edits, constants
+
+
+def composite_twins(files, tags_name):
+    """Identities the registry composes from a version constant that some other
+    file ALSO spells as a literal: two spellings, one of which a bump can miss.
+    Returns [(file, literal)]."""
+    tags = files.get(tags_name, "")
+    nats = {name: int(value) for name, value in NAT_DECL.findall(tags)}
+    strings = dict(STRING_DECL.findall(tags))
+    literals = []
+    for prefix, v in re.findall(r's!"([^"{]*)\{(\w+)\}"', tags):
+        if v in nats:
+            literals.append(f'"{prefix}{nats[v]}"')
+    for head, v in re.findall(r'("[^"]*"|\b\w+)\.toUTF8\.toList\s*\+\+\s*\[UInt8\.ofNat (\w+)\]', tags):
+        prefix = head[1:-1] if head.startswith('"') else strings.get(head)
+        if prefix is not None and v in nats:
+            literals.append(re.compile(rf'"{re.escape(prefix)}"\.toUTF8\.toList\s*\+\+\s*\[{nats[v]}\]'))
+    twins = []
+    for name, body in files.items():
+        if name == tags_name:
+            continue
+        for lit in literals:
+            if (lit in body) if isinstance(lit, str) else lit.search(body):
+                twins.append((name, lit if isinstance(lit, str) else lit.pattern))
+    return twins
+
+
+def source_texts():
+    return {str(path.relative_to(ROOT)): path.read_text(errors="surrogateescape")
+            for path in spelled_files()}
+
+
+def bump(hexid, identity_text, done):
+    plan = plan_bump(hexid, identity_text, source_texts(), str(TAGS.relative_to(ROOT)), done)
+    if plan is None:
+        return None
+    new_text, edits, constants = plan
+    for name, body in edits.items():
+        (ROOT / name).write_text(body, errors="surrogateescape")
+    done.update(constants)
+    return new_text, sorted(edits) + [f"{c} (constant)" for c in constants]
+
+
+def refuse_twins():
+    twins = composite_twins(source_texts(), str(TAGS.relative_to(ROOT)))
+    for name, literal in twins:
+        print(f"twin: {name} spells {literal}, which the registry composes from a version constant")
+    if twins:
+        sys.exit("refused: use the registry constant instead of the literal (one spelling per identity)")
 
 
 def main():
     if "--selftest" in sys.argv[1:]:
         selftest()
     check = "--check" in sys.argv[1:]
+    refuse_twins()
+    if "--twins" in sys.argv[1:]:
+        print("no composite twins")
+        return
     baseline = parse(PINS.read_text())
     bumped = set()
     for round_ in range(8):
@@ -194,9 +344,9 @@ def main():
                 sys.exit(1)
             print("pins up to date")
             return
-        unbumped = []
+        unbumped, done = [], set()
         for hexid, text in moved:
-            result = bump(text)
+            result = bump(hexid, text, done)
             if result is None or not result[1]:
                 unbumped.append((hexid, text))
             else:
