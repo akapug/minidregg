@@ -260,5 +260,9 @@ when the arm lands.
   dregg-ref. Owed: read JPAY6 (row 23 and the plant) on the integrator's first candidate containing
   c286143e7; a consent binary from current main cannot be substituted into b26630168 (J0's full
   consent dies), so no earlier local run exists.
+* **Commuting content appends (contention lane ed3f512f9):** they relax only computeTarget's
+  content arm; thin consent refuses every `.content` payload (`unsupportedPayload`), so the keystone
+  is unaffected. A future thin content arm owes a commuting variant (post = shown on the patch's
+  writes, post = pre elsewhere) in the same commit.
 * **dregg-ref closure-lock:** never wrap `lane-check` in `closure-lock`; it takes the lock itself for
   its import build, and the outer lock deadlocks it (twice on 10-28).
