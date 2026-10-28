@@ -158,10 +158,11 @@ pub(crate) fn plan(
             let (view, _, _) = signed_view(root, workspace, &source_ref, "resource")?;
             let cell = view.get("cell").ok_or("signed source lacks cell")?;
             let id = member(&source_ref, "target")?;
-            let target = match cell_storage(cell)? {
-                "content" => json!({"type":"document","id":id}),
-                _ => resource_link_target(member(&source_ref, "kind")?, id),
-            };
+            // Every cell answers the link index's document key — a stream as
+            // much as a content document (`targetKeys`) — so a link to any
+            // cell names it as a document; `mini:KIND/ID` is for what is not
+            // a cell here.
+            let target = json!({"type":"document","id":id});
             if source_ref != reference(root, to)? {
                 return Err("source reference changed while preparing the link".into());
             }
