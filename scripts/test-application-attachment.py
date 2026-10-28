@@ -315,6 +315,12 @@ class AttachmentTests(unittest.TestCase):
         argv = seen[0][1]
         offset = argv.index("--served")
         self.assertEqual(argv[offset + 1:offset + 4], [op.mini, op.operator, M.sha(op.mini)])
+        pins = M.read(op.calls / "operator-pins.json")
+        self.assertEqual([(p["role"], p["index"]) for p in pins["payerPins"]], [("4", "0"), ("1", "0")])
+        for pin in pins["payerPins"]:
+            self.assertEqual(pin["keyId"], self.a["dispatch"]["keyId"])
+            self.assertEqual(pin["keyEpoch"], "77")
+            self.assertNotIn("seedPath", pin)
 
     def test_layout_keeps_controller_and_dispatch_separate(self):
         op = M.Attachment(self.path, "prepare-config")

@@ -618,7 +618,7 @@ class Attachment:
         # then authority; ApplicationDispatchAuthoring adds four observations.
         app_signers = [pin(role, index, "controller") for role, index in
                        [(4, 0), (4, 1), (8, 0), (8, 1), (1, 0), (9, 0), (9, 1), (9, 2), (9, 3)]]
-        payer = [pin(role, 0, "dispatch") for role in (4, 8, 1)]
+        payer = [pin(role, 0, "dispatch") for role in (4, 1)]
         for signer in payer:
             del signer["seedPath"]
         pins = {"controllerRouteName": self.names["application"], "socketPath": layout["listenerSocket"],
