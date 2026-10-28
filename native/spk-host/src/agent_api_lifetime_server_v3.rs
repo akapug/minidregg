@@ -230,8 +230,10 @@ impl ResidentLifetimeAgent<'_> {
             path_and_query: &path_and_query,
             ordered_headers: &ordered_headers,
             body: &body,
-            route: Route::Api {
-                signed_path: self.signed_api_path,
+            route: match &binding.route {
+                Some(crate::agent_api_lifetime_v3::HostedRoute::Web { .. }) => Route::Browser,
+                Some(crate::agent_api_lifetime_v3::HostedRoute::Api { signed_prefix }) => Route::Api { signed_path: signed_prefix },
+                None => Route::Api { signed_path: self.signed_api_path },
             },
         };
         let (app_path, _) = app_route_path(&http)?;
@@ -303,8 +305,12 @@ impl ResidentLifetimeAgent<'_> {
         )?;
         write_new(&client_dir, "op76-fresh-v3.json", b"fresh-installed-op76")?;
         let matched = matched_v3(&permit, &reserve, method, &app_path, query)?;
+        let web_origin = match &binding.route {
+            Some(crate::agent_api_lifetime_v3::HostedRoute::Web { origin }) => origin.as_str(),
+            _ => "",
+        };
         let physical =
-            physical_web_input(&matched, &http, self.display_name, self.preferred_handle, "")?;
+            physical_web_input(&matched, &http, self.display_name, self.preferred_handle, web_origin)?;
         caller_still_present(stream, cancelled)?;
         let record = self
             .journal
@@ -363,13 +369,21 @@ impl ResidentLifetimeAgent<'_> {
                 .finish_dispatch_uncertain_released(&identity, fence);
             return Err(error);
         }
-        let (web_reply, success_fence) = match prequeue.dispatch(
-            physical.binding,
-            physical.request,
-            MAX_APP_RESPONSE,
-            Duration::from_secs(30),
-            Arc::clone(cancelled),
-        ) {
+        let delivery = if method == crate::hosted_conversation::METHOD {
+            let api_prefix = match &binding.route {
+                Some(crate::agent_api_lifetime_v3::HostedRoute::Web { .. }) => None,
+                Some(crate::agent_api_lifetime_v3::HostedRoute::Api { signed_prefix }) => Some(signed_prefix.clone()),
+                None => Some(self.signed_api_path.to_owned()),
+            };
+            prequeue.dispatch_hosted(physical.binding,physical.request,MAX_APP_RESPONSE,
+                Duration::from_secs(30),Arc::clone(cancelled),crate::hosted_conversation::Custody {
+                    directory:client_dir.clone(),api_prefix,
+                })
+        } else {
+            prequeue.dispatch(physical.binding,physical.request,MAX_APP_RESPONSE,
+                Duration::from_secs(30),Arc::clone(cancelled))
+        };
+        let (web_reply, success_fence) = match delivery {
             Ok(reply) => reply,
             Err(failure) => {
                 let (error, fence) = failure.into_parts();

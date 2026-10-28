@@ -1,0 +1,248 @@
+{
+  "format": "mini-app-interface-v1",
+  "interfaceVersion": 1,
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 16384,
+    "replyBytes": 1048576,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "name": "filedrop",
+  "appId": "nn7axgy3y8kvd0m1mtk3cwca34t916p5d7m4j1j2e874nuz3t8y0",
+  "packageId": "d13f67230d0a4f9a63fc2c0bba87fc52",
+  "appVersion": "1.0.6",
+  "auth": {
+    "kind": "member-route"
+  },
+  "sources": [
+    "https://github.com/zombiezen/filedrop/blob/51f4f1d7ae6e567ddead5ddba7e1cb9d34935e8d/filedrop.go",
+    "scripts/spk-platform/market-writes/b5.sh"
+  ],
+  "$defs": {
+    "Entry": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "operations": {
+    "file.put": {
+      "description": "Replace bounded binary bytes in this flat inbox; path is a single filename.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "format": "relative-path",
+            "pattern": "^[^/]+$"
+          },
+          "contentBase64": {
+            "type": "string",
+            "maxLength": 21848,
+            "contentEncoding": "base64"
+          }
+        },
+        "required": [
+          "path",
+          "contentBase64"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "PUT",
+        "path": [
+          "file/",
+          {
+            "arg": "path",
+            "encoding": "path"
+          }
+        ],
+        "decode": "status",
+        "status": [
+          201,
+          204
+        ],
+        "base64": {
+          "arg": "contentBase64"
+        },
+        "headers": {
+          "content-type": "application/octet-stream"
+        }
+      }
+    },
+    "file.get": {
+      "description": "Read exact binary bytes as base64.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "format": "relative-path",
+            "pattern": "^[^/]+$"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "contentBase64": {
+            "type": "string",
+            "maxLength": 1398104,
+            "contentEncoding": "base64"
+          }
+        },
+        "required": [
+          "contentBase64"
+        ],
+        "additionalProperties": false
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "file/",
+          {
+            "arg": "path",
+            "encoding": "path"
+          }
+        ],
+        "decode": "base64",
+        "status": [
+          200
+        ]
+      }
+    },
+    "file.list": {
+      "description": "List every file in this flat inbox, bounded to 1000 entries; the package has no pagination.",
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Entry"
+        },
+        "maxItems": 1000
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "file/"
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ]
+      },
+      "projection": {
+        "collection": "entries",
+        "where": {}
+      }
+    }
+  },
+  "qualification": [
+    {
+      "id": "empty",
+      "op": "file.list",
+      "args": {},
+      "assert": [
+        {
+          "path": [],
+          "equals": []
+        }
+      ]
+    },
+    {
+      "id": "put",
+      "op": "file.put",
+      "args": {
+        "path": {
+          "concat": [
+            {
+              "context": "runId"
+            },
+            ".bin"
+          ]
+        },
+        "contentBase64": "AP9hZ2VudAo="
+      }
+    },
+    {
+      "id": "get",
+      "op": "file.get",
+      "args": {
+        "path": {
+          "concat": [
+            {
+              "context": "runId"
+            },
+            ".bin"
+          ]
+        }
+      },
+      "assert": [
+        {
+          "path": [
+            "contentBase64"
+          ],
+          "equals": "AP9hZ2VudAo="
+        }
+      ]
+    },
+    {
+      "id": "list",
+      "op": "file.list",
+      "args": {},
+      "assert": [
+        {
+          "contains": {
+            "name": {
+              "concat": [
+                {
+                  "context": "runId"
+                },
+                ".bin"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

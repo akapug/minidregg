@@ -1,0 +1,879 @@
+{
+  "format": "mini-app-interface-v1",
+  "name": "wekan",
+  "interfaceVersion": 1,
+  "appId": "m86q05rdvj14yvn78ghaxynqz7u2svw6rnttptxx49g1785cdv1h",
+  "packageId": "2a2c05041cb4285da884d114e4820298",
+  "appVersion": "12.65~2026-10-25",
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 16384,
+    "replyBytes": 1048576,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "$defs": {
+    "Board": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "title": {
+          "type": "string"
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "userId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "isAdmin": {
+                "type": "boolean"
+              },
+              "isActive": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "userId",
+              "isAdmin",
+              "isActive"
+            ],
+            "additionalProperties": true
+          },
+          "maxItems": 1000
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "members"
+      ],
+      "additionalProperties": true
+    },
+    "List": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "title": {
+          "type": "string"
+        },
+        "boardId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "boardId"
+      ],
+      "additionalProperties": true
+    },
+    "Swimlane": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "title": {
+          "type": "string"
+        },
+        "boardId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "boardId"
+      ],
+      "additionalProperties": true
+    },
+    "Card": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "title": {
+          "type": "string"
+        },
+        "boardId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "listId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "swimlaneId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "boardId",
+        "listId",
+        "swimlaneId"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "operations": {
+    "board.read": {
+      "description": "Read a ready snapshot of a non-lazy board with lists, swimlanes, cards and members. Lazy mode is refused; no atomic snapshot across concurrent edits is promised.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "board": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        },
+        "required": [
+          "board"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "boards": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Board"
+            },
+            "maxItems": 1000
+          },
+          "lists": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/List"
+            },
+            "maxItems": 1000
+          },
+          "swimlanes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Swimlane"
+            },
+            "maxItems": 1000
+          },
+          "cards": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Card"
+            },
+            "maxItems": 1000
+          }
+        },
+        "required": [
+          "boards",
+          "lists",
+          "swimlanes",
+          "cards"
+        ],
+        "additionalProperties": false
+      },
+      "write": false,
+      "binding": {
+        "protocol": "ddp",
+        "kind": "snapshot",
+        "publication": "board",
+        "params": [
+          {
+            "arg": "board"
+          },
+          false
+        ],
+        "collections": [
+          "boards",
+          "lists",
+          "swimlanes",
+          "cards"
+        ]
+      },
+      "requires": [
+        {
+          "op": "board.status",
+          "args": {
+            "board": {
+              "arg": "board"
+            }
+          },
+          "assert": [
+            {
+              "path": [
+                "lazy"
+              ],
+              "equals": false
+            }
+          ]
+        }
+      ]
+    },
+    "board.create": {
+      "description": "Create a private board with this authenticated member as administrator.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "write": true,
+      "binding": {
+        "protocol": "ddp",
+        "kind": "method",
+        "method": "/boards/insert",
+        "params": [
+          {
+            "_id": {
+              "context": "operationId"
+            },
+            "title": {
+              "arg": "title"
+            },
+            "permission": "private",
+            "color": "belize",
+            "type": "board",
+            "members": [
+              {
+                "userId": {
+                  "context": "userId"
+                },
+                "isAdmin": true,
+                "isActive": true
+              }
+            ],
+            "createdAt": {
+              "$date": {
+                "context": "nowMs"
+              }
+            }
+          }
+        ],
+        "result": "insert-id"
+      }
+    },
+    "list.create": {
+      "description": "Create a list belonging to an existing board.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "board": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          }
+        },
+        "required": [
+          "board",
+          "title"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "write": true,
+      "binding": {
+        "protocol": "ddp",
+        "kind": "method",
+        "method": "/lists/insert",
+        "params": [
+          {
+            "_id": {
+              "context": "operationId"
+            },
+            "title": {
+              "arg": "title"
+            },
+            "boardId": {
+              "arg": "board"
+            },
+            "sort": 0,
+            "createdAt": {
+              "$date": {
+                "context": "nowMs"
+              }
+            }
+          }
+        ],
+        "result": "insert-id"
+      },
+      "requires": [
+        {
+          "op": "board.read",
+          "args": {
+            "board": {
+              "arg": "board"
+            }
+          },
+          "exists": [
+            {
+              "collection": "boards",
+              "where": {
+                "id": {
+                  "arg": "board"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "swimlane.create": {
+      "description": "Create a swimlane belonging to an existing board.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "board": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          }
+        },
+        "required": [
+          "board",
+          "title"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "write": true,
+      "binding": {
+        "protocol": "ddp",
+        "kind": "method",
+        "method": "/swimlanes/insert",
+        "params": [
+          {
+            "_id": {
+              "context": "operationId"
+            },
+            "title": {
+              "arg": "title"
+            },
+            "boardId": {
+              "arg": "board"
+            },
+            "sort": 0,
+            "createdAt": {
+              "$date": {
+                "context": "nowMs"
+              }
+            }
+          }
+        ],
+        "result": "insert-id"
+      },
+      "requires": [
+        {
+          "op": "board.read",
+          "args": {
+            "board": {
+              "arg": "board"
+            }
+          },
+          "exists": [
+            {
+              "collection": "boards",
+              "where": {
+                "id": {
+                  "arg": "board"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "card.create": {
+      "description": "Create a card in a list and swimlane from the same board. IDs are scoped to this grain.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "board": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "list": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "swimlane": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          }
+        },
+        "required": [
+          "board",
+          "list",
+          "swimlane",
+          "title"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "write": true,
+      "binding": {
+        "protocol": "ddp",
+        "kind": "method",
+        "method": "/cards/insert",
+        "params": [
+          {
+            "_id": {
+              "context": "operationId"
+            },
+            "title": {
+              "arg": "title"
+            },
+            "boardId": {
+              "arg": "board"
+            },
+            "listId": {
+              "arg": "list"
+            },
+            "swimlaneId": {
+              "arg": "swimlane"
+            },
+            "userId": {
+              "context": "userId"
+            },
+            "sort": 0,
+            "createdAt": {
+              "$date": {
+                "context": "nowMs"
+              }
+            }
+          }
+        ],
+        "result": "insert-id"
+      },
+      "requires": [
+        {
+          "op": "board.read",
+          "args": {
+            "board": {
+              "arg": "board"
+            }
+          },
+          "exists": [
+            {
+              "collection": "boards",
+              "where": {
+                "id": {
+                  "arg": "board"
+                }
+              }
+            },
+            {
+              "collection": "lists",
+              "where": {
+                "id": {
+                  "arg": "list"
+                },
+                "boardId": {
+                  "arg": "board"
+                }
+              }
+            },
+            {
+              "collection": "swimlanes",
+              "where": {
+                "id": {
+                  "arg": "swimlane"
+                },
+                "boardId": {
+                  "arg": "board"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "card.list": {
+      "description": "List cards in a board filtered by list, after subscription ready. This is a bounded snapshot, not pagination.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "board": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "list": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        },
+        "required": [
+          "board",
+          "list"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Card"
+        },
+        "maxItems": 1000
+      },
+      "write": false,
+      "binding": {
+        "protocol": "ddp",
+        "kind": "snapshot",
+        "publication": "board",
+        "params": [
+          {
+            "arg": "board"
+          },
+          false
+        ],
+        "collections": [
+          "boards",
+          "lists",
+          "swimlanes",
+          "cards"
+        ]
+      },
+      "projection": {
+        "collection": "cards",
+        "where": {
+          "listId": {
+            "arg": "list"
+          }
+        }
+      },
+      "requires": [
+        {
+          "op": "board.read",
+          "args": {
+            "board": {
+              "arg": "board"
+            }
+          },
+          "exists": [
+            {
+              "collection": "boards",
+              "where": {
+                "id": {
+                  "arg": "board"
+                }
+              }
+            },
+            {
+              "collection": "lists",
+              "where": {
+                "id": {
+                  "arg": "list"
+                },
+                "boardId": {
+                  "arg": "board"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "board.status": {
+      "description": "Read the board loading mode and visible non-archived card count. Lazy boards need a paginated interface.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "board": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        },
+        "required": [
+          "board"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string"
+          },
+          "lazy": {
+            "type": "boolean"
+          },
+          "cards": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "mode",
+          "lazy",
+          "cards"
+        ],
+        "additionalProperties": true
+      },
+      "write": false,
+      "binding": {
+        "protocol": "ddp",
+        "kind": "method",
+        "method": "boardStatus",
+        "params": [
+          {
+            "arg": "board"
+          }
+        ],
+        "result": "json"
+      }
+    }
+  },
+  "qualification": [
+    {
+      "id": "board",
+      "op": "board.create",
+      "args": {
+        "title": {
+          "context": "runId"
+        }
+      }
+    },
+    {
+      "id": "list",
+      "op": "list.create",
+      "args": {
+        "board": {
+          "result": [
+            "board",
+            "id"
+          ]
+        },
+        "title": "To do"
+      }
+    },
+    {
+      "id": "swim",
+      "op": "swimlane.create",
+      "args": {
+        "board": {
+          "result": [
+            "board",
+            "id"
+          ]
+        },
+        "title": "Default"
+      }
+    },
+    {
+      "id": "card",
+      "op": "card.create",
+      "args": {
+        "board": {
+          "result": [
+            "board",
+            "id"
+          ]
+        },
+        "list": {
+          "result": [
+            "list",
+            "id"
+          ]
+        },
+        "swimlane": {
+          "result": [
+            "swim",
+            "id"
+          ]
+        },
+        "title": {
+          "context": "runId"
+        }
+      }
+    },
+    {
+      "id": "cards",
+      "op": "card.list",
+      "args": {
+        "board": {
+          "result": [
+            "board",
+            "id"
+          ]
+        },
+        "list": {
+          "result": [
+            "list",
+            "id"
+          ]
+        }
+      },
+      "assert": [
+        {
+          "contains": {
+            "id": {
+              "result": [
+                "card",
+                "id"
+              ]
+            },
+            "title": {
+              "context": "runId"
+            },
+            "boardId": {
+              "result": [
+                "board",
+                "id"
+              ]
+            },
+            "listId": {
+              "result": [
+                "list",
+                "id"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "kind": "sandstorm-ddp-rendezvous",
+    "websocket": "/websocket",
+    "method": "loginWithSandstorm",
+    "postPath": "/.sandstorm-login",
+    "contentType": "application/x-sandstorm-login-token",
+    "userIdField": "userId"
+  },
+  "sources": [
+    "https://github.com/wekan/wekan/blob/43c86065488315e28a26b55ffa876796ce5176b1/packages/wekan-accounts-sandstorm/server.js",
+    "https://github.com/wekan/wekan/blob/43c86065488315e28a26b55ffa876796ce5176b1/server/publications/boards.js"
+  ]
+}

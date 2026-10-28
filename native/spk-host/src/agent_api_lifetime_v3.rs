@@ -155,6 +155,46 @@ impl CurrentClaims {
     }
 }
 
+/// Protected route identity. A web origin is host custody, never a model argument;
+/// the committed Mini session kind must independently agree before delivery.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) enum HostedRoute {
+    Api { #[serde(rename = "signedPrefix")] signed_prefix: String },
+    Web { origin: String },
+}
+
+impl HostedRoute {
+    pub(crate) fn validate(&self) -> io::Result<()> {
+        match self {
+            Self::Api { signed_prefix } => minidregg_signed_api_path::checked_prefix(signed_prefix).map_err(refused),
+            Self::Web { origin } => {
+                let host = origin.strip_prefix("https://").ok_or_else(|| refused("hosted web origin is not https"))?;
+                if !crate::http_entrance::valid_expected_host(host) {
+                    return Err(refused("hosted web origin is not a canonical host"));
+                }
+                Ok(())
+            }
+        }
+    }
+    pub(crate) fn kind(&self) -> &'static str {
+        match self { Self::Api { .. } => "api", Self::Web { .. } => "web" }
+    }
+    pub(crate) fn project_path(&self, path: &str) -> io::Result<String> {
+        self.validate()?;
+        match self {
+            Self::Api { signed_prefix } => minidregg_signed_api_path::route(signed_prefix, path).map_err(refused),
+            Self::Web { .. } => {
+                // This is the same exact relative grammar used for browser entrance
+                // requests. No URL decoding, repair, prefixing or origin substitution.
+                let http = crate::dispatch_inspection::HttpProjection { method: "GET", path_and_query: path,
+                    ordered_headers: &[], body: &[], route: crate::dispatch_inspection::Route::Browser };
+                crate::dispatch_inspection::app_route_path(&http).map(|(path, _)| path)
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 /// Stable Hello identity for one resident app incarnation. A hard reconnect
@@ -163,7 +203,10 @@ impl CurrentClaims {
 pub(crate) struct LifetimeBinding {
     pub protocol: String,
     pub lineage: LifetimeLineage,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub signed_api_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route: Option<HostedRoute>,
     pub host_unit: String,
     pub host_invocation: String,
 }
@@ -171,8 +214,12 @@ pub(crate) struct LifetimeBinding {
 impl LifetimeBinding {
     pub(crate) fn validate(&self) -> io::Result<()> {
         self.lineage.validate()?;
-        if self.protocol != "mini-spk-agent-lifetime-binding-v3"
-            || minidregg_signed_api_path::checked_prefix(&self.signed_api_path).is_err()
+        let route_valid = match (&self.route, self.protocol.as_str()) {
+            (None, "mini-spk-agent-lifetime-binding-v3") => minidregg_signed_api_path::checked_prefix(&self.signed_api_path).is_ok(),
+            (Some(route), "mini-spk-agent-lifetime-binding-v4") => self.signed_api_path.is_empty() && route.validate().is_ok(),
+            _ => false,
+        };
+        if !route_valid
             || self.host_unit.is_empty()
             || self.host_unit.len() > 256
             || self
@@ -189,7 +236,7 @@ impl LifetimeBinding {
     pub(crate) fn fingerprint(&self) -> io::Result<String> {
         self.validate()?;
         let mut digest = Sha256::new();
-        digest.update(b"DREGG/SPK-AGENT-LIFETIME-BINDING/v3\0");
+        digest.update(if self.route.is_some() { b"DREGG/SPK-AGENT-LIFETIME-BINDING/v4\0" } else { b"DREGG/SPK-AGENT-LIFETIME-BINDING/v3\0" });
         digest.update(serde_json::to_vec(self)?);
         Ok(digest
             .finalize()
@@ -446,6 +493,7 @@ pub(crate) fn match_committed_inspection(input: CommittedMatch<'_>) -> io::Resul
     same(session, "resource", &lineage.session_resource)?;
     same(session, "generation", &current.session_generation)?;
     same(session, "subject", &lineage.participant_subject)?;
+    same(session, "kind", binding.route.as_ref().map_or("api", HostedRoute::kind))?;
     let origin = session
         .get("originalOrigin")
         .ok_or_else(|| refused("origin absent"))?;
@@ -542,6 +590,7 @@ mod tests {
                 purse_task: "701".into(),
             },
             signed_api_path: "/api/".into(),
+            route: None,
             host_unit: "mini-app.service".into(),
             host_invocation: "ab".repeat(16),
         }
@@ -605,6 +654,29 @@ mod tests {
                 "parentPhysicalRoot":current.parent_physical_root,
                 "pursePhysicalRoot":current.purse_physical_root}});
         (request, plan)
+    }
+
+    #[test]
+    fn hosted_binding_v4_is_distinct_and_route_is_exact() {
+        let legacy = binding();
+        let legacy_bytes = serde_json::to_value(&legacy).unwrap();
+        assert!(legacy_bytes.get("route").is_none());
+        assert!(legacy_bytes.get("signedApiPath").is_some());
+        let mut web = legacy.clone();
+        web.protocol = "mini-spk-agent-lifetime-binding-v4".into();
+        web.signed_api_path.clear();
+        web.route = Some(HostedRoute::Web { origin: "https://friend.example.test".into() });
+        web.validate().unwrap();
+        let web_bytes = serde_json::to_value(&web).unwrap();
+        assert!(web_bytes.get("signedApiPath").is_none());
+        assert_eq!(web_bytes["route"]["kind"], "web");
+        assert_ne!(legacy.fingerprint().unwrap(), web.fingerprint().unwrap());
+        assert_eq!(web.route.as_ref().unwrap().project_path("websocket").unwrap(), "websocket");
+        web.protocol = legacy.protocol;
+        assert!(web.validate().is_err());
+        for origin in ["http://friend.example.test", "https://elsewhere/a", "https://friend.example.test/"] {
+            assert!(HostedRoute::Web { origin: origin.into() }.validate().is_err());
+        }
     }
 
     #[test]
@@ -687,7 +759,7 @@ mod tests {
                 "currentPhysicalRoot":lineage.grant_initialized_root,
                 "issueReceipt":lineage.grant_issue_receipt},
             "app":{"resource":lineage.app_resource,"generation":current.app_generation},
-            "session":{"resource":lineage.session_resource,
+            "session":{"resource":lineage.session_resource,"kind":binding.route.as_ref().map_or("api", HostedRoute::kind),
                 "generation":current.session_generation,
                 "subject":lineage.participant_subject,
                 "originalOrigin":{"type":"agent","task":lineage.original_parent_task,

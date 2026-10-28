@@ -1,0 +1,12 @@
+{
+  "source": "/tank/lanes/cx-app-interface/qualification/interface-davros-2169047-17068/requests.jsonl",
+  "candidate": "e89fe7b8ba8c477d1538ed6ee1f0e7aeac70c97f",
+  "packageId": "15bf92664a1b14a784bf737e502e13b7",
+  "operation": "entry.move",
+  "recording": "2026-10-28; body verbatim; headers projected to content-type",
+  "status": 403,
+  "headers": {
+    "content-type": "text/html; charset=utf-8"
+  },
+  "body": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<d:error xmlns:d=\"DAV:\" xmlns:a=\"http://ajax.org/2005/aml\">\n    <a:exception>Forbidden</a:exception>\n    <a:message>Requested uri (/remote.php/webdav/ai-ef6085a78f624b5f99bd/moved.bin) is out of base uri (/dav/)</a:message>\n<a:jsdav-version>0.3.4</a:jsdav-version>\n</d:error>"
+}

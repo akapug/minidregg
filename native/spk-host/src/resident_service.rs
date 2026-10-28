@@ -140,6 +140,12 @@ enum PreparedAgent {
 }
 
 impl PreparedAgent {
+    fn requires_api(&self) -> bool {
+        match self {
+            Self::V2(..) => true,
+            Self::V3(custody, _) => !matches!(custody.route, Some(crate::agent_api_lifetime_v3::HostedRoute::Web { .. })),
+        }
+    }
     fn coordinates(&self) -> (&str, &str, &str, &str) {
         match self {
             Self::V2(custody, _) => (
@@ -1532,6 +1538,16 @@ pub fn run(config_path: &Path) -> io::Result<()> {
             }
             _ => return Err(invalid("resident agent protocol refused")),
         };
+        if let PreparedAgent::V3(custody, _) = &prepared {
+            if let Some(crate::agent_api_lifetime_v3::HostedRoute::Web { origin }) = &custody.route {
+                if !policies.iter().any(|policy| policy.fixed_session_kind == EntranceKind::Browser
+                    && policy.fixed_app == custody.lineage.app_resource
+                    && policy.fixed_subject == custody.lineage.participant_subject
+                    && format!("https://{}", policy.expected_host) == *origin) {
+                    return Err(invalid("hosted web agent origin lacks same-member browser custody"));
+                }
+            }
+        }
         let (session, ticket, parent, purse) = prepared.coordinates();
         if agent_preflights.iter().any(|prior: &PreparedAgent| {
             let (s, t, p, q) = prior.coordinates();
@@ -1558,7 +1574,7 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     if bridge.api_path != descriptor.package.api_path {
         return Err(invalid("signed START bridge differs from Mini descriptor"));
     }
-    if (!config.agents.is_empty()
+    if (agent_preflights.iter().any(PreparedAgent::requires_api)
         || policies
             .iter()
             .any(|policy| policy.fixed_session_kind == EntranceKind::Api))
@@ -1737,7 +1753,7 @@ pub fn run(config_path: &Path) -> io::Result<()> {
                 custody.lineage.app_resource == claim.physical_begin.app.to_string()
             }
         };
-        if !matches_app || bridge.api_path.is_none() {
+        if !matches_app || (prepared.requires_api() && bridge.api_path.is_none()) {
             return Err(invalid("agent custody differs from claimed shared app"));
         }
     }
@@ -2163,9 +2179,7 @@ pub fn run(config_path: &Path) -> io::Result<()> {
         let (listener, prepared, agent) = agent_routes
             .get_mut(index)
             .ok_or_else(|| invalid("resident agent poll index drift"))?;
-        let signed_api_path = api_path
-            .as_deref()
-            .ok_or_else(|| invalid("signed API path absent"))?;
+        let signed_api_path = api_path.as_deref().unwrap_or("");
         match prepared {
             PreparedAgent::V2(custody, reverse) => {
                 let mut context = ResidentAgent {

@@ -1,0 +1,333 @@
+{
+  "format": "mini-app-interface-v1",
+  "name": "tube",
+  "interfaceVersion": 1,
+  "appId": "70xjeuj6t85v3s9a3up583q97wu044mnt8aekf3pqs41e3ct2v70",
+  "packageId": "cbba85a45618c184f304d90ccce303a9",
+  "appVersion": "1.1.13",
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 1048576,
+    "replyBytes": 4194304,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "operations": {
+    "video.upload": {
+      "description": "Upload a bounded video with title and description; the app transcodes it into the browser\u2019s video library.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 16384
+          },
+          "contentBase64": {
+            "type": "string",
+            "contentEncoding": "base64",
+            "maxLength": 1398104
+          }
+        },
+        "required": [
+          "title",
+          "description",
+          "contentBase64"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 599
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "POST",
+        "path": [
+          "upload"
+        ],
+        "decode": "status",
+        "status": [
+          200
+        ],
+        "multipart": [
+          {
+            "name": "video_title",
+            "text": {
+              "arg": "title"
+            }
+          },
+          {
+            "name": "video_description",
+            "text": {
+              "arg": "description"
+            }
+          },
+          {
+            "name": "video_file",
+            "filename": "video.mp4",
+            "contentType": "video/mp4",
+            "base64": {
+              "arg": "contentBase64"
+            }
+          }
+        ]
+      }
+    },
+    "videos.list": {
+      "description": "Read the library\u2019s RSS data feed as typed metadata and media enclosure references.",
+      "input": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "array",
+        "maxItems": 1000,
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "title": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 16384
+            },
+            "link": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 16384
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 16384
+            },
+            "published": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 16384
+            },
+            "enclosure": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string",
+                      "maxLength": 4096
+                    },
+                    "bytes": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "type": {
+                      "type": "string",
+                      "maxLength": 128
+                    }
+                  },
+                  "required": [
+                    "url",
+                    "bytes",
+                    "type"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "title",
+            "link",
+            "description",
+            "published",
+            "enclosure"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "feed.xml"
+        ],
+        "decode": "rss",
+        "status": [
+          200
+        ]
+      }
+    },
+    "video.get": {
+      "description": "Read bounded MP4 bytes using the video ID from a library /v/<id> link, optionally including its collection prefix.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "relative-path",
+            "maxLength": 512
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "contentBase64": {
+            "type": "string",
+            "contentEncoding": "base64",
+            "maxLength": 5592408
+          }
+        },
+        "required": [
+          "contentBase64"
+        ],
+        "additionalProperties": false
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "v/",
+          {
+            "arg": "id",
+            "encoding": "path"
+          },
+          ".mp4"
+        ],
+        "decode": "base64",
+        "status": [
+          200
+        ]
+      }
+    },
+    "thumbnail.get": {
+      "description": "Read the generated thumbnail bytes for a video ID.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "relative-path",
+            "maxLength": 512
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "contentBase64": {
+            "type": "string",
+            "contentEncoding": "base64",
+            "maxLength": 5592408
+          }
+        },
+        "required": [
+          "contentBase64"
+        ],
+        "additionalProperties": false
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "t/",
+          {
+            "arg": "id",
+            "encoding": "path"
+          }
+        ],
+        "decode": "base64",
+        "status": [
+          200
+        ]
+      }
+    }
+  },
+  "qualification": [
+    {
+      "id": "upload",
+      "op": "video.upload",
+      "args": {
+        "title": {
+          "context": "runId"
+        },
+        "description": "Uploaded through the member\u2019s typed video tool.",
+        "contentBase64": "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"
+      }
+    },
+    {
+      "id": "feed",
+      "op": "videos.list",
+      "args": {},
+      "await": {
+        "attempts": 20,
+        "intervalSeconds": 3,
+        "retryStatuses": [
+          502,
+          503
+        ]
+      },
+      "assert": [
+        {
+          "contains": {
+            "title": {
+              "context": "runId"
+            },
+            "description": "Uploaded through the member\u2019s typed video tool."
+          }
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "kind": "member-session"
+  },
+  "sources": [
+    "https://git.mills.io/prologic/tube/src/commit/cc036e0af183a1504546f796949d732ea5cfe045/app/app.go",
+    "https://git.mills.io/prologic/tube/src/commit/cc036e0af183a1504546f796949d732ea5cfe045/app/feed.go",
+    "scripts/spk-platform/market-writes/b5-tube-clip.py"
+  ],
+  "$defs": {}
+}

@@ -8,7 +8,7 @@ centrally. Rows below say which checks ran before that rule.
 | item | branch tip | state |
 |---|---|---|
 | 1 invite reserve + codes | lane/pd-invite 567e8db7b | done; filtered tests green on the Mac before the rule; infra wiring routed |
-| 2 per-subject Host rate | lane/pd-host-rate f3a1e243a | Host arm, `rateLimited` (tag 16), outcome v7, client rendering pushed, reasoned; RefusalReason, NativeProtocolFrames, NativeHostCodec elaborated per file before the rule |
+| 2 per-subject Host rate | lane/pd-host-rate 9f9bac798 | Host arm (the allocation-gate red fixed: ratedClaims no longer carries a `| 130 =>` arm), `rateLimited` (tag 16), outcome v7, client rendering pushed, reasoned; RefusalReason, NativeProtocolFrames, NativeHostCodec elaborated per file before the rule |
 | 3 web3.js → solpay.js | lane/pd-web3 e4f3904cf | done; Wallet Standard only, paste fallback (decided) |
 | 4 grain class slices | lane/pd-grain-class 577208316 | done; infra drop-ins routed |
 | 5 private-compute door | lane/pd-private-compute a5b6cb6b6 | done; `mini-private-compute` in the artifact set routed |

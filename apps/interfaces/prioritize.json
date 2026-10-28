@@ -1,0 +1,326 @@
+{
+  "format": "mini-app-interface-v1",
+  "name": "prioritize",
+  "interfaceVersion": 1,
+  "appId": "nut9xv0zcc4x92udcu9mwrp661xps9ecdtjaffnev34yn2ussvz0",
+  "packageId": "345bcc7b66577c64b514b56fd7731455",
+  "appVersion": "0.5",
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 16384,
+    "replyBytes": 1048576,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "auth": {
+    "kind": "member-route",
+    "appCookies": "retain"
+  },
+  "$defs": {
+    "Job": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "period": {
+          "type": "integer",
+          "minimum": 86400000,
+          "maximum": 315576000000
+        },
+        "lastDone": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "urgencyGrowth": {
+          "enum": [
+            "log",
+            "sqrt",
+            "linear",
+            "quadratic",
+            "exponential"
+          ],
+          "description": "Absent in older saved tasks means linear urgency growth."
+        }
+      },
+      "required": [
+        "title",
+        "period",
+        "lastDone"
+      ],
+      "additionalProperties": false
+    },
+    "Entry": {
+      "type": "object",
+      "properties": {
+        "k": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "v": {
+          "$ref": "#/$defs/Job"
+        }
+      },
+      "required": [
+        "k",
+        "v"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "sources": [
+    "https://github.com/zenhack/prioritize/blob/9b4929763dab8d74f03df41a9726c0a66df19030/main.go",
+    "https://github.com/zenhack/prioritize/blob/9b4929763dab8d74f03df41a9726c0a66df19030/index.html",
+    "https://github.com/zenhack/prioritize/blob/9b4929763dab8d74f03df41a9726c0a66df19030/client/src/Main.elm"
+  ],
+  "operations": {
+    "auth.csrf": {
+      "description": "Obtain only the CSRF bootstrap token on this same member route.",
+      "internal": true,
+      "write": false,
+      "input": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256,
+        "pattern": "^[A-Za-z0-9_+/=-]+$"
+      },
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [],
+        "decode": "json-string-fragment",
+        "fragment": {
+          "prefix": "csrfToken: ",
+          "suffix": ","
+        },
+        "status": [
+          200
+        ]
+      }
+    },
+    "jobs.snapshot": {
+      "description": "Read periodic jobs and their optimistic concurrency version; this is an immediate snapshot, not a long poll.",
+      "write": false,
+      "input": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "object",
+            "properties": {
+              "jobs": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/Entry"
+                },
+                "maxItems": 1000,
+                "uniqueBy": "k"
+              }
+            },
+            "required": [
+              "jobs"
+            ],
+            "additionalProperties": false
+          },
+          "headers": {
+            "type": "object",
+            "properties": {
+              "version": {
+                "type": "string",
+                "pattern": "^[0-9]+$",
+                "maxLength": 20
+              }
+            },
+            "required": [
+              "version"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "body",
+          "headers"
+        ],
+        "additionalProperties": false
+      },
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "data"
+        ],
+        "headers": {
+          "X-Sandstorm-App-Data-Version": "-1"
+        },
+        "decode": "json",
+        "responseHeaders": {
+          "version": "x-sandstorm-app-data-version"
+        },
+        "status": [
+          200
+        ],
+        "emptyValue": {
+          "jobs": []
+        }
+      }
+    },
+    "jobs.replace": {
+      "description": "Replace the complete job list only at expectedVersion. Preserve every job you want to keep. A concurrent human edit returns conflict. Period and lastDone use milliseconds.",
+      "write": true,
+      "input": {
+        "type": "object",
+        "properties": {
+          "jobs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Entry"
+            },
+            "maxItems": 1000,
+            "uniqueBy": "k"
+          },
+          "expectedVersion": {
+            "type": "string",
+            "pattern": "^[0-9]+$",
+            "maxLength": 20
+          }
+        },
+        "required": [
+          "jobs",
+          "expectedVersion"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "prepare": [
+        {
+          "id": "csrf",
+          "op": "auth.csrf",
+          "args": {}
+        }
+      ],
+      "binding": {
+        "protocol": "http",
+        "method": "POST",
+        "path": [
+          "data"
+        ],
+        "headers": {
+          "X-CSRF-Token": {
+            "result": [
+              "csrf"
+            ]
+          },
+          "X-Sandstorm-App-Data-Version": {
+            "arg": "expectedVersion"
+          }
+        },
+        "json": {
+          "jobs": {
+            "arg": "jobs"
+          }
+        },
+        "decode": "status",
+        "status": [
+          200
+        ]
+      }
+    }
+  },
+  "qualification": [
+    {
+      "id": "before",
+      "op": "jobs.snapshot",
+      "args": {},
+      "assert": [
+        {
+          "path": [
+            "body",
+            "jobs"
+          ],
+          "equals": []
+        }
+      ]
+    },
+    {
+      "id": "replace",
+      "op": "jobs.replace",
+      "args": {
+        "jobs": [
+          {
+            "k": 1,
+            "v": {
+              "title": {
+                "context": "runId"
+              },
+              "period": 86400000,
+              "lastDone": null,
+              "urgencyGrowth": "linear"
+            }
+          }
+        ],
+        "expectedVersion": {
+          "result": [
+            "before",
+            "headers",
+            "version"
+          ]
+        }
+      }
+    },
+    {
+      "id": "after",
+      "op": "jobs.snapshot",
+      "args": {},
+      "assert": [
+        {
+          "path": [
+            "body",
+            "jobs"
+          ],
+          "equals": [
+            {
+              "k": 1,
+              "v": {
+                "title": {
+                  "context": "runId"
+                },
+                "period": 86400000,
+                "lastDone": null,
+                "urgencyGrowth": "linear"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -355,7 +355,20 @@ Lean never runs on the Mac.
        built and a bare `git init` for the scripts' `rev-parse`.
      - The re-recorded data files and the projection/authority edits are .lean changes: build
        `Fixtures` on hbox (`rebuild.sh Fixtures`), commit named files, push, send the sha.
-2. **The migration commit** (§5 step 1; post-demo; prepare, never land without the
+2. **Commuting appends (qualification ruling, 10-28).**  Append-only `createAtom` content
+   commands are to admit at any signed root if they admit at `pre.root`; every other content
+   action still refuses `staleTarget`.  The keystone worker is `a76c092a8eda237ca`
+   (`lane/qualify-doc-contention`).  The root pin is hand-stated today in three places:
+   `computeTarget`'s content arm, `contentHeader`, and `ContentAgreement` clause 3.  Clause 2
+   is stated only at `pre.root`.  The proposal sent to the worker: a declaration field
+   `commutes : O → Bool` from which the header's root check is derived; clause 3 conditional on
+   `commutes = false`; clause 2 generalised to every root when the command commutes; the kernel
+   arm changes in the same commit.  The statements go to the auditor first.  Then re-prove
+   ContentProofs (`computeTarget_content_header`, clause 3 of `contentAgreement`, the host
+   witnesses), PrepareProofs and the HostTeethProofs header.  Never hand-edit the clause
+   outside this.  **Owner: `a76c092a8eda237ca`, who took it on 10-28 on `lane/qualify-doc-contention`
+   with this design (its commit messages carry a pointer).  This lane only reviews.**
+3. **The migration commit** (§5 step 1; post-demo; prepare, never land without the
    coordinator's word).  The gate is `HostKeystone` and `HostLegacyCensus` (both provable
    only after it) plus the already-proved `PrepareFactors`.  Its shape:
    - `Payload` loses `content` and gains `registered (code : UInt8) (op : List UInt8)`, with
@@ -381,9 +394,9 @@ Lean never runs on the Mac.
    - Persisted identities move: `payloadStream` and the transaction frame.  The integrator
      plans the raw-octet bump; this is a re-genesis by the whole-epoch design (§8 item 4
      below), which re-genesis at the homelab absorbs.
-3. **Migration step 2 (transfer)** must satisfy `TwoLevels` for its derived executor projected
+4. **Migration step 2 (transfer)** must satisfy `TwoLevels` for its derived executor projected
    to a `YieldCommit` (§5 step 2, corrected 10-28: a refused verdict is an accepted yield).
-4. **Whole-epoch compatibility** (design only; no local handler upgrade is promised until it is
+5. **Whole-epoch compatibility** (design only; no local handler upgrade is promised until it is
    built).  Today `StoreEpoch.current.schemaRefs` hashes the whole persisted corpus, and opening
    is equality, so every registry change is a re-genesis.  The design:
    - the seed carries the corpus itself;

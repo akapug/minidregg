@@ -10,6 +10,13 @@
 #
 #   preflight  the Store pins Hermes's purse tariff; the provider table has the
 #              pool row for the model; broker client; operator socket; launcher
+#   consent    the resident's delegated full consent: a socket-activated `mini
+#              serve-controller-consent` runs as the operator (it replays the Store,
+#              whose checkpoint key the resident must never read) and answers only the
+#              resident uid; its listener is the resident's RUN/consent.sock. The
+#              selection the resident's processes need is V/consent.env (root 0644),
+#              which every as-resident command here exports and the controller and
+#              resident units take as EnvironmentFile=
 #   subjects   enroll hermes (room key and tool worker), hhost (parent owner),
 #              hprov (provider worker) and the founder; provision + init the
 #              founder and Hermes
@@ -68,11 +75,11 @@
 #   The house's shared room (the lobby every member joins at the door; the seed's posts
 #   and the tour's Hermes step), installed before deploy/demo-seed/seed.sh runs:
 #     INSTANCE=lobby BASE=9872000 ROOM=lobby BUDGET=100 FOUNDER_MEMBER=house MEMBER_ROOT=/var/lib/mini/sessions \
-#       HERMES_ROOT=OUT install-hermes preflight route subjects room runtime create handoff summon controller dispatch resident
+#       HERMES_ROOT=OUT install-hermes preflight route consent subjects room runtime create handoff summon controller dispatch resident
 #
 #   The subscriber tier (deploy/hermes/README.md "The subscriber tier"):
 #     INSTANCE=glm BASE=9871000 MODEL=glm-5.3-flash ROOM=subscribers TIER=1 POOL_ROW=zai-glm \
-#       HERMES_ROOT=OUT install-hermes preflight route subjects room concierge runtime create handoff summon controller dispatch resident
+#       HERMES_ROOT=OUT install-hermes preflight route consent subjects room concierge runtime create handoff summon controller dispatch resident
 set -euo pipefail
 # Custody files are owner-private whatever the calling shell's umask; explicit
 # modes come from install -m.
@@ -111,6 +118,8 @@ RUN=$V/run                        # RESIDENT 0700: the resident's operator route
 RSOCKET=$RUN/mini.sock
 SPEC=$V/grain-spec.json           # root 0644: read by both accounts (paths only, no secrets)
 ROUTE_UNIT=mini-resident-operator-$INSTANCE
+CONSENT_UNIT=mini-resident-consent-$INSTANCE
+CONSENT_ENV=$V/consent.env
 MINI=$CAND/bin/mini HOST=$CAND/bin/minidregg-host GRAIN=$CAND/bin/grain-runtime
 BRIDGE=$CAND/bin/grain-provider-bridge LAUNCH_GATE=$CAND/bin/launch-gate
 CONFIG=$NODE/deployment/pinned-config.json
@@ -130,7 +139,12 @@ ANCHORS=$V/anchors
 as_op() { runuser -u "$OPERATOR" -- env MINI_CONSENT_ANCHOR_DIR="$NODE/consent-anchors" "$@"; }
 # The resident pins its route's listener creator (systemd, uid 0); every
 # child `mini` of its commands inherits the pin.
-as_res() { runuser -u "$RESIDENT" -- env MINI_OPERATOR_PEER_UID=0 MINI_CONSENT_ANCHOR_DIR="$ANCHORS" "$@"; }
+# Once step consent ran, every resident command selects its delegated consent.
+as_res() {
+  local sel=()
+  [ -f "$CONSENT_ENV" ] && mapfile -t sel <"$CONSENT_ENV"
+  runuser -u "$RESIDENT" -- env MINI_OPERATOR_PEER_UID=0 MINI_CONSENT_ANCHOR_DIR="$ANCHORS" "${sel[@]}" "$@"
+}
 resident_subject() { case $1 in hermes|hhost|hprov) return 0 ;; *) return 1 ;; esac; }
 # A hosted founder (FOUNDER_MEMBER) acts as its own tenant account, as its shell does.
 hosted_founder() { [ "$1" = founder ] && [ -n "$FOUNDER_MEMBER" ]; }
@@ -247,6 +261,53 @@ EOF
   as_res "$MINI" operator-status --socket "$RSOCKET" --host "$HOST" --config "$CONFIG" >/dev/null \
     || die "the resident's route does not answer operator-status (journalctl -u $ROUTE_UNIT)"
   mark route
+}
+
+step_consent() {
+  done_step route || die "consent follows route"
+  local ruid consent=$CAND/bin/minidregg-client-consent csock=$RUN/consent.sock image settings
+  ruid=$(id -u "$RESIDENT")
+  [ -x "$consent" ] || die "missing $consent"
+  install -d -o "$OPERATOR" -g "$OPERATOR" -m 0700 "$OPV/consent-anchors"
+  image=$(sha256sum "$consent" | cut -d' ' -f1); settings=$(sha256sum "$CONFIG" | cut -d' ' -f1)
+  cat >"/etc/systemd/system/$CONSENT_UNIT.socket" <<EOF
+[Unit]
+Description=Mini delegated consent for the $INSTANCE resident ($RESIDENT)
+[Socket]
+ListenStream=$csock
+SocketUser=$RESIDENT
+SocketGroup=$RESIDENT
+SocketMode=0600
+DirectoryMode=0700
+RemoveOnStop=yes
+Accept=no
+Service=$CONSENT_UNIT.service
+[Install]
+WantedBy=sockets.target
+EOF
+  cat >"/etc/systemd/system/$CONSENT_UNIT.service" <<EOF
+[Unit]
+Description=Mini full consent for the $INSTANCE resident ($RESIDENT): answers only uid $ruid
+Requires=$CONSENT_UNIT.socket
+After=$CONSENT_UNIT.socket
+[Service]
+User=$OPERATOR
+Group=$OPERATOR
+ExecStart=$MINI serve-controller-consent --socket $csock --consent $consent --config $CONFIG --consent-sha256 $image --config-sha256 $settings --controller-uid $ruid --anchors $OPV/consent-anchors
+Environment=HOME=$OPV
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+LockPersonality=yes
+EOF
+  systemctl daemon-reload
+  systemctl enable --now "$CONSENT_UNIT.socket"
+  # The selection (deploy/shell/README.md: the hosted member's variables).
+  printf '%s\n' "MINI_CONSENT_SOCKET=$csock" "MINI_CONSENT_PEER_UID=0" "MINI_CONSENT_SHA256=$image" \
+    "MINI_CONSENT_CONFIG_SHA256=$settings" "MINI_LOCAL_HOST=$HOST" "MINI_CONSENT_HOST=$consent" \
+    "MINI_CONSENT_CONFIG=$CONFIG" >"$CONSENT_ENV.new"
+  install -o root -g root -m 0644 "$CONSENT_ENV.new" "$CONSENT_ENV"; rm -f "$CONSENT_ENV.new"
+  mark consent
 }
 
 enroll() { # NAME: keygen in its home (its owner's account); the sponsor plans, seals and submits its enrollment
@@ -373,6 +434,7 @@ step_runtime() {
 }
 
 step_create() {
+  done_step consent || die "create needs the resident's delegated consent (step consent): its own consent cannot read the Store"
   local genesis=$NODE/genesis.json reserve
   # The pool hold covers the fee and the metered charge at the token caps.
   reserve=$(jq -r --argjson p "$PURSE_T" '.providerServices[] | select(.providerResourceId == $p) | .tariff.routes.pool
@@ -535,7 +597,7 @@ step_refill() {
 [ $# -gt 0 ] || { sed -n '2,70p' "$0"; exit 64; }
 for step in "$@"; do
   case $step in
-    preflight|route|subjects|room|concierge|runtime|create|handoff|summon|controller|dispatch|resident) ;;
+    preflight|route|consent|subjects|room|concierge|runtime|create|handoff|summon|controller|dispatch|resident) ;;
     refill|dismiss|resummon) done_step preflight || die "run preflight first"; POOL_ROW=$(cat "$RECORD/pool-row"); "step_$step"; continue ;;
     *) die "unknown step $step" ;;
   esac

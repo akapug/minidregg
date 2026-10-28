@@ -1,0 +1,419 @@
+{
+  "format": "mini-app-interface-v1",
+  "name": "davros",
+  "interfaceVersion": 1,
+  "appId": "8aspz4sfjnp8u89000mh2v1xrdyx97ytn8hq71mdzv4p4d8n0n3h",
+  "packageId": "15bf92664a1b14a784bf737e502e13b7",
+  "appVersion": "0.33.4",
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 16384,
+    "replyBytes": 1048576,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "$defs": {
+    "DavEntry": {
+      "type": "object",
+      "properties": {
+        "href": {
+          "type": "string"
+        },
+        "collection": {
+          "type": "boolean"
+        },
+        "bytes": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "etag": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "href",
+        "collection",
+        "bytes",
+        "etag"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "operations": {
+    "directory.create": {
+      "description": "Create a directory beneath this grain\u2019s DAV root.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "format": "relative-path"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "MKCOL",
+        "path": [
+          "dav/",
+          {
+            "arg": "path",
+            "encoding": "path"
+          }
+        ],
+        "decode": "status",
+        "status": [
+          201
+        ]
+      }
+    },
+    "file.put": {
+      "description": "Write bounded binary bytes at a relative file path.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "format": "relative-path"
+          },
+          "contentBase64": {
+            "type": "string",
+            "maxLength": 21848,
+            "contentEncoding": "base64"
+          }
+        },
+        "required": [
+          "path",
+          "contentBase64"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "PUT",
+        "path": [
+          "dav/",
+          {
+            "arg": "path",
+            "encoding": "path"
+          }
+        ],
+        "decode": "status",
+        "status": [
+          200,
+          201,
+          204
+        ],
+        "base64": {
+          "arg": "contentBase64"
+        },
+        "headers": {
+          "content-type": "application/octet-stream"
+        }
+      }
+    },
+    "file.get": {
+      "description": "Read exact binary bytes as base64.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "format": "relative-path"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "contentBase64": {
+            "type": "string",
+            "maxLength": 1398104,
+            "contentEncoding": "base64"
+          }
+        },
+        "required": [
+          "contentBase64"
+        ],
+        "additionalProperties": false
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "dav/",
+          {
+            "arg": "path",
+            "encoding": "path"
+          }
+        ],
+        "decode": "base64",
+        "status": [
+          200
+        ]
+      }
+    },
+    "entry.move": {
+      "description": "Move a file or directory; refuse overwriting an existing destination.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "format": "relative-path"
+          },
+          "destination": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "format": "relative-path"
+          }
+        },
+        "required": [
+          "path",
+          "destination"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "MOVE",
+        "path": [
+          "dav/",
+          {
+            "arg": "path",
+            "encoding": "path"
+          }
+        ],
+        "decode": "status",
+        "status": [
+          201,
+          204
+        ],
+        "headers": {
+          "destination": {
+            "path": [
+              "/dav/",
+              {
+                "arg": "destination",
+                "encoding": "path"
+              }
+            ]
+          },
+          "overwrite": "F"
+        }
+      }
+    },
+    "directory.list": {
+      "description": "List immediate children and the directory itself, including type, size and etag.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "format": "relative-path"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/DavEntry"
+        },
+        "maxItems": 1000
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "PROPFIND",
+        "path": [
+          "dav/",
+          {
+            "arg": "path",
+            "encoding": "path"
+          }
+        ],
+        "decode": "dav-multistatus",
+        "status": [
+          207
+        ],
+        "headers": {
+          "depth": "1",
+          "content-type": "application/xml"
+        },
+        "text": "<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\"><d:prop><d:resourcetype/><d:getcontentlength/><d:getetag/></d:prop></d:propfind>"
+      }
+    }
+  },
+  "qualification": [
+    {
+      "id": "mkdir",
+      "op": "directory.create",
+      "args": {
+        "path": {
+          "context": "runId"
+        }
+      }
+    },
+    {
+      "id": "put",
+      "op": "file.put",
+      "args": {
+        "path": {
+          "concat": [
+            {
+              "context": "runId"
+            },
+            "/sample.bin"
+          ]
+        },
+        "contentBase64": "AP9hZ2VudAo="
+      }
+    },
+    {
+      "id": "move",
+      "op": "entry.move",
+      "args": {
+        "path": {
+          "concat": [
+            {
+              "context": "runId"
+            },
+            "/sample.bin"
+          ]
+        },
+        "destination": {
+          "concat": [
+            {
+              "context": "runId"
+            },
+            "/moved.bin"
+          ]
+        }
+      }
+    },
+    {
+      "id": "get",
+      "op": "file.get",
+      "args": {
+        "path": {
+          "concat": [
+            {
+              "context": "runId"
+            },
+            "/moved.bin"
+          ]
+        }
+      },
+      "assert": [
+        {
+          "path": [
+            "contentBase64"
+          ],
+          "equals": "AP9hZ2VudAo="
+        }
+      ]
+    },
+    {
+      "id": "list",
+      "op": "directory.list",
+      "args": {
+        "path": {
+          "context": "runId"
+        }
+      },
+      "assert": [
+        {
+          "contains": {
+            "href": {
+              "concat": [
+                "/dav/",
+                {
+                  "context": "runId"
+                },
+                "/moved.bin"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "kind": "member-route"
+  },
+  "sources": [
+    "https://github.com/mnutt/davros",
+    "scripts/spk-platform/market-writes/dav.sh"
+  ]
+}

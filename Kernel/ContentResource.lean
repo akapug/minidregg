@@ -443,6 +443,19 @@ structure Command where
   actions : List Action
   deriving DecidableEq
 
+/-- An append-only action: a new atom, and in a document its leaf at the end of the root's
+children (`appendLeaf`).  Its atom id is the author's fresh draw, never read from the cell. -/
+def Action.appendOnly : Action → Bool
+  | .createAtom .. => true
+  | _ => false
+
+/-- **A commuting command**: nonempty and append-only.  Two of them on one document are both
+admitted in either order, each computed at the cell it meets, so the controller does not pin
+its plan to the observed whole root (`computeTarget`, `Kernel.ContentCommutingAppend`).
+Every other command still names, and is refused away from, the root it was planned over. -/
+def Command.commutes (command : Command) : Bool :=
+  !command.actions.isEmpty && command.actions.all Action.appendOnly
+
 def commandStream : StreamCodec Command :=
   StreamCodec.xmap (StreamCodec.list actionStream) Command.actions
     (fun actions => ⟨actions⟩) (by intro command; rfl)

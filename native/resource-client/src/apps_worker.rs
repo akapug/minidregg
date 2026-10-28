@@ -637,7 +637,7 @@ impl Worker {
             return Err(refused("classRefused", "class is S, M, L or auto"));
         }
         let mut docs = Map::new();
-        for key in ["birthSource", "birthReceipt", "delegation"] {
+        for key in ["birthSource", "birthReceipt", "delegation", "shareDelegation"] {
             let Some(doc) = request.get(key).filter(|d| d.is_object()) else {
                 return Err(refused("birthRequired", format!("the request carries no {key} document; the install is a member turn (docs/APP-MARKET-2026-10-27.md §3)")));
             };
@@ -703,7 +703,8 @@ impl Worker {
                 let source = work.join("birth-source.json");
                 let receipt = work.join("birth-outcome.json");
                 let delegation = work.join("delegation.json");
-                for (path, doc) in [(&source, &docs["birthSource"]), (&receipt, &docs["birthReceipt"]), (&delegation, &docs["delegation"])] {
+                let share = work.join("share-delegation.json");
+                for (path, doc) in [(&source, &docs["birthSource"]), (&receipt, &docs["birthReceipt"]), (&delegation, &docs["delegation"]), (&share, &docs["shareDelegation"])] {
                     if !path.exists() {
                         if let Err(e) = write_json(path, doc) {
                             return undecided("stateUnavailable", e, &retry);
@@ -1220,6 +1221,12 @@ impl ProcessWorld {
         fs::rename(&temp, &path).map_err(|e| e.to_string())
     }
 
+    /// What the worker's own session births need from the world, read from its genesis (never constants):
+    /// the factory and the management enrollment's grants, the platform template and the grain birth tariff.
+    fn world_shape(&self, genesis: &Value) -> Result<WorldShape> {
+        shape_of(genesis, &self.management_key_id, &self.management_subject)
+    }
+
     fn nonce(&self) -> Result<u64> {
         let current = fs::read_to_string(&self.nonce_file).ok().and_then(|t| t.trim().parse::<u64>().ok()).unwrap_or(70_000_000);
         let next = current + 1000;
@@ -1295,17 +1302,35 @@ impl ProcessWorld {
         if attempt.exists() {
             return Err(format!("birth {name} attempt is uncertain; exact recovery first"));
         }
-        self.grain_op(work, &format!("{name}-reserve"), &self.tool_task, &self.tool_capability, nonce, json!({"type":"reserve","amount":"5"}))?;
+        self.with_reserve(work, name, "5", nonce, || self.birth_session_reserved(work, name, app, session, kind, cap, nonce))
+    }
+
+    /// A reserve on the metered tool task that a refused turn gives back. The reserve law refuses a second
+    /// reserve while one is outstanding on the world's only tool task, so a decided refusal after the reserve
+    /// settles it for 0 and retires the reserve and turn attempts, and the retry plans the turn afresh.
+    fn with_reserve<T>(&self, work: &Path, name: &str, amount: &str, nonce: u64, turn: impl FnOnce() -> Result<T>) -> Result<T> {
+        let (reserve, settle) = (format!("{name}-reserve"), format!("{name}-release"));
+        guarded_reserve(
+            || self.grain_op(work, &reserve, &self.tool_task, &self.tool_capability, nonce, json!({"type":"reserve","amount":amount})),
+            turn,
+            || self.grain_op(work, &settle, &self.tool_task, &self.tool_capability, nonce + 700, json!({"type":"settle","charge":"0"})),
+            || for dir in [&reserve, &settle, &format!("{name}-submit"), &name.to_owned()] { let _ = fs::remove_dir_all(work.join(format!("{dir}-attempt"))); },
+        )
+    }
+
+    fn birth_session_reserved(&self, work: &Path, name: &str, app: &str, session: u64, kind: &str, cap: u64, nonce: u64) -> Result<Value> {
+        let attempt = work.join(format!("{name}-attempt"));
         let (tool, _) = self.query(work, &format!("{name}-tool"), &self.tool_task, &self.tool_capability, nonce + 101, "resource")?;
         let (parent, _) = self.query(work, &format!("{name}-parent"), &self.parent_task, &self.parent_capability, nonce + 102, "resource")?;
         let genesis = read_json(&self.genesis)?;
+        let shape = self.world_shape(&genesis)?;
         let m = &self.management_subject;
         let source = json!({"subject":m,"nonce":(nonce + 100).to_string(),
-            "grants":[{"kind":"object","target":"10","capability":"55"},{"kind":"account","target":m,"capability":"42"},
+            "grants":[{"kind":"object","target":shape.factory,"capability":shape.factory_observe},{"kind":"account","target":m,"capability":shape.spend},
                 {"kind":"object","target":self.tool_task,"capability":self.tool_capability},{"kind":"object","target":self.parent_task,"capability":self.parent_capability}],
-            "applicationSessionGrainBirth":{"tariff":{"base":"2","perBirth":"1"},
-                "applicationSessionBirth":{"genesis":genesis,"template":{"issuer":"5","ownerBudget":"100000","lifetime":"10000"},
-                    "creator":m,"nonce":(nonce + 100).to_string(),"sourceCapabilities":["42"],"funding":[],"feePayer":m,
+            "applicationSessionGrainBirth":{"tariff":shape.tariff,
+                "applicationSessionBirth":{"genesis":genesis,"template":shape.template,
+                    "creator":m,"nonce":(nonce + 100).to_string(),"sourceCapabilities":[shape.spend],"funding":[],"feePayer":m,
                     "session":{"app":app,"session":session.to_string(),"descriptor":(session + 1).to_string(),"participant":m,"kind":kind,
                         "sessionOwnerCapability":cap.to_string(),"sessionControlCapability":(cap + 1).to_string(),
                         "descriptorOwnerCapability":(cap + 2).to_string(),"descriptorControlCapability":(cap + 3).to_string()}},
@@ -1346,6 +1371,51 @@ impl ProcessWorld {
         use sha2::Digest;
         Ok(hex(&sha2::Sha256::digest(fs::read(path).map_err(|e| e.to_string())?)))
     }
+}
+
+/// The capability a share ticket is issued under. The issuer is the management subject (the dispatch
+/// admission requires it), so the capability must be HELD by the manager: the child of the member's
+/// app owner capability that the member delegated to the manager at install, not the owner capability
+/// itself (the member holds that one).
+pub(crate) fn share_delegate_capability(delegated: &Value, app: &str, manager: &str) -> Result<String> {
+    let field = |k: &str| delegated.get(k).and_then(Value::as_str).unwrap_or("");
+    if field("type") != "minidregg-delegated-reference-v1" || field("target") != app || field("recipient") != manager || field("capability").is_empty() {
+        return Err(format!("shareDelegationRefused: the retained delegation must be a minidregg-delegated-reference-v1 of app {app} to the manager {manager}"));
+    }
+    Ok(field("capability").to_owned())
+}
+
+/// Reserve, run the turn, and on a refusal give the reserve back (settle for 0) and retire the attempts so a
+/// retry plans afresh. A failed release is reported by name and nothing is retired.
+pub(crate) fn guarded_reserve<T>(reserve: impl FnOnce() -> Result<()>, turn: impl FnOnce() -> Result<T>, release: impl FnOnce() -> Result<()>, retire: impl FnOnce()) -> Result<T> {
+    reserve()?;
+    match turn() {
+        Ok(done) => Ok(done),
+        Err(error) => match release() {
+            Ok(()) => { retire(); Err(format!("{error}; the tool reservation was released")) }
+            Err(failed) => Err(format!("{error}; toolReservationReleaseUndecided: {failed}")),
+        },
+    }
+}
+
+/// The genesis facts a worker session birth cites.
+#[derive(Debug, PartialEq)]
+pub(crate) struct WorldShape { pub factory: String, pub factory_observe: String, pub spend: String, pub template: Value, pub tariff: Value }
+
+pub(crate) fn shape_of(genesis: &Value, management_key_id: &str, management_subject: &str) -> Result<WorldShape> {
+    let text = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).map(str::to_owned).ok_or_else(|| format!("worldShapeUnreadable: genesis lacks {k}"));
+    let enrollment = genesis.get("enrollments").and_then(Value::as_array)
+        .and_then(|list| list.iter().find(|e| e.pointer("/key/keyId").and_then(Value::as_str) == Some(management_key_id)))
+        .ok_or_else(|| format!("worldShapeUnreadable: genesis enrolls no key {management_key_id}"))?;
+    if text(enrollment, "accountId")? != management_subject {
+        return Err(format!("worldShapeUnreadable: key {management_key_id} is not the account of management subject {management_subject}"));
+    }
+    let platform = genesis.get("platform").ok_or("worldShapeUnreadable: genesis lacks platform")?;
+    Ok(WorldShape {
+        factory: text(genesis, "factoryId")?, factory_observe: text(enrollment, "factoryObserveCapabilityId")?, spend: text(enrollment, "spendCapabilityId")?,
+        template: json!({"issuer":"5","ownerBudget":text(platform, "ownerBudget")?,"lifetime":text(platform, "lifetime")?}),
+        tariff: platform.get("grainBirthTariff").cloned().ok_or("worldShapeUnreadable: genesis lacks platform.grainBirthTariff")?,
+    })
 }
 
 /// The session, descriptor and ticket resource ids of one share, derived from the world's nonce counter
@@ -1414,13 +1484,14 @@ impl World for ProcessWorld {
         let launch = read_json(&state_app.join("install").join("launch-descriptor").join("launch-inspection.json"))?;
         let birth_source = read_json(&work.join("birth-source.json"))?;
         let appcap = birth_source.pointer("/applicationGrainBirth/applicationBirth/application/appOwnerCapability").and_then(Value::as_str).ok_or("birth source lacks appOwnerCapability")?.to_owned();
+        let app_delegate = share_delegate_capability(&read_json(&work.join("share-delegation.json")).map_err(|e| format!("shareDelegationRequired: the install retained no share delegation ({e}); reinstall"))?, app, &self.management_subject)?;
         let pkgcap = birth_source.pointer("/applicationGrainBirth/applicationBirth/application/packageOwnerCapability").and_then(Value::as_str).ok_or("birth source lacks packageOwnerCapability")?.to_owned();
         let (app_state, _) = self.query(work, &format!("{label}-app-state"), app, &appcap, base + 300, "resource")?;
         let pversion = app_state["cell"]["entries"].as_array().and_then(|e| e.iter().find(|x| x["key"]["field"] == "2")).and_then(|x| x["value"].as_str()).unwrap_or("0").to_owned();
         let t = work.join(format!("{label}-ticket"));
         private_dir(&t)?;
         if !t.join("issue").join("receipt-anchor.json").exists() {
-            self.grain_op(work, &format!("{label}-ticket-reserve"), &self.tool_task, &self.tool_capability, base + 400, json!({"type":"reserve","amount":"3"}))?;
+            self.with_reserve(work, &format!("{label}-ticket"), "3", base + 400, || -> Result<()> {
             let descriptor = read_json(&pkgdir.join("descriptor-inspection.json"))?;
             let interface = descriptor["interfaces"].as_array().and_then(|i| i.iter().find(|x| x["kind"] == "web")).cloned().ok_or("package descriptor has no web interface")?;
             let m = &self.management_subject;
@@ -1432,8 +1503,8 @@ impl World for ProcessWorld {
                     "sessionCapability":cap.to_string(),"appObserveCapability":appcap,"ticketObserveCapability":(tcap + 2).to_string()},
                 "ceiling":{"basis":role_basis(&self.role_basis, &schema),"added":[],"removed":[],"roleSchemaRoot":schema["root"],"roleVersion":schema["version"]},
                 "issueNonce":(base + 500).to_string(),"notAfter":"1000000000"},
-                "issuer":m,"appDelegateCapability":appcap,"ticketOwnerCapability":tcap.to_string(),"ticketControlCapability":(tcap + 1).to_string()},
-                "payer":m,"funding":[],"sourceCapabilities":["42"],
+                "issuer":m,"appDelegateCapability":app_delegate,"ticketOwnerCapability":tcap.to_string(),"ticketControlCapability":(tcap + 1).to_string()},
+                "payer":m,"funding":[],"sourceCapabilities":[self.world_shape(&read_json(&self.genesis)?)?.spend],
                 "tool":{"task":self.tool_task,"capability":self.tool_capability,"observeCapability":self.tool_capability},
                 "parent":{"task":self.parent_task,"capability":self.parent_capability,"observeCapability":self.parent_capability}});
             write_json(&t.join("request.json"), &request)?;
@@ -1454,6 +1525,8 @@ impl World for ProcessWorld {
                 let _ = self.mini(work, &format!("{label}-ticket-submit"), &["grain-share-issue-submit", "--socket", o, "--attempt", t.join("issue").to_str().unwrap_or("")]);
             }
             self.mini(work, &format!("{label}-ticket-lookup"), &["grain-share-issue-lookup", "--socket", o, "--attempt", t.join("issue").to_str().unwrap_or("")])?;
+            Ok(())
+            }).map_err(|e| { if !t.join("issue").join("submit-marker.json").exists() { let _ = fs::remove_dir_all(t.join("issue")); } e })?;
         }
         // The route request: the management key signs for the grain's guest subject (v1).
         let session_source = work.join(format!("{label}-session-author")).join("source.json");
@@ -1634,6 +1707,42 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 mod tests {
 
     #[test]
+    fn a_refused_turn_gives_its_reservation_back_and_a_failed_release_is_named() {
+        use std::cell::Cell;
+        let (released, retired) = (Cell::new(0), Cell::new(0));
+        let refused: super::Result<()> = super::guarded_reserve(|| Ok(()), || Err("law-denied".into()), || { released.set(released.get() + 1); Ok(()) }, || retired.set(retired.get() + 1));
+        assert!(refused.unwrap_err().contains("law-denied; the tool reservation was released"));
+        assert_eq!((released.get(), retired.get()), (1, 1));
+        let ok = super::guarded_reserve(|| Ok(()), || Ok(7), || panic!("no release on success"), || panic!("no retire on success"));
+        assert_eq!(ok, Ok(7));
+        let stuck: super::Result<()> = super::guarded_reserve(|| Ok(()), || Err("refused".into()), || Err("undecided".into()), || panic!("nothing retired when the release failed"));
+        assert!(stuck.unwrap_err().contains("toolReservationReleaseUndecided: undecided"));
+        let not_reserved: super::Result<()> = super::guarded_reserve(|| Err("reserve refused".into()), || panic!("no turn"), || panic!("no release"), || {});
+        assert_eq!(not_reserved.unwrap_err(), "reserve refused");
+    }
+
+    #[test]
+    fn a_share_is_issued_under_the_capability_the_manager_holds() {
+        let delegated = json!({"type":"minidregg-delegated-reference-v1","recipient":"8","kind":"object","target":"13827490942341725565","capability":"777"});
+        assert_eq!(super::share_delegate_capability(&delegated, "13827490942341725565", "8").unwrap(), "777");
+        for (wrong_app, wrong_manager) in [("1", "8"), ("13827490942341725565", "9")] {
+            assert!(super::share_delegate_capability(&delegated, wrong_app, wrong_manager).unwrap_err().starts_with("shareDelegationRefused"));
+        }
+        assert!(super::share_delegate_capability(&json!({"type":"minidregg-delegated-reference-v1","recipient":"8","target":"1"}), "1", "8").is_err());
+    }
+
+    #[test]
+    fn world_shape_is_read_from_the_genesis_not_the_workroom_constants() {
+        let genesis = |factory: &str, fobs: &str, spend: &str, life: &str| json!({"factoryId":factory,"platform":{"ownerBudget":"100000","lifetime":life,"grainBirthTariff":{"base":"2","perBirth":"1"}},
+            "enrollments":[{"accountId":"7","spendCapabilityId":"41","factoryObserveCapabilityId":"54","key":{"keyId":"7007"}},{"accountId":"8","spendCapabilityId":spend,"factoryObserveCapabilityId":fobs,"key":{"keyId":"8008"}}]});
+        let workroom = super::shape_of(&genesis("10", "55", "42", "10000"), "8008", "8").unwrap();
+        assert_eq!((workroom.factory.as_str(), workroom.factory_observe.as_str(), workroom.spend.as_str()), ("10", "55", "42"));
+        let demo = super::shape_of(&genesis("900", "7777", "6006", "200000"), "8008", "8").unwrap();
+        assert_eq!((demo.factory.as_str(), demo.factory_observe.as_str(), demo.spend.as_str(), demo.template["lifetime"].as_str()), ("900", "7777", "6006", Some("200000")));
+        assert!(super::shape_of(&genesis("10", "55", "42", "10000"), "9999", "8").unwrap_err().starts_with("worldShapeUnreadable"));
+    }
+
+    #[test]
     fn share_ids_are_injective_clear_of_namespace_ids_and_never_overflow() {
         use super::share_ids;
         let (s0, t0) = share_ids(70_001_000).unwrap();
@@ -1732,7 +1841,8 @@ mod tests {
         json!({"protocol":WORKER_PROTOCOL,"verb":"install","requestId":id,"appId":APP,"packageId":PKG,"class":"auto","indexName":"Hacker Slides",
             "birthSource":{"applicationGrainBirth":{"applicationBirth":{"application":{"appOwnerCapability":"976001"}}}},
             "birthReceipt":{"type":"confirmed","confirmation":"installed","acceptedCount":"40"},
-            "delegation":{"protocol":"mini-spk-grain-lifecycle-delegation-v1","appOwner":"12","managementSubject":"8","selector":{"app":"4501"}}})
+            "delegation":{"protocol":"mini-spk-grain-lifecycle-delegation-v1","appOwner":"12","managementSubject":"8","selector":{"app":"4501"}},
+            "shareDelegation":{"type":"minidregg-delegated-reference-v1","recipient":"8","kind":"object","target":"4501","capability":"777"}})
     }
 
     fn worker(name: &str) -> (Arc<Worker>, PathBuf) {

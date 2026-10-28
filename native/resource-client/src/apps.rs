@@ -618,6 +618,14 @@ fn install(mut args: Args, paths: &Paths, as_json: bool, dir: Option<std::ffi::O
                 if !delegation.exists() {
                     fs::copy(&selector, &delegation).map_err(|e| format!("cannot retain the delegation: {e}"))?;
                 }
+                // The manager issues share tickets, so it must hold a delegate-capable child of the owner's
+                // app capability; the member delegates it now and the worker issues under it.
+                let share = apps_dir.join("share-delegation.json");
+                if !share.exists() {
+                    let max = born_source.pointer("/applicationGrainBirth/applicationBirth/template/ownerBudget").and_then(Value::as_str).unwrap_or("100000").to_owned();
+                    let child = delegate_share(&root, &ws, &name, &config.management_subject, &max)?;
+                    crate::create_private(&share, &serde_json::to_vec_pretty(&child).map_err(|e| e.to_string())?)?;
+                }
             }
             // The worker cannot read a member's 0700 home: the three documents travel
             // in the request (bounded), and the worker re-checks them against the Store.
@@ -639,6 +647,7 @@ fn install(mut args: Args, paths: &Paths, as_json: bool, dir: Option<std::ffi::O
                 "protocol":WORKER_PROTOCOL,"verb":"install","requestId":id,
                 "appId":entry.app_id,"packageId":entry.package_id,"class":class,
                 "birthSource":document(&source)?,"birthReceipt":document(&receipt)?,"delegation":delegation_doc,
+                "shareDelegation":document(&delegation.with_file_name("share-delegation.json"))?,
                 "requestCell":cell,"indexName":entry.name,"indexVersion":entry.version
             });
             let file = requests.join(format!("{id}.json"));
@@ -1159,6 +1168,33 @@ pub(crate) fn app_birth(root: &Path, ws: &Value, home: Option<&Path>, name: &str
         crate::create_private(&reference_path, &serde_json::to_vec_pretty(&value).map_err(|e| e.to_string())?)?;
     }
     Ok((source, receipt))
+}
+
+/// The member delegates the manager a child of the app owner capability with the verbs a share ticket's
+/// issuer needs (observe, mutate, delegate, append, place), through the shell's own propose, submit and
+/// publish-delegation, and returns the recipient reference (which names the child capability).
+fn delegate_share(root: &Path, ws: &Value, app_ref: &str, manager: &str, max_cost: &str) -> Result<Value> {
+    use crate::workspace as w;
+    let id = format!("share-{app_ref}");
+    let proposal = root.join("sources").join(format!("{id}.request.json"));
+    let request = json!({"type":"minidregg-workspace-proposal-v1","action":"delegate","name":app_ref,"recipient":manager,
+        "verbs":["observe","mutate","delegate","append","place"],"maxCost":max_cost});
+    let _ = fs::remove_file(&proposal);
+    crate::create_private(&proposal, &serde_json::to_vec_pretty(&request).map_err(|e| e.to_string())?)?;
+    let mini = std::env::current_exe().map_err(|e| e.to_string())?;
+    let _ = ws;
+    let run = |args: &[&str]| -> Result<()> {
+        let out = std::process::Command::new(&mini).args(["workspace", "--action"]).args(args).output().map_err(|e| e.to_string())?;
+        if out.status.success() { Ok(()) } else { Err(format!("shareDelegationRefused: workspace {}: {}", args.first().unwrap_or(&""), String::from_utf8_lossy(&out.stderr).trim())) }
+    };
+    let dir = root.to_str().ok_or("workspace path is not UTF-8")?;
+    let attempt = root.join("attempts").join(&id);
+    let intent = root.join("proposals").join(&id).join("intent.json");
+    let (attempt_s, intent_s, proposal_s) = (attempt.to_string_lossy().into_owned(), intent.to_string_lossy().into_owned(), proposal.to_string_lossy().into_owned());
+    run(&["propose", "--dir", dir, "--request", &proposal_s, "--proposal-id", &id])?;
+    run(&["submit", "--dir", dir, "--intent", &intent_s, "--attempt", &attempt_s])?;
+    run(&["publish-delegation", "--dir", dir, "--proposal-id", &id, "--attempt", &attempt_s])?;
+    w::bounded_json(&root.join("proposals").join(&id).join("recipient-reference.json"))
 }
 
 /// The hosting delegation to the manager through the shell's own verb
