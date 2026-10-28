@@ -158,7 +158,7 @@ gates main and fixes reds itself.
 
 ## Rulings (do not re-ask)
 
-- thin-birth: landed after the conversion at fb0acbfbe (main 6fd993d43); its lane-check on dregg-ref was still running at landing, reds come back to ad0906325ab57d1c3. lane/thin-birth Phase-3 work lands only on a sha its owner sends after the auditor accepts.
+- thin-birth: landed after the conversion at fb0acbfbe (main 6fd993d43); its lane-check on dregg-ref is green (Kernel/NativeThinConsent, Kernel/NativeThinBirth, Host/ClientConsentCore rc=0, 10-28); JP2 and THIN go to the rows validator on the next built main; reds to ad0906325ab57d1c3. lane-check takes closure-lock itself: never wrap it in closure-lock (it deadlocks on itself). lane/thin-birth Phase-3 work lands only on a sha its owner sends after the auditor accepts.
 - effects-revival LANDED 10-28 at 65b813888 (main 4d059a29b) and ae0c78a01 (main ac4247487, HostTeeth proved; converted, `lake build Effects` green on hbox);
   Its reds from the next build go to a26c13b24522dee35.
 - Fixtures (coordinator 10-28): the integrator re-records BOTH Fixtures.NativeAcceptedFixture and
