@@ -64,7 +64,7 @@ class Journey:
         self.pin_candidate()
 
     @classmethod
-    def resume_transport(cls):
+    def resume_transport(cls, checkpoint=None):
         """Resume only the proved pre-provision transport cutover boundary.
 
         No genesis, enrollment, provision, room write or application attempt is
@@ -72,13 +72,32 @@ class Journey:
         """
         os.umask(0o077)
         j=cls.__new__(cls);j.root=Path(os.environ['JOURNEY_STEP_DIR'])/'oracle';j.logs=j.root/'commands'
-        failure=read(j.root/'failure.json')
-        if failure['phase']!='world' or (j.root/'context-after-world.json').exists() or (j.root/'broker').exists():
-            raise ValueError('transport continuation requires the uncompleted world cutover boundary')
-        last=failure['lastCommand'];result=j.logs/f'{last:04d}-lifetime-target.result.json'
-        if not result.is_file() or read(result)!={'exitCode':0}:
-            raise ValueError('transport continuation requires retained successful target metadata rendering')
-        j.c=read(j.root/'allocation-context.json');j.c['manifest']=str(j.root/'candidate.json')
+        if checkpoint is None:
+            failure=read(j.root/'failure.json')
+            if failure['phase']!='world' or (j.root/'context-after-world.json').exists() or (j.root/'broker').exists():
+                raise ValueError('transport continuation requires the uncompleted world cutover boundary')
+            last=failure['lastCommand'];result=j.logs/f'{last:04d}-lifetime-target.result.json'
+            if not result.is_file() or read(result)!={'exitCode':0}:
+                raise ValueError('transport continuation requires retained successful target metadata rendering')
+            j.c=read(j.root/'allocation-context.json')
+        else:
+            # The first reusable checkpoint is before physical registration or
+            # native app attempts. Later uncertain phases use their native exact
+            # lookup APIs; an arbitrary phase replay is deliberately unavailable.
+            if checkpoint!=j.root/'context-after-world.json' or (j.root/'application').exists():
+                raise ValueError('only the pre-application world checkpoint can resume here')
+            failures=[read(p) for p in j.root.glob('failure*.json')]
+            failure=max(failures,key=lambda f:f['lastCommand']);last=failure['lastCommand']
+            command=j.logs/f'{last:04d}-broker-world'
+            if failure['phase']!='application' or read(command.with_suffix('.result.json'))!={'exitCode':1}:
+                raise ValueError('checkpoint refuses replay after an unclassified native attempt')
+            # A refused sudo invocation submitted nothing. Require its retained
+            # evidence instead of treating any installer error as safe to retry.
+            argv=read(command.with_suffix('.argv.json'));prior=Path(argv[-1])
+            if 'sudo: a password is required' not in (prior/'root-setup.log').read_text() or (prior/'broker.json').exists():
+                raise ValueError('registration refusal is not proved; inspect exact physical state')
+            j.c=read(checkpoint)
+        j.c['manifest']=str(j.root/'candidate.json')
         if Path(j.c['root'])!=j.root:raise ValueError('retained root differs')
         j.bins=Path(need('J14_ORACLE_BIN'));j.mini=need('MINI');j.host=need('HOST');j.runtime=need('GRAIN_RUNTIME')
         j.provider=need('TEST_PROVIDER');j.hermes_root=need('J14_HERMES_ROOT');j.spk=need('J14_ORACLE_SPK')
@@ -98,7 +117,7 @@ class Journey:
         if read(j.c['allocation'])!=inputs.allocation(j.c) or sha(j.c['hostConfig'])!=sha(j.root/'operator-with-oracle.json'):
             raise ValueError('continuation allocation or installed metadata differs')
         j.counter=last;j.processes=[];j.controller=False;j.world_pid=None
-        record=j.root/'transport-continuation.json'
+        record=j.root/(f'checkpoint-continuation-{last:04d}.json' if checkpoint else 'transport-continuation.json')
         if record.exists():raise ValueError('transport continuation already attempted; inspect its retained commands')
         write(record,{'previousSource':candidate['orchestrationSource'],'sourceCommit':os.environ.get('J14_ORACLE_ORCHESTRATION_COMMIT'),
             'driverSha256':sha(HERE/'j14-oracle.py'),'installerSha256':sha(j.installer),'helperSha256':sha(REPO/'deploy/spk-host/controller-world.py'),
@@ -106,11 +125,14 @@ class Journey:
             'hostConfigSha256':sha(j.c['hostConfig']),'lastCompletedCommand':last})
         return j
 
-    def resume_world(self):
-        self.spawn('operator-v2',[self.mini,'serve-operator','--host',self.host,'--config',self.c['hostConfig'],'--socket',self.c['operatorSocket']])
+    def restart_transport(self):
+        self.spawn('operator-restart-'+str(self.counter),[self.mini,'serve-operator','--host',self.host,'--config',self.c['hostConfig'],'--socket',self.c['operatorSocket']])
         self.wait_socket(self.c['operatorSocket'])
-        self.spawn('participant-v2',[self.mini,'serve-public-proxy','--socket',self.c['publicSocket'],'--upstream',self.c['operatorSocket'],'--config',self.c['hostConfig']])
+        self.spawn('participant-restart-'+str(self.counter),[self.mini,'serve-public-proxy','--socket',self.c['publicSocket'],'--upstream',self.c['operatorSocket'],'--config',self.c['hostConfig']])
         self.wait_socket(self.c['publicSocket'])
+
+    def resume_world(self):
+        self.restart_transport()
         self.c['nativeProfile']=str(self.run('native-profile',[self.host,self.c['hostConfig'],'profile']))
 
     def pin_candidate(self):
@@ -228,8 +250,9 @@ class Journey:
 
     def application(self):
         env=dict(os.environ,MINI_IMPORT_PROFILE='operator-appliance-v1')
-        self.run('broker-world',[REPO/'scripts/spk-platform/broker-world-up.sh',self.bins,self.c['hostConfig'],self.root/'broker'],env=env)
-        self.broker=read(self.root/'broker/broker.json')
+        broker=self.root/f'broker-{self.counter+1:04d}'
+        self.run('broker-world',[REPO/'scripts/spk-platform/broker-world-up.sh',self.bins,self.c['hostConfig'],broker],env=env)
+        self.broker=read(broker/'broker.json')
         self.layout=read(self.fixed('controller-create'));self.c['controllerRoot']=str(Path(self.layout['controllerHome'])/'grain')
         params=read(Path(self.c['world'])/'genesis-params.json')
         manifest=Path(self.c['manifest']);m=read(manifest)
@@ -547,14 +570,17 @@ class Journey:
 
 def main():
     resume=os.environ.get('J14_ORACLE_RESUME_WORLD')=='1'
-    j=Journey.resume_transport() if resume else Journey()
+    checkpoint=os.environ.get('J14_ORACLE_RESUME_CHECKPOINT')
+    j=Journey.resume_transport(Path(checkpoint)) if checkpoint else Journey.resume_transport() if resume else Journey()
+    phase='transport';start_counter=j.counter
     try:
-        for phase in ['world','application','worker','room','attach','probe']:
+        if checkpoint:j.restart_transport()
+        for phase in (['application','worker','room','attach','probe'] if checkpoint else ['world','application','worker','room','attach','probe']):
             if phase=='worker':j.await_worker_release()
             (j.resume_world if resume and phase=='world' else getattr(j,phase))()
             write(j.root/('context-after-'+phase+'.json'),j.c)
     except Exception as error:
-        write(j.root/('failure-transport-continuation.json' if resume else 'failure.json'),{'phase':phase,'error':str(error),'passed':False,'lastCommand':j.counter,
+        write(j.root/(f'failure-checkpoint-{start_counter:04d}.json' if checkpoint else 'failure-transport-continuation.json' if resume else 'failure.json'),{'phase':phase,'error':str(error),'passed':False,'lastCommand':j.counter,
             'recovery':'Inspect retained exact native attempts; do not repeat an uncertain submission as new work.'})
         raise
     finally:j.cleanup()
