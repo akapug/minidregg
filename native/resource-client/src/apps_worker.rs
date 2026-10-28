@@ -1526,7 +1526,8 @@ mod tests {
         json!({"protocol":WORKER_PROTOCOL,"verb":"install","requestId":id,"appId":APP,"packageId":PKG,"class":"auto","indexName":"Hacker Slides",
             "birthSource":{"applicationGrainBirth":{"applicationBirth":{"application":{"appOwnerCapability":"976001"}}}},
             "birthReceipt":{"type":"confirmed","confirmation":"installed","acceptedCount":"40"},
-            "delegation":{"protocol":"mini-spk-grain-lifecycle-delegation-v1","appOwner":"12","managementSubject":"8","selector":{"app":"4501"}}})
+            "delegation":{"protocol":"mini-spk-grain-lifecycle-delegation-v1","appOwner":"12","managementSubject":"8","selector":{"app":"4501"}},
+            "shareDelegation":{"type":"minidregg-delegated-reference-v1","recipient":"8","kind":"object","target":"4501","capability":"777"}})
     }
 
     fn worker(name: &str) -> (Worker, PathBuf) {
