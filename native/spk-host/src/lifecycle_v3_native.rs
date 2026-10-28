@@ -725,7 +725,7 @@ mod tests {
         assert!(error.starts_with("launch claim assemble: "), "{error}");
         assert!(error.contains("claim"), "{error}");
         assert!(!error.contains("BEGIN"), "{error}");
-        let short = framed_payload("launch claim plan", &[0, 0], 68, b"x").unwrap_err().to_string();
+        let short = framed_payload("launch claim plan", &[0, 0], crate::host_operations::APPLICATION_LAUNCH_CLAIM_PLAN, b"x").unwrap_err().to_string();
         assert!(short.starts_with("launch claim plan: "), "{short}");
     }
 
