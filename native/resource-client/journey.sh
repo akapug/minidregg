@@ -58,7 +58,7 @@
 #          refused (journey.d/jstorygm.sh; enrolls one friend)
 #   JR17   R17: home, key, app, adopt-next-key, hermes through mini shell, each ended by the Host's
 #          decision or a named refusal (journey.d/jr17.sh)
-#   JP2    J-PRIV-2 (PRIVACY.md): a friend enrolled from their own key reaches
+#   JP2    J-PRIV-2: a friend enrolled from their own key reaches
 #          the Host only through the ssh byte proxy (journey.d/jpriv2.sh)
 #
 # MANIFEST (JSON; paths absolute):

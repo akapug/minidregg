@@ -1,5 +1,5 @@
 /-
-# Kernel.SealedMarket — the sealed-bid market law (SEALED-MARKET; PRIVACY §3.4, MUD §2.7/§2.8)
+# Kernel.SealedMarket — the sealed-bid market law (SEALED-MARKET; MUD §2.7/§2.8)
 
 One declared cell is one market: a founder sells `supply` units at one uniform price to at most
 four sealed bids. This module is the law's **source**. The shell template
