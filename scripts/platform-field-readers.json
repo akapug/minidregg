@@ -292,21 +292,11 @@
   }
  },
  "Kernel/ParticipantFactoryProvisioning.lean": {
-  "profile.template": {
-   "count": 8,
-   "status": "owed"
-  },
   "template.lifetime": {
    "count": 1,
    "status": "owed"
   },
   "template.ownerBudget": {
-   "count": 1,
-   "status": "owed"
-  }
- },
- "Kernel/ParticipantFactoryProvisioningReceiver.lean": {
-  "profile.template": {
    "count": 1,
    "status": "owed"
   }
