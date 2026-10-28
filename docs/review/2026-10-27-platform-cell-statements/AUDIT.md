@@ -915,3 +915,11 @@ Historical re-admission reading the record in force at that height is what repla
   the completion's basis keys include `cellIdOf deployment`, the platform cell reads as `absentBytes`,
   `load` is `none`, and every light-route completion refuses `platformUnavailable`. State, and prove, that
   each completion family's light key set contains the platform cell id.
+
+**Correction to the twentieth pass: the light-route requirement is withdrawn.** It rested on a wrong
+premise. Basis keys name only transactions and nullifiers (`DurableView.Keys`,
+`Kernel/DurableView.lean:143`). A basis's cell bytes are the served state's whole
+`canonicalBytes`, whatever the keys (`Basis.view_canonicalBytes … := rfl`, `Compiler/ServedBasis.lean:126`).
+`Served`'s private constructors (`ofLoaded`, `ofStateAt`, `advance`) all carry full cell state. So a
+seeded platform cell is present on every light ground. L1d's replacement is the right declaration:
+`recordOn` agrees across any two key sets over the same `served`, by `rfl`.
