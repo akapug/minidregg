@@ -5,9 +5,13 @@ v2 management law, app state and package content are independently checked
 on the same loaded image. This lower check does not submit a durable intent
 or permit a host launch.
 -/
-import Kernel.ApplicationLifecycleClaimHistory
-import Kernel.PhysicalResourceReadGuard
-import Kernel.ResourceObservationAdmission
+module
+
+public import Kernel.ApplicationLifecycleClaimHistory
+public import Kernel.PhysicalResourceReadGuard
+public import Kernel.ResourceObservationAdmission
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleClaimCurrent
 

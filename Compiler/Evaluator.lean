@@ -55,10 +55,29 @@ without NUL, params).
 field value, and the event a claim carries — EVAL §4. Nock's is N11's (`nockDoor`, from
 `Kernel.NockEntry`); the referee is `Kernel.Door`, generic.
 -/
-import Kernel.NockEntry
-import Theory.TypedAuthorization
-import Compiler.Sp800185Cshake256
-import Theory.AssertAxioms
+module
+
+public import Kernel.NockEntry
+public import Theory.TypedAuthorization
+public import Compiler.Sp800185Cshake256
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler
 

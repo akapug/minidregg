@@ -11,7 +11,8 @@ write_WBO() {
   [[ $res == *'"ok": true'* ]] || { echo "0 socket.io broadcast: ${res:0:160}"; return; }
   local id; id=$(sed 's/.*"id": "\([^"]*\)".*/\1/' <<<"$res")
   local got; got=$(req GET "/boards/$board.json")
-  [[ $got == 200 ]] && grep -q "$id" "$body" && echo "1 socket.io broadcast Rectangle $id; GET /boards/$board.json $got"
+  [[ $got == 200 ]] && grep -q "$id" "$body" && { echo "1 socket.io broadcast Rectangle $id; GET /boards/$board.json $got"; return; }
+  echo "0 socket.io broadcast sent as $id; GET /boards/$board.json $got without it [$(head -c 160 "$body" | tr '\r\n\t' '   ')]"
 }
 
 # HedgeDoc 1.9.8: GET /new makes a note (303 to /<id>, row evidence from the featured table's

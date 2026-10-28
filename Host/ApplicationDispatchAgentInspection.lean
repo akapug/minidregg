@@ -3,8 +3,12 @@ Read-only presentation of an event21 committed permit frame. Only the private
 op46 receiver may provide delivery provenance; decoding arbitrary bytes into
 this JSON is never authority.
 -/
-import Kernel.ApplicationDispatchAgentReceiver
-import Lean.Data.Json
+module
+
+public import Kernel.ApplicationDispatchAgentReceiver
+public import Lean.Data.Json
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationDispatchAgentInspection
 

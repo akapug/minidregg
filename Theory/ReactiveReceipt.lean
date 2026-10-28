@@ -12,8 +12,27 @@ The point is to make the state transition, history event, invalidation event,
 and replay cursor one semantic path.  Animation clocks, local drafts, transports,
 renderers, and proof systems remain separate interpreters of this core.
 -/
-import Mathlib.Data.Finset.Empty
-import Mathlib.Tactic
+module
+
+public import Mathlib.Data.Finset.Empty
+public import Mathlib.Tactic
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Theory.ReactiveReceipt
 

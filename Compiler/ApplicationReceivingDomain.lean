@@ -3,7 +3,11 @@ CanonicalRuntimeProfile. Keep this leaf free of receivers/NativeHost imports.
 A frame preserves representation; receivingContract also commits the authority,
 freshness, replay, renewal and physical-custody distinctions behind those bytes.
 -/
-import Init
+module
+
+public import Init
+
+@[expose] public section
 
 namespace Minidregg.Compiler.ApplicationReceivingDomain
 

@@ -5,8 +5,12 @@ before a read-guarded event-only CAS. Exact historical retry selects the
 accepted packet/envelope without reapplying changed current law. Fn transport
 may only attribute source authorization to an accepted event, not preparation.
 -/
-import Kernel.FnSelectiveReleaseSourceAuthority
-import Kernel.NativeHostContext
+module
+
+public import Kernel.FnSelectiveReleaseSourceAuthority
+public import Kernel.NativeHostContext
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnSelectiveReleaseSourceReceiver
 

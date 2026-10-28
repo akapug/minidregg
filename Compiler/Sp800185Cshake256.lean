@@ -15,9 +15,28 @@ so complete builds still check conformance without putting vector constants
 and evaluation commands in every API consumer's import surface.
 -/
 
-import Theory.Bignum
-import Compiler.Tower256CshakeMerkleController
-import Theory.Sp800185Cshake256Core
+module
+
+public import Theory.Bignum
+public import Compiler.Tower256CshakeMerkleController
+public import Theory.Sp800185Cshake256Core
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.Sp800185Cshake256
 

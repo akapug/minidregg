@@ -1,7 +1,11 @@
 /- Authenticated human/source authoring lives above the native kernel.
 The kernel reserve factory, canonical codecs and receiving admission remain pure. -/
-import Kernel.NativeHostReserveBirth
-import Host.CurrentResourceBirthAuthoring
+module
+
+public import Kernel.NativeHostReserveBirth
+public import Host.CurrentResourceBirthAuthoring
+
+@[expose] public section
 
 namespace Minidregg.Host.NativeReserveBirthAuthoring
 open Minidregg.Compiler

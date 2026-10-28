@@ -4,7 +4,11 @@ AgentGrain reserve and complete record equality are necessary, but this type
 alone does not certify membership in the current admitted history. Replay
 must add it only after the exact step advances and validates.
 -/
-import Kernel.ApplicationDispatchAgentPayer
+module
+
+public import Kernel.ApplicationDispatchAgentPayer
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationDispatchAgentReserveCore
 

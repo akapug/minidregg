@@ -315,6 +315,8 @@ and stay here:
 
 ## 5. Decisions
 
+- **The StoreEpoch moves once with the module conversion** (2026-10-28, iteration-speed lane; approved under ember's standing ruling that re-genesis is free): the persisted-codec census now hashes compiler auxiliaries (`match_N`, `_sparseCasesOn_N`, `_proof_N`) by structure, not by their elaborator numbering, so a module build and a non-module build agree. `Compiler/PersistedCodecShapes.lean` was re-emitted once by the census emitter; NO identity was bumped and no wire byte changed, but the pins feed `DurableCheckpointCodec.persistedCodecCorpus`, so the derived StoreEpoch moves: **the next frame re-geneses** (rehearsals already ship `--rehearsal --regenesis`).
+
 **Taken by engineering after the council** (all three reviewers agreed these are not the
 owner's): R1 settled (§0); R2 the DelveTalk candidate restored by a forward commit (done);
 R3 pushed (done); R4 Hermes pool route only from a candidate carrying L1(c)'s four-class

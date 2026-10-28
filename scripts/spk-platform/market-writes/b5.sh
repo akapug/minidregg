@@ -7,7 +7,8 @@ b5_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # filedrop/client/bundle.js). Routes read from that bundle's filedrop.Files service: GET /file/ answers
 # {"entries":[{"name":...}]}, PUT /file/<name> uploads the raw body (Content-Type application/octet-stream)
 # and needs the `write` permission (the owner's role has it, bridge-config permissions read/write/delete),
-# GET /file/<name> downloads. The write is one PUT read back twice: the listing and the bytes.
+# GET /file/<name> downloads. Role 0 is "viewer" (read only): the run answered 403 "Insufficient Sandstorm
+# permissions", so the table gives the owner role 1, "editor" (b5.tsv). The write is one PUT read back twice: the listing and the bytes.
 write_FileDrop() {
   local put; put=$(req PUT /file/featured.txt -H 'Content-Type: application/octet-stream' --data-binary 'written by a resident')
   [[ $put =~ ^20 ]] || { echo "0 PUT /file/featured.txt $put: $(head -c 120 "$body" | tr -d '\n')"; return; }
@@ -25,7 +26,7 @@ write_FileDrop() {
 # X-Sandstorm-Permissions, and on the last chunk renames the upload to kiwix.zim. Kiwix has no write of
 # its own (it is a reader), so the write is that upload and the read is the served article:
 # kiwix-serve names the book "kiwix", so GET /kiwix/A/Hello. b5-mkzim.py builds the smallest valid ZIM
-# (one article, 652 bytes). LIMIT: the page's own uploader chunks at 10 MiB (main.js maxChunkSize), over
+# (one article, 650 bytes). LIMIT: the page's own uploader chunks at 10 MiB (main.js maxChunkSize), over
 # the 8 MiB request bound, so real ZIMs through the page need the above-8-MiB body (APP-MARKET 2b);
 # this recipe sends the one small chunk. nginx's client_max_body_size is 50M and the Flask limit 15 MiB.
 write_Kiwix() {
@@ -48,7 +49,8 @@ write_Kiwix() {
 # {name,args} on any path. So the write is b5-gb.py: connect, read `token`, subscribe `library`, POST
 # /upload (multipart, the `size` field before the audio part, `add` permission from the owner's role) with
 # the token cookie, then read the track back from the `library` subscription and its bytes from
-# GET /library/<file>. The upload is a 0.5 s WAV with RIFF INFO tags (about 8 KB), under the 8 MiB bound.
+# GET /library/<file>. Role 0 is "controller" (no `add`): the run answered 403 "not authorized", so the
+# table gives the owner role 2, "administrator" (b5.tsv). The upload is a 0.5 s WAV with RIFF INFO tags (about 8 KB), under the 8 MiB bound.
 # LIMITS: real albums are over 8 MiB per request (APP-MARKET 2b); GET /stream.mp3 is an endless
 # response the 8 MiB response bound cannot carry, so listening is not exercised. The websocket needs the
 # entrance's websocket support (BROWSER-WEBSOCKETS.md), which the rt batch already relies on.
@@ -63,23 +65,26 @@ write_GrooveBasin() {
 # /usr/bin). Routes read from the binary's route table and templates: POST /upload (the upload form posts
 # multipart fields video_file, video_title, video_description; the server transcodes with ffmpeg
 # -vcodec h264 -acodec aac, cuts a thumbnail with -vframes 1, and moves the result into the library),
-# GET / lists the library, /v/<id> plays, /t/<id> is the thumbnail, /feed.xml the RSS. The id is
-# the stored file name, so the file is named featured-by-a-resident.mp4 and the title is searched for as
-# well. b5-tube-clip.py writes a real 2.6 KB clip (ffmpeg needs a decodable stream). LIMITS: a real video
+# GET / redirects (303) to /v/<random id> once the library has a video (run evidence, 76758dba6), so the read-back follows it; /v/<id> plays, /t/<id> is the thumbnail, /feed.xml the RSS. The page is
+# searched for the title and for the file name. b5-tube-clip.py writes a real 2.6 KB clip (ffmpeg needs a decodable stream). LIMITS: a real video
 # is over the 8 MiB request bound (APP-MARKET 2b: the above-8-MiB body codec is not built); playback of
-# /v/<id>.mp4 uses Range reads, fine for this clip. Not claimed: that the page lists the video inside the
-# poll window (the library is rescanned by a watcher); the loop names that outcome if it never does.
+# /v/<id>.mp4 uses Range reads, fine for this clip.
+# Run evidence (76758dba6): the upload was accepted (200) and the library had the video at once.
 write_Tube() {
   local clip="$out/bodies/featured-by-a-resident.mp4"
   python3 -I "$b5_here/b5-tube-clip.py" "$clip" || { echo "0 b5-tube-clip.py failed"; return; }
   local up; up=$(req POST /upload -F "video_title=featured by a resident" -F "video_description=uploaded by a resident" \
     -F "video_file=@$clip;filename=featured-by-a-resident.mp4;type=video/mp4")
   [[ $up =~ ^(200|302|303)$ ]] || { echo "0 POST /upload $up: $(head -c 160 "$body" | tr -d '\n')"; return; }
-  local i got=000
+  local i got=000 loc
   for i in $(seq 1 30); do
     got=$(req GET /)
-    [[ $got == 200 ]] && grep -qE 'featured-by-a-resident|featured by a resident' "$body" && { echo "1 POST /upload $up; GET / $got lists it (poll $i)"; return; }
+    if [[ $got == 303 ]]; then  # with a video in the library, GET / redirects to /v/<random id>
+      loc=$(grep -i '^location:' "$body.headers" | tr -d '\r' | awk '{print $2}'); loc=${loc%\?}
+      got=$(req GET "$loc")
+    fi
+    [[ $got == 200 ]] && grep -qE 'featured-by-a-resident|featured by a resident' "$body" && { echo "1 POST /upload $up; GET / -> ${loc:-/} $got shows it (poll $i)"; return; }
     sleep 3
   done
-  echo "0 POST /upload $up but GET / $got never listed the video"
+  echo "0 POST /upload $up but GET / ${loc:-} $got never showed the video"
 }

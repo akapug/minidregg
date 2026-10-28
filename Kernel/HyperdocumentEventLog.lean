@@ -21,8 +21,27 @@ There is one carrier.  The former adapter into a second `CellState.Schema`
 store is the cell state, and a codec/root declaration is a
 `CellState.Materializer Sparse.layout Root`.
 -/
-import Kernel.SparseAuthenticatedState
-import Theory.Hyperdocument
+module
+
+public import Kernel.SparseAuthenticatedState
+public import Theory.Hyperdocument
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.HyperdocumentEventLog
 

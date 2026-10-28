@@ -17,7 +17,12 @@ The two conformance theorems compare against an independent implementation
 (pycryptodome 3.x `Crypto.Hash.KMAC256`, `mac_len=32`); NIST publishes KMAC256
 samples only at L = 512, and L enters the MAC through `right_encode(L)`.
 -/
-import Theory.Sp800185Cshake256Core
+module
+
+public import Theory.Sp800185Cshake256Core
+meta import Theory.Sp800185Cshake256Core
+
+@[expose] public section
 
 namespace Minidregg.Compiler.Sp800185Cshake256
 

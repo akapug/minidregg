@@ -12,8 +12,12 @@ Completeness (an intent the Store-reading authoring produced re-authors to itsel
 coordinates) runs through the JSON parser and is not a theorem here. It is witnessed by the
 journey's successful thin birth (`native/resource-client/journey.d/jpriv2.sh`, row 19).
 -/
-import Kernel.NativeThinBirth
-import Host.SourceAgreementJson
+module
+
+public import Kernel.NativeThinBirth
+public import Host.SourceAgreementJson
+
+@[expose] public section
 
 namespace Minidregg.Host.ThinBirthConsent
 

@@ -16,13 +16,34 @@ generation. Every later use checks the newly selected source. The current source
 still governs its own replacement, so a deliberately restrictive new law may
 refuse future installations even though the control grant remains current.
 -/
-import Compiler.NativeProtocolFrames
-import Kernel.ObjectAudienceInstall
-import Kernel.PolicyInstallController
-import Kernel.ResourceBirthController
-import Compiler.DurableReceiverIO
-import Compiler.CredentialAuthorityReplay
-import Compiler.WorldKindLawDependencies
+module
+
+public import Compiler.NativeProtocolFrames
+public import Kernel.ObjectAudienceInstall
+public import Kernel.PolicyInstallController
+public import Kernel.ResourceBirthController
+public import Compiler.DurableReceiverIO
+public import Compiler.CredentialAuthorityReplay
+public import Compiler.WorldKindLawDependencies
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PolicyInstallReceiver
 

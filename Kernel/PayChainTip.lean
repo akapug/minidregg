@@ -7,9 +7,28 @@ manufactures missing chain evidence. Finality and the chain RPC verification
 remain the observer capability's responsibility. This module preserves the
 exact asserted slot and block time, separately from the mixed deployment clock.
 -/
-import Kernel.PayReceivingContract
-import Kernel.PayCell
-import Kernel.ClockCell
+module
+
+public import Kernel.PayReceivingContract
+public import Kernel.PayCell
+public import Kernel.ClockCell
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PayChainTip
 

@@ -4,11 +4,32 @@ selects the participant and ticket ceiling. The session and descriptor are one
 ordinary signed joint mutation. Event28 admission separately checks a signed
 app observation and adds the app's physical read guard to that same turn.
 -/
-import Compiler.CarriedApplicationProvenance
-import Kernel.ApplicationGrainSessionEnrollmentSource
-import Kernel.ApplicationGrainSessionEnrollmentConstruction
-import Kernel.ApplicationDispatchAdmission
-import Kernel.NativeHost
+module
+
+public import Compiler.CarriedApplicationProvenance
+public import Kernel.ApplicationGrainSessionEnrollmentSource
+public import Kernel.ApplicationGrainSessionEnrollmentConstruction
+public import Kernel.ApplicationDispatchAdmission
+public import Kernel.NativeHost
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationGrainSessionEnrollmentAuthoring
 

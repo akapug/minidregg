@@ -14,12 +14,32 @@ theorem (`ObjectiveBendTermWire.decode_json`), not a run-time comparison: `accep
 refuses only a term nested deeper than the decoder's capacity. An `Accepted` value
 therefore carries a typing derivation for exactly the Core4 term the elaborator
 produced (`ObjectiveBendFrontEndAdequacy` states what that buys). -/
-import Compiler.ObjectiveBendParse
-import Compiler.ObjectiveBendElaborate
-import Compiler.ObjectiveBendLaw
-import Compiler.ObjectiveBendTermWire
-import Compiler.Sha256
-import Theory.ObjectiveBendTyping
+module
+
+public import Compiler.ObjectiveBendParse
+public import Compiler.ObjectiveBendElaborate
+public import Compiler.ObjectiveBendLaw
+public import Compiler.ObjectiveBendTermWire
+public import Compiler.Sha256
+public import Theory.ObjectiveBendTyping
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Compiler.ObjectiveBendFrontEnd
 open Lean
 open Minidregg.Compiler.ObjectiveBendElaborate (ATerm CoreTerm Output)

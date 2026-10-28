@@ -13,14 +13,41 @@ stale-guard theorems at one concrete authority cell. It is not a receiving
 configuration or decoder fallback. Signature verification remains the
 deployment portal's responsibility.
 -/
-import Compiler.CredentialAuthorityDomain
-import Compiler.PolicyRecordCodec
-import Compiler.CredentialSignatureAdmission
-import Theory.CredentialLineageAdmission
-import Kernel.CanonicalPolicyRegistry
-import Compiler.RefusalReason
-import Theory.AssertCompiled
-import Theory.AxiomPin
+module
+
+public import Compiler.CredentialAuthorityDomain
+public import Compiler.PolicyRecordCodec
+public import Compiler.CredentialSignatureAdmission
+public import Theory.CredentialLineageAdmission
+public import Kernel.CanonicalPolicyRegistry
+public import Compiler.RefusalReason
+public import Theory.AssertCompiled
+public import Theory.AxiomPin
+meta import Compiler.CredentialAuthorityDomain
+meta import Compiler.PolicyRecordCodec
+meta import Compiler.CredentialSignatureAdmission
+meta import Theory.CredentialLineageAdmission
+meta import Kernel.CanonicalPolicyRegistry
+meta import Compiler.RefusalReason
+meta import Theory.AssertCompiled
+meta import Theory.AxiomPin
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.CredentialAuthorityPolicyRegistry
 

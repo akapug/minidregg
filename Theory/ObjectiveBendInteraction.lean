@@ -23,7 +23,12 @@ kernel forms in `Kernel.ObjectiveResumeContract`): whatever a normalized state (
 checkpoint) commits, under any resources, is the reference node of the lazy state it is in a
 chain with; after a yield, for EVERY response, the resumed checkpoint is in a chain with
 `k r`; and if the reference spins, the normalized state commits nothing, ever. -/
-import Theory.ObjectiveBendDemandForcingConverse
+module
+
+public import Theory.ObjectiveBendDemandForcingConverse
+
+@[expose] public section
+
 namespace Minidregg.Theory.ObjectiveBendInteraction
 open Minidregg.Theory.ObjectiveBendOpenRecursion
 open Minidregg.Theory.ObjectiveBendDemandMachine

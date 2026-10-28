@@ -2,10 +2,29 @@
 After-core construction: not activated by the frozen native runtime profile.
 Methods select immutable existing programs; they confer no mutation authority.
 -/
-import Compiler.WorldExecutionContract
-import Compiler.WorldKindCell
-import Compiler.NockProgramCodec
-import Theory.Eval
+module
+
+public import Compiler.WorldExecutionContract
+public import Compiler.WorldKindCell
+public import Compiler.NockProgramCodec
+public import Theory.Eval
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.WorldKindMethods
 

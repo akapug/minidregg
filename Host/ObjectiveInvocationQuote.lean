@@ -16,13 +16,33 @@ The producer never accepts a remote final command, claimed output or
 The returned plan is "Core4 executeWith output" (evaluator
 `ObjectiveBendNativeAdmission.evaluatorId`), not a source-semantics theorem.
 Quotation reserves no authority and spends nothing. -/
-import Kernel.NativeHost
-import Kernel.ObjectiveBendAuthenticatedInputs
-import Compiler.ObjectiveBendQuoteRequest
-import Compiler.ObjectiveInvocationLayout
-import Compiler.ObjectiveBendDataWire
-import Lean.Data.Json
-import Host.CapacityJson
+module
+
+public import Kernel.NativeHost
+public import Kernel.ObjectiveBendAuthenticatedInputs
+public import Compiler.ObjectiveBendQuoteRequest
+public import Compiler.ObjectiveInvocationLayout
+public import Compiler.ObjectiveBendDataWire
+public import Lean.Data.Json
+public import Host.CapacityJson
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Host.ObjectiveInvocationQuote
 open Minidregg.Compiler Minidregg.Kernel Minidregg.Theory
 open Minidregg.Kernel.NativeHost

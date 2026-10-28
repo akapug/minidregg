@@ -4,15 +4,34 @@ controller bytes, not a second executor or an authority assertion. Each
 operation's existing strict receiving codec still decodes its inner payload.
 No raw DataIntent, supplied height, profile, or post-state is a call variant.
 -/
-import Compiler.NativeProtocolFrames
-import Compiler.NativeHostProfile
-import Kernel.DeclaredResourceController
-import Kernel.PolicyInstallReceiver
-import Kernel.ResourceBirthReceiver
-import Kernel.CapabilityDelegationReceiver
-import Kernel.CapabilityRevocationReceiver
-import Kernel.WorldRoot
-import Compiler.RefusalReason
+module
+
+public import Compiler.NativeProtocolFrames
+public import Compiler.NativeHostProfile
+public import Kernel.DeclaredResourceController
+public import Kernel.PolicyInstallReceiver
+public import Kernel.ResourceBirthReceiver
+public import Kernel.CapabilityDelegationReceiver
+public import Kernel.CapabilityRevocationReceiver
+public import Kernel.WorldRoot
+public import Compiler.RefusalReason
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.NativeHostCodec
 

@@ -4,8 +4,12 @@ same loaded image supplies the source-authored grant birth and the current
 signed app `.delegateObject` check. This module does not yet emit a durable
 special issue intent or implement replay; Accepted is not a receipt.
 -/
-import Kernel.ApplicationAgentLifetimeGrantDelegation
-import Kernel.ResourceBirthReceiver
+module
+
+public import Kernel.ApplicationAgentLifetimeGrantDelegation
+public import Kernel.ResourceBirthReceiver
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationAgentLifetimeGrantAdmission
 open Minidregg.Compiler

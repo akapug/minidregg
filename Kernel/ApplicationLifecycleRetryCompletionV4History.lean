@@ -4,9 +4,13 @@ prefix. Replay must compare this to its chronological retry claim gate; the live
 receiver must obtain that comparison from Verified. A structural prefix is
 not, by itself, a completion permit.
 -/
-import Kernel.ApplicationLifecycleRetryCompletionV4Source
-import Kernel.NativeHistorySelection
-import Kernel.ApplicationLifecycleRetryClaimV4Core
+module
+
+public import Kernel.ApplicationLifecycleRetryCompletionV4Source
+public import Kernel.NativeHistorySelection
+public import Kernel.ApplicationLifecycleRetryClaimV4Core
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4History
 

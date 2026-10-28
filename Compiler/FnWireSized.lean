@@ -13,7 +13,26 @@ other. Here: one accept and every malformed case, as named theorems (`decide`, k
 Store event the poll reply carries (fn `docs/operator-internals.md`: the Store frame's u32 less
 the reply's 9 header and 346 cursor octets).
 -/
-import Compiler.FnWireFncu
+module
+
+public import Compiler.FnWireFncu
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.FnWire
 

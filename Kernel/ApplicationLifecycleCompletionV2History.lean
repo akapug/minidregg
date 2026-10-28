@@ -4,9 +4,13 @@ prefix. Replay must compare this to its chronological PriorClaimV3; the live
 receiver must obtain that comparison from Verified. A structural prefix is
 not, by itself, a completion permit.
 -/
-import Kernel.ApplicationLifecycleCompletionV2Source
-import Kernel.NativeHistorySelection
-import Kernel.ApplicationLifecycleClaimV3Core
+module
+
+public import Kernel.ApplicationLifecycleCompletionV2Source
+public import Kernel.NativeHistorySelection
+public import Kernel.ApplicationLifecycleClaimV3Core
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleCompletionV2History
 

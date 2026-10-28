@@ -79,6 +79,7 @@ exit status alone ([docs/JOURNEY.md](docs/JOURNEY.md)). The developer guide is
 - [The plan](docs/DEMO-PREFIX-2026-10-26.md): the work and the conditions for opening the demo.
 - [The architecture page](https://emberian.github.io/minidregg/architecture.html): admission, laws, receipts, consent, private rooms.
 - [docs/STATUS.md](docs/STATUS.md): what the next build carries, each line with its evidence.
+- [Oracle appliance](docs/oracle-appliance.md): question answering and specialist tools, shared hosting, and [agent access](docs/oracle-agent-tools.md).
 - [ATLAS.md](ATLAS.md): the founding diagnosis and the design laws.
 - For contributors: [HANDOFF.md](HANDOFF.md), then [how the project works](docs/COORDINATION-2026-10-27.md) and [AGENTS.md](AGENTS.md).
 

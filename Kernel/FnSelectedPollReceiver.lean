@@ -3,8 +3,12 @@ Event17 receiving under the exact verified Mini history. A local fn poll is
 testimony, not a durable receipt: only exact CAS and verified readback confirm
 coverage. Historical lookup returns a receipt and never authorizes an ACK.
 -/
-import Kernel.FnSelectedPollAdmission
-import Kernel.NativeHost
+module
+
+public import Kernel.FnSelectedPollAdmission
+public import Kernel.NativeHost
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnSelectedPollReceiver
 

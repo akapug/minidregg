@@ -34,6 +34,41 @@ service profiles and do not advertise Oracle tools. Naming the profile does not
 prove that the deployed package implements this protocol; discovery itself goes
 through the live API and can fail visibly.
 
+## Attach an existing agent in the same world
+
+The application, receiving session, persistent grant and agent task must belong
+to the same Mini Store. A route fragment from another acceptance world cannot
+attach an agent. The session participant and lifetime grant bind the
+controller's parent task and subject; its tool task performs the session birth,
+and a separate dispatch task pays for application calls.
+
+`grain-runtime create` accepts an optional `dispatch` role alongside its
+controller, tool and provider roles. This births the dispatch purse with the
+agent and writes its transport configuration. The
+[creation guide](../deploy/grain-host/README.md) describes the input. Existing
+agents without an application route do not need this role.
+
+The reusable [application attachment helper](../scripts/application-attachment.py)
+takes explicit artifacts from an existing world: the application birth and
+bootstrap ticket, allocated agent identities, controller configuration, native
+session profile and issuer signing keys. Its phases prepare observation grants
+and configuration, create the receiving session, issue its persistent grant,
+register the route and activate it against the actual running generation. The
+Oracle acceptance fixture calls this same helper. The Python code assembles
+requests; native Mini admits each transition.
+
+The operator and controller use separate OS accounts. Operator custody stays
+outside the controller home. Installing a configuration bundle and invoking a
+foreground tool across that boundary use the fixed controller installer
+operations. A room can then expose `mini_oracle_discover` and `mini_oracle_call`
+to Hermes with its `hermes/tools` Oracle bit (8); the room permission and the
+application's native grant are both required.
+
+Every attachment phase retains its inputs and results. After an uncertain
+native response, inspect the helper's `status` output and the exact retained
+attempt before continuing. It refuses to silently repeat an attempted phase;
+editing a route fragment or changing a request ID is not recovery.
+
 ## Discover and call
 
 The operator registers a provisioned lifetime entrance with

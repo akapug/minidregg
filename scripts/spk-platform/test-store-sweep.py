@@ -9,6 +9,7 @@ import os
 import sys
 import threading
 import shutil
+import uuid
 import unittest
 
 spec = importlib.util.spec_from_file_location('sweep', Path(__file__).with_name('store-sweep-data.py'))
@@ -145,6 +146,40 @@ echo manager-environment-ok
                     if proc.poll() is None:
                         proc.terminate()
                     reaper.join()
+
+    def test_world_down_accepts_valid_partial_broker_locator_only(self):
+        here = Path(__file__).resolve().parent
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            driver, bins, run = root/'driver', root/'bin', root/'world'
+            for path in (driver, bins, run/'broker-setup'):
+                path.mkdir(parents=True)
+            shutil.copy(here/'world-down.sh', driver/'world-down.sh')
+            # No real service manager, sudo, filesystem cleanup, or residents in this fixture.
+            for name in ('systemctl', 'journalctl', 'rm', 'find'):
+                script = bins/name
+                script.write_text('#!/bin/bash\ncase " $* " in *" is-active "*) exit 3;; esac\nexit 0\n')
+                script.chmod(0o755)
+            (bins/'sudo').write_text('#!/bin/bash\necho unexpected-sudo >&2\nexit 99\n')
+            (bins/'sudo').chmod(0o755)
+            (driver/'stop-residents.sh').write_text('#!/bin/bash\nexit 0\n')
+            (driver/'stop-residents.sh').chmod(0o755)
+            store = uuid.uuid4().hex[:16]
+            grains = '/var/lib/mini-spk-worlds/' + store
+            locator = dict(protocol='mini-spk-world-recovery-v1', store=store, grainsRoot=grains,
+                           brokerSocket=grains+'/runtime-'+store+'/broker.sock',
+                           helper='/usr/local/libexec/mini-spk-volume-helper-'+store)
+            path = run/'broker-setup/recovery.json'
+            path.write_text(json.dumps(locator))
+            env = dict(os.environ, PATH=str(bins)+os.pathsep+os.environ['PATH'])
+            cmd = ['bash', str(driver/'world-down.sh'), str(run)]
+            result = subprocess.run(cmd, env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('removal_assertions=0', result.stdout)
+            locator['brokerSocket'] = '/another-world/broker.sock'
+            path.write_text(json.dumps(locator))
+            result = subprocess.run(cmd, env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 2, 'mismatched locator must refuse before cleanup')
 
 
 if __name__ == '__main__':

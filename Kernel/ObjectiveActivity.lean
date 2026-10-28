@@ -104,16 +104,35 @@ by the Book by name, and the deposit has left only with the record. Every postin
 loaded Book (`AcceptedBatch`), so every turn conserves every asset
 (`Birth.conserves`, `Delivery.conserves`). No amount depends on how much
 computation ran (`refund_measurement_free`). -/
-import Std.Data.HashMap
-import Kernel.AnswerSlot
-import Compiler.ObjectiveBendSourceArtifact
-import Compiler.ObjectiveBendPublication
-import Compiler.CanonicalCellRegistry
-import Theory.ObjectiveBendDemandCollect
-import Kernel.ObjectState
-import Kernel.ObjectRecord
-import Kernel.ObjectiveTariff
-import Kernel.ObjectiveWorkAccount
+module
+
+public import Std.Data.HashMap
+public import Kernel.AnswerSlot
+public import Compiler.ObjectiveBendSourceArtifact
+public import Compiler.ObjectiveBendPublication
+public import Compiler.CanonicalCellRegistry
+public import Theory.ObjectiveBendDemandCollect
+public import Kernel.ObjectState
+public import Kernel.ObjectRecord
+public import Kernel.ObjectiveTariff
+public import Kernel.ObjectiveWorkAccount
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ObjectiveActivity
 open Minidregg.Theory Minidregg.Compiler

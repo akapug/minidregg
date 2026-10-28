@@ -5,9 +5,13 @@ issue provenance, or durable pending commit. The signed no-op is checked at
 the same image as the application dispatch; event21 carries its complete-cell
 physical root as a read guard rather than writing an unchanged purse page.
 -/
-import Kernel.ApplicationDispatchAgentReserveContext
-import Kernel.NativeHostContext
-import Kernel.NativeHostServed
+module
+
+public import Kernel.ApplicationDispatchAgentReserveContext
+public import Kernel.NativeHostContext
+public import Kernel.NativeHostServed
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationDispatchAgentPayer
 

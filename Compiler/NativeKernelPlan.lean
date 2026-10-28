@@ -20,8 +20,27 @@ well-formed generated call, exact public prefix, and existing descriptor
 acceptance.  This is a control-integrity theorem, not a native semantics or a
 native-refinement theorem.
 -/
-import Compiler.BignumKernelABI
-import Compiler.SemanticManifest
+module
+
+public import Compiler.BignumKernelABI
+public import Compiler.SemanticManifest
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.NativeKernelPlan
 

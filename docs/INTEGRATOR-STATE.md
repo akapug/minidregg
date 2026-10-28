@@ -96,6 +96,15 @@ the newest built main that passed the gate; each is reported in one line, and in
 | main since f1b7add21 | 1d5902832 | rows-ledger c6cc9b4a3 and 45fc4d30a (ROWS-OWED §0 app tables); umbrellas stage 842d8fb75 |
 | umbrellas stage | 842d8fb75 | coordinator 10-28: no stage elaborated Fixtures/ObjectiveProofs/CensusChecks, so NativeDocWriteFixture sat red unseen. `lane-build.sh umbrellas` (after host, seated, `--umbrella --umbrella-only`, targets from `umbrella-targets --unshipped`) reds the candidate; integration-build.sh runs host, consent, umbrellas, rust (backup .bak-umbrellas). One-off run on integ8 at f1b7add21: `integ4/umbrellas-now.sh` (pid file integ4/umbrellas-now.pid; builder copy src/scripts/bnh-umbrella-oneoff.sh, untracked; log integ8/logs/umbrellas.log) started 09:5x |
 | f1b7add21 decision | — | no regen inside the conversion freeze: the conversion landing re-pins DISPATCH-OBSERVATION/v6 and GRAIN-RESOURCE-BIRTH/JOINT/v5 with the epoch move; the next build is the conversion candidate. Recorded fixtures (NativeDocWriteFixture, NativeAcceptedFixture) are regenerated once, from the first READY candidate carrying the conversion AND lean-audit-c + M2 (L1e: M2 moves the turn digest and the v3 frames, so a conversion-only fixture goes stale again); until then the umbrellas stage is expected red on Fixtures only |
+| conversion | b26630168 | 10:1x main fast-forwarded to lane/iter-speed b26630168 (module conversion, landing 186dd02e8, pins 73ab0797... byte-identical hbox/dregg-ref; StoreEpoch moves: FRESH GENESIS). Umbrellas one-off at f1b7add21 stopped by its PID tree (integ8/stop-umbrellas.list). `main-full2.sh b26630168` at SWARM_MEM_MAX=22G started 10:13 (main-full.pid 293722, build.pid 293739; gate-cut6 + enrol-resume after READY). Main since: thin-birth fb0acbfbe (6fd993d43, merged onto the converted main), app-market-b5 84938f78c + 0aff6334e (3a943f85e), hermes-b 20a7abafc (6b5528b20; install-hermes preflight as root). The build after this candidate carries them; name it to L4b |
+| main since b26630168 | 550073827 | thin-birth fb0acbfbe, app-market-b5 84938f78c + b5-featured 0aff6334e, hermes-b 20a7abafc + cb638b87d (per-account consent anchors) + 1c0cc645d, un-deputy 05890da80, un-pb-helpers 9be4a7da3 (private-backend checks with --features demo on the Mac). Conversion build b26630168 in its host stage from 10:17 |
+| main since b26630168 | 643b4c6ba | hermes-b 627f91c96 (0cfb09864: umask 077 around pin-enrollment-plan-height; filtered participant_enrollment 14/14 on the Mac), un-deputy c7ac7819c (state). Name the build carrying them to L4b |
+| main since b26630168 | b71898658 | un-consent-reconnect 0b88b837f (c64a50a28; rehearsal blocker 1 of 3) and b71898658 (POLLRDHUP gated to Linux: 0b88b837f broke the mini on macOS; consent_proxy 10/10 on the Mac). Name the first candidate carrying it to infra a298031c78e86d651 (checks 200 -> idle -> 200) |
+| main since b26630168 | d0256656e | app-market-b7 d6243efa8 (2048, Perplexity Sudoku, 3D Blockstack, Simple Chat in FEATURED, 25; harness 119f29700/53cb4abda/376472418; filtered apps_search 1/1 on the Mac), un-deputy 347a223dd (state). lane/un-consent-reconnect 02a03960f NOT merged: superseded by b71898658 (deputy 10-28) |
+| main since b26630168 | d871cb4dd | un-pb-helpers ee908664b (private-backend P6 lost-reply recovery; `cargo check --all-targets --features demo` clean on the Mac). Deputy note: never run custody torn_anchor_tail/lost_reply_and_relabel in one process with king_store's kill-9 test (flock WouldBlock flake) |
+| main since b26630168 | 994dcf17b | effects-revival ae0c78a01 (ac4247487; Effects/Revival/HostTeethProofs.lean imported by Effects.lean, HostTeeth by `decide +kernel`; `lake build Effects` green on hbox per the owner; first elaborated here by the umbrellas stage of the build after b26630168), un-deputy ada83a1b4 (state) |
+| b26630168 progress | — | 10:30 host stage cold (788 modules, seats 4, 22G) from 10:17; on READY: gate-cut6 + enrol-resume; name `/build/candidates/b26630168b63024c9c46311745fa0b25fa09c13f` with its verdict to the coordinator and infra a298031c78e86d651 |
+| rehearsal plan | — | coordinator 10-28: b26630168 is NOT the rehearsal cut; run its gate fully (conversion proof, fresh-genesis baseline; the validator and market run on it). The rehearsal candidate is the NEXT build, launched the moment all three blockers are on main: consent reconnect (landed), public-reader 403 (deputy's faerie), Hermes birthStale (L4c), plus the held Lean branches merged and converted by their owners (lean-audit-c/-m2 L1e, thin-birth, effects-revival a26c13b24522dee35, OwnTracks). Keep the coordinator and infra posted |
 Gate harness rule (coordinator, 10-28): the tour and composed harness (scripts/, native/resource-client/*.sh|*.py, journey.d/) come from main at gate time over the candidate's source.tar and binaries (`integ4/harness-overlay.sh DEST SHA`; `HARNESS=<sha>` in tour-run2.sh and composed-full2.sh; gate-cut4.sh resolves main's tip, adds `harnessCommit` to the gate file after gate-from-runs.py, which binds only the candidate's SHA256SUMS). Infra was asked to copy harnessCommit in gate-from-runs.py itself (optional).
 Runner rule (coordinator, 10-28): launch builds with `integ4/main-full2.sh`, which gates with `gate-cut5.sh`: it copies tour-run2.sh, composed-full2.sh and harness-overlay.sh into `$G/runner` at gate start, runs only from that copy and writes `runnerSha256sums` beside `harnessCommit` in the gate file. Never edit a script a running job reads; change it under a new name.
 Merge-subject slip: 8e7940fea and 1a3240483 name the un-deputy sha in their subjects; their parents are un-story-install 733dd948f and red-authority-zero-field 108083a35. 733dd948f was a red-first test (shared_names.rs:1144), cleared by a8376ce8f (d2b639068).
@@ -143,8 +152,10 @@ gates main and fixes reds itself.
 
 ## Rulings (do not re-ask)
 
-- Held for the conversion: lane/thin-birth 9509996a0 (b00bc41ff + docs; ad0906325ab57d1c3; continuation docs/THIN-BIRTH-2026-10-28.md §11; checkOpened, the re-encoding twin deleted; JP2 71/71 and THIN on e89fe7b8b with its consent binary). Tell it when the conversion is on main; it merges and re-converts, then sends a sha.
-- Held for the conversion window (touches .lean, Effects.lean imports it): lane/effects-revival 6b5464201 (owner a26c13b24522dee35 after the a83b7949ba401cca5 hand-off; it also owes a regenerated Fixtures/NativeDocWriteFixture.lean (stale since 3315a908), regenerated from the conversion candidate after READY and landed with its Effects sha; Engine, Statements, EngineProofs). After the conversion the lane merges main, converts its Effects files and sends one sha; land that, through a box build.
+- thin-birth: landed after the conversion at fb0acbfbe (main 6fd993d43); its lane-check on dregg-ref was still running at landing, reds come back to ad0906325ab57d1c3. lane/thin-birth Phase-3 work lands only on a sha its owner sends after the auditor accepts.
+- effects-revival LANDED 10-28 at 65b813888 (main 4d059a29b) and ae0c78a01 (main ac4247487, HostTeeth proved; converted, `lake build Effects` green on hbox);
+  owner a26c13b24522dee35 still owes Fixtures/NativeDocWriteFixture.lean regenerated from the conversion(+M2)
+  candidate after READY. Its reds from the next build go to that owner.
 - Held for the build after the conversion candidate (one .lean file): lane/app-market-b5 84938f78c
   (Kernel/ApplicationSpkPackageIdentity.lean, safeApiTail admits a final segment with no trailing slash; OwnTracks
   re-qualifies on the candidate carrying it; deputy a308118209b4a48ea). Land after the conversion, re-converted if
@@ -154,7 +165,7 @@ gates main and fixes reds itself.
   1f9a757de is in (256a98cbd).
 - Not held, nothing coming: lane/un-ns-owner 587c5acbd is the superseded work-in-progress branch; its clean
   form lane/un-ns-owner-clean (3a8109059, box-elaborated, plus e80f56422 and cf3c5d433) is on main (coordinator 10-28).
-- Module-conversion window: from iter-speed's (a0fd127abfb9aac75) "re-deriving now" until it sends its sha, no .lean or lakefile.toml change lands on main; Rust, shell and docs continue.
+- Module-conversion window: CLOSED 10-28 10:1x (b26630168 on main); .lean lands again. Held lanes told: L1e, thin-birth, effects (a26c13b24522dee35).
 - Row requirements: a row asserting behaviour newer than the oldest candidate a harness may judge gets a line in scripts/gates/row-requires.tsv in the same commit (5 JWF rows → 588855a71, 9b36d6d37).
 - Pay weights stay at 19.3 GB in the seat table (coordinator 10-28: never lower a weight to a kill-time peak); a
   host stage that must compile a Pay module runs at SWARM_MEM_MAX=22G on a slice cleared of leftovers.
@@ -210,3 +221,11 @@ only `.lake/packages`; Lake's artifact cache restores the build dir as fresh ino
 - install-user-world's companion pin is recomputed from the merged controller-world.py whenever both sides moved.
 - Named-file commits, `git commit -F` from `scratchpad/integration/<unique>.txt`; never git stash.
 - Filtered tests only (the tests stage of integration-build.sh lists the per-lane filters).
+
+- Umbrellas stage (coordinator 10-28): non-fatal for the conversion candidate (b26630168) ONLY. A red writes
+  integ8/UMBRELLAS-RED and is named in the candidate report (integration-build.sh; backup .bak-umbrella-nonfatal).
+  It becomes BLOCKING again (restore exit 10 for umbrellas) in the first build after NativeDocWriteFixture and
+  NativeAcceptedFixture are regenerated from the conversion(+M2) candidate by the effects lane (a26c13b24522dee35)
+  and L1e (a58f907aef8926430).
+- Mac shared target: four codex astra workers build on /Users/ember/dev/minidregg-lanes/target-integ (and hbox);
+  if their cargo runs contend with the integrator's Mac checks, tell the coordinator.

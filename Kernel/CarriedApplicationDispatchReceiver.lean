@@ -1,9 +1,13 @@
 /- A physical dispatch receiver for an authenticated carried service. Both old
 and new tickets retain their actual typed current admission. One exact CAS
 extends the suffix; only its fresh winner can hand a physical permit to Host. -/
-import Kernel.ApplicationDispatchReceiver
-import Kernel.CarriedDispatchAdmission
-import Kernel.ApplicationDispatchLookup
+module
+
+public import Kernel.ApplicationDispatchReceiver
+public import Kernel.CarriedDispatchAdmission
+public import Kernel.ApplicationDispatchLookup
+
+@[expose] public section
 
 namespace Minidregg.Kernel.CarriedApplicationDispatchReceiver
 

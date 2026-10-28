@@ -49,6 +49,141 @@ class ControllerWorldTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), digest)
         self.assertIn("compile(code, path, 'exec')", installer.read_text())
 
+    def test_runtime_and_child_pin_short_consent_anchor_directory(self):
+        for version in (1, 2):
+            with self.subTest(version=version):
+                r = self.record() if version == 1 else self.consent_record()
+                r['home'] = '/var/lib/mini-spk-worlds/abababababababab/controller/home'
+                pins = None if version == 1 else {'providerSha256': '12'*32, 'configSha256': '34'*32,
+                                                  'storage': {'writableParent': '/private/store-parent'}}
+                units = c.unit_bytes(r, Path('/base'), Path('/operator.sock'), pins)
+                self.assertIn('Environment=MINI_CONSENT_ANCHOR_DIR=' + r['home'] + '/a\n', units[r['units'][0]].decode())
+                r['_consentEnvironment'] = {'MINI_CONSENT_ANCHOR_DIR': '/unwanted/override'}
+                class SpawnObserved(Exception): pass
+                with patch.object(c.subprocess, 'Popen', side_effect=SpawnObserved) as spawn:
+                    with self.assertRaises(SpawnObserved): c.controller_child(r, ['/fixed/native'])
+                    self.assertEqual(spawn.call_args.kwargs['env']['MINI_CONSENT_ANCHOR_DIR'], r['home'] + '/a')
+                    self.assertEqual(spawn.call_args.kwargs['env']['MINI_CODEC_RESIDENT'], '0')
+                    self.assertEqual(spawn.call_args.kwargs['env']['MINI_CONSENT_RESIDENT'], '0')
+                self.assertNotIn('MINI_CODEC_RESIDENT=0', units[r['units'][0]].decode())
+
+    def worker_record(self):
+        r = self.consent_record(); r['workerTask'] = '9870001'
+        r['units'] = c.names(r['store'], True, r['workerTask'])
+        return r
+
+    def worker_config_value(self, r):
+        home = Path(r['home']); base = self.root / 'base'; root = home / 'grain'
+        (home / 'keys').mkdir(mode=0o700, exist_ok=True)
+        key = home / 'keys/hhost.key'; key.write_bytes(b'x' * 32); key.chmod(0o600)
+        value = {'task': r['workerTask'], 'subject': '601', 'capability': '701', 'queryCapability': '701',
+            'custodyKey': str(key), 'stateDir': str(root / 'state'), 'controlSocket': str(root / 'state/control.sock'),
+            'cwd': str(root), 'mini': str(base / 'bin/mini'), 'host': str(base / 'bin/minidregg-host'),
+            'hostConfig': str(home / 'host-config.json'), 'hostSocket': '/public/host.sock',
+            'commands': [{'name': 'hermes-acp', 'program': str(base / 'worker/launcher/bwrap'),
+                'args': ['--workspace', str(home / 'worker-work'), '--runtime-root', str(base / 'worker/runtime-root'),
+                         '--network', 'none', '--', '/agent/hermes-acp'],
+                'systemdScope': True, 'wallTimeSeconds': 1800, 'reserve': '3', 'charge': '1'}]}
+        value['toolTask'] = {'task': '9870002', 'subject': '602', 'capability': '702', 'queryCapability': '702',
+                             'custodyKey': str(key), 'parentCapability': '703', 'parentObserveCapability': '703'}
+        return base, value
+
+    def test_worker_paths_and_units_bind_task_and_private_native_environment(self):
+        r = self.worker_record(); base = self.root / 'base'
+        pins = {'providerSha256': '12'*32, 'configSha256': '34'*32, 'storage': {'writableParent': '/private/store'}}
+        runtime = c.unit_bytes(r, base, Path('/operator.sock'), pins)[r['units'][0]].decode()
+        self.assertEqual(r['units'][0], 'mini-grain-controller@9870001.service')
+        self.assertIn(' serve ' + str(Path(r['home']) / 'grain/controller.json'), runtime)
+        self.assertIn('MINI_GRAIN_CONTROLLER_MANAGER=system', runtime)
+        self.assertIn('MINI_GRAIN_WORKER_MANAGER=user', runtime)
+        self.assertIn('MINI_GRAIN_CONTROLLER_REGISTRATION=' + str(base / 'registrations/9870001.json'), runtime)
+        self.assertIn('XDG_RUNTIME_DIR=/run/user/' + str(r['uid']), runtime)
+        self.assertEqual(c.worker_state(r), Path(r['home']) / 'grain/state')
+        self.assertEqual(c.worker_state(self.record()), Path(r['home']) / 'state')
+
+    def test_worker_input_copy_rejects_escape_duplicates_and_store_destination(self):
+        source = self.file('metadata.json', b'{}')
+        request = {'protocol': 'mini-controller-worker-prepare-v1', 'task': '9870001',
+                   'files': [{'source': str(source), 'destination': 'host-config.json'}], 'directories': ['bootstrap/namespace'],
+                   'launcherDirectory': '/launcher', 'runtimeRoot': '/runtime'}
+        data, directories = c.worker_inputs(request, self.uid)
+        self.assertEqual(data, {'host-config.json': b'{}'})
+        self.assertTrue({'bootstrap', 'bootstrap/namespace', 'grain', 'worker-work'} <= directories)
+        for destination in ('../escape', 'keys/../escape', '/root/key', 'store/forward-link.sqlite3', 'bin/mini'):
+            changed = {**request, 'files': [{'source': str(source), 'destination': destination}]}
+            with self.subTest(destination=destination), self.assertRaises(ValueError): c.worker_inputs(changed, self.uid)
+        with self.assertRaises(ValueError): c.worker_inputs({**request, 'files': request['files'] * 2}, self.uid)
+
+    def test_worker_configuration_rejects_launcher_scope_or_custody_changes(self):
+        r = self.worker_record(); base, config = self.worker_config_value(r)
+        c.validate_worker_config(config, base, r)
+        for field, value in (('program', '/bin/sh'), ('systemdScope', False), ('wallTimeSeconds', 1801)):
+            changed = json.loads(json.dumps(config)); changed['commands'][0][field] = value
+            with self.subTest(field=field), self.assertRaises(ValueError): c.validate_worker_config(changed, base, r)
+        changed = {**config, 'custodyKey': str(self.root / 'sponsor.key')}
+        with self.assertRaises(ValueError): c.validate_worker_config(changed, base, r)
+        changed = {**config, 'subject': '999'}
+        with self.assertRaises(ValueError): c.validate_worker_config(changed, base, r, config)
+
+    def test_worker_command_executes_only_fixed_native_program_and_stages_after_drop(self):
+        r = self.worker_record(); (self.root / 'requests').mkdir(mode=0o700)
+        source = self.file('room-input.json', b'{"native":"data"}')
+        request = {'program': 'mini', 'args': ['hermes-handoff', '--action', 'registration'],
+                   'inputs': [{'source': str(source), 'destination': 'requests/room.json'}]}
+        path = self.file('run.json', c.encoded(request))
+        pins = {'providerSha256': '12'*32, 'configSha256': '34'*32}
+        def child(record, argv, setup=None, timeout=None):
+            self.assertEqual(argv[0], str(self.root / 'bin/mini'))
+            self.assertFalse((self.root / 'requests/room.json').exists())
+            self.assertEqual(record['uid'], self.uid)
+            setup()
+            self.assertEqual((self.root / 'requests/room.json').read_bytes(), source.read_bytes())
+            return 0
+        with patch.object(c, 'load', return_value=({}, self.root, r)), patch.object(c, 'checked_units', return_value={'consent': pins}), \
+             patch.object(c, 'worker_manager'), patch.object(c, 'controller_child', side_effect=child) as execute:
+            self.assertEqual(c.controller_run(r['store'], '/unused', str(path)), 0)
+            request['program'] = '/bin/sh'; path.write_bytes(c.encoded(request))
+            with self.assertRaises(ValueError): c.controller_run(r['store'], '/unused', str(path))
+            self.assertEqual(execute.call_count, 1)
+
+    def test_worker_room_account_binds_once_without_changing_other_authority(self):
+        old = {'task': '12', 'subject': '13', 'room': {'room': 'lab', 'workspace': '/private/workspace', 'account': 'unsummoned'}}
+        c.unchanged_worker_tool(old, old)
+        for name in ('lab-hermes', 'lab/hermes-budget'):
+            new = {**old, 'room': {**old['room'], 'account': name}}
+            c.unchanged_worker_tool(old, new)
+            c.unchanged_worker_tool(new, new)
+            with self.assertRaises(ValueError): c.unchanged_worker_tool(new, old)
+            with self.assertRaises(ValueError): c.unchanged_worker_tool(new, {**new, 'room': {**new['room'], 'account': 'other'}})
+        for name in ('../secret', 'lab//account', 'lab_account', 'a' * 65, '/lab', 'lab/' + 'x' * 125):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                c.unchanged_worker_tool(old, {**old, 'room': {**old['room'], 'account': name}})
+        for change in ({'subject': '99'}, {'room': {**old['room'], 'room': 'other', 'account': 'lab-hermes'}}):
+            with self.assertRaises(ValueError): c.unchanged_worker_tool(old, {**old, **change})
+        c.unchanged_worker_tool(old, {**old, 'allowedApplicationLifetimeRoutes': [{'name': 'oracle-app'}]})
+
+    def test_worker_runtime_copy_refuses_links_without_following_them(self):
+        source = self.root / 'runtime-source'; source.mkdir(mode=0o700)
+        secret = self.file('not-a-runtime-file', b'private')
+        (source / 'escape').symlink_to(secret)
+        with patch.object(c.os, 'chown'):
+            with self.assertRaises((ValueError, OSError)):
+                c.copy_worker_tree(source, self.root / 'copied-runtime', self.uid)
+        self.assertEqual(secret.read_bytes(), b'private')
+        self.assertEqual(list((self.root / 'copied-runtime').iterdir()), [])
+
+    def test_birth_transfer_refuses_hardlinks_before_ownership_changes(self):
+        root = self.root / 'birth'; root.mkdir(mode=0o700)
+        artifact = root / 'call.bin'; artifact.write_bytes(b'exact'); artifact.chmod(0o600)
+        os.link(artifact, root / 'alias')
+        with patch.object(c.os, 'fchown') as change:
+            with self.assertRaises(ValueError): c.transfer_birth_tree(root, self.uid, self.uid, self.gid)
+            change.assert_not_called()
+        (root / 'alias').unlink()
+        c.transfer_birth_tree(root, self.uid, self.uid, self.gid)
+        self.assertEqual(artifact.read_bytes(), b'exact')
+        self.assertEqual(stat.S_IMODE(artifact.stat().st_mode), 0o600)
+
     def test_path_rejects_unit_escaping_and_aliases(self):
         self.assertEqual(c.canonical('/var/lib/mini-spk-worlds/ab/controller'), Path('/var/lib/mini-spk-worlds/ab/controller'))
         for value in ['/a/../b', '/a/./b', '/a//b', '/a/', 'relative', '/a b', '/a\nUser=root', '/a%h']:

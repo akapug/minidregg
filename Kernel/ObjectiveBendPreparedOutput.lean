@@ -2,10 +2,15 @@
 This token checks actual closed typing, executes SAME source term with one root+
 field budget, materializes complete data, and binds exact source Plan against
 ACTUAL loaded directory and command. It creates no accepted receipt or authority. -/
-import Theory.ObjectiveBendTyping
-import Theory.ObjectiveBendDemandCapacity
-import Compiler.ObjectiveBendPlanAdapter
-import Theory.AssertAxioms
+module
+
+public import Theory.ObjectiveBendTyping
+public import Theory.ObjectiveBendDemandCapacity
+public import Compiler.ObjectiveBendPlanAdapter
+public import Theory.AssertAxioms
+
+@[expose] public section
+
 namespace Minidregg.Kernel.ObjectiveBendPreparedOutput
 open Minidregg.Theory
 open Minidregg.Theory.ObjectiveBendTyping

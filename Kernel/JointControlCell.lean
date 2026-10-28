@@ -3,7 +3,27 @@ No alternate Store transaction is needed: this cell is changed in the same
 DataIntent record as reservation/install/decision state. Integration must install
 ordinaryGate in BOTH live admission and replay; merely importing is insufficient.
 -/
-import Kernel.JointReservation
+module
+
+public import Kernel.JointReservation
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Kernel.JointControlCell
 open Minidregg.Theory
 open Minidregg.Theory.TypedAuthorization

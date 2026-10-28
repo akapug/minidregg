@@ -4,7 +4,11 @@ native tip. The original claim must be a v4 claim admitted by the same walk.
 Exact post-CAS readback is required for confirmation; an uncertain reply is
 recovered only by receipt lookup of the same ingress.
 -/
-import Kernel.NativeHostReplay
+module
+
+public import Kernel.NativeHostReplay
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Receiver
 

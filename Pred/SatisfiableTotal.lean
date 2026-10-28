@@ -21,7 +21,27 @@ for every law `Pred.difference?` translates, `decide` returns a witness or a cer
 
 Core Lean only, within the Pred boundary.
 -/
-import Pred.Satisfiable
+module
+
+public import Pred.Satisfiable
+meta import Pred.Satisfiable
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Pred.Sat
 

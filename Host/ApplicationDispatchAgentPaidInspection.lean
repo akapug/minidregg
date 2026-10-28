@@ -3,8 +3,12 @@ Read-only custody presentation for source-authored event21 signing plans. JSON
 and decoded canonical bytes are never authority; native op46 re-admits the
 assembled ingress at the current verified tip before CAS.
 -/
-import Kernel.ApplicationDispatchAgentPaidAuthoring
-import Lean.Data.Json
+module
+
+public import Kernel.ApplicationDispatchAgentPaidAuthoring
+public import Lean.Data.Json
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationDispatchAgentPaidInspection
 

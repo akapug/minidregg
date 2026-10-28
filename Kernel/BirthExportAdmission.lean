@@ -1,14 +1,33 @@
 /- Explicit inherited export restrictions on the exact signed initial effect.
 The old factory law remains the authorizer. A newborn's own local component is
 not an export root and is never self-evaluated by this gate. -/
-import Compiler.PhysicalLawResolution
-import Compiler.WorldKindLawDependencies
-import Compiler.CanonicalRuntimeProfileCore
-import Kernel.WorldKindProjection
-import Kernel.ContentResource
-import Kernel.DeclaredResourceProjection
-import Kernel.ClockCellDomain
-import Theory.AxiomPin
+module
+
+public import Compiler.PhysicalLawResolution
+public import Compiler.WorldKindLawDependencies
+public import Compiler.CanonicalRuntimeProfileCore
+public import Kernel.WorldKindProjection
+public import Kernel.ContentResource
+public import Kernel.DeclaredResourceProjection
+public import Kernel.ClockCellDomain
+public import Theory.AxiomPin
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.BirthExportAdmission
 

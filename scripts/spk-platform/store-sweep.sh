@@ -83,7 +83,7 @@ if compgen -G "$staging/b.*" >/dev/null; then
 fi
 # Save the scripts and binary pins used, independently of subsequent lane edits.
 mkdir -p "$out/driver"
-cp "$0" "$data" "$here/store-sweep-world.sh" "$here/grain-journey.sh" "$here/world-up.sh" "$here/world-down.sh" "$here/stop-residents.sh" "$out/driver/"
+cp "$0" "$data" "$here/store-sweep-world.sh" "$here/grain-journey.sh" "$here/world-up.sh" "$here/broker-world-up.sh" "$here/world-down.sh" "$here/stop-residents.sh" "$out/driver/"
 sha256sum "$candidate/bin/mini" "$candidate/bin/spk-host" "$candidate/bin/minidregg-host" >"$out/binary-sha256.txt"
 while IFS= read -r batch; do
   batchfile=$(mktemp "$out/batch.XXXXXX.json")

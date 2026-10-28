@@ -4,7 +4,11 @@ read in its canonical address order.  A resource contributes every field it
 has; there is no page capacity.  Pair deltas expose linear conservation
 constraints to the existing Pred algebra without opaque checks,
 application-specific evaluator branches or a host-provided admission bit. -/
-import Compiler.DeclaredEffectCell
+module
+
+public import Compiler.DeclaredEffectCell
+
+@[expose] public section
 
 namespace Minidregg.Kernel.DeclaredResourceProjection
 open Minidregg.Compiler

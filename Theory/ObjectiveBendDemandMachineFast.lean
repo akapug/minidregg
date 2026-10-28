@@ -19,7 +19,27 @@ The implementation: the capacity check is decided BEFORE the transition from the
 pre-state (`sizesAfter`, proved equal to the sizes of `stepRaw`'s result), so no
 pre-state is retained on the success path; the stack depth is carried as a
 counter; the four push sites read the size before pushing. -/
-import Theory.ObjectiveBendDemandMachine
+module
+
+public import Theory.ObjectiveBendDemandMachine
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Theory.ObjectiveBendDemandMachineFast
 open ObjectiveBendOpenRecursion ObjectiveBendDemandMachine
 set_option autoImplicit false

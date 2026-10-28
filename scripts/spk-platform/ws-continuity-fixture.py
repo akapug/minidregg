@@ -447,6 +447,7 @@ class Fixture:
         self.mini("grain-share-issue-prepare", "--request", request, "--approval", approval, "--dir", issue, operator=True)
         # The exact attempt is named before its one submission, so an
         # interrupted issue is recovered by lookup of this directory only.
+        d["issueRequest"] = str(request)
         d["issueAttempt"] = str(issue)
         self.write_state()
         self.run([self.m["mini"]["path"], "grain-share-issue-submit", "--socket", self.osock, "--attempt", issue])

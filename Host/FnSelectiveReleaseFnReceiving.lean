@@ -5,8 +5,12 @@ event files. This helper only parses the bounded authored source and binds its
 owner-signed Message-ID to the projection; it does not assert that fn delivered
 anything or that Mini recipient admission will succeed.
 -/
-import Host.FnSelectiveReleaseAuthoring
-import Kernel.FnSelectiveReleaseArticle
+module
+
+public import Host.FnSelectiveReleaseAuthoring
+public import Kernel.FnSelectiveReleaseArticle
+
+@[expose] public section
 
 namespace Minidregg.Host.FnSelectiveReleaseFnReceiving
 

@@ -32,7 +32,27 @@ implement `UInt64`/`ByteArray` primitives as their Lean definitions say.
 `Sp800185Cshake256Core` imports this module and the spec; import Core.
 -/
 
-import Theory.Sp800185Cshake256Spec
+module
+
+public import Theory.Sp800185Cshake256Spec
+meta import Theory.Sp800185Cshake256Spec
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.Sp800185Cshake256.Fast
 open Minidregg.Compiler.Sp800185Cshake256

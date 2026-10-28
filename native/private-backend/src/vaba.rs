@@ -212,8 +212,7 @@ impl Vaba {
         b.extend(self.context);
         b.extend(v.to_le_bytes());
         let context = hash(&b);
-        let mut g = self.generation.clone();
-        g.invocation = Nat::from_be(&context);
+        let g = self.generation.derived(&context);
         let asks = (0..self.n)
             .map(|j| Asks::new(self.me, j as u16, self.n, self.f, &g))
             .collect::<Result<Vec<_>>>()?;

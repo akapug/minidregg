@@ -5,7 +5,26 @@ shares the predecessor nullifier with selected coverage event17. A receipt for
 the old tag9 may be an audited historical anchor, never a claim that the old
 receiver enforced this order at its original admission.
 -/
-import Kernel.FnConsumerFrontierCore
+module
+
+public import Kernel.FnConsumerFrontierCore
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnEmptyPollProgressV2
 

@@ -3,8 +3,12 @@ lookup selects the exact original registration and four-field receipt without
 rechecking a changed current gateway law. Fresh work checks the configured
 gateway, same-walk frontier/anchor, and one namespace nullifier before CAS.
 Neither a conditional plan nor a local fn status is itself Mini acceptance. -/
-import Kernel.FnConsumerNamespaceAdmission
-import Kernel.NativeHost
+module
+
+public import Kernel.FnConsumerNamespaceAdmission
+public import Kernel.NativeHost
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnConsumerNamespaceReceiver
 

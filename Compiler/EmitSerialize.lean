@@ -56,10 +56,33 @@ unambiguous. The modulus is stamped in the header; the reader checks it.
   SAME generic functions but is not written as testdata (~10⁸ bytes of JSON); the sharing/CSE
   rung shrinks it first.
 -/
-import Compiler.Emit
-import Compiler.AirHash
-import Compiler.BabyBear
-import Lean.Data.Json
+module
+
+public import Compiler.Emit
+public import Compiler.AirHash
+public import Compiler.BabyBear
+public import Lean.Data.Json
+meta import Compiler.Emit
+meta import Compiler.AirHash
+meta import Compiler.BabyBear
+meta import Lean.Data.Json
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler
 

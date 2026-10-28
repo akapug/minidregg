@@ -7,7 +7,27 @@
   outer stack appended, and that demand finishes (`Demand`).
 * `demand_props`: a finished closed demand of a suspended cell takes at least four
   transitions, caches the cell with its result, and runs the same over any outer stack. -/
-import Theory.ObjectiveBendDemandForcingRun
+module
+
+public import Theory.ObjectiveBendDemandForcingRun
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Theory.ObjectiveBendDemandForcing
 open Minidregg.Theory.ObjectiveBendOpenRecursion
 open Minidregg.Theory.ObjectiveBendDemandMachine

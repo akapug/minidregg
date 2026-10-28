@@ -427,8 +427,8 @@ def store_context(store, helper):
     return r, base
 
 
-def names(store, consent=False):
-    units = [f'mini-spk-controller-{store}.service', f'mini-spk-controller-proxy-{store}.socket',
+def names(store, consent=False, task=None):
+    units = [f'mini-grain-controller@{task}.service' if task else f'mini-spk-controller-{store}.service', f'mini-spk-controller-proxy-{store}.socket',
              f'mini-spk-controller-proxy-{store}.service']
     return units + ([f'mini-spk-controller-consent-{store}.socket',
                      f'mini-spk-controller-consent-{store}.service'] if consent else [])
@@ -510,7 +510,7 @@ def load(store, helper):
     require(receipt['protocol'] in ('mini-spk-controller-v1', 'mini-spk-controller-v2') and receipt['store'] == store
             and receipt['operatorUid'] == registry['operatorUid'], 'controller receipt differs')
     require(receipt['name'] == 'mini-c-' + store and receipt['home'] == str(base / 'home')
-            and receipt['units'] == names(store, has_consent(receipt)), 'controller layout differs')
+            and receipt['units'] == names(store, has_consent(receipt), receipt.get('workerTask')), 'controller layout differs')
     account = pwd.getpwnam(receipt['name'])
     require((account.pw_uid, account.pw_gid, account.pw_dir, account.pw_shell) ==
             (receipt['uid'], receipt['gid'], receipt['home'], '/usr/sbin/nologin'), 'controller account changed')
@@ -676,8 +676,10 @@ def unit_bytes(r, base, upstream, consent=None):
               'TimeoutStopSec=30\nKillMode=control-group\nUMask=0077\n')
     runtime = (f'[Unit]\nDescription=Mini isolated controller {r["store"]}\n[Service]\n'
                f'User={r["uid"]}\nGroup={r["gid"]}\n'
-               f'ExecStart={base}/bin/grain-runtime serve {home}/controller.json\n'
-               f'Environment=HOME={home}\nWorkingDirectory={home}/workspace\nReadWritePaths={home} {base}/reverse\n' + common)
+               f'ExecStart={base}/bin/grain-runtime serve {worker_config(r)}\n'
+               f'Environment=HOME={home}\nEnvironment=MINI_CONSENT_ANCHOR_DIR={home}/a\nWorkingDirectory={worker_layout(r) if r.get("workerTask") else home / "workspace"}\nReadWritePaths={home} {base}/reverse\n' + common)
+    if r.get('workerTask'):
+        runtime += ''.join(f'Environment={key}={value}\n' for key, value in worker_environment(base, r).items())
     sock = (f'[Unit]\nDescription=Mini controller operator activation {r["store"]}\n[Socket]\n'
             f'ListenStream={home}/operator/mini.sock\nSocketUser={r["uid"]}\nSocketGroup={r["gid"]}\n'
             f'SocketMode=0600\nDirectoryMode=0700\nRemoveOnStop=yes\nAccept=no\nService={stem}.service\n')
@@ -730,34 +732,343 @@ def grant_acl(path, uid, permission, operator, receipt_path=None):
     return entry
 
 
-def stage(store, helper, bundle_arg, bins_arg, upstream_arg, public_arg):
+def worker_layout(r):
+    home = Path(r['home'])
+    return home / 'grain' if r.get('workerTask') else home
+
+
+def worker_state(r):
+    return worker_layout(r) / 'state'
+
+
+def worker_config(r):
+    return worker_layout(r) / 'controller.json'
+
+
+def worker_relative(value):
+    require(isinstance(value, str) and re.fullmatch(r'[A-Za-z0-9_./-]{1,512}', value)
+            and all(p not in ('', '.', '..') for p in value.split('/')), 'worker relative path refused')
+    return Path(value)
+
+
+def worker_inputs(request, operator):
+    require(isinstance(request, dict) and set(request) ==
+            {'protocol', 'task', 'files', 'directories', 'launcherDirectory', 'runtimeRoot'}
+            and request['protocol'] == 'mini-controller-worker-prepare-v1'
+            and isinstance(request['task'], str) and re.fullmatch('[1-9][0-9]{0,19}', request['task']),
+            'worker preparation schema refused')
+    require(isinstance(request['files'], list) and 1 <= len(request['files']) <= 256
+            and isinstance(request['directories'], list) and len(request['directories']) <= 256,
+            'worker input count refused')
+    data = {}; total = 0
+    for entry in request['files']:
+        require(isinstance(entry, dict) and set(entry) == {'source', 'destination'}, 'worker file entry refused')
+        rel = worker_relative(entry['destination'])
+        require(str(rel) == 'host-config.json' or rel.parts[0] in ('keys', 'bootstrap', 'requests'),
+                'worker input destination refused')
+        require(str(rel) not in data, 'duplicate worker input destination')
+        content = read_file(canonical(entry['source']), operator, 8 * 1024 * 1024, required_mode=0o600)
+        total += len(content); require(total <= 32 * 1024 * 1024, 'worker input bytes exceed bound')
+        data[str(rel)] = content
+    require('host-config.json' in data, 'worker Host configuration absent')
+    directories = {'keys', 'bootstrap', 'requests', 'worker-work', 'grain'}
+    for name in request['directories']:
+        rel = worker_relative(name)
+        require(rel.parts[0] in ('keys', 'bootstrap', 'requests', 'worker-work'), 'worker directory destination refused')
+        directories.add(str(rel))
+    for name in data:
+        directories.update(str(p) for p in Path(name).parents if str(p) != '.')
+    for name in tuple(directories):
+        directories.update(str(p) for p in Path(name).parents if str(p) != '.')
+    require(not (set(data) & directories), 'worker file/directory collision')
+    return data, directories
+
+
+def copy_worker_tree(source, destination, operator):
+    """Bounded regular-file snapshot; never dereference caller symlinks as root."""
+    ancestry(source, {0, operator})
+    inventory = {}; total = 0; directories = 0
+    mkdir(destination, mode=0o755)
+    for directory, dirs, files in os.walk(source, followlinks=False):
+        directories += 1
+        rel = Path(directory).relative_to(source)
+        require(directories <= 20000 and len(rel.parts) <= 32, 'worker runtime directory bound exceeded')
+        for name in dirs:
+            src = Path(directory) / name
+            m = metadata(src, operator)
+            require(stat.S_ISDIR(m.st_mode) and not m.st_mode & 0o022, 'worker runtime directory custody refused')
+            worker_relative(str(src.relative_to(source)))
+            mkdir(destination / src.relative_to(source), mode=0o755)
+        for name in files:
+            src = Path(directory) / name
+            relative = str(src.relative_to(source)); worker_relative(relative)
+            require(len(inventory) < 100000, 'worker runtime file count exceeded')
+            data = read_file(src, operator, 256 * 1024 * 1024, allow_empty=True)
+            total += len(data); require(total <= 4 * 1024 * 1024 * 1024, 'worker runtime byte bound exceeded')
+            mode = 0o555 if src.lstat().st_mode & 0o111 else 0o444
+            write_new(destination / relative, data, mode=mode)
+            inventory[relative] = {'sha256': sha(data), 'mode': mode, 'size': len(data)}
+    return inventory
+
+
+def worker_manager(base, r, action):
+    if not r.get('workerTask'):
+        return
+    path = base / ('stage.json' if (base / 'stage.json').exists() else 'stage-pending.json')
+    stage = strict_json(read_file(path, 0, 65536))
+    unit = stage['worker']['userManager']
+    require(unit == f'user@{r["uid"]}.service', 'worker manager identity differs')
+    run(['/usr/bin/systemctl', action, unit])
+
+
+def worker_environment(base, r):
+    if not r.get('workerTask'):
+        return {}
+    return {'XDG_RUNTIME_DIR': f'/run/user/{r["uid"]}',
+            'DBUS_SESSION_BUS_ADDRESS': f'unix:path=/run/user/{r["uid"]}/bus',
+            'MINI_GRAIN_CONTROLLER_MANAGER': 'system', 'MINI_GRAIN_WORKER_MANAGER': 'user',
+            'MINI_GRAIN_CONTROLLER_UNIT': r['units'][0],
+            'MINI_GRAIN_CONTROLLER_REGISTRATION': str(base / 'registrations' / (r['workerTask'] + '.json'))}
+
+
+def validate_worker_config(value, base, r, previous=None):
+    home = Path(r['home']); root = worker_layout(r)
+    require(value.get('task') == r['workerTask'] and value.get('stateDir') == str(root / 'state')
+            and value.get('controlSocket') == str(root / 'state/control.sock') and value.get('cwd') == str(root)
+            and value.get('hostConfig') == str(home / 'host-config.json'), 'worker config layout differs')
+    for field, name in (('mini', 'mini'), ('host', 'minidregg-host')):
+        require(value.get(field) in (str(home / 'bin' / name), str(base / 'bin' / name)), 'worker native binary path refused')
+    commands = value.get('commands')
+    require(isinstance(commands, list) and len(commands) == 1, 'one fixed Hermes command required')
+    command = commands[0]
+    require(set(command) == {'name', 'program', 'args', 'systemdScope', 'wallTimeSeconds', 'reserve', 'charge'}
+            and command['name'] == 'hermes-acp' and command['program'] == str(base / 'worker/launcher/bwrap')
+            and command['systemdScope'] is True and type(command['wallTimeSeconds']) is int
+            and 1 <= command['wallTimeSeconds'] <= 1800
+            and command['args'] in (["--workspace", str(home / 'worker-work'), "--runtime-root", str(base / 'worker/runtime-root'),
+                                     "--network", network, "--", "/agent/hermes-acp"] for network in ('none', 'host')),
+            'worker command differs from staged fixed launcher/runtime/workspace')
+    for field in ('reserve', 'charge'):
+        require(isinstance(command[field], str) and re.fullmatch('0|[1-9][0-9]{0,19}', command[field]), 'worker charge shape refused')
+    for role in (None, 'toolTask', 'providerTask', 'dispatchTask'):
+        task = value if role is None else value.get(role)
+        if task is None: continue
+        key = canonical(task.get('custodyKey'))
+        require(key.parent == home / 'keys', 'worker custody key outside staged role directory')
+        require(len(read_file(key, r['uid'], 32, required_mode=0o600)) == 32, 'worker custody key shape refused')
+        if previous is not None:
+            old = previous if role is None else previous.get(role)
+            require(isinstance(old, dict) and all(task.get(k) == old.get(k) for k in
+                ('task', 'subject', 'custodyKey', 'capability', 'queryCapability', 'parentCapability', 'parentObserveCapability')),
+                'worker role or custody identity changed')
+    if previous is not None:
+        require(all(value.get(k) == previous.get(k) for k in ('commands', 'mini', 'host', 'hostConfig', 'hostSocket',
+                'policyControlCapability', 'providerTask', 'dispatchTask')),
+                'worker command, transport or service authority changed')
+
+
+def unchanged_worker_tool(previous, current):
+    """Allow one initial account reference selection; native handoff still grants access."""
+    allowed = {'registeredSharedApplications', 'allowedSessionFamilies', 'currentBirthHostSha256',
+               'allowedApplicationLifetimeRoutes', 'lifetimeApiHostSha256', 'applicationServices'}
+    old = {k:v for k,v in previous.items() if k not in allowed}
+    new = {k:v for k,v in current.items() if k not in allowed}
+    if old == new:
+        return
+    old_room, new_room = old.get('room'), new.get('room')
+    if isinstance(old_room, dict) and isinstance(new_room, dict) and old_room.get('account') == 'unsummoned':
+        account = new_room.get('account')
+        # Same syntactic boundary as native workspace::validate_ref_name. This
+        # selects a reference, never proves its ownership, funding or room grant.
+        valid = (isinstance(account, str) and account != 'unsummoned' and 0 < len(account) <= 128
+                 and all(re.fullmatch('[A-Za-z0-9-]{1,64}', part) for part in account.split('/')))
+        if valid:
+            new = {**new, 'room': {**new_room, 'account': 'unsummoned'}}
+    require(old == new, 'worker non-attachment tool config changed or room account already bound')
+
+
+def publish_worker_config(store, helper):
+    _, base, r = load(store, helper)
+    stage = checked_units(base, r)
+    require(r.get('workerTask'), 'worker mode required')
+    worker_manager(base, r, 'stop'); no_processes(r['uid'])
+    data = read_file(worker_config(r), r['uid'], 524288, required_mode=0o600)
+    value = strict_json(data); validate_worker_config(value, base, r)
+    require(value.get('hostSocket') == stage['publicSocket'], 'worker participant socket changed')
+    archive = base / 'configs' / (sha(data) + '.json')
+    publish_exact(archive, data, bound=524288)
+    registration = {'protocol': 'mini-controller-registration-v1', 'task': r['workerTask'],
+                    'config': str(worker_config(r)), 'manager': 'system', 'workerManager': 'user',
+                    'serviceUid': r['uid'], 'residentConfig': None}
+    publish_exact(base / 'registrations' / (r['workerTask'] + '.json'), encoded(registration), mode=0o644)
+    publish_exact(base / 'worker-published.json', encoded({'configSha256': sha(data)}))
+    return {'store': store, 'configurationSha256': sha(data), 'config': value,
+            'controllerHome': str(worker_layout(r)), 'controllerUid': r['uid']}
+
+
+def controller_run(store, helper, request_arg):
+    _, base, r = load(store, helper)
+    stage = checked_units(base, r)
+    require(r.get('workerTask'), 'worker mode required')
+    request = strict_json(read_file(canonical(request_arg), r['operatorUid'], 65536, required_mode=0o600))
+    require(isinstance(request, dict) and set(request) in ({'program', 'args'}, {'program', 'args', 'inputs'})
+            and request['program'] in ('mini', 'grain-runtime') and isinstance(request['args'], list)
+            and 1 <= len(request['args']) <= 128 and all(isinstance(a, str) and '\0' not in a and len(a) <= 4096
+                                                        for a in request['args']), 'worker command schema refused')
+    allowed = {'mini': {'shell', 'hermes-handoff', 'workspace', 'credit', 'context'},
+               'grain-runtime': {'create', 'hermes-room', 'controller-launch', 'tool-result', 'tool-ack'}}
+    require(request['args'][0] in allowed[request['program']], 'worker command is outside fixed native verbs')
+    if request['args'][0] == 'create':
+        require(request['program'] == 'grain-runtime' and len(request['args']) == 2
+                and canonical(request['args'][1]).parent == Path(r['home']) / 'requests',
+                'worker create selects one staged request, never operator birth')
+    inputs = request.get('inputs', [])
+    require(isinstance(inputs, list) and len(inputs) <= 32, 'worker command input count refused')
+    copies = {}
+    for entry in inputs:
+        require(isinstance(entry, dict) and set(entry) == {'source', 'destination'} and re.fullmatch(r'requests/[A-Za-z0-9_-]+\.json', entry['destination']), 'worker command input destination refused')
+        require(entry['destination'] not in copies, 'duplicate worker command input')
+        copies[entry['destination']] = read_file(canonical(entry['source']), r['operatorUid'], 262144, required_mode=0o600)
+    def setup():
+        for name, data in copies.items():
+            path = Path(r['home']) / name
+            ancestry(path.parent, {0, r['uid']})
+            write_new(path, data, r['uid'], r['gid'])
+    r['_consentEnvironment'] = {**consent_environment(r, base, stage['consent']), **worker_environment(base, r)}
+    worker_manager(base, r, 'start')
+    return controller_child(r, [str(base / 'bin' / request['program']), *request['args']], setup, timeout=1800)
+
+
+def export_config(store, helper):
+    _, base, r = load(store, helper)
+    checked_units(base, r)
+    return strict_json(read_file(worker_config(r), r['uid'], 524288, required_mode=0o600))
+
+
+def transfer_birth_tree(root, before_uid, uid, gid):
+    """Only bounded owned regular birth artifacts; chown descriptors, never follow links."""
+    ancestry(root.parent, {0, uid, before_uid})
+    entries = []; total = 0
+    for directory, dirs, files in os.walk(root, followlinks=False):
+        require(len(entries) <= 4096 and len(Path(directory).relative_to(root).parts) <= 16,
+                'birth transfer directory bound exceeded')
+        for path in [Path(directory), *[Path(directory) / n for n in files]]:
+            m = metadata(path, before_uid)
+            require(stat.S_ISDIR(m.st_mode) or (stat.S_ISREG(m.st_mode) and m.st_nlink == 1),
+                    'birth transfer requires owned regular files and directories')
+            total += m.st_size if stat.S_ISREG(m.st_mode) else 0
+            require(total <= 64 * 1024 * 1024, 'birth transfer byte bound exceeded')
+            entries.append((path, fingerprint(m)))
+        for name in dirs:
+            require(stat.S_ISDIR(metadata(Path(directory) / name, before_uid).st_mode), 'birth transfer linked directory refused')
+    for path, expected in reversed(entries):
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+        try:
+            m = os.fstat(fd)
+            require(fingerprint(m) == expected and fingerprint(path.lstat()) == expected, 'birth transfer path changed')
+            os.fchown(fd, uid, gid)
+            os.fchmod(fd, 0o700 if stat.S_ISDIR(m.st_mode) else 0o600)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+
+def worker_birth(store, helper, source_arg):
+    _, base, r = load(store, helper)
+    stage = checked_units(base, r)
+    require(r.get('workerTask') and not (base / 'worker-published.json').exists(), 'birth only before worker publication')
+    service(store, helper, 'stop'); no_processes(r['uid'])
+    raw = read_file(canonical(source_arg), r['operatorUid'], 524288, required_mode=0o600)
+    spec = strict_json(raw); home = Path(r['home']); root = worker_layout(r)
+    require(spec.get('root') == str(root) and spec.get('task') == r['workerTask']
+            and spec.get('mini') == str(base / 'bin/mini') and spec.get('host') == str(base / 'bin/minidregg-host')
+            and spec.get('hostConfig') == str(home / 'host-config.json')
+            and spec.get('genesis') == str(home / 'bootstrap/genesis.json')
+            and spec.get('namespaceRoot') == str(home / 'bootstrap/namespace'), 'worker birth layout refused')
+    sponsor = canonical(spec['sponsor']['key'])
+    require(not sponsor.is_relative_to(home) and len(read_file(sponsor, r['operatorUid'], 32, required_mode=0o600)) == 32,
+            'sponsor key must remain operator-private outside controller home')
+    retained = base / 'worker-birth-spec.json'
+    publish_exact(retained, raw, bound=524288)
+    # The same bytes are handed to Whole; root never changes the native spec.
+    publish_exact(home / 'requests/create.json', raw, r['uid'], r['gid'], bound=524288)
+    owner = metadata(root).st_uid
+    require(owner in (r['uid'], r['operatorUid']), 'birth root ownership differs')
+    transfer_birth_tree(root, owner, r['operatorUid'], r['operatorGid'])
+    acl_root = base / ('worker-birth-acl-' + str(time.time_ns()))
+    mkdir(acl_root)
+    paths = [(home, '--x'), (home / 'host-config.json', 'r--')]
+    for directory, dirs, files in os.walk(home / 'bootstrap', followlinks=False):
+        paths.append((Path(directory), 'r-x'))
+        paths.extend((Path(directory) / name, 'r--') for name in files)
+        for name in dirs:
+            require(stat.S_ISDIR(metadata(Path(directory) / name, r['uid']).st_mode), 'bootstrap linked directory refused')
+    require(len(paths) <= 512, 'birth bootstrap ACL count exceeded')
+    changed = []
+    try:
+        for index, (path, permission) in enumerate(paths):
+            m = metadata(path, r['uid'])
+            before = acl_text(path)
+            require(not any(line.startswith(('mask:', 'default:')) or re.match(r'(user|group):[^:]+:', line)
+                            for line in before.splitlines()), 'birth temporary ACL needs unextended source')
+            entry = {'path': str(path), 'dev': m.st_dev, 'ino': m.st_ino, 'before': before}
+            write_new(acl_root / f'{index:03}.json', encoded(entry)); changed.append(entry)
+            run(['/usr/bin/setfacl', '-m', f'u:{r["operatorUid"]}:{permission}', '--', str(path)])
+        operator = {**r, 'uid': r['operatorUid'], 'gid': r['operatorGid'],
+                    'home': pwd.getpwuid(r['operatorUid']).pw_dir}
+        fd = os.memfd_create('mini-worker-birth-spec', os.MFD_ALLOW_SEALING | os.MFD_CLOEXEC)
+        try:
+            os.write(fd, raw); os.lseek(fd, 0, os.SEEK_SET)
+            os.fchown(fd, r['operatorUid'], r['operatorGid']); os.fchmod(fd, 0o400)
+            fcntl.fcntl(fd, fcntl.F_ADD_SEALS, fcntl.F_SEAL_SEAL | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_GROW | fcntl.F_SEAL_WRITE)
+            result = controller_child(operator, [str(base / 'bin/grain-runtime'), 'create', f'/proc/self/fd/{fd}',
+                                      '--birth-socket', stage['upstreamSocket']], timeout=1800, pass_fds=(fd,))
+        finally:
+            os.close(fd)
+    finally:
+        for entry in reversed(changed):
+            path = Path(entry['path']); m = metadata(path, r['uid'])
+            require((m.st_dev, m.st_ino) == (entry['dev'], entry['ino']), 'birth ACL object replaced; preserve receipt')
+            run(['/usr/bin/setfacl', '--restore=-'], input=(f'# file: {path}\n' + entry['before']).encode())
+        transfer_birth_tree(root, r['operatorUid'], r['uid'], r['gid'])
+        run(['/usr/bin/systemctl', 'start', r['units'][1], r['units'][3], r['units'][4]])
+    return result
+
+
+def stage(store, helper, bundle_arg, bins_arg, upstream_arg, public_arg, worker=False):
     registry, base, r = load(store, helper)
     no_processes(r['uid'])
+    require(not worker or has_consent(r), 'worker preparation requires version-2 consent services')
     require(not (base / 'stage.json').exists() and not (base / 'stage-pending.json').exists(), 'controller stage already attempted')
     bundle, bins, upstream, public = map(canonical, (bundle_arg, bins_arg, upstream_arg, public_arg))
     op = registry['operatorUid']
-    ancestry(bundle, {0, op}); ancestry(bins, {0, op})
+    ancestry(bundle.parent if worker else bundle, {0, op}); ancestry(bins, {0, op})
+    request = strict_json(read_file(bundle, op, 65536, required_mode=0o600)) if worker else None
+    if worker:
+        data, worker_dirs = worker_inputs(request, op)
+        r = {**r, 'workerTask': request['task'], 'units': names(store, has_consent(r), request['task'])}
     actual = set()
-    allowed_dirs = {'custody', 'state', 'state/shared-app-refs', 'state/oracle-grant', 'workspace'}
-    for directory, dirs, files in os.walk(bundle, followlinks=False):
-        require(len(actual) <= len(FILES) + len(FINAL_FILES), 'controller bundle exceeds file bound')
-        for n in dirs:
-            child = Path(directory) / n
-            require(str(child.relative_to(bundle)) in allowed_dirs, 'controller bundle directory outside allowlist')
-            metadata(child, op)
-        actual.update(str((Path(directory) / n).relative_to(bundle)) for n in files)
-    require(set(FILES) <= actual <= set(FILES) | set(FINAL_FILES), 'controller bundle files differ from exact allowlist')
-    limits = {**FILES, **FINAL_FILES}
-    data = {n: read_file(bundle / n, op, limits[n], required_mode=0o600 if n.startswith('custody/') else None)
-            for n in actual}
-    require(all(len(data['custody/' + role + '.key']) == 32 for role in ('controller', 'tool', 'dispatch', 'provider')), 'controller key size differs')
+    if not worker:
+        allowed_dirs = {'custody', 'state', 'state/shared-app-refs', 'state/oracle-grant', 'workspace'}
+        for directory, dirs, files in os.walk(bundle, followlinks=False):
+            require(len(actual) <= len(FILES) + len(FINAL_FILES), 'controller bundle exceeds file bound')
+            for n in dirs:
+                child = Path(directory) / n
+                require(str(child.relative_to(bundle)) in allowed_dirs, 'controller bundle directory outside allowlist')
+                metadata(child, op)
+            actual.update(str((Path(directory) / n).relative_to(bundle)) for n in files)
+        require(set(FILES) <= actual <= set(FILES) | set(FINAL_FILES), 'controller bundle files differ from exact allowlist')
+        limits = {**FILES, **FINAL_FILES}
+        data = {n: read_file(bundle / n, op, limits[n], required_mode=0o600 if n.startswith('custody/') else None)
+                for n in actual}
+        require(all(len(data['custody/' + role + '.key']) == 32 for role in ('controller', 'tool', 'dispatch', 'provider')), 'controller key size differs')
     binaries = {n: read_file(bins / n, op, 256 * 1024 * 1024, True) for n in binary_names(r)}
-    config = json.loads(data['controller.json']); host = json.loads(data['host-config.json'])
+    config = json.loads(data['controller.json']) if not worker else {}; host = json.loads(data['host-config.json'])
     home = Path(r['home'])
-    require(config.get('commands') == [] and config.get('stateDir') == str(home / 'state')
+    require(worker or (config.get('commands') == [] and config.get('stateDir') == str(home / 'state')
             and config.get('controlSocket') == str(home / 'state/control.sock')
             and config.get('cwd') == str(home / 'workspace') and config.get('hostConfig') == str(home / 'host-config.json')
-            and config.get('hostSocket') == str(public), 'controller configuration layout differs')
+            and config.get('hostSocket') == str(public)), 'controller configuration layout differs')
     ancestry(upstream.parent, {0, op}); um = metadata(upstream, op, 0o600)
     require(stat.S_ISSOCK(um.st_mode), 'primary operator endpoint is not a socket')
     ancestry(public.parent, {0, op}); pm = metadata(public, op)
@@ -772,12 +1083,16 @@ def stage(store, helper, bundle_arg, bins_arg, upstream_arg, public_arg):
                'binaries': {n: sha(v) for n, v in binaries.items()}, 'publicSocket': str(public),
                'upstreamSocket': str(upstream), 'upstreamIdentity': [um.st_dev, um.st_ino], 'acl': [],
                'units': {n: sha(value) for n, value in units.items()}}
+    if worker:
+        pending['worker'] = {'task': request['task'], 'root': str(worker_layout(r)),
+                             'userManager': f'user@{r["uid"]}.service', 'inputSha256': sha(encoded(request))}
     if consent is not None:
         pending['consent'] = consent
     write_new(base / 'stage-pending.json', encoded(pending))
     # Fresh home only; no running controller can redirect the root setup writes.
     require(not list(home.iterdir()), 'controller home is not fresh')
-    for rel in ('bin', 'custody', 'state', 'state/shared-app-refs', 'state/oracle-grant', 'workspace', 'operator', 'tool-requests'):
+    directories = {'bin', 'operator', 'tool-requests'} | (worker_dirs if worker else {'custody', 'state', 'state/shared-app-refs', 'state/oracle-grant', 'workspace'})
+    for rel in sorted(directories, key=lambda p: (len(Path(p).parts), p)):
         mkdir(home / rel, r['uid'], r['gid'])
     if has_consent(r):
         mkdir(home / 'consent', r['uid'], r['gid'])
@@ -790,7 +1105,25 @@ def stage(store, helper, bundle_arg, bins_arg, upstream_arg, public_arg):
     for n, value in binaries.items():
         write_new(base / 'bin' / n, value, mode=0o755)
         write_new(home / 'bin' / n, value, r['uid'], r['gid'], 0o500)
-    write_new(base / 'configs' / (sha(data['controller.json']) + '.json'), data['controller.json'])
+    if not worker:
+        write_new(base / 'configs' / (sha(data['controller.json']) + '.json'), data['controller.json'])
+    else:
+        mkdir(base / 'worker', mode=0o755); mkdir(base / 'registrations', mode=0o755)
+        runtime = copy_worker_tree(canonical(request['runtimeRoot']), base / 'worker/runtime-root', op)
+        launcher = canonical(request['launcherDirectory']); ancestry(launcher, {0, op})
+        require(set(p.name for p in launcher.iterdir()) == {'bwrap', 'launch-gate'}, 'fixed launcher files differ')
+        mkdir(base / 'worker/launcher', mode=0o755)
+        pins = {}
+        for name in ('bwrap', 'launch-gate'):
+            content = read_file(launcher / name, op, 256 * 1024 * 1024, True)
+            write_new(base / 'worker/launcher' / name, content, mode=0o555)
+            pins['launcher/' + name] = sha(content)
+        for name in ('hermes-acp', 'grain-runtime', 'grain-provider-bridge'):
+            require(name in runtime and runtime[name]['mode'] == 0o555, 'worker runtime entrypoint absent')
+            pins['runtime-root/' + name] = runtime[name]['sha256']
+        write_new(base / 'worker-files.json', encoded(runtime))
+        pending['worker']['binaries'] = pins
+        replace_root_record(base / 'receipt.json', encoded(r), 0o600)
     write_new(base / 'proxy/config.json', data['host-config.json'], op, registry['operatorGid'])
     # Only traversal of private ancestors and access to the PUBLIC socket. The
     # operator's private listener and Store files receive no controller ACL.
@@ -806,6 +1139,9 @@ def stage(store, helper, bundle_arg, bins_arg, upstream_arg, public_arg):
     pending['units'] = {n: sha(value) for n, value in units.items()}
     write_new(base / 'stage.json', encoded(pending))
     run(['/usr/bin/systemctl', 'daemon-reload'])
+    if worker:
+        run(['/usr/bin/loginctl', 'enable-linger', r['name']])
+        run(['/usr/bin/systemctl', 'start', r['units'][1], r['units'][3], r['units'][4]])
     return {**r, 'stage': str(base / 'stage.json'), **({'consent': consent_record(base, r, pending)} if has_consent(r) else {})}
 
 
@@ -829,6 +1165,9 @@ def checked_units(base, r, partial=False, consent_upgrade_hashes=(), runtime_upg
         digest = sha(read_file(base / 'bin' / n, 0, 256 * 1024 * 1024, True))
         require(digest == stage['binaries'][n] or (n == 'grain-runtime' and digest in runtime_upgrade_hashes),
                 'controller binary changed')
+    if stage.get('worker') and not partial:
+        for name, digest in stage['worker']['binaries'].items():
+            require(sha(read_file(base / 'worker' / name, 0, 256 * 1024 * 1024, True)) == digest, 'worker binary changed')
     if has_consent(r) and not partial:
         pins = stage['consent']
         require(pins['providerSha256'] == stage['binaries'][CONSENT_BIN], 'consent provider pin differs')
@@ -1049,7 +1388,7 @@ def enroll(store, helper, source_arg):
             and all(isinstance(request[key], str) and re.fullmatch('[0-9a-f]{64}', request[key])
                     for key in ('expectedBindingSha256', 'targetConfigSha256')), 'native enrollment request shape refused')
     home = Path(r['home'])
-    config = read_file(home / 'controller.json', r['uid'], 524288, required_mode=0o600)
+    config = read_file(worker_config(r), r['uid'], 524288, required_mode=0o600)
     require(sha(config) == request['targetConfigSha256']
             and read_file(base / 'configs' / (sha(config) + '.json'), 0, 524288, required_mode=0o600) == config,
             'native enrollment config differs from retained revision')
@@ -1074,7 +1413,7 @@ def enroll(store, helper, source_arg):
     try:
         run(['/usr/bin/systemctl', 'start', r['units'][1], r['units'][3], r['units'][4]])
         return controller_child(r, [str(base / 'bin/grain-runtime'), 'application-enroll', 'stopped',
-                                   str(home / 'controller.json'), str(path)], setup, timeout=1800)
+                                   str(worker_config(r)), str(path)], setup, timeout=1800)
     finally:
         # Socket activation may also have started the operator proxy service.
         # Restore only helpers observed inactive, including after native refusal;
@@ -1097,11 +1436,14 @@ def service(store, helper, action):
             expected = r['uid'] if name == r['units'][0] else r['operatorUid']
             require(observed.get('User') == str(expected), 'controller manager unit user differs')
     if action == 'start':
+        if r.get('workerTask'):
+            require((base / 'worker-published.json').exists(), 'worker configuration has not been published')
+            worker_manager(base, r, 'start')
         if has_consent(r):
             require('storage' in stage['consent'], 'consent Store sandbox needs explicit stopped storage upgrade')
             run(['/usr/bin/systemctl', 'start', r['units'][3], r['units'][4]])
         run(['/usr/bin/systemctl', 'start', r['units'][1], r['units'][0]])
-        ready = Path(r['home']) / 'state/control.sock'
+        ready = worker_state(r) / 'control.sock'
         deadline = time.monotonic() + 180
         while True:
             observed = manager_properties(r['units'][0])
@@ -1124,6 +1466,7 @@ def service(store, helper, action):
         present = [n for n in r['units'] if (UNITS / n).exists()]
         if present:
             run(['/usr/bin/systemctl', 'stop', *present])
+        worker_manager(base, r, 'stop')
         no_processes(r['uid'])
     return {'store': store, 'action': action, 'units': r['units'],
             **({'consent': consent_readiness(base, r, stage)} if action == 'start' and has_consent(r) else {})}
@@ -1131,8 +1474,10 @@ def service(store, helper, action):
 
 def config_update(store, helper, source_arg):
     _, base, r = load(store, helper)
-    checked_units(base, r); no_processes(r['uid'])
+    checked_units(base, r); worker_manager(base, r, 'stop'); no_processes(r['uid'])
     source = canonical(source_arg)
+    worker = bool(r.get('workerTask'))
+    limits = dict(FINAL_FILES)
     proof = {}
     if stat.S_ISDIR(source.lstat().st_mode):
         actual = set()
@@ -1140,27 +1485,40 @@ def config_update(store, helper, source_arg):
         for directory, dirs, files in os.walk(source, followlinks=False):
             for n in dirs:
                 p = Path(directory) / n; metadata(p, r['operatorUid'])
-                require(str(p.relative_to(source)) in allowed_dirs, 'config bundle directory refused')
+                relative = str(p.relative_to(source))
+                require(relative in allowed_dirs or (worker and re.fullmatch(r'state/(?:attachments(?:/[A-Za-z0-9-]+(?:/grant)?)?|shared-app-refs)', relative)), 'config bundle directory refused')
             actual.update(str((Path(directory) / n).relative_to(source)) for n in files)
-            require(len(actual) <= 1 + len(FINAL_FILES), 'config bundle exceeds file bound')
-        require('controller.json' in actual and actual <= {'controller.json'} | set(FINAL_FILES), 'config bundle files refused')
+            require(len(actual) <= (65 if worker else 1 + len(FINAL_FILES)), 'config bundle exceeds file bound')
+        if worker:
+            for relative in actual - {'controller.json'}:
+                require(re.fullmatch(r'state/shared-app-refs/[A-Za-z0-9-]+\.bin|state/attachments/[A-Za-z0-9-]+/grant/(?:seal\.json|call\.bin|submit-marker\.json|receipt\.json)', relative), 'worker proof file refused')
+                limits[relative] = 12_102_760
+        require('controller.json' in actual and actual <= {'controller.json'} | set(limits), 'config bundle files refused')
         data = read_file(source / 'controller.json', r['operatorUid'], 524288)
-        proof = {n: read_file(source / n, r['operatorUid'], FINAL_FILES[n]) for n in actual - {'controller.json'}}
+        proof = {n: read_file(source / n, r['operatorUid'], limits[n]) for n in actual - {'controller.json'}}
     else:
         data = read_file(source, r['operatorUid'], 524288)
     value = json.loads(data); home = Path(r['home'])
-    require(value.get('commands') == [] and value.get('stateDir') == str(home / 'state')
-            and value.get('controlSocket') == str(home / 'state/control.sock'), 'controller config layout differs')
-    if has_consent(r):
-        require(value.get('hostConfig') == str(home / 'host-config.json')
-                and value.get('cwd') == str(home / 'workspace'), 'consent-bound controller config layout differs')
-    old = read_file(home / 'controller.json', r['uid'], 524288, required_mode=0o600)
+    require(sum(map(len, proof.values())) <= 32 * 1024 * 1024, 'config proof bytes exceed bound')
+    if not worker:
+        require(value.get('commands') == [] and value.get('stateDir') == str(home / 'state')
+                and value.get('controlSocket') == str(home / 'state/control.sock'), 'controller config layout differs')
+        if has_consent(r):
+            require(value.get('hostConfig') == str(home / 'host-config.json')
+                    and value.get('cwd') == str(home / 'workspace'), 'consent-bound controller config layout differs')
+    old = read_file(worker_config(r), r['uid'], 524288, required_mode=0o600)
     require(read_file(base / 'configs' / (sha(old) + '.json'), 0, 524288, required_mode=0o600) == old,
             'current config differs from retained revision')
+    if worker:
+        validate_worker_config(value, base, r, strict_json(old))
+        previous = strict_json(old)
+        require({k:v for k,v in value.items() if k != 'toolTask'} == {k:v for k,v in previous.items() if k != 'toolTask'}, 'worker non-tool config changed')
+        unchanged_worker_tool(previous['toolTask'], value['toolTask'])
+    root = worker_layout(r)
     for name, content in proof.items():
-        path = home / name
+        path = root / name
         if path.exists() or path.is_symlink():
-            require(read_file(path, r['uid'], FINAL_FILES[name]) == content, 'retained grant evidence differs')
+            require(read_file(path, r['uid'], limits[name]) == content, 'retained grant evidence differs')
     target = base / 'configs' / (sha(data) + '.json')
     intent_path = base / 'configs' / ('config-publication-' + sha(data) + '.json')
     if not intent_path.exists() and not intent_path.is_symlink():
@@ -1169,7 +1527,7 @@ def config_update(store, helper, source_arg):
                   'previousSha256': sha(old), 'configurationSha256': sha(data),
                   'proofSha256': {name: sha(content) for name, content in proof.items()}}
         publish_exact(intent_path, encoded(intent))
-    intent = strict_json(read_file(intent_path, 0, 4096, required_mode=0o600))
+    intent = strict_json(read_file(intent_path, 0, 65536 if worker else 4096, required_mode=0o600))
     require(isinstance(intent, dict) and set(intent) ==
             {'protocol', 'store', 'previousSha256', 'configurationSha256', 'proofSha256'}
             and intent['protocol'] == 'mini-spk-controller-config-publication-v1' and intent['store'] == store
@@ -1181,17 +1539,23 @@ def config_update(store, helper, source_arg):
     require(sha(previous) == intent['previousSha256'], 'config publication original revision differs')
     publish_exact(target, data, bound=524288)
     for name, content in proof.items():
-        path = home / name
-        publish_exact(path, content, r['uid'], r['gid'], bound=FINAL_FILES[name])
-    pending = home / '.controller-next.json'
+        path = root / name
+        for parent in reversed(path.parent.relative_to(root).parents):
+            directory = root / parent
+            if not directory.exists() and not directory.is_symlink(): mkdir(directory, r['uid'], r['gid'])
+            metadata(directory, r['uid'], 0o700)
+        if not path.parent.exists() and not path.parent.is_symlink(): mkdir(path.parent, r['uid'], r['gid'])
+        ancestry(path.parent, {0, r['uid']})
+        publish_exact(path, content, r['uid'], r['gid'], bound=limits[name])
+    pending = root / '.controller-next.json'
     publish_exact(pending, data, r['uid'], r['gid'], bound=524288)
-    os.replace(pending, home / 'controller.json')
-    sync_directory(home)
+    os.replace(pending, worker_config(r))
+    sync_directory(root)
     return {'store': store, 'configurationSha256': sha(data), 'previousSha256': intent['previousSha256'],
             'publication': str(intent_path), 'replayed': old == data}
 
 
-def controller_child(r, argv, setup=None, timeout=1200):
+def controller_child(r, argv, setup=None, timeout=1200, pass_fds=()):
     def identity():
         os.setsid(); os.setgroups([]); os.setgid(r['gid']); os.setuid(r['uid']); os.umask(0o077)
         resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
@@ -1199,7 +1563,9 @@ def controller_child(r, argv, setup=None, timeout=1200):
         if setup:
             setup()
     proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            preexec_fn=identity, env={**ENV, 'HOME': r['home'], **r.get('_consentEnvironment', {})})
+                            preexec_fn=identity, pass_fds=pass_fds, env={**ENV, 'HOME': r['home'], **r.get('_consentEnvironment', {}),
+                                 'MINI_CONSENT_ANCHOR_DIR': str(Path(r['home']) / 'a'),
+                                 'MINI_CODEC_RESIDENT': '0', 'MINI_CONSENT_RESIDENT': '0'})
     try:
         total = 0; deadline = time.monotonic() + timeout
         sel = selectors.DefaultSelector()
@@ -1226,7 +1592,7 @@ def tool(store, helper, verb, request_id, extra):
     if has_consent(r):
         r['_consentEnvironment'] = consent_environment(r, base, stage['consent'])
     require(re.fullmatch('[0-9a-f]{32}', request_id), 'request ID must be 32 lowercase hex')
-    home = Path(r['home']); runtime = str(base / 'bin/grain-runtime'); socket = str(home / 'state/control.sock')
+    home = Path(r['home']); runtime = str(base / 'bin/grain-runtime'); socket = str(worker_state(r) / 'control.sock')
     if verb == 'tool':
         require(len(extra) == 2 and extra[0] in TOOLS, 'unsupported controller tool')
         data = read_file(canonical(extra[1]), r['operatorUid'], 262144)
@@ -1246,13 +1612,13 @@ def recover_session(store, helper, request_id):
     checked_units(base, r)
     require(re.fullmatch('[0-9a-f]{32}', request_id), 'request ID must be 32 lowercase hex')
     return controller_child(r, [str(base / 'bin/grain-runtime'), 'admin',
-        str(Path(r['home']) / 'state/admin.sock'), 'recover foreground session ' + request_id], timeout=1800)
+        str(worker_state(r) / 'admin.sock'), 'recover foreground session ' + request_id], timeout=1800)
 
 
 def export_state(store, helper):
     _, base, r = load(store, helper)
     checked_units(base, r)
-    root = Path(r['home']) / 'state'; files = {}; total = 0; directories = 0
+    root = worker_state(r); files = {}; total = 0; directories = 0
     for directory, dirs, entries in os.walk(root, followlinks=False):
         directories += 1
         require(directories <= 1024 and len(Path(directory).relative_to(root).parts) <= 16, 'controller evidence directory bound exceeded')
@@ -1274,7 +1640,7 @@ def reserve_export(store, helper, attempt_text):
     require(re.fullmatch('0|[1-9][0-9]{0,19}', attempt_text) and int(attempt_text) < 2**64,
             'dispatch attempt ID must be canonical decimal u64')
     prefix = f'agent-lifetime-reserve-{int(attempt_text):016}'
-    root = Path(r['home']) / 'state' / prefix
+    root = worker_state(r) / prefix
     files = {}; total = 0
     for name in ('source.json', 'pin.json', 'request.bin', 'plan.bin', 'plan.frame',
                  'call.bin', 'receipt.json', 'submit-marker.json'):
@@ -1445,7 +1811,7 @@ def controller_status(store, helper):
     raw = read_file(base / 'stage.json', 0, 65536, required_mode=0o600)
     require(strict_json(raw) == stage, 'stage changed during observation')
     home = Path(r['home'])
-    config = read_file(home / 'controller.json', r['uid'], 524288, required_mode=0o600)
+    config = read_file(worker_config(r), r['uid'], 524288, required_mode=0o600)
     require(read_file(base / 'configs' / (sha(config) + '.json'), 0, 524288, required_mode=0o600) == config,
             'controller configuration is not an exact retained revision')
     runtime = read_file(home / 'bin/grain-runtime', r['uid'], 256 * 1024 * 1024, True, required_mode=0o500)
@@ -1596,6 +1962,8 @@ def remove(store, helper):
             (UNITS / n).unlink()
     run(['/usr/bin/systemctl', 'daemon-reload'])
     no_processes(r['uid'])
+    if r.get('workerTask'):
+        run(['/usr/bin/loginctl', 'disable-linger', r['name']])
     run(['/usr/sbin/userdel', r['name']])
     try:
         group = grp.getgrnam(r['name'])
@@ -1639,7 +2007,7 @@ def main(args):
                     and stat.S_IMODE(m.st_mode) == 0o600, 'controller lifecycle lock custody refused')
             shared = action in ('controller-tool', 'controller-tool-result', 'controller-tool-ack', 'controller-recover-session',
                                 'controller-journal', 'controller-export', 'controller-reserve-export',
-                                'controller-service-logs', 'controller-status')
+                                'controller-service-logs', 'controller-status', 'controller-run', 'controller-config-export', 'controller-host-config-export')
             # Lock order is global allocator, then controller. Never wait on a
             # controller while holding the allocator: an active call gets a
             # visible busy refusal, not account/config deletion underneath it.
@@ -1647,6 +2015,19 @@ def main(args):
         if action == 'controller-create' and not extra: result = create(store, helper)
         elif action == 'controller-resume-create' and not extra: result = resume_create(store, helper)
         elif action == 'controller-stage' and len(extra) == 4: result = stage(store, helper, *extra)
+        elif action == 'controller-worker-prepare' and len(extra) == 4: result = stage(store, helper, *extra, worker=True)
+        elif action == 'controller-worker-birth' and len(extra) == 1:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            return worker_birth(store, helper, extra[0])
+        elif action == 'controller-worker-publish' and not extra: result = publish_worker_config(store, helper)
+        elif action == 'controller-config-export' and not extra: result = export_config(store, helper)
+        elif action == 'controller-host-config-export' and not extra:
+            _, base, r = load(store, helper)
+            checked_units(base, r)
+            result = strict_json(read_file(Path(r['home']) / 'host-config.json', r['uid'], 1048576, required_mode=0o600))
+        elif action == 'controller-run' and len(extra) == 1:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            return controller_run(store, helper, extra[0])
         elif action in ('controller-start', 'controller-stop') and not extra: result = service(store, helper, action[11:])
         elif action == 'controller-config' and len(extra) == 1: result = config_update(store, helper, extra[0])
         elif action in ('controller-tool', 'controller-tool-result', 'controller-tool-ack') and extra:
@@ -1670,7 +2051,7 @@ def main(args):
             return enroll(store, helper, extra[0])
         elif action == 'controller-journal' and not extra:
             _, base, r = load(store, helper)
-            result = json.loads(read_file(Path(r['home']) / 'state/journal.json', r['uid'], 8 * 1024 * 1024))
+            result = json.loads(read_file(worker_state(r) / 'journal.json', r['uid'], 8 * 1024 * 1024))
         elif action == 'controller-remove' and not extra: result = remove(store, helper)
         else: raise ValueError('unsupported controller installer arguments')
         print(json.dumps(result, sort_keys=True))

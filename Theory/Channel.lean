@@ -11,6 +11,11 @@
   sealing hypotheses `PayloadHidden` / `FillHidden`, `observable_trace_depends_only_on_membership`,
   `member_view_independent_of_presence`, and every pole on a concrete instance.
 -/
-import Theory.Channel.Cell
-import Theory.Channel.Lease
-import Theory.Channel.Trace
+module
+
+public import Theory.Channel.Cell
+public import Theory.Channel.Lease
+public import Theory.Channel.Trace
+
+@[expose] public section
+

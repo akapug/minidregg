@@ -2,21 +2,25 @@
 The request is local custody's input, never decoded from a remote plan. Each
 branch runs the real current-source authoring route and returns its complete
 canonical plan; the session compares all bytes before exposing any headers. -/
-import Kernel.NativeHostReplay
-import Kernel.ApplicationShareIssueAuthoring
-import Kernel.ApplicationDispatchAuthoring
-import Kernel.ApplicationDispatchAgentPaidAuthoring
-import Kernel.ApplicationAgentLifetimeDispatchPaidAuthoring
-import Host.ApplicationAgentLifetimeGrantAuthoring
-import Host.ApplicationGrainSessionEnrollmentAuthoring
-import Host.ApplicationLifecycleCompletionOperator
-import Host.ApplicationLifecycleClaimOperator
-import Host.ApplicationLifecycleLaunchBeginAuthoring
-import Host.ApplicationLifecycleLaunchClaimAuthoring
-import Host.ApplicationLifecycleLaunchCompletionAuthoring
-import Host.ApplicationFailedStartRecoveryAuthoring
-import Host.SourceAgreementJson
-import Compiler.FnEvidenceCodec
+module
+
+public import Kernel.NativeHostReplay
+public import Kernel.ApplicationShareIssueAuthoring
+public import Kernel.ApplicationDispatchAuthoring
+public import Kernel.ApplicationDispatchAgentPaidAuthoring
+public import Kernel.ApplicationAgentLifetimeDispatchPaidAuthoring
+public import Host.ApplicationAgentLifetimeGrantAuthoring
+public import Host.ApplicationGrainSessionEnrollmentAuthoring
+public import Host.ApplicationLifecycleCompletionOperator
+public import Host.ApplicationLifecycleClaimOperator
+public import Host.ApplicationLifecycleLaunchBeginAuthoring
+public import Host.ApplicationLifecycleLaunchClaimAuthoring
+public import Host.ApplicationLifecycleLaunchCompletionAuthoring
+public import Host.ApplicationFailedStartRecoveryAuthoring
+public import Host.SourceAgreementJson
+public import Compiler.FnEvidenceCodec
+
+@[expose] public section
 
 namespace Minidregg.Host.NativeLifecycleConsent
 open Minidregg.Compiler Minidregg.Compiler.NativeHostCodec

@@ -18,10 +18,29 @@ term: the event term is the one charge for what the log retains.
   (`WorldTrack.advance`, naming the first `mismatch` lane), so on every
   accepted turn Host charge = World charge.
 -/
-import Kernel.SnapRepresents
-import Kernel.DeployedRepresentsCheck
-import Kernel.DeployedHistory
-import Theory.AssertAxioms
+module
+
+public import Kernel.SnapRepresents
+public import Kernel.DeployedRepresentsCheck
+public import Kernel.DeployedHistory
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.DeployedCharge
 

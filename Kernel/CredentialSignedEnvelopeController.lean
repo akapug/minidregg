@@ -22,11 +22,30 @@ authenticity, and the relation between authenticity and custody/EUF-CMA, remain
 explicit premises below.  The executable digest used to pin the registry is a
 representation function only; no collision-resistance theorem is claimed.
 -/
-import Compiler.Tower256ConcreteBackend
-import Compiler.CredentialSigningKeyCodec
-import Kernel.CanonicalPolicyRegistry
-import Theory.CredentialAuthorityFamily
-import Theory.AxiomPin
+module
+
+public import Compiler.Tower256ConcreteBackend
+public import Compiler.CredentialSigningKeyCodec
+public import Kernel.CanonicalPolicyRegistry
+public import Theory.CredentialAuthorityFamily
+public import Theory.AxiomPin
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.CredentialSignedEnvelopeController
 

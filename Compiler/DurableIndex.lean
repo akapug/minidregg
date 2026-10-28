@@ -21,11 +21,35 @@ with one root. This module pins its deployed shape:
   security floor is therefore cSHAKE256's COLLISION resistance at a 256-bit
   output (about 2^128 work), not its second-preimage resistance.
 -/
-import Theory.AuthTrieRange
-import Compiler.Sp800185Cshake256
-import Kernel.WorldRoot
-import Compiler.DurableReceiverCodec
-import Theory.AssertCompiled
+module
+
+public import Theory.AuthTrieRange
+public import Compiler.Sp800185Cshake256
+public import Kernel.WorldRoot
+public import Compiler.DurableReceiverCodec
+public import Theory.AssertCompiled
+meta import Theory.AuthTrieRange
+meta import Compiler.Sp800185Cshake256
+meta import Kernel.WorldRoot
+meta import Compiler.DurableReceiverCodec
+meta import Theory.AssertCompiled
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.DurableIndex
 

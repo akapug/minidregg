@@ -31,6 +31,10 @@ case "$SPONSOR_BALANCE" in ''|*[!0-9]*) echo 'NEWPARTICIPANT_SPONSOR_BALANCE mus
 # Compiled-in evaluators this Store's operator disables (space-separated registry
 # names, e.g. "nock"; K-EVAL). Written into the genesis params; default none.
 DISABLED_EVALUATORS=${NEWPARTICIPANT_DISABLED_EVALUATORS:-}
+# A world that will host applications retains the common grain platform
+# configuration and generates its completion custodian before bootstrap.
+GRAIN_PLATFORM=${NEWPARTICIPANT_GRAIN_PLATFORM:-0}
+case "$GRAIN_PLATFORM" in 0|1) ;; *) echo 'NEWPARTICIPANT_GRAIN_PLATFORM must be 0 or 1' >&2; exit 2;; esac
 case "$OWNER_BUDGET" in ''|*[!0-9]*) echo 'NEWPARTICIPANT_OWNER_BUDGET must be decimal' >&2; exit 2;; esac
 for executable in "$HOST" "$MINI" "$STORE" "$VERIFIER"; do
   case "$executable" in /*) ;; *) echo "binary path must be absolute: $executable" >&2; exit 2;; esac
@@ -67,10 +71,10 @@ TEMPLATE_VARIANT= TEMPLATE_TAR= TEMPLATE_META=
 variant_digest() {
   # contents only (`sha256sum -` names no path): a caller's spec file lives under its own run root
   { for b in "$HOST" "$MINI" "$STORE" "$VERIFIER" "$HERE/genesis-params.example.json" "$HERE/genesis.sh" "$0"; do sha256sum <"$b"; done
-    printf 'domain=%s subject=%s budget=%s balance=%s disabled=%s tail=%s objective=%s observer=%s serve=%s now=%s step=%s socket-in-root=%s\n' \
+    printf 'domain=%s subject=%s budget=%s balance=%s disabled=%s tail=%s objective=%s observer=%s serve=%s now=%s step=%s socket-in-root=%s grain-platform=%s\n' \
       "$DOMAIN" "$SUBJECT" "$OWNER_BUDGET" "$SPONSOR_BALANCE" "$DISABLED_EVALUATORS" "${MINI_TAIL_BOUND:-256}" \
       "${OBJECTIVE_INVOCATION_POLICY:-}" "${NEWPARTICIPANT_CLOCK_OBSERVER:-}" "${NEWPARTICIPANT_SERVE:-serve}" \
-      "${GENESIS_NOW:-}" "${MAX_STEP_SECONDS:-}" "$(case $SOCKET in "$ROOT"/*) echo yes;; *) echo no;; esac)"
+      "${GENESIS_NOW:-}" "${MAX_STEP_SECONDS:-}" "$(case $SOCKET in "$ROOT"/*) echo yes;; *) echo no;; esac)" "$GRAIN_PLATFORM"
     for f in "${EXTRA_GENESIS_ENROLLMENTS:-}" "${NEWPARTICIPANT_EXTRA_SUBJECTS:-}" "${EXTRA_CLOCK_TICKERS:-}" "${NEWPARTICIPANT_PROVIDER_SERVICES:-}"; do
       [ -n "$f" ] && { printf '%s ' "$(basename "$f")"; sha256sum <"$f"; }
     done
@@ -232,18 +236,20 @@ fi
 cat >"$ROOT/pay/genesis-observer.json" <<EOF
 {"subject":"30","capability":"4030","enrolCapability":"4032"}
 EOF
-# The one genesis template (genesis.sh) from the example params, without its grain platform (this
-# world hosts no grains; the example's null completionCustodianKey is refused unfilled), with this
+# The one genesis template (genesis.sh) from the example params, with the grain
+# platform only when requested by an application-hosting journey, and with this
 # Store's domain and sponsor subject; it honours EXTRA_GENESIS_ENROLLMENTS and
 # MINI_TAIL_BOUND (the tail bound L, default the example's 256 = 4 x 64).
 jq --argjson domain "$DOMAIN" --argjson subject "$SUBJECT" --argjson budget "$OWNER_BUDGET" --argjson balance "$SPONSOR_BALANCE" \
   --arg disabled "$DISABLED_EVALUATORS" --argjson tail "${MINI_TAIL_BOUND:-256}" \
-  --arg objective "${OBJECTIVE_INVOCATION_POLICY:-}" \
+  --arg objective "${OBJECTIVE_INVOCATION_POLICY:-}" --argjson grains "$GRAIN_PLATFORM" \
   '.domain = $domain | .sponsor.subject = $subject | .sponsor.initialBalance = $balance | .ownerBudget = $budget | .tailBound = $tail
    | ($disabled | split(" ") | map(select(length > 0))) as $off
    | if ($off | length) > 0 then .disabledEvaluators = $off else . end
    | if $objective != "" then .objectiveInvocation = $objective else . end
-   | del(.grainPlatform)' \
+   | if $grains == 1 then
+       .grainPlatform.lifecycleManagement = {managementSubject:.sponsor.subject,managementKeyId:.sponsor.keyId}
+     else del(.grainPlatform) end' \
   "$HERE/genesis-params.example.json" >"$ROOT/genesis-params.json"
 . "$HERE/journey.d/lib/genesis-params.sh"
 resolve_params_sh "$HERE/../.." || exit 2

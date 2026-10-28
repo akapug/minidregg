@@ -3,9 +3,13 @@ Source-owned signing plan for the grain-backed birth. The public host first
 authorizes the exact observation footprint; this helper then finalizes only
 authority-allocated auxiliary cells and derives every current signing header.
 -/
-import Kernel.NativeHostContext
-import Kernel.GrainResourceBirthAdmission
-import Compiler.GrainResourceBirthHostCodec
+module
+
+public import Kernel.NativeHostContext
+public import Kernel.GrainResourceBirthAdmission
+public import Compiler.GrainResourceBirthHostCodec
+
+@[expose] public section
 
 namespace Minidregg.Kernel.NativeHostGrainBirth
 

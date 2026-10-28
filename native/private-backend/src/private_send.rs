@@ -75,8 +75,7 @@ impl PrivateSend {
         b.extend((f as u64).to_le_bytes());
         b.extend((length as u64).to_le_bytes());
         let context = hash(&b);
-        let mut kg = g.clone();
-        kg.invocation = Nat::from_be(&context);
+        let kg = g.derived(&context);
         let key = Asks::new(me, dealer, n, f, &kg)?;
         Ok(Self {
             me,

@@ -1,6 +1,10 @@
 /- Read-only custody presentation for a launch-bound event25 completion plan. -/
-import Host.ApplicationLifecycleLaunchCompletionAuthoring
-import Lean.Data.Json
+module
+
+public import Host.ApplicationLifecycleLaunchCompletionAuthoring
+public import Lean.Data.Json
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationLifecycleLaunchCompletionInspection
 

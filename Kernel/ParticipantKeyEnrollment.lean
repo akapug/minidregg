@@ -1,22 +1,27 @@
-import Compiler.SigningKeyCommitment
-/-
-Runtime enrollment of a fresh signing principal. The new key is installed in
-the same canonical authority cell used by every signed receiver. Enrollment
-does not issue a capability or create an account: a current factory-management
-capability, its current law, and the new key holder's proof of possession are
-all required before the authority update and its durable nullifier commit.
+module
 
-A record that commits to a next key (pre-rotation) also needs POSSESSION of
-that next key: the ingress carries the next public key and its signature over
-`nextPossessionFrame` (the enrolled public key and the next public key), and
-admission runs `Theory.KeyPreRotation.enrollGate` -- the same possession rule a
-rotation has (`Accepted.nextPossession`).  A sponsor therefore cannot commit a
-next key it merely names.  It CAN commit a keypair of its own; only the
-subject's client, comparing the commitment with the digest of its own next
-key, refuses that (`workspace init`).
--/
-import Kernel.CapabilityRevocationController
-import Theory.KeyPreRotation
+public import Compiler.SigningKeyCommitment
+public import Kernel.CapabilityRevocationController
+public import Theory.KeyPreRotation
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ParticipantKeyEnrollment
 

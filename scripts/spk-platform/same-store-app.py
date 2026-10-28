@@ -3,6 +3,7 @@
 All births/share/enrollment use supplied owner/member authority and pinned sockets.
 
   same-store-app.py INPUT                       attach, or continue the same attachment
+  same-store-app.py prepare INPUT               install/routes, leave START to composed journey
   same-store-app.py status INPUT                retained step ledger; no native call
   same-store-app.py settle INPUT STEP absent|confirmed EVIDENCE REASON
   same-store-app.py adopt-adapter INPUT REASON  pin repaired adapter bytes for this root
@@ -237,10 +238,22 @@ def enter(path):
     os.rename(staging,root)
     return c,root,f.Fixture(root/'fixture.json')
 
-def attach(path):
+def prepared_application(x):
+    """Export retained native birth/ticket paths for an existing-controller attachment."""
+    common={'birthSource':x.f['applicationSource'],
+            'birthAttempt':str(Path(x.f['applicationReceipt']).parent),
+            'packageDirectory':str(x.pkg)}
+    applications={}
+    for label,d in x.f['delegates'].items():
+        require('issueRequest' in d,'bootstrap request was not retained; use the original ticket request, never reissue')
+        applications[label]=dict(common,bootstrapTicketRequest=d['issueRequest'],bootstrapTicketAttempt=d['issue'])
+    return {'protocol':'mini-spk-same-store-prepared-v1','appId':x.app,
+            'fixture':str(x.path),'profilePath':str(x.profile),'applications':applications}
+
+def attach(path, prepare_only=False):
     c,root,x=enter(path)
     retained=root/'attachment-result.json'
-    if retained.exists():return load(retained)
+    if retained.exists():return prepared_application(x) if prepare_only else load(retained)
     host=x.m['spkHost']['path']
     x.step('observe-world',lambda:observe_world(x,c),reentrant=True)
     x.step('runtime-ready',lambda:runtime_ready(x),reentrant=True)
@@ -259,6 +272,10 @@ def attach(path):
         x.step(k+'ticket',lambda d=d:x.issue(d,reserve=False,observe=False))
         x.step(k+'ticket-observe',lambda d=d:x.delegate(d['ticket'],d['ticketOwner'],d['ticketObserve'],d['subject']),effect_only=True)
         x.step(k+'route',lambda label=label,d=d:x.route(route_name(label),d))
+    if prepare_only:
+        result=prepared_application(x)
+        save(root/'prepared-application.json',result)
+        return result
     x.step('start',lambda:x.run([host,'grain','start',x.profile,x.app],timeout=START_TIMEOUT),reentrant=True)
     for label,d in x.f['delegates'].items():
         x.step('member:'+label+':enrollment',lambda d=d:x.enroll(d))
@@ -288,6 +305,7 @@ def main():
     os.umask(0o077);p=argparse.ArgumentParser(description=__doc__,formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('words',nargs='+');words=p.parse_args().words
     if words[0]=='status' and len(words)==2:result=status(words[1])
+    elif words[0]=='prepare' and len(words)==2:result=attach(words[1],prepare_only=True)
     elif words[0]=='settle' and len(words)==6:
         result=f.Fixture(retained_fixture(words[1])/'fixture.json').settle(words[2],words[3],words[4],words[5])
     elif words[0]=='adopt-adapter' and len(words)==3:result=f.adopt_adapter(retained_fixture(words[1]),words[2])

@@ -4,9 +4,13 @@ ingress. Signatures are recovered only from canonical source envelopes and
 reassembled through the original Lean authoring codec. This does not verify
 signatures, recheck current law, admit event26, or mint a physical permit.
 -/
-import Host.ApplicationAgentLifetimeDispatchPaidInspection
-import Kernel.ApplicationAgentLifetimeDispatchPaidAuthoring
-import Lean.Data.Json
+module
+
+public import Host.ApplicationAgentLifetimeDispatchPaidInspection
+public import Kernel.ApplicationAgentLifetimeDispatchPaidAuthoring
+public import Lean.Data.Json
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationAgentLifetimePaidIngressInspection
 

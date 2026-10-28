@@ -30,14 +30,14 @@ mkdir -p "$ev" "$stage/packages"
 [[ ${5:-} == --recover ]] || cp "$batch" "$ev/batch.json"
 if [[ ${5:-} != --recover ]]; then
   mkdir -p "$ev/driver"
-  cp "$0" "$data" "$here/grain-journey.sh" "$here/world-up.sh" "$here/world-down.sh" "$here/stop-residents.sh" "$ev/driver/"
+  cp "$0" "$data" "$here/grain-journey.sh" "$here/world-up.sh" "$here/broker-world-up.sh" "$here/world-down.sh" "$here/stop-residents.sh" "$ev/driver/"
 fi
 cleanup_attempted=0
 cleanup() {
   local rc=0
   [[ $cleanup_attempted == 0 ]] || return 0
   cleanup_attempted=1
-  if [[ -f $world/WORLD.env ]]; then
+  if [[ -f $world/WORLD.env || -f $world/broker-setup/recovery.json ]]; then
     bash "$here/world-down.sh" "$world" >"$ev/world-down.log" 2>&1 || rc=1
   elif [[ -d $world/w ]]; then
     BIN="$candidate/bin" GRAINS_ROOT=/var/lib/mini-spk-worlds/0000000000000000 \
@@ -53,6 +53,10 @@ cleanup() {
     for f in "$world"/*.log "$world"/binary-sha256.txt "$world"/WORLD.env; do
       [[ ! -f $f ]] || cp "$f" "$ev/" || rc=1
     done
+    if [[ -d $world/broker-setup ]]; then
+      mkdir -p "$ev/broker-setup"
+      cp -a "$world/broker-setup/." "$ev/broker-setup/" || rc=1
+    fi
   fi
   if [[ $rc == 0 ]]; then
     rm -rf -- "$stage" # only this invocation's mktemp directory, after checked teardown

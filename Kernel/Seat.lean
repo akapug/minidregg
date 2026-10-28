@@ -58,8 +58,30 @@ coordinate `H(offer transaction)`, the cell is retired (never reused), and an
 offer onto a retired or present cell is refused (`Kernel.SeatStore.offer_refuses_taken_cell`). The native route (`Kernel.SeatReceiver`) commits
 exactly what `step`/`runPlan` decide over the cells it loads (`Kernel.SeatStore`).
 Not here: fees (the receiver charges them), non-fungible (set) amounts. -/
-import Kernel.Invitation
-import Kernel.ProtectedCell
+module
+
+public import Kernel.Invitation
+public import Kernel.ProtectedCell
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Mathlib.Data.List.Sort
+import all Kernel.Invitation
+import all Theory.TypedAuthorization
+
+@[expose] public section
 
 namespace Minidregg.Kernel.Seats
 open Minidregg.Theory.CanonicalResourceKernel

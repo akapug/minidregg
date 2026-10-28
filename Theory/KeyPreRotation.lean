@@ -31,8 +31,27 @@ the tag `DREGG.SIGNING-KEY.NEXT/v1` (`Kernel.Receivers.SubjectKeyRotation`'s `ne
 "The digest pins the key" is its collision resistance; nothing below assumes it:
 the theorems are stated over digest (in)equality, as admission is.
 -/
-import Theory.CredentialAuthorityState
-import Theory.AssertAxioms
+module
+
+public import Theory.CredentialAuthorityState
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Theory.KeyPreRotation
 

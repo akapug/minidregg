@@ -3,8 +3,12 @@ Read-only original-receipt lookup for a special dispatch transaction. It
 returns status only: a past receipt cannot be converted into a fresh physical
 HTTP delivery permit, regardless of whether the request bytes repeat.
 -/
-import Kernel.NativeHostReplay
-import Kernel.ApplicationDispatchAdmission
+module
+
+public import Kernel.NativeHostReplay
+public import Kernel.ApplicationDispatchAdmission
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationDispatchLookup
 

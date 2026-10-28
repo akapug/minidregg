@@ -7,10 +7,32 @@ Authored WIP; source opcode 61 and replay/ordered receiver joins are pending.
 The predicted prefix is the opened image extended by the first record
 (`Loaded.extend`), never a genesis replay of the whole history.
 -/
-import Kernel.JointControlBootstrap
-import Kernel.ResourceBirthReceiver
-import Compiler.Sp800185Cshake256
-import Theory.AssertAxioms
+module
+
+public import Kernel.JointControlBootstrap
+public import Kernel.ResourceBirthReceiver
+public import Compiler.Sp800185Cshake256
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
+
 namespace Minidregg.Kernel.JointControlBootstrapBundle
 open Minidregg.Theory
 open Minidregg.Theory.TypedAuthorization

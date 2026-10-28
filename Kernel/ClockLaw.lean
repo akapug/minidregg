@@ -36,13 +36,32 @@ The judgement itself is not here: every writer calls
 function `Kernel.Receiving.Family` runs for a migrated family, so a pay family's
 clock write is judged exactly as it will be after the migration.
 -/
-import Kernel.ClockCell
-import Compiler.CanonicalPolicyAdmission
-import Compiler.CanonicalRuntimeProfileCore
-import Compiler.CredentialAuthorityEntryCodec
-import Theory.CredentialAuthorityEffects
-import Theory.PolicyInstall
-import Theory.AxiomPin
+module
+
+public import Kernel.ClockCell
+public import Compiler.CanonicalPolicyAdmission
+public import Compiler.CanonicalRuntimeProfileCore
+public import Compiler.CredentialAuthorityEntryCodec
+public import Theory.CredentialAuthorityEffects
+public import Theory.PolicyInstall
+public import Theory.AxiomPin
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ClockLaw
 

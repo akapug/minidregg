@@ -45,10 +45,29 @@ cell is born declaring its sixteen fields (`jobFields`), and the scalar receiver
 changes any other field by name, before the law runs (`Kernel.FieldClosure`). `kernelAdmits` is that
 verdict; `no_double_settle` is over every field, and `closed_job_refuses_undeclared_field` names 20.
 -/
-import Pred.Core
-import Pred.Leaf
-import Kernel.LawView
-import Kernel.FieldClosure
+module
+
+public import Pred.Core
+public import Pred.Leaf
+public import Kernel.LawView
+public import Kernel.FieldClosure
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.Job
 

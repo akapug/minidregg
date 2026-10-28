@@ -4,9 +4,30 @@ remain components until Replay proves both historical issue and reserve are
 members of this exact admitted prefix. Neither this module nor its candidate
 can deliver an HTTP request or recover a historical permit.
 -/
-import Kernel.ApplicationDispatchAgentIngress
-import Kernel.ApplicationDispatchHistoricalCore
-import Kernel.NativeHostServed
+module
+
+public import Kernel.ApplicationDispatchAgentIngress
+public import Kernel.ApplicationDispatchHistoricalCore
+public import Kernel.NativeHostServed
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationDispatchAgentCore
 

@@ -1,14 +1,28 @@
-import Compiler.CarriedDispatchProvenance
-/-
-Detached, source-owned authoring for one special application dispatch. A fixed
-participant custodian selects its admitted ticket and submits exact HTTP bytes;
-this module derives current image roots, identity, permissions, command and
-all signing headers. Assembly only inserts detached signatures. The native
-op34 receiver still checks the whole result against a fresh verified tip.
--/
-import Kernel.NativeHost
-import Kernel.ApplicationDispatchAdmission
-import Kernel.ApplicationDispatchHistoricalCore
+module
+
+public import Compiler.CarriedDispatchProvenance
+public import Kernel.NativeHost
+public import Kernel.ApplicationDispatchAdmission
+public import Kernel.ApplicationDispatchHistoricalCore
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationDispatchAuthoring
 

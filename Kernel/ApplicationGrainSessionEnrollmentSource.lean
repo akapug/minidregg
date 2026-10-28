@@ -4,9 +4,28 @@ mutates only the participant's session and descriptor. A separate checked
 app observation and physical read guard belong to the event28 receiver;
 these request and ingress codecs do not themselves grant enrollment.
 -/
-import Kernel.ApplicationGrainSessionEnrollment
-import Kernel.ApplicationDispatchAuthority
-import Kernel.NativeHostContext
+module
+
+public import Kernel.ApplicationGrainSessionEnrollment
+public import Kernel.ApplicationDispatchAuthority
+public import Kernel.NativeHostContext
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationGrainSessionEnrollmentSource
 
