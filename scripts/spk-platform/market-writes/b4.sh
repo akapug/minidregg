@@ -72,16 +72,13 @@ write_HackerCMS() {
   echo "0 www.sock GET /featured.html $got after publish $pub"
 }
 
-# Hakyll CMS (package 49a44b77, sshakyll): lifecycle red at START ("resident exited before START", app output
-# empty; install passed). From the package: action "New Hakyll CMS Site" is `sandstorm-http-bridge 8000 --
-# /startup.sh`; startup.sh writes /var/www/index.html, runs `cp -a /source /var`, then /bin/sshakyll, whose
-# options are HOST 127.0.0.1, PORT, DIR default "var" (a RELATIVE path, so the process's working directory
-# decides where /var/source and /var/public land). CAUSE NOT PROVEN (no logs are readable here); the
-# candidates, in order: (1) the resident's working directory is not "/" or not writable, so sshakyll cannot
-# open `var`; (2) `cp -a /source /var` fails on ownership preservation in the unprivileged launch worker and
-# the later steps depend on it; (3) sshakyll binds a port other than the bridge's 8000 (it takes --port, and
-# startup.sh passes none). The first fix to try is the launch's cwd = "/" plus /var writable; the resident's
-# stderr from `sshakyll` is the evidence to read first. Not a recipe defect.
+# Hakyll CMS (package 49a44b77, sshakyll). First-pass lifecycle red: "resident unit ... is  before START
+# completion" after 125 s, an EMPTY state. Cause (run evidence, dregg-build app-batch-4-runs/w1): not the
+# package. The resident unit ran from 20:48:04 until the harness stopped the world at 20:51:40; the wait loop
+# read an empty `systemctl --user show` (the box OOM-killed another lane's scope at that second) as a
+# stopped unit. Fixed in spk-host grain.rs (an unreadable state is absorbed, not a verdict). The package
+# itself starts under the Mini floor: action `sandstorm-http-bridge 8000 -- /startup.sh` writes /var/www,
+# `cp -a /source /var`, then /bin/sshakyll, which listens on 127.0.0.1:8000 with cwd "/" (DIR default "var").
 # Recipe (API read from the binary): the site source is a tree served as /api/file/<path> (GET reads, PUT
 # writes, DELETE removes), config.json routes `posts/*` through templates/post.html, POST /api/publish
 # rebuilds into /var/www, and the grain's -www origin serves it. A new post is posts/<name>.md, built to
