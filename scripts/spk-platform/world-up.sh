@@ -57,6 +57,22 @@ config=$run/w/store/base/workroom/deployment/pinned-config.json
 "$run/bin/minidregg-host" "$config" profile >"$run/w/native-profile.json"
 store=$(jq -er '.storeTag | select(test("^[0-9a-f]{16}$"))' "$run/w/native-profile.json")
 root=/var/lib/mini-spk-worlds/$store
+# Retain enough identity to tear down even an interrupted installer/broker setup.
+# PROFILE is filled after the profile phase; world-down needs only the other fields.
+cat >"$run/WORLD.env" <<ENV
+BIN=$run/bin
+GRAINS_ROOT=$root
+BROKER_SOCKET=$root/runtime-$store/broker.sock
+STORE=$store
+PROFILE=
+RUN=$run/w
+HOST=$run/bin/minidregg-host
+CONFIG=$config
+OSOCK=$run/w/sock/operator/host.sock
+PSOCK=$run/w/sock/participant/host.sock
+HELPER=$helper
+ENV
+: >"$run/root-setup.log"
 # A free 16-ID slice of the operator's subordinate allocation: a lane box carries several standing
 # worlds, and the installer refuses a slice another world's registry already names.
 read -r start count < <(awk -F: -v user="$op_name" '$1==user && $3>=16 {print $2,$3;exit}' /etc/subuid)

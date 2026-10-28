@@ -1,0 +1,25 @@
+{
+  "protocol": "mini-store-qualification-v1",
+  "scope": "install-share-start-enroll-get-root",
+  "candidate": "aae3e2e372b045dd43493183144db08212d51659",
+  "counts": {
+    "PASS": 1,
+    "FAIL": 0
+  },
+  "apps": [
+    {
+      "candidate": "aae3e2e372b045dd43493183144db08212d51659",
+      "appId": "0dp7n6ehj8r5ttfc0fj0au6gxkuy1nhw2kx70wussfa1mqj8tf80",
+      "packageId": "5830d70137cdae158118884da8790870",
+      "name": "Simple Todos",
+      "verdict": "PASS",
+      "stage": "get",
+      "reason": "HTTP 200",
+      "evidence": "/tank/lanes/cx-store-sweep/out/aae3e2e372b045dd43493183144db08212d51659/evidence/b.1aT84m",
+      "importProfile": "standard-v1",
+      "rawBytes": 23632200,
+      "decodedBytes": 85904224,
+      "checkedAt": "2026-10-28T10:48:44.459016+00:00"
+    }
+  ]
+}

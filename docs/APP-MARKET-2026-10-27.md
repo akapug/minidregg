@@ -136,6 +136,14 @@ it is showing.
 
 ## 2. Catalogue: `mini apps search`, `mini apps show`
 
+- Whole-store lifecycle evidence is now a separate `qualification` field beside the local
+  ingest verdict. `scripts/spk-platform/store-sweep.sh` runs the public index without
+  per-app recipes; the candidate embeds `deploy/market/store-qualification.json` and
+  `--qualification FILE` (or `MINI_APPS_QUALIFICATION`) selects a newer recorded sweep.
+  Search says **known working (lifecycle; candidate SHA)** only for an exact appId/packageId
+  PASS through install/share/start/enrol/GET `/`. Unswept entries remain unswept; this does
+  not assert that the app's writes or external services work. See
+  [`STORE-SWEEP.md`](../scripts/spk-platform/STORE-SWEEP.md) for running, resuming and publishing it.
 - `mini apps search [TERM] [--category C] [--json]` lists matching apps: name, version, appId (the
   publisher's key hash), publisher, package size when known, and **Mini's verdict** from
   `/var/lib/mini-apps/verdicts/<packageId>.json`, written by the worker's real ingest: `verified`
