@@ -92,7 +92,9 @@
                       "HEAD",
                       "MKCOL",
                       "MOVE",
-                      "PROPFIND"
+                      "PROPFIND",
+                      "REPORT",
+                      "MKCALENDAR"
                     ]
                   },
                   "path": {
@@ -129,7 +131,9 @@
                       "json",
                       "base64",
                       "status",
-                      "dav-multistatus"
+                      "dav-multistatus",
+                      "text",
+                      "json-lines"
                     ]
                   },
                   "status": {
@@ -150,10 +154,66 @@
                     "type": "object"
                   },
                   "text": {
-                    "type": "string"
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "object"
+                      }
+                    ]
                   },
                   "base64": {
                     "type": "object"
+                  },
+                  "form": {
+                    "type": "object"
+                  },
+                  "multipart": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "filename": {
+                          "type": "string"
+                        },
+                        "contentType": {
+                          "type": "string"
+                        },
+                        "text": {},
+                        "base64": {}
+                      },
+                      "required": [
+                        "name"
+                      ],
+                      "additionalProperties": false,
+                      "oneOf": [
+                        {
+                          "required": [
+                            "text"
+                          ],
+                          "not": {
+                            "required": [
+                              "base64"
+                            ]
+                          }
+                        },
+                        {
+                          "required": [
+                            "base64"
+                          ],
+                          "not": {
+                            "required": [
+                              "text"
+                            ]
+                          }
+                        }
+                      ]
+                    }
                   }
                 },
                 "required": [
@@ -331,6 +391,32 @@
               "where"
             ],
             "additionalProperties": false
+          },
+          "internal": {
+            "type": "boolean"
+          },
+          "prepare": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "op": {
+                  "type": "string"
+                },
+                "args": {
+                  "type": "object"
+                }
+              },
+              "required": [
+                "id",
+                "op",
+                "args"
+              ],
+              "additionalProperties": false
+            }
           }
         },
         "required": [
