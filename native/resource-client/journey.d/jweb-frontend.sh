@@ -82,7 +82,9 @@ if [ -n "${SPONSOR_WS:-}" ] && [ -f "$SPONSOR_WS/workspace.json" ]; then
     # HOME/.mini/consent-anchors/ and a Unix socket path is bounded (sun_path). Stable per step
     # directory, so a run on a box that keeps its world finds the member it provisioned before.
     M=${XDG_RUNTIME_DIR:-/tmp}/jwf-m-$(printf '%s' "$D" | cksum | cut -c1-8); mkdir -p -m 700 "$M/home/requests" "$M/home/provision" "$M/sponsor-home/keys" "$M/sponsor-home/requests"
-    [ "$mode" = hook ] && JWF_MEMBER_DIR=$M
+    # The member dir is tmpfs: it goes with the step on every exit path, unless JWF_KEEP_MEMBER=1 keeps it
+    # for a box whose world outlives the run (then the next run reuses the member it holds).
+    [ "${JWF_KEEP_MEMBER:-0}" = 1 ] || { JWF_MEMBER_DIR=$M; trap 'stop; rm -rf "$JWF_MEMBER_DIR"' EXIT; }
     mline() { # WORKSPACE HOME LINE -> stdout; rc in $?
       "$MINI" shell --socket "$SOCKET" --workspace "$1" --home "$2" --host "$HOST" --config "$CONFIG" --line "$3" 2>"$M/last.err"
     }
@@ -109,7 +111,7 @@ if [ -n "${SPONSOR_WS:-}" ] && [ -f "$SPONSOR_WS/workspace.json" ]; then
       done
       : >"$M/provisioned-this-run"
     }
-    # A member an earlier run of this step provisioned (the box keeps its world) is reused.
+    # A member an earlier run of this step provisioned (JWF_KEEP_MEMBER=1 on a box that keeps its world) is reused.
     [ -f "$M/home/workspace/workspace.json" ] || provision_jwf || true
     if [ -f "$M/home/workspace/workspace.json" ] && [ "$(jq -r '.birthContext != null' "$M/home/workspace/workspace.json")" = true ]; then
       JSUBJ=$(jq -r .subject "$M/home/workspace/workspace.json")
