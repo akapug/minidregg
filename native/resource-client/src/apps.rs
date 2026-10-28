@@ -636,7 +636,15 @@ fn install(mut args: Args, paths: &Paths, as_json: bool, dir: Option<std::ffi::O
     };
     let mut request = retained.clone();
     request["verb"] = json!(if is_retry { "retry" } else { "install" });
-    let reply = worker_call(&paths.socket, &request)?;
+    // The worker answers an install at once (`pending` while it runs); a reply lost after the
+    // request was sent leaves the request with the worker, so the member is shown its follow-up.
+    let reply = worker_call(&paths.socket, &request).map_err(|error| {
+        if error.starts_with("worker reply lost") || error.starts_with("worker closed without") {
+            format!("undecided: request {id} was sent and the worker may be running it; it continues without this command ({error}); exact retry: mini apps install --app {} --retry {id}", entry.app_id)
+        } else {
+            error
+        }
+    })?;
     let outcome = requests.join(format!("{id}.outcome.json"));
     crate::workspace::atomic_json(&outcome, &reply, None).or_else(|_| {
         // A second reply for the same id (the exact retry) replaces nothing:
