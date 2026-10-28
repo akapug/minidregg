@@ -133,7 +133,8 @@
                       "status",
                       "dav-multistatus",
                       "text",
-                      "json-lines"
+                      "json-lines",
+                      "caldav-multistatus"
                     ]
                   },
                   "status": {
@@ -179,7 +180,14 @@
                           "type": "string"
                         },
                         "filename": {
-                          "type": "string"
+                          "oneOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "object"
+                            }
+                          ]
                         },
                         "contentType": {
                           "type": "string"
@@ -213,6 +221,13 @@
                           }
                         }
                       ]
+                    }
+                  },
+                  "acceptedContentTypes": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "string"
                     }
                   }
                 },
