@@ -504,4 +504,86 @@ rebinds code 0), and a safe extension may not rebind a retired code. -/
 def ExtensionTeeth : Prop :=
   ¬ Extends toyPole toyGhostPole ∧ ¬ SafeExtension [(0, toyEntry entryASpec)] toyPole [1]
 
+/-! ### Prefix consumption (review gap 3).
+
+A registered operation is not a whole wire message.  The deployed target decoder reads the
+payload's tag octet, then the payload, then the target's later fields (`targetStream` is a
+product with `payloadStream` in its middle).  So the registry is also read as a PREFIX: one
+octet, the entry's own `decodePrefix`, and the suffix handed back untouched to the enclosing
+decoder.  An extension must preserve that reading on every old code too, not only the
+dispatch of a whole operation (`ExtensionPreserves`). -/
+
+/-- A candidate prefix reader: bytes ↦ the code, the operation's bytes, the suffix. -/
+abbrev PrefixReader := List UInt8 → Option (Nat × List UInt8 × List UInt8)
+
+/-- The registry's prefix reader: the tag octet, then the entry's own prefix decoder; the
+operation's bytes are its canonical encoding. -/
+def readPrefix {Ctx Cell : Type} (R : Registry Ctx Cell) : PrefixReader
+  | [] => none
+  | tag :: rest =>
+    match R.lookup tag.toNat with
+    | none => none
+    | some e => (e.spec.opStream.decodePrefix rest).map fun decoded =>
+        (tag.toNat, e.spec.opStream.encode decoded.1, decoded.2)
+
+/-- `read` reads `R` as a prefix.
+* `consume`: after a registered code's octet, exactly one operation's encoding is consumed
+  and every suffix is handed back untouched;
+* `refuse`: an octet at no registered code is refused, never read by another entry;
+* `canonical`: whatever it accepts is a registered code's octet, one operation's encoding
+  and the suffix, nothing else. -/
+structure ConsumesPrefix {Ctx Cell : Type} (R : Registry Ctx Cell) (read : PrefixReader) :
+    Prop where
+  consume : ∀ code e, R.lookup code = some e → code < 256 → ∀ (op : e.O) (suffix : List UInt8),
+    read (UInt8.ofNat code :: (e.spec.opStream.encode op ++ suffix)) =
+      some (code, e.spec.opStream.encode op, suffix)
+  refuse : ∀ (tag : UInt8) rest, R.lookup tag.toNat = none → read (tag :: rest) = none
+  canonical : ∀ bytes code opBytes suffix, read bytes = some (code, opBytes, suffix) →
+    ∃ e, R.lookup code = some e ∧ code < 256 ∧ (∃ op : e.O, opBytes = e.spec.opStream.encode op) ∧
+      bytes = UInt8.ofNat code :: (opBytes ++ suffix)
+
+/-- **PREFIX KEYSTONE.**  `readPrefix R` reads every registry as a prefix, and an extension
+reads every old code's prefix exactly as before (the bytes consumed and the suffix handed
+back alike). -/
+def PrefixKeystone (Ctx Cell : Type) : Prop :=
+  (∀ R : Registry Ctx Cell, ConsumesPrefix R (readPrefix R)) ∧
+  (∀ R R' : Registry Ctx Cell, Extends R R' → ∀ code, R.lookup code ≠ none → code < 256 →
+    ∀ rest, readPrefix R' (UInt8.ofNat code :: rest) = readPrefix R (UInt8.ofNat code :: rest))
+
+/-- A reader that decodes the operation from ALL the remaining bytes (a top-level decode
+where a prefix decode belongs): it hands the enclosing decoder no suffix. -/
+def readWhole {Ctx Cell : Type} (R : Registry Ctx Cell) : PrefixReader
+  | [] => none
+  | tag :: rest =>
+    match R.lookup tag.toNat with
+    | none => none
+    | some e => (e.spec.opStream.toLawful.decode rest).map fun op =>
+        (tag.toNat, e.spec.opStream.encode op, [])
+
+/-- A fail-open reader: an octet at no registered code is read by entry A's decoder. -/
+def readFailOpen : PrefixReader
+  | [] => none
+  | tag :: rest =>
+    match toyPole.lookup tag.toNat with
+    | none => readPrefix toyPole (0 :: rest)
+    | some _ => readPrefix toyPole (tag :: rest)
+
+/-- The pole with code 1 rebound to entry A's codec (a natural number where a boolean was). -/
+def toyRebindPole : Registry Unit ToyStore := [(0, toyEntry entryASpec), (1, toyEntry entryASpec)]
+
+/-- **Prefix satisfiable**: the pole is read as a prefix, and code 0's `5` followed by a
+suffix `[7]` consumes exactly `5`'s encoding and hands back `[7]`. -/
+def PrefixSatisfiable : Prop :=
+  ConsumesPrefix toyPole (readPrefix toyPole) ∧
+  readPrefix toyPole (0 :: (StreamCodec.nat.encode 5 ++ [7])) = some (0, StreamCodec.nat.encode 5, [7])
+
+/-- **Prefix teeth**: a reader that consumes the whole rest fails `consume`; a fail-open
+reader fails `refuse`; and rebinding code 1's codec (not an extension) changes what an old
+code's prefix reads. -/
+def PrefixTeeth : Prop :=
+  ¬ ConsumesPrefix toyPole (readWhole toyPole) ∧
+  ¬ ConsumesPrefix toyPole readFailOpen ∧
+  readPrefix toyRebindPole (1 :: StreamCodec.bool.encode true) ≠
+    readPrefix toyPole (1 :: StreamCodec.bool.encode true)
+
 end Minidregg.Effects.Revival

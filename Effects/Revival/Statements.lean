@@ -423,4 +423,37 @@ def HostLegacyCensus : Prop := LegacyDisjoint payloadTag [(1, contentHandler)]
 false until the migration deletes it. -/
 def HostLegacyCensusRefutedToday : Prop := ¬ HostLegacyCensus
 
+/-! ### The deployed payload decoder, read as a prefix (review gap 3, live).
+
+`targetStream` reads a target's payload with `payloadStream.decodePrefix` and then continues
+with the target's later fields.  `ContentPrefixAgreement` says that on content's code the
+deployed decoder consumes exactly what the registry's prefix reader consumes and hands back
+the same suffix, so routing the payload through the registry at the migration commit does
+not move a single target's bytes.  Its teeth: the agreement is not a property of every code
+(binding the content handler at the observe-only read's code 3 disagrees). -/
+
+/-- The deployed payload decoder as a prefix reader: the tag octet, the payload's bytes after
+it, the suffix. -/
+def payloadPrefix : PrefixReader := fun bytes =>
+  (DeclaredResourceController.payloadStream.decodePrefix bytes).map fun decoded =>
+    (payloadTag decoded.1, (DeclaredResourceController.payloadStream.encode decoded.1).tail, decoded.2)
+
+/-- **LIVE PREFIX AGREEMENT.**  On content's code, every byte string is read alike by the
+deployed payload decoder and by the registry's prefix reader: refused alike, or the same
+operation bytes and the same suffix. -/
+def ContentPrefixAgreement : Prop :=
+  ∀ rest, payloadPrefix (1 :: rest) = readPrefix [(1, contentHandler)] (1 :: rest)
+
+/-- **Satisfiable.**  The agreement's accepting side is inhabited: a content command's
+encoding after code 1, with any suffix, is read as that command's bytes and that suffix. -/
+def ContentPrefixAccepts : Prop :=
+  ∃ (command : ContentResource.Command) (suffix : List UInt8),
+    payloadPrefix (1 :: (ContentResource.commandStream.encode command ++ suffix)) =
+      some (1, ContentResource.commandStream.encode command, suffix)
+
+/-- **Teeth.**  At the read's code (3), the deployed decoder accepts `[3]` (an observe-only
+read, no bytes after its tag) while the content handler bound there refuses it. -/
+def ContentPrefixTeeth : Prop :=
+  payloadPrefix [3] ≠ readPrefix [(3, contentHandler)] [3]
+
 end Minidregg.Effects.Revival

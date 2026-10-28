@@ -361,22 +361,59 @@ Engine/Statements split).
    newly accepted codes: a retired code is never rebound), with satisfiable and teeth;
    `LawfulRegistry` gains `octet` (every code < 256, the payload tag byte).  Proved:
    `extensionPreserves`, `extensionSatisfiable`, `extensionTeeth`.
-   Still to state: prefix consumption (the outer target decoder reads the tag octet, then the
-   handler's `opStream.decodePrefix`; an extension preserves `decodePrefix` on every old
-   code), and a whole-epoch compatibility design: the persisted corpus feeds
-   `StoreEpoch.current`, so moving one handler's identity moves the epoch; local handler
-   upgrades are not promised until that design exists.
+   **Prefix consumption** (stated, Engine §6 and Statements §8; to the auditor): `readPrefix R`
+   (the tag octet, then the entry's own `decodePrefix`, the suffix handed back), the predicate
+   `ConsumesPrefix R read` on any candidate reader (consume exactly one operation, refuse an
+   unregistered octet, accept only canonical spellings), `PrefixKeystone` (every registry is
+   read as a prefix; an extension reads every old code's prefix as before), toy
+   `PrefixSatisfiable`/`PrefixTeeth` (a whole-rest reader, a fail-open reader, a codec rebind),
+   and live `ContentPrefixAgreement` (on code 1 the deployed `payloadStream.decodePrefix` reads
+   exactly what the registry's reader reads) with `ContentPrefixAccepts` and
+   `ContentPrefixTeeth` (code 3 disagrees).
+   **Whole-epoch compatibility (design; no local handler upgrade is promised until it is
+   built).**  Today `StoreEpoch.current.schemaRefs` is one hash of the whole persisted corpus
+   (every tag entry, every structural fingerprint, every cell descriptor), and a Store opens
+   only when its epoch EQUALS the Host's (`StoreEpoch.differing`).  So adding a handler (a new
+   `DREGG/EFFECT/<NAME>/vN` identity) or bumping one moves the epoch and every existing Store
+   is refused: each registry change is a re-genesis.  That is the promise until the following
+   exists:
+   1. The seed carries the corpus itself (the canonical list of identity:fingerprint entries
+      and cell descriptors), not only its hash; the hash stays as the label's commitment.
+   2. Opening becomes a relation: a Store written under corpus S opens under Host corpus H
+      exactly when every entry of S is in H byte for byte (H ⊇ S, one fingerprint per
+      identity), and the registry delta is a `SafeExtension` (no retired code rebound).  Then
+      `ExtensionPreserves` and `PrefixKeystone` say every logged byte string under an old code
+      decodes, is consumed and dispatches exactly as when it was written.
+   3. A changed fingerprint at an existing identity is never compatible.  A codec change is a
+      new identity `/v(N+1)`, and the old one stays registered for reading old records.
+   4. The first record a Host writes under a code outside S moves the Store's epoch to H, as an
+      appended epoch step in the log, so an older Host refuses the Store by name.
+   5. The statement to prove when this is built: `EpochCompatible S H` (2) implies that
+      replaying the Store's log under H yields the states it yielded under S.
+   For the demo this costs nothing: re-genesis at the homelab is planned anyway.
 5. **The generic engine is a leaf** (gap 4): done.  `Effects/Revival/Engine.lean` imports
    only `Theory.Store`, `Theory.TypedAuthorization` and the stream codecs; controllers import
    it at migration.  `Statements.lean` (the live content instance) is the only file importing
    the controller.
-6. **Activity refusals have two levels** (review, §6).  A refused transfer is recorded as the
-   await's verdict inside an ACCEPTED turn (`ObjectiveActivity` transfer-refused branch returns
-   `.ok`), not a turn rejection.  The transfer declaration (migration step 2) must keep that:
-   its `sem` returns the turn's `Except` with the verdict inside the emitted descriptor, not
-   `refused`.  State it before step 2.
-7. The doc-write fixture inhabitant (`Fixtures/NativeDocWriteFixture*`), with a non-empty
-   rotation: `ContentAccepted`, `HostAccepted`, the ghost halves of `ContentTeeth`/`HostTeeth`.
+6. **Activity refusals have two levels** (review, §6).  Stated
+   (`Effects/Revival/ActivityStatements.lean`; to the auditor): `TwoLevels candidate`, a
+   predicate on any yield judgment over `YieldInput` (`commitYield`'s arguments): an
+   effect-level refusal (`TransferRefused`: the turn's guards pass, the verdict refuses) is an
+   ACCEPTED yield whose await records `.performed (.refused reason)` and commits nothing else;
+   every refusal of today's `commitYield` stays a turn refusal under its name.
+   `TwoLevelsSatisfiable` (today's kernel), `TwoLevelsPremise` (an effect-level refusal
+   exists), `TwoLevelsTeeth` (the collapsed judgment is refuted).  At step 2 the transfer
+   declaration's derived executor, projected to a `YieldCommit`, must satisfy it.
+7. The doc-write fixture inhabitant: `Effects/Revival/ContentFixture.lean` is written
+   (`ContentAccepted`, `HostAccepted`, the ghost halves of `ContentTeeth`/`HostTeeth`, and
+   `HostTeeth`'s twin half).  It reads the fixture's content target as `prepareTarget` does.
+   It is NOT imported yet: `Fixtures.NativeDocWriteFixture` is red (its recorded seed/record
+   frames no longer decode; first evidence 2026-10-28, the integrator treats it as red on
+   main).  Regenerate it from the conversion candidate the integrator names on READY (fresh
+   genesis, moved `StoreEpoch`): run `native/resource-client/doc-write-native-acceptance.py`
+   on dregg-build from that candidate (your own run directory; stop the world's servers),
+   then run `scripts/native-doc-write-fixture/generate.sh` where Lean may run (hbox private
+   tree, merged to that main), then check ContentFixture.
 8. `ContentAgreement contentSpec`: unfold `computeTarget`'s content arm, then
    `ContentResource.prepareCell_ok_of_run`, `Patch.run_append`, validate, `store_run_validFrom`.
 9. `HostKeystone`, `PrepareFactors` and `HostLegacyCensus` land with the migration commit (§5 step 1), with the
