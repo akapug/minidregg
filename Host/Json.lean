@@ -2493,10 +2493,13 @@ private def birth (path : String) (json : Lean.Json)
 caller supplies its checked current height and authority state; this parser
 checks the supplied genesis against the pinned seed before using it for
 immutable deployment coordinates. Current grant epochs come only from the
-loaded authority, never from that genesis description. -/
+loaded authority, never from that genesis description. A grain resource whose
+target the deployment routes through a provider schedule is born with that
+route's policy, exactly as the offline authoring of the same source. -/
 def birthCurrent (path : String) (json : Lean.Json)
     (deployed : NativeHost.Config) (height : Nat) (authority : AuthState)
-    (lineage : CapabilityId → Option (Finset CapabilityId)) :
+    (lineage : CapabilityId → Option (Finset CapabilityId))
+    (providerRoutes : List (Nat × ProviderMetering.Schedule) := []) :
     Result Draft := do
   let raw ← object path json
   let source ← genesis (path ++ ".genesis") (← field path "genesis" raw)
@@ -2504,7 +2507,8 @@ def birthCurrent (path : String) (json : Lean.Json)
     (fun reason => s!"{path}.genesis: refused: {repr reason}")
   unless NativeHost.seedIdentity built.seed == deployed.expectedSeed do
     throw s!"{path}.genesis: differs from the pinned seed"
-  birth path json none (some deployed) (some height) (some authority) [] (some lineage)
+  birth path json none (some deployed) (some height) (some authority) providerRoutes
+    (some lineage)
 
 structure ApplicationBirthContext where
   source : NativeHostGenesis.Config

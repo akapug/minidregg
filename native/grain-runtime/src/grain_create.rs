@@ -449,6 +449,105 @@ fn signed_step_on(spec: &Spec, socket: &Path, attempt: &Path, what: &str, submit
     Err(format!("{what}: undecided after exact lookup; rerun `grain-runtime create` with the same spec to look it up again (attempt {})", attempt.display()))
 }
 
+/// How many fresh observe-and-author generations one create tries before it
+/// stops and says so; each costs one signed read and one Host authoring, no fee.
+const AUTHOR_GENERATIONS: usize = 8;
+
+/// The one object grant in the sponsor's presented grants that observes the
+/// factory: it signs the read that authorizes the current-height authoring.
+fn factory_grant<'a>(spec: &'a Spec, genesis: &Value) -> Result<(String, &'a Grant)> {
+    let factory = match &genesis["factoryId"] {
+        Value::String(text) => text.clone(),
+        Value::Number(number) => number.to_string(),
+        _ => return Err("genesis names no factoryId".into()),
+    };
+    let mut matching = spec.sponsor.grants.iter().filter(|g| g.kind == "object" && g.target == factory);
+    match (matching.next(), matching.next()) {
+        (Some(grant), None) => Ok((factory, grant)),
+        _ => Err(format!("sponsor.grants must name exactly one object grant on the factory {factory}")),
+    }
+}
+
+/// Generation directories `g0001`, `g0002`, ...: the newest, or a first one.
+fn author_generation(base: &Path, fresh: bool) -> Result<PathBuf> {
+    let mut count = 0usize;
+    for entry in fs::read_dir(base).map_err(|e| format!("{}: {e}", base.display()))? {
+        let name = entry.map_err(|e| e.to_string())?.file_name();
+        let name = name.to_str().ok_or("non-UTF-8 birth authoring generation")?;
+        let digits = name.strip_prefix('g').filter(|d| d.len() == 4 && d.bytes().all(|b| b.is_ascii_digit()))
+            .ok_or_else(|| format!("unknown entry in {}: {name}", base.display()))?;
+        count = count.max(digits.parse::<usize>().map_err(|e| e.to_string())?);
+    }
+    if count == 0 || fresh {
+        count += 1;
+        fs::DirBuilder::new().mode(0o700).create(base.join(format!("g{count:04}")))
+            .map_err(|e| format!("birth authoring generation: {e}"))?;
+    }
+    Ok(base.join(format!("g{count:04}")))
+}
+
+/// The Host authors the birth at the current height (Host op 91, the path
+/// `workspace create` takes): its root grants name `notBefore` = the height
+/// of the image it authored against and that image's issuer epochs, so a
+/// World of any age admits the birth within the template's `birthSlack`, and
+/// a provider-routed grain gets its route's policy. The sponsor's signed
+/// factory resource read authorizes that authoring against the exact image it
+/// read. Nothing here is admitted: the signed birth that follows is the only
+/// effect. An authoring the Host refused (the image moved after the read) or
+/// a read that did not finish is superseded by a fresh generation.
+fn author_birth(spec: &Spec, work: &Path, socket: &Path, source: &Path, genesis: &Value) -> Result<PathBuf> {
+    let (factory, grant) = factory_grant(spec, genesis)?;
+    let base = work.join("birth-author");
+    if !base.exists() {
+        fs::DirBuilder::new().mode(0o700).create(&base).map_err(|e| format!("birth authoring: {e}"))?;
+    }
+    let mut fresh = false;
+    let mut last = String::from("no generation ran");
+    for _ in 0..AUTHOR_GENERATIONS {
+        let generation = author_generation(&base, fresh)?;
+        fresh = true;
+        let author = generation.join("author");
+        let intent = author.join("intent.bin");
+        match fs::read(author.join("reply.frame")) {
+            // The Host's reply is an intent: finish its local retention.
+            Ok(frame) if frame.first() == Some(&91) => {}
+            Ok(_) => { last = format!("the Host refused authoring generation {}", generation.display()); continue; }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("{}: {e}", author.display())),
+        }
+        let observation = generation.join("observation");
+        let signed = observation.join("signed-observation.bin");
+        if !signed.is_file() {
+            if observation.exists() {
+                last = format!("factory read {} did not finish", observation.display());
+                continue;
+            }
+            let query = generation.join("factory-query.json");
+            if !query.exists() {
+                let mut nonce = [0u8; 8];
+                File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut nonce)).map_err(|e| format!("nonce: {e}"))?;
+                write_private_new(&query, json!({"subject":spec.sponsor.subject,"nonce":u64::from_le_bytes(nonce).to_string(),
+                    "purpose":{"type":"query","kind":"object","target":factory,"view":"resource"},
+                    "grants":[{"kind":"object","target":factory,"capability":grant.capability}]}).to_string().as_bytes())?;
+            }
+            if let Err(error) = run(Command::new(&spec.mini).arg("query").arg("--host").arg(&spec.host)
+                .arg("--config").arg(&spec.host_config).arg("--socket").arg(socket).arg("--key").arg(&spec.sponsor.key)
+                .arg("--intent").arg(&query).args(["--view", "resource"]).arg("--dir").arg(&observation), "factory read") {
+                last = error;
+                continue;
+            }
+        }
+        match run(Command::new(&spec.mini).arg("current-resource-intent").arg("--host").arg(&spec.host)
+            .arg("--config").arg(&spec.host_config).arg("--socket").arg(socket).arg("--source").arg(source)
+            .arg("--signed-observation").arg(&signed).arg("--dir").arg(&author), "current birth authoring") {
+            Ok(_) if intent.is_file() => return Ok(intent),
+            Ok(_) => last = format!("current birth authoring left no intent in {}", author.display()),
+            Err(error) => last = error,
+        }
+    }
+    Err(format!("grain birth authoring: {AUTHOR_GENERATIONS} generations without an intent; last: {last}"))
+}
+
 fn init_workspace(spec: &Spec, key: &Key, dir: &Path) -> Result<()> {
     if dir.join("workspace.json").exists() {
         return Ok(());
@@ -546,10 +645,13 @@ pub(crate) fn create_phase(spec_path: &Path, phase: Phase) -> Result<Value> {
     }
     let birth = work.join("birth");
     let birth_socket = match &phase { Phase::Birth { socket } => socket.clone(), Phase::Whole => spec.host_socket.clone() };
+    // An existing birth attempt holds its exact signed call: it is only looked up.
+    let authored = if birth.exists() { None } else { Some(author_birth(&spec, &work, &birth_socket, &intent_path, &genesis)?) };
     signed_step_on(&spec, &birth_socket, &birth, "grain birth", || {
+        let authored = authored.as_ref().ok_or("grain birth: no authored intent")?;
         run(Command::new(&spec.mini).arg("submit").arg("--host").arg(&spec.host)
             .arg("--config").arg(&spec.host_config).arg("--socket").arg(&birth_socket)
-            .arg("--intent").arg(&intent_path).args(["--intent-kind", "birth-intent"])
+            .arg("--intent").arg(authored).args(["--intent-kind", "binary"])
             .arg("--key").arg(&spec.sponsor.key).arg("--dir").arg(&birth), "mini submit birth").map(|_| ())
     })?;
 
@@ -708,5 +810,36 @@ mod tests {
         let mut net = spec_json();
         net["worker"]["network"] = json!("bridge");
         assert!(serde_json::from_value::<Spec>(net).unwrap().check_values().is_err());
+    }
+
+    #[test]
+    fn birth_authoring_signs_its_read_with_the_one_factory_grant() {
+        let mut with = spec_json();
+        with["sponsor"]["grants"] = json!([{"kind":"object","target":"10","capability":"54"},
+            {"kind":"account","target":"7","capability":"41"}]);
+        let spec: Spec = serde_json::from_value(with.clone()).unwrap();
+        let (factory, grant) = factory_grant(&spec, &json!({"factoryId":10})).unwrap();
+        assert_eq!((factory.as_str(), grant.capability.as_str()), ("10", "54"));
+        assert_eq!(factory_grant(&spec, &json!({"factoryId":"10"})).unwrap().1.capability, "54");
+        // No grant on this genesis's factory, or two: refused before any read.
+        assert!(factory_grant(&spec, &json!({"factoryId":"11"})).is_err());
+        assert!(factory_grant(&spec, &json!({})).is_err());
+        with["sponsor"]["grants"][1] = json!({"kind":"object","target":"10","capability":"55"});
+        let two: Spec = serde_json::from_value(with).unwrap();
+        assert!(factory_grant(&two, &json!({"factoryId":"10"})).is_err());
+    }
+
+    #[test]
+    fn birth_authoring_generations_resume_the_newest_and_supersede_by_number() {
+        let base = std::env::temp_dir().join(format!("grain-author-gen-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir(&base).unwrap();
+        assert_eq!(author_generation(&base, false).unwrap(), base.join("g0001"));
+        assert_eq!(author_generation(&base, false).unwrap(), base.join("g0001"));
+        assert_eq!(author_generation(&base, true).unwrap(), base.join("g0002"));
+        assert_eq!(author_generation(&base, false).unwrap(), base.join("g0002"));
+        fs::create_dir(base.join("stray")).unwrap();
+        assert!(author_generation(&base, false).is_err());
+        fs::remove_dir_all(&base).unwrap();
     }
 }
