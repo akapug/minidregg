@@ -923,3 +923,39 @@ premise. Basis keys name only transactions and nullifiers (`DurableView.Keys`,
 `Served`'s private constructors (`ofLoaded`, `ofStateAt`, `advance`) all carry full cell state. So a
 seeded platform cell is present on every light ground. L1d's replacement is the right declaration:
 `recordOn` agrees across any two key sets over the same `served`, by `rfl`.
+
+## 2026-10-27, twenty-first pass: M2 proof phase, `Intent.credit` and the refill family (L1d, design)
+
+**Verdict: the shape is accepted, with one finding that must change before code.**
+
+The extension is right:
+- one `credit` field, threaded protocol → data intent → record;
+- `install := available - exactCharge + credit`, with no truncation, because `preflight` funds
+  `exactCharge` first;
+- `sameCheck` comparing credit;
+- the codec carrying it as a field (v3, riding the re-genesis), not derived from event bytes, so
+  "the label grants nothing" rests on a field.
+
+K1 instantiates M2-d on the real `Snapshot.install`. K2 instantiates M2-c on the deployed receiver.
+K3 instantiates M2-b over what replay can produce. The teeth (replay, overflow, forgery, tagged mint)
+are the accepted ones.
+
+**Finding: the overflow check must happen at commit, not plan.** `fitsCheck (raised remaining amount)` is
+computed against `remaining` at plan time. A second refill, or any later-charged record, can land between
+plan and commit, and no guard covers the meter: it is `Snapshot.available`, not a cell. So the committed
+`available - 0 + amount` can exceed `WordLayout`. That is the machine-width boundary `Theory.ResourceCost`
+checks at persistence, so a Store would accept a record it cannot encode. Put the fit into the
+protocol: `preflight` refuses when `available - exactCharge + credit` does not fit the layout (a named
+`creditOverflow`). Restate `overflow_refused` against the commit-time `available`. With credit 0 for
+every other family, this costs them nothing.
+
+- **(a) Authority-cell guard: right**, since it is the revocation race. Take the controller from the same
+  source as the install family: `controllerOf` of the platform cell, proved equal to genesis's by
+  `controller_stays`. Reading `config.factoryController` here would be a second source of controller
+  identity. With `controller_stays`, the platform cell needs no guard for this read.
+- **(b) Bounded only by fit: accepted.** The meter is the operator's resource, and the issuance cap stays
+  out of the lane, as recorded.
+- **(c) Quantify over the `NativeAdmission` arms: right**, because replay is the meter's source of truth.
+  It is sufficient only if replay compares each record's `credit` with its arm's re-admitted intent.
+  State that link: a record whose credit differs from its arm's intent is refused (the `sameCheck` credit
+  clause). Then an IO receiver cannot commit a credit the arm would not reproduce.
