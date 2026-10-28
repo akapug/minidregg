@@ -29,10 +29,10 @@ Time: about 8 to 12 minutes without apps (roughly 120 shell calls, a few seconds
 - Seed member **`sage`**: NEW, a second hosted member (roster entry, `mini-reenroll sage`, provisioned,
   initialised). Names are overridable with `SEED_HOST` / `SEED_GUEST`.
 - The `public` reader and `/etc/mini/public-subject`. The lobby's Hermes resident, installed first
-  by `deploy/hermes/demo/install-hermes` with `FOUNDER_MEMBER=box ROOM=lobby` (the example in its
-  header): its `room` step founds the lobby as `box`, its `summon` step summons Hermes there, and
-  the registry it writes to `box`'s `HOME/hermes/registry.json` is what `summon lobby` finds.
-- The door's `room` setting, `{"founder": "box", "name": "lobby"}` (beside `story`), so every member
+  by `deploy/hermes/demo/install-hermes` with `FOUNDER_MEMBER=SEED_HOST ROOM=lobby` (`house` on the demo box; the example in its
+  header): its `room` step founds the lobby as that member, its `summon` step summons Hermes there,
+  and the registry it writes to that member's `HOME/hermes/registry.json` is what `summon lobby` finds.
+- The door's `room` setting, `{"founder": SEED_HOST, "name": "lobby"}` (beside `story`; `house` on the demo box), so every member
   joins the lobby at enrolment.
 - The front page should render the published document named `welcome`; the script publishes it but
   does not set any front-page pointer.
@@ -48,7 +48,7 @@ Time: about 8 to 12 minutes without apps (roughly 120 shell calls, a few seconds
   Hermes librarian summoned with budget 100 and an intro post that says `ask lobby your question`.
   The lobby is the house's shared room: every member the door enrols joins it, and Hermes there
   answers all of them. A member's `summon lobby as librarian` says Hermes is already there and how
-  to ask it; only `box` summons, funds and dismisses. This is the tour's Hermes step (step 6).
+  to ask it; only the founder (SEED_HOST) summons, funds and dismisses. This is the tour's Hermes step (step 6).
 - Story `tale` installed under the sealed law, GM `sage`, first scene narrated. `box` is the author.
 - Bend `tally` published from `world/activity/Tally.obend` and run on object `lobby-tally`.
 - Delegation: `field-notes` is `box`'s with `observe,mutate` to `sage` (one admitted note); `house-rules`

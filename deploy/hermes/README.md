@@ -463,14 +463,14 @@ page to state.
 ## The shared house room
 
 Hermes lives in the house's `lobby`: the door joins every enrolled member to it (door.json `room:
-{"founder": "box", "name": "lobby"}`, beside `story`), `box` summoned Hermes there and funds its
+{"founder": "house", "name": "lobby"}`, beside `story`), the house member (`house`, the seed's `SEED_HOST`) summoned Hermes there and funds its
 turns, and every member asks it with `ask lobby QUESTION`; the replies land in the room for all of
 them. A member's `summon lobby as librarian` says Hermes is already the room's resident and how to
 ask it, and funds or grants nothing. Summon, its budget and dismissal stay the founder's. The lobby's
 resident is installed before the seed (deploy/demo-seed/README.md) by:
 
 ```sh
-INSTANCE=lobby BASE=9872000 ROOM=lobby BUDGET=100 FOUNDER_MEMBER=box MEMBER_ROOT=/var/lib/mini/sessions \
+INSTANCE=lobby BASE=9872000 ROOM=lobby BUDGET=100 FOUNDER_MEMBER=house MEMBER_ROOT=/var/lib/mini/sessions \
   HERMES_ROOT=OUT demo/install-hermes preflight route subjects room runtime create handoff summon controller dispatch resident
 ```
 
