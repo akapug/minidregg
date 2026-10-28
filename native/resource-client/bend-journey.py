@@ -13,7 +13,7 @@ the activity route (Host ops 7 author / 210 plan / 211 assemble / 212 submit / 2
   bend-run       `bend run tally counter`: the object is created pinning Tally and born under a full
                  envelope; the Host's outcome line names height, world root and receipt; the object's
                  declared state read back through the VIEW (not the shell's line) is Tally's `{total: 0}`;
-                 the activity's purse holds the deposit the line states, which is three envelope prices as
+                 the activity's purse holds the deposit the line states, which is two envelope prices (the first await's pair) as
                  activity_world prices them; the member's account paid at least that
   bend-show      `bend show counter`: the public view agrees with the view this driver reads
   bend-refusal   `bend publish bad @Bad.obend` with a malformed source: refused (exit 3) by the Host's
@@ -54,6 +54,7 @@ try:
     (home / 'requests' / 'Bad.obend').write_text('edition ObjectiveBend 1\nrecord State:\n  total Nat\ndef bad( -> \n')
     for p in [home / 'requests' / 'Tally.obend', home / 'requests' / 'Bad.obend']:
         p.chmod(0o600)
+    FRONT_OK = lambda: AW.FRONT['replayBytes'] == AW.TALLY_QUOTE['replayBytes'] and AW.FRONT['coreBytes'] == AW.TALLY_QUOTE['coreBytes']
     height = lambda label: int(w.view(label, {})['height'])
 
     with w.group('bend-publish'):
@@ -71,6 +72,9 @@ try:
         w.check('package-on-chain-with-a-front-end-quote', cell.get('kind') == 'package' and cell.get('atCoordinate') is True
                 and v['pins'][0].get('frontEnd') is not None, {'cell': cell, 'pin': v['pins'][0]})
         w.learn_front_end()
+        BPRICE = AW.price(AW.cap(AW.BEND_TICKS))  # a bend's birth envelope: BEND_TICKS source ticks and the quote
+        economy = AW.demo_economy()
+        w.check('economy-matches-the-tallys-quote', FRONT_OK() and economy['tallyBirthPrice'] == BPRICE, {'front': AW.FRONT, 'economy': economy, 'birthPrice': BPRICE})
 
     with w.group('bend-run'):
         w.objects['counter']  # the content resource bring_up made
@@ -85,7 +89,7 @@ try:
             height_n, root, tx, event, state, purse, deposit, was, now, charge = m.groups()
             w.check('run-is-admitted-after-the-publish', int(height_n) > published_at, {'publish': published_at, 'run': height_n})
             w.check('line-state-is-the-tallys', state == '{total=0}', state)
-            w.check('deposit-is-three-envelope-prices', int(deposit) == 3 * AW.PRICE, {'line': deposit, 'world': 3 * AW.PRICE})
+            w.check('deposit-is-the-first-awaits-pair', int(deposit) == AW.BEND_PURSE_PRICES * BPRICE, {'line': deposit, 'world': AW.BEND_PURSE_PRICES * BPRICE})
             w.check('purse-holds-the-deposit', 0 < int(purse) <= int(deposit), {'purse': purse, 'deposit': deposit})
             w.check('account-paid-at-least-the-deposit', int(charge) >= int(deposit) and int(was) - int(now) == int(charge),
                     {'was': was, 'now': now, 'charge': charge, 'deposit': deposit})
@@ -152,7 +156,7 @@ try:
         acct = acct0
         w.check('one-charge', acct(b0) - acct(end) == first_charge,
                 {'before': acct(b0), 'afterLost': acct(mid), 'afterRetry': acct(end), 'firstRunCharge': first_charge})
-        w.check('purse-is-one-deposit', s['purse'] == 3 * AW.PRICE, s['purse'])
+        w.check('purse-is-one-deposit', s['purse'] == AW.BEND_PURSE_PRICES * BPRICE, s['purse'])
 
     with w.group('bend-demo-sized-member'):
         # the seed's shape: an account holding a demo-sized balance (10,000) is told, by name and with the amounts,
@@ -166,7 +170,7 @@ try:
         m = re.search(r'costs (\d+) .* holds (\d+);', err)
         w.check('demo-sized-run-refused-by-name-with-the-amounts',
                 rc == 3 and err.startswith('refused: unfunded: run tally on counter costs') and m is not None and int(m.group(2)) == held
-                and int(m.group(1)) == 4 * AW.PRICE and held < 4 * AW.PRICE, {'rc': rc, 'err': err[-400:], 'held': held, 'price': AW.PRICE})
+                and int(m.group(1)) == (AW.BEND_PURSE_PRICES + 1) * BPRICE and held < (AW.BEND_PURSE_PRICES + 1) * BPRICE, {'rc': rc, 'err': err[-400:], 'held': held, 'price': BPRICE})
         w.check('nothing-submitted-by-the-unfunded-run', int(w.view('poor-height-after', {})['height']) == before, 'height unchanged')
 
     with w.group('bend-refusal'):
