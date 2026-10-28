@@ -667,9 +667,9 @@ fn tour(site: &Site, outcome: Option<(usize, String)>) -> Page {
             forms(4, &[("can", "can"), ("why", "why"), ("inspect", "inspect law")])),
         ("delegates, bounded", "A narrower grant on one document to another member, then its revocation; both are receipts; the other member's attempt after revocation is refused with that clause.".into(),
             forms(5, &[("delegate", "delegate"), ("revoke", "revoke"), ("renounce", "renounce")])),
-        ("summons an agent", "First a bounded grant on one document to the resident's subject (<code>delegate … --until H</code>: the grant's expiry is a height); then a Hermes resident into your room with a budget funded from your purse (the meter); ask it to read the document and post a summary; its turns land as paid, admitted writes with receipts and the meter drains; a write outside its grant is refused <code>no-grant</code> as a receipt; <code>revoke</code> ends the grant; <code>dismiss</code> refunds the remainder.".into(),
+        ("summons an agent", "Hermes lives in the <code>lobby</code>, the house's shared room every member joins at the door. First a bounded grant on one document to Hermes's subject (<code>delegate … --until H</code>: the grant's expiry is a height); <code>summon lobby as librarian</code> answers that it is already there (the house summoned it and pays its turns from the room's budget); ask it to read the document and post a summary: its turns land as paid, admitted writes with receipts, and every member of the lobby sees the reply; a write outside its grant is refused <code>no-grant</code> as a receipt; <code>revoke</code> ends the grant.".into(),
             if member {
-                format!("{}{}", PURSE_LATER, forms(6, &[("delegate", "delegate"), ("summon", "summon"), ("ask", "ask"), ("tail", "tail"), ("hermes", "hermes status"), ("revoke", "revoke"), ("dismiss", "dismiss")]))
+                format!("{}{}", PURSE_LATER, forms(6, &[("delegate", "delegate"), ("summon", "summon"), ("ask", "ask"), ("tail", "tail"), ("hermes", "hermes status"), ("revoke", "revoke")]))
             } else { String::new() }),
         ("installs an application", "The Sandstorm store index; install any SPK; the grain opens on its own origin in a pane; its grants are Mini capabilities on the Grants page.".into(),
             format!("<p><a href=\"/apps\">the market</a> · <a href=\"/grain\">your grains</a></p>{}", forms(7, &[("apps", "apps search")]))),
@@ -710,7 +710,7 @@ fn board_forms(name: &str) -> String {
 
 fn summon_form(name: &str) -> String {
     format!(
-        "<section><h2>Summon a resident</h2><p class=note>Founder only: a Hermes resident joins the room in a role, with a budget funded from your account.</p>\
+        "<section><h2>Summon a resident</h2><p class=note>The founder summons a Hermes resident into the room in a role, with a budget funded from the founder's account; in a room that already has one (the lobby), a member's summon says so, and every member asks it there.</p>\
          <form method=\"post\" action=\"/room/{n}/summon\" class=\"row\"><div><label for=\"sr-{n}\">Role</label><select id=\"sr-{n}\" name=\"role\"><option>librarian</option><option>runner</option></select></div>\
          <div><label for=\"sb-{n}\">Budget</label><input id=\"sb-{n}\" name=\"budget\" type=\"text\" pattern=\"[0-9]+\" value=\"100\"></div><button>Summon</button></form></section>\n",
         n = escape(name)

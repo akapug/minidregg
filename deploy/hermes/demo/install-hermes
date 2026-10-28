@@ -43,6 +43,20 @@
 #                    for each paying subject) and timer; MEMBER_HOMES: the hosted homes
 #                    directory (DIR/SUBJECT) that receives each window's join reference
 #
+#   FOUNDER_MEMBER   a hosted member (e.g. box) founds ROOM instead of the operator's own
+#                    founder subject: Hermes is installed for that member's room (created
+#                    by `room` when it does not exist yet), the member's own shell does the
+#                    room, summon and tariff lines (as mini-s-MEMBER on MEMBER_SOCKET), and
+#                    the registry lands in the member's HOME/hermes/registry.json.
+#                    MEMBER_ROOT: the hosted homes directory (MEMBER_ROOT/MEMBER, its
+#                    workspace/ beneath); TENANT_GROUP (mini-sessions); MEMBER_SOCKET
+#                    (NODE/public/mini.sock). Not with TIER.
+#
+#   The house's shared room (the lobby every member joins at the door; the seed's posts
+#   and the tour's Hermes step), installed before deploy/demo-seed/seed.sh runs:
+#     INSTANCE=lobby BASE=9872000 ROOM=lobby BUDGET=100 FOUNDER_MEMBER=box MEMBER_ROOT=/var/lib/mini/sessions \
+#       HERMES_ROOT=OUT install-hermes preflight route subjects room runtime create handoff summon controller dispatch resident
+#
 #   The subscriber tier (deploy/hermes/README.md "The subscriber tier"):
 #     INSTANCE=glm BASE=9871000 MODEL=glm-5.3-flash ROOM=subscribers TIER=1 POOL_ROW=zai-glm \
 #       HERMES_ROOT=OUT install-hermes preflight route subjects room concierge runtime create handoff summon controller dispatch resident
@@ -63,6 +77,12 @@ case $INSTANCE in glm) MODEL=${MODEL:-glm-5.3-flash} ;; *) MODEL=${MODEL:-meta-l
 case $INSTANCE in *[!a-z0-9]*|'') echo "install-hermes: INSTANCE must be lowercase letters and digits" >&2; exit 64 ;; esac
 case $BASE in *[!0-9]*|'') echo "install-hermes: BASE must be a decimal" >&2; exit 64 ;; esac
 TIER=${TIER:-} WEEK=${WEEK:-4000} PERIOD=${PERIOD:-43200}
+FOUNDER_MEMBER=${FOUNDER_MEMBER:-} TENANT_GROUP=${TENANT_GROUP:-mini-sessions}
+case $FOUNDER_MEMBER in *[!a-z0-9-]*) echo "install-hermes: FOUNDER_MEMBER must be a hosted member name" >&2; exit 64 ;; esac
+if [ -n "$FOUNDER_MEMBER" ]; then
+  [ -z "$TIER" ] || { echo "install-hermes: FOUNDER_MEMBER is not for a TIER room" >&2; exit 64; }
+  [ -n "${MEMBER_ROOT:-}" ] || { echo "install-hermes: FOUNDER_MEMBER needs MEMBER_ROOT (the hosted homes directory)" >&2; exit 64; }
+fi
 PARENT_T=$((BASE + 1)) TOOL_T=$((BASE + 2)) PURSE_T=$((BASE + 3))
 GATEWAY_PORT=$((18761 + (BASE - 9870000) / 1000))
 RESIDENT=${RESIDENT:-mini-h-$INSTANCE}
@@ -99,11 +119,16 @@ as_op() { runuser -u "$OPERATOR" -- env MINI_CONSENT_ANCHOR_DIR="$NODE/consent-a
 # child `mini` of its commands inherits the pin.
 as_res() { runuser -u "$RESIDENT" -- env MINI_OPERATOR_PEER_UID=0 MINI_CONSENT_ANCHOR_DIR="$ANCHORS" "$@"; }
 resident_subject() { case $1 in hermes|hhost|hprov) return 0 ;; *) return 1 ;; esac; }
-as_owner() { local who=$1; shift; if resident_subject "$who"; then as_res "$@"; else as_op "$@"; fi; }
-home_of() { if resident_subject "$1"; then echo "$H/$1"; else echo "$HO/$1"; fi; }
-ws_of() { if [ "$1" = sponsor ]; then echo "$SPONSOR_WS"; elif resident_subject "$1"; then echo "$WS/$1"; else echo "$WO/$1"; fi; }
-socket_of() { if resident_subject "$1"; then echo "$RSOCKET"; else echo "$SOCKET"; fi; }
-owner_of() { if resident_subject "$1"; then echo "$RESIDENT"; else echo "$OPERATOR"; fi; }
+# A hosted founder (FOUNDER_MEMBER) acts as its own tenant account, as its shell does.
+hosted_founder() { [ "$1" = founder ] && [ -n "$FOUNDER_MEMBER" ]; }
+as_member() { setpriv --reuid="mini-s-$FOUNDER_MEMBER" --regid="$TENANT_GROUP" --init-groups --reset-env -- \
+  env -i PATH=/usr/bin:/bin LANG=C.UTF-8 "$@"; }
+as_owner() { local who=$1; shift; if hosted_founder "$who"; then as_member "$@"; elif resident_subject "$who"; then as_res "$@"; else as_op "$@"; fi; }
+home_of() { if hosted_founder "$1"; then echo "$MEMBER_ROOT/$FOUNDER_MEMBER"; elif resident_subject "$1"; then echo "$H/$1"; else echo "$HO/$1"; fi; }
+ws_of() { if [ "$1" = sponsor ]; then echo "$SPONSOR_WS"; elif hosted_founder "$1"; then echo "$MEMBER_ROOT/$FOUNDER_MEMBER/workspace"; elif resident_subject "$1"; then echo "$WS/$1"; else echo "$WO/$1"; fi; }
+socket_of() { if hosted_founder "$1"; then echo "${MEMBER_SOCKET:-$NODE/public/mini.sock}"; elif resident_subject "$1"; then echo "$RSOCKET"; else echo "$SOCKET"; fi; }
+owner_of() { if hosted_founder "$1"; then echo "mini-s-$FOUNDER_MEMBER"; elif resident_subject "$1"; then echo "$RESIDENT"; else echo "$OPERATOR"; fi; }
+group_of() { if hosted_founder "$1"; then echo "$TENANT_GROUP"; else owner_of "$1"; fi; }
 sh_line() { # WHO LINE: one shell line in WHO's workspace and home, as WHO's account
   local who=$1; shift
   as_owner "$who" "$MINI" shell --socket "$(socket_of "$who")" --host "$HOST" --config "$CONFIG" \
@@ -235,8 +260,14 @@ provision() { # NAME FUNDING: an account owned by NAME, its birth context, its w
 step_subjects() {
   local names="hermes hhost hprov founder"
   [ -n "$TIER" ] && names="$names con"
+  if [ -n "$FOUNDER_MEMBER" ]; then
+    # The member is already enrolled, provisioned and funded (the door or the frame).
+    names=${names% founder}
+    sh_line founder whoami | as_op tee "$RECORD/subject-founder.json" >/dev/null
+    [ -n "$(subject founder)" ] && [ "$(subject founder)" != null ] || die "$FOUNDER_MEMBER's whoami names no subject"
+  fi
   for f in $names; do [ -s "$RECORD/subject-$f.json" ] || enroll "$f"; done
-  provision founder "$FOUNDER_FUNDING"
+  [ -n "$FOUNDER_MEMBER" ] || provision founder "$FOUNDER_FUNDING"
   provision hermes 0
   # The concierge's runner pays its own turn fees (J17 funds it 10).
   [ -n "$TIER" ] && provision con "${CONCIERGE_FUNDING:-100}"
@@ -251,6 +282,8 @@ step_room() {
     sh_line founder "room new $ROOM --template workroom --concierge $(subject con) --period $PERIOD" >/dev/null
     sh_line founder "tariff $ROOM set week $WEEK" >/dev/null
     sh_line founder "tariff $ROOM set open 1" >/dev/null
+  elif [ -n "$FOUNDER_MEMBER" ] && grep -qw -- "$ROOM" <<<"$(sh_line founder "chat rooms")"; then
+    echo "install-hermes: $FOUNDER_MEMBER's room $ROOM exists; Hermes is installed for it"
   else
     sh_line founder "chat new $ROOM" >/dev/null
   fi
@@ -372,14 +405,15 @@ step_create() {
 }
 
 step_handoff() {
-  local lab; lab=$(jq -r .target "$WO/founder/refs/$ROOM.json")
+  local lab reg; lab=$(jq -r .target "$(ws_of founder)/refs/$ROOM.json")
   install -d -o "$RESIDENT" -g "$RESIDENT" -m 0700 "$V/registrations" "$V/inbox"
-  install -d -o "$OPERATOR" -g "$OPERATOR" -m 0700 "$HO/founder/hermes"
+  reg=$(home_of founder)/hermes
+  install -d -o "$(owner_of founder)" -g "$(group_of founder)" -m 0700 "$reg"
   as_res "$MINI" hermes-handoff --action registration --dir "$S/resource-workspace" --task "$PARENT_T" --room-cell "$lab" \
     --inbox "$V/inbox" --socket "$RSOCKET" | as_res tee "$V/registrations/$PARENT_T.json" >/dev/null
   # The registry the founder's summon reads: made by the resident, handed to the founder by root.
   as_res "$MINI" hermes-handoff --action registry --registrations "$V/registrations" --socket "$RSOCKET" \
-    | as_op tee "$HO/founder/hermes/registry.json" >/dev/null
+    | as_owner founder tee "$reg/registry.json" >/dev/null
   mark handoff
 }
 

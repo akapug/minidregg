@@ -543,6 +543,18 @@ fn summon(
     let chat_room = chat::load_room(session, room).map_err(err)?;
     let record = chat::get_json(&session.home.join("chat").join("rooms").join(format!("{room}.json"))).unwrap_or_default();
     if record.get("founder").and_then(Value::as_str) != Some(me.as_str()) {
+        // A shared room (the house's lobby): its founder summoned Hermes once and
+        // every member asks it there. A member's summon is answered from the
+        // room's signed hermes field; it funds and grants nothing.
+        let root = session.workspace.clone();
+        let ws = workspace::load(&root).map_err(err)?;
+        let present = quietly(|| crate::credit::room(&root, &ws, room)).ok()
+            .and_then(|tariff| tariff.fields.get("hermes").filter(|h| h.as_str() != "0").cloned());
+        if let Some(hermes) = present {
+            println!("{room}: Hermes ({hermes}) is already this room's resident, summoned by its founder and paid from the room's budget; \
+                      it answers every member here. Ask it: `ask {room} QUESTION`; its replies land in the room for everyone (`tail {room}`)");
+            return Ok(());
+        }
         return Err(usage(format!(
             "only the founder of {room} summons Hermes: its grants, its documents' laws and the room's hermes fields are the founder's"
         )));

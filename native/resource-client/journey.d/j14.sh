@@ -45,6 +45,11 @@
 #             performed and paid; no operator path in any brief the model was shown.
 #   budget    more says and a question: a digest, then the next turn is refused
 #             bookRefused at plan; Hermes says "out of budget"; `topup` resumes.
+#   house     lab as the house's shared room (the tour's Hermes step): carl and dave
+#             join as the door joins every member (the founder's default invite);
+#             carl's `summon` says Hermes is already there and costs him nothing;
+#             carl asks, Hermes answers him in its own pass, and dave's own tail
+#             shows that reply.
 #   dismiss   alice: `dismiss lab` revokes; Hermes returns the remainder; its
 #             read of lab is refused.
 #   balances  Hermes's account: 100 + topup - (10 + fee)*turns - returned - fee = 0;
@@ -383,10 +388,11 @@ printf '%s\n' '{"type":"all","predicates":[]}' >"$SD/permit-all.json"
 
 # ------------------------------------------------ friends and Hermes: enroll, provision, init
 declare -A SUBJ FUND
-FUND[alice]=5000; FUND[bob]=100; FUND[hermes]=0; FUND[con]=100
+FUND[alice]=5000; FUND[bob]=100; FUND[hermes]=0; FUND[con]=100; FUND[carl]=100; FUND[dave]=100
 # Two Tally births escrow seven envelope prices each.
 [ -z "$J14_AWAIT" ] || FUND[alice]=${J14_AWAIT_FUNDING:-200000000}
-FRIENDS="alice bob hermes"; [ -n "$J14_TIER" ] && FRIENDS="$FRIENDS con"
+# carl and dave are strangers the door enrols into the shared house room (step house).
+FRIENDS="alice bob hermes"; [ -n "$J14_TIER" ] && FRIENDS="$FRIENDS con" || FRIENDS="$FRIENDS carl dave"
 for f in $FRIENDS; do
   mkdir -p -m 700 "$H/$f"
   ok setup "$f" "keygen mini.key"
@@ -1019,6 +1025,29 @@ RT_CATALOGUE='"mini_room_ls","mini_room_status","mini_stream_tail","mini_say","m
 [ -z "$J14_TOOLS" ] || RT_CATALOGUE=$RT_CATALOGUE',"read_file","write_file","patch","search_files","terminal","process_manage","execute_code"'
 checkp redteam "every offer to the model was the room catalogue${J14_TOOLS:+ (and the granted sandbox tools)}" \
   sh -c "jq -e -s '[.[].tools[] | ltrimstr(\"mcp__mini_grain__\")] | unique - [$RT_CATALOGUE] | length == 0' '$SHOWN' >/dev/null"
+
+# ------------------------------------------------ house: the shared room every member asks Hermes in
+if [ -z "$J14_TIER" ]; then
+  C=${SUBJ[carl]}
+  for f in carl dave; do
+    ok house alice "chat invite lab ${SUBJ[$f]} $f"
+    operator house "DELIVER: $f's invitation (the door's room step hands it to HOME/requests)" \
+      install_private 0600 "$H/alice/chat/invites/lab-${SUBJ[$f]}.json" "$H/$f/requests/lab-invite.json"
+    ok house "$f" "chat join lab @lab-invite.json"
+  done
+  C0=$(credit_of carl)
+  ok house carl "summon lab as librarian"
+  checkp house "a member's summon says Hermes is already the room's resident" grep -q "already this room's resident" "$OUT"
+  check house "carl's summon funded nothing (his signed balance)" "$C0" "$(credit_of carl)"
+  ok house carl "ask lab what changed since $H0"
+  hermes house "answers carl, a member who did not summon it"
+  own_pass house "$C"
+  ok house dave "tail --in lab --json -n 200"
+  cp "$OUT" "$SD/tail-house-dave.jsonl"
+  CASK=$(jq -s --arg h "$HS" --arg c "$C" '[.[] | select(.author == $c and .to == $h)] | .[-1].n // 0' "$SD/tail-house-dave.jsonl")
+  checkp house "dave's own tail shows Hermes's answer to carl (entry #$CASK), addressed to carl" \
+    jq -s -e --arg h "$HS" --arg c "$C" --argjson n "${CASK:-0}" 'any(.[]; .author == $h and .re == $n and .to == $c and .kind == "say")' "$SD/tail-house-dave.jsonl"
+fi
 
 # ------------------------------------------------ the program document (after the resident rows, so a
 # document-rendering row cannot hide the resident run)
