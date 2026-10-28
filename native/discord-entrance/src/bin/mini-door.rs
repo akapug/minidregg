@@ -328,7 +328,11 @@ impl Door {
     }
 
     fn post(&self, path: &str, body: &[u8], key: &str, now: u64) -> (u16, Vec<u8>) {
-        let refuse = |status: u16, why: &str| (status, page("Not accepted", &format!("<p>{}</p><p><a href=/join>Back</a></p>", html(why))));
+        // The stranger's page is unchanged; the door's journal keeps every refusal by its reason.
+        let refuse = |status: u16, why: &str| {
+            eprintln!("mini-door: refused {path} from {key}: {status}: {why}");
+            (status, page("Not accepted", &format!("<p>{}</p><p><a href=/join>Back</a></p>", html(why))))
+        };
         let fields = match form(body) {
             Ok(f) => f,
             Err(e) => return refuse(400, &e),
@@ -423,6 +427,7 @@ impl Door {
             Ok(r) => r,
             Err(e) => {
                 if let Some((status, reason)) = e.status {
+                    eprintln!("mini-door: refused a request from {peer}: {status} {reason}: {}", e.detail);
                     let _ = write_response(&mut stream, status, reason, "text/plain", e.detail.as_bytes());
                 }
                 return;

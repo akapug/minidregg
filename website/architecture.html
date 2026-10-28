@@ -37,7 +37,7 @@ receipt, or refuses it with a reason.</p>
 <p>The kernel checks a request against current capabilities, laws, exact read roots and
 funding, and checks a computation by running it again, at admission and on every replay.
 No admission uses a proof. The proof-system research, Selvage, is outside the deployed
-build except twelve modules behind the Host's digest backend.</p>
+build: no module of the deployed closure imports it.</p>
 <p>A signed invocation of an Objective method is admitted the same way. The receiver re-runs the
 Lean front end on the published package and admits only a core equal to its own output, requires
 the claim's declared envelope to be priced by one public tariff, runs the method, and requires the
@@ -46,19 +46,18 @@ Plan's effects to equal the command's. This ran on scratch worlds (journey row
 
 <h2>Grants and laws</h2>
 <p>An owner delegates a grant with named verbs and can revoke it. Each resource has a law, a
-predicate checked on every change. A law that denies everything is permanent:</p>
+predicate checked on every change. A law that admits nothing is permanent:</p>
 <pre><code>mini&gt; law lock notes {"type":"any","predicates":[]} --allow-unsatisfiable
-mini&gt; submit lock
-mini&gt; read notes
-# refused: law-denied: sealed
-mini&gt; law unlock notes {"type":"all","predicates":[]}
-# refused: law-denied</code></pre>
+mini&gt; submit lock</code></pre>
+<p>Nobody can change that law again, and the locked cell refuses every verb with
+<code>law-denied</code>.</p>
 
 <h2>Receipts and retries</h2>
 <p>A receipt names the transaction, the resulting world root and a confirmation such as
-<code>installed</code> or <code>replayed</code>. A refusal names one of fourteen reasons, such as <code>no-grant</code>,
+<code>installed</code> or <code>replayed</code>. A refusal from the Host names one of seventeen reasons, such as <code>no-grant</code>,
 <code>law-denied</code> or <code>stale-root</code>. A lost reply is answered by looking up
-the same call bytes, never by a new request; a retry returns the same receipt.</p>
+the same call bytes, never by a new request; a retry sends the exact retained call and is never
+a second write.</p>
 
 <h2>Consent</h2>
 <p>The SDK (Rust, and TypeScript byte-identical to it) runs on the member's device and does
@@ -68,15 +67,17 @@ nothing else. A browser has no consent process, so until a bridge to a member-he
 replica exists, a browser must not sign.</p>
 
 <h2>Private rooms</h2>
-<p>Main only; devnet quality; privacy not audited. A member's words are sealed on their own
-machine under the room key, which the node holds only wrapped to each member (X25519 +
-ML-KEM-768). The node still sees who is in the room, who wrote when, and line sizes in
-64-byte steps. The founder key is trusted on first use.</p>
+<p>Devnet quality; privacy not audited. A member's words are sealed on their own machine under
+the room key, which the node holds only wrapped to each member (X25519 + ML-KEM-768). The node
+still sees who wrote what at which height, each member's public encryption key, and sizes in
+64-byte blocks. The founder key is trusted on first use unless verified out of band. In the
+hosted shell the room key is a file on the box.</p>
 
 <h2>Agreement</h2>
-<p>A Generic Simplex BFT engine, written in Lean and compiled native, for n = 3f + 1
-replicas with at most f Byzantine. Safety is proved over the Lean engine model. Liveness is
-not established; the executed run was four replicas on one host.</p>
+<p>A Generic Simplex BFT engine, written in Lean and compiled native, is in progress, for a
+fixed committee of n = 3f + 1 with at most f Byzantine. Safety is proved over the Lean engine
+model. Liveness is not a theorem. The executed runs were four replicas on one host; one
+committed two records and stalled on the third.</p>
 
 </div>
 </main>

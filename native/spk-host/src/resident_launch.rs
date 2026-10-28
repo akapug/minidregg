@@ -494,6 +494,7 @@ mod tests {
             argv: vec!["/bin/true".into()],
             environ: vec![],
             app_output: "/missing/app-output.log".into(),
+            ifaddrs_shim: false,
         };
         assert!(PreparedResident::prepare(
             &spec,
@@ -527,6 +528,7 @@ mod tests {
                 argv: vec!["/spk-sandbox-probe".into()],
                 environ: vec![("SPK_PROBE".into(), "resident".into())],
                 app_output: dir.join(output_name),
+                ifaddrs_shim: false,
             },
             uid: var("SPK_AUDIT_UID").parse().unwrap(),
             gid: var("SPK_AUDIT_GID").parse().unwrap(),
@@ -616,6 +618,7 @@ mod tests {
                 "userns-unshare-refused", "userns-clone-refused", "seccomp-filter-active",
                 "capabilities-all-zero", "web-app-positive-control", "seccomp-refused",
                 "prctl-set-seccomp-refused", "io_setup-refused", "vmsplice-refused",
+                "socket-netlink-route-refused", "ifaddrs-shim-absent",
                 "set_mempolicy-refused", "hostname-sandbox", "dev-minimal", "rlimit-nofile-bounded",
             ] {
                 assert_eq!(held(&lines, check), Some(true), "{check}");
@@ -679,6 +682,38 @@ print(json.dumps({'verdict':'public-data-held','mount_read_only':True,'write_ope
         println!("mount-audit-worker-reaped=true");
     }
 
+    /// The platform shim, through the production gate: a declared package's app sees the shim mounted
+    /// read-only at /tmp/libifaddrs-lo.so, LD_PRELOAD naming it, and getifaddrs answering exactly lo;
+    /// the floor is unchanged (fd census, seccomp, no netlink).
+    #[test]
+    #[ignore = "operator with a subuid grant; run by scripts/spk-platform/sandbox-floor-audit.sh"]
+    fn operator_probe_holds_with_platform_shim() {
+        let mut audit = audit_inputs("app-output-shim.log");
+        audit.spec.ifaddrs_shim = true;
+        audit.spec.environ.push(("SPK_PROBE_SHIM".into(), "expect".into()));
+        {
+            use sha2::{Digest, Sha256};
+            let digest: String = Sha256::digest(crate::sandbox::IFADDRS_SHIM).iter().map(|b| format!("{b:02x}")).collect();
+            audit.spec.environ.push(("SPK_PROBE_SHIM_SHA256".into(), digest));
+        }
+        in_single_threaded_child(move || {
+            crate::resident_privilege::bootstrap_for_audit(&audit.spec.bwrap, &audit.bwrap_sha256, audit.uid, audit.gid)
+                .unwrap();
+            let prepared =
+                PreparedResident::prepare(&audit.spec, audit.uid, audit.gid, &audit.bwrap_sha256).unwrap();
+            let (status, lines) = run_probe(prepared, &audit.spec.app_output);
+            assert_eq!(verdict(&lines), Some("floor-held"));
+            for check in [
+                "fd-census-self", "seccomp-filter-active", "capabilities-all-zero", "socket-netlink-route-refused",
+                "socket-netlink-refused", "ifaddrs-shim-loopback-only", "ifaddrs-shim-read-only", "ifaddrs-shim-bytes-pinned",
+            ] {
+                assert_eq!(held(&lines, check), Some(true), "{check}");
+            }
+            assert!(held(&lines, "ifaddrs-shim-absent").is_none(), "the absence check must not run with the shim");
+            assert!(libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0, "status {status}");
+        });
+    }
+
     /// Negative control: the same gate and probe with the pre-floor argument
     /// list (abe988d). The probe must report a breach, so the audit can go red.
     #[test]
@@ -705,7 +740,7 @@ print(json.dumps({'verdict':'public-data-held','mount_read_only':True,'write_ope
             let (status, lines) = run_probe(prepared, &audit.spec.app_output);
             assert_eq!(verdict(&lines), Some("floor-breached"));
             for check in [
-                "seccomp-filter-active", "fd-census-self", "socket-netlink-refused",
+                "seccomp-filter-active", "fd-census-self", "socket-netlink-refused", "socket-netlink-route-refused",
                 "userns-unshare-refused",
             ] {
                 assert_eq!(held(&lines, check), Some(false), "{check} did not fail");

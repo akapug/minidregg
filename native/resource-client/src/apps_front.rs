@@ -122,7 +122,7 @@ fn connect_route(origin: &Origin, route: &Route) -> io::Result<UnixStream> {
     let (reply, socket) = super::worker::receive_with_fd(&edge).map_err(io::Error::other)?;
     match socket {
         Some(socket) => Ok(socket),
-        None => Err(io::Error::other(reply.get("refused").and_then(Value::as_str).unwrap_or("connector refused").to_owned())),
+        None => Err(io::Error::other(connector_refusal(&reply))),
     }
 }
 
@@ -130,11 +130,29 @@ fn connect_route(origin: &Origin, route: &Route) -> io::Result<UnixStream> {
 /// refusal names why: `grainStopped` when no resident is listening.
 fn connect_www(origin: &Origin) -> std::result::Result<UnixStream, String> {
     let connector = origin.connector.as_ref().ok_or("noConnector")?;
-    let mut edge = UnixStream::connect(connector).map_err(|_| "connectorUnavailable".to_owned())?;
+    let mut edge = UnixStream::connect(connector).map_err(|e| {
+        eprintln!("mini apps-front: grain {} connector {}: {e}", origin.grain, connector.display());
+        "connectorUnavailable".to_owned()
+    })?;
     edge.set_read_timeout(Some(Duration::from_secs(10))).map_err(|e| e.to_string())?;
     edge.write_all(format!("{{\"verb\":\"www\",\"grain\":\"{}\"}}\n", origin.grain).as_bytes()).map_err(|e| e.to_string())?;
     let (reply, socket) = super::worker::receive_with_fd(&edge)?;
-    socket.ok_or_else(|| reply.get("refused").and_then(Value::as_str).unwrap_or("connector refused").to_owned())
+    socket.ok_or_else(|| {
+        let refusal = reply.get("refused").and_then(Value::as_str).unwrap_or("connector refused").to_owned();
+        if refusal != "grainStopped" {
+            eprintln!("mini apps-front: grain {} www: {}", origin.grain, connector_refusal(&reply));
+        }
+        refusal
+    })
+}
+
+/// The worker connector's refusal for the operator's log: its name and its detail.
+fn connector_refusal(reply: &Value) -> String {
+    let name = reply.get("refused").and_then(Value::as_str).unwrap_or("connector refused");
+    match reply.get("detail").and_then(Value::as_str) {
+        Some(detail) if !detail.is_empty() => format!("{name}: {detail}"),
+        _ => name.to_owned(),
+    }
 }
 
 /// The grain of a publishing origin `a4501-www.demo.dregg.online`.
@@ -369,8 +387,12 @@ impl Front {
         if !head.target.starts_with('/') || head.target.len() > 2048 || head.target.bytes().any(|b| b <= b' ' || b == 0x7f) {
             return respond(&mut client, "404 Not Found", "no such published file\n", false);
         }
-        let Ok(origin) = self.origin(grain) else {
-            return respond(&mut client, "404 Not Found", "no such published site\n", false);
+        let origin = match self.origin(grain) {
+            Ok(origin) => origin,
+            Err(reason) => {
+                eprintln!("mini apps-front: www {grain}: {reason}");
+                return respond(&mut client, "404 Not Found", "no such published site\n", false);
+            }
         };
         let Some(_slot) = self.take_slot(grain) else {
             return respond(&mut client, "503 Service Unavailable", &format!("grain {grain} has every connection slot in use ({PER_GRAIN_CONNECTIONS})\n"), false);
@@ -382,6 +404,7 @@ impl Front {
                 let _ = write!(client, "HTTP/1.1 503 Service Unavailable\r\nRetry-After: 30\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
                 return;
             }
+            // connect_www has logged the refusal (its name and detail) already.
             Err(_) => return respond(&mut client, "404 Not Found", "no such published site\n", false),
         };
         if write!(upstream, "{} {} HTTP/1.0\r\n\r\n", head.method, head.target).is_err() {
@@ -410,7 +433,10 @@ impl Front {
         };
         let origin = match self.origin(&grain) {
             Ok(origin) => origin,
-            Err(reason) => return respond(&mut client, "404 Not Found", &format!("{reason}\n"), false),
+            Err(reason) => {
+                eprintln!("mini apps-front: grain {grain}: {reason}");
+                return respond(&mut client, "404 Not Found", &format!("{reason}\n"), false);
+            }
         };
         let Some(_slot) = self.take_slot(&grain) else {
             return respond(&mut client, "503 Service Unavailable", &format!("grain {grain} has every connection slot in use ({PER_GRAIN_CONNECTIONS})\n"), false);
@@ -450,7 +476,10 @@ impl Front {
         };
         let mut upstream = match connect_route(&origin, route) {
             Ok(upstream) => upstream,
-            Err(_) => return respond(&mut client, "503 Service Unavailable", "grain route not listening; the grain may be stopped or restarting\n", false),
+            Err(error) => {
+                eprintln!("mini apps-front: grain {grain} route {}: {error}", route.member);
+                return respond(&mut client, "503 Service Unavailable", "grain route not listening; the grain may be stopped or restarting\n", false);
+            }
         };
         if upstream.write_all(&buffer).is_err() {
             return respond(&mut client, "502 Bad Gateway", "grain route refused the request\n", false);

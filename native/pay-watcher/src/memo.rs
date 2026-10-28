@@ -1,7 +1,7 @@
-//! Enrolment memos (PAY.md §11): the SPL Memo bytes carried by a payment to the ENROLLMENT
+//! Enrolment memos (PAY §11): the SPL Memo bytes carried by a payment to the ENROLLMENT
 //! index, reported to the kernel verbatim.
 //!
-//! The watcher does not parse the memo. PAY.md §11.3/§11.4: the kernel's
+//! The watcher does not parse the memo. PAY §11.3/§11.4: the kernel's
 //! `PayEnrollmentReceiver` parses it, verifies both signatures, and journals every refusal. A
 //! Rust reading of the grammar here would be a second parser that agrees with Lean's today and
 //! not tomorrow. The watcher decides only chain facts: how many memo instructions the
@@ -17,7 +17,7 @@ use serde_json::Value;
 
 use crate::model::{MemoError, Refusal};
 
-/// The most memo bytes an enrollment observation carries (PAY.md §11.9: the room left in a
+/// The most memo bytes an enrollment observation carries (PAY §11.9: the room left in a
 /// one-transfer transaction). A longer memo is `memoInvalid`.
 pub const MEMO_MAX: usize = 566;
 

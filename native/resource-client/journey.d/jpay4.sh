@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# J-PAY-4 (PAY.md P4): the payment rail through the client, on a fresh private Store, with the
+# J-PAY-4 (PAY P4): the payment rail through the client, on a fresh private Store, with the
 # P1/P1b fixture watcher driven by the real tick script (deploy/pay/mini-pay-watcher).
 #
 # Follows the journey hook contract (journey.sh header): executed with HOST, MINI, STORE,

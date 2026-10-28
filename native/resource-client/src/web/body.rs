@@ -160,8 +160,32 @@ fn serve(site: &Site, mut stream: UnixStream, deadline: Instant) -> Result<()> {
         _ => simple(405, "Method", "GET, HEAD and POST only"),
     };
     let mut page = page;
+    if site.front.read_only && page.status >= 400 {
+        log_public_failure(&format!("{} {target}", request.method), &page);
+    }
     page.body = page.body.replace(PAGE_MARK, &pct(&target));
     answer(&mut stream, &page, site)
+}
+
+/// The public reader is the operator's own hosted member, and its stderr is the helper's journal:
+/// a page it could not serve reaches the operator's log with its status, title and text (the
+/// refusal's clause among it). What the reader's visitor sees is unchanged.
+fn log_public_failure(what: &str, page: &Page) {
+    let mut text = String::new();
+    let mut in_tag = false;
+    for c in page.body.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' if in_tag => {
+                in_tag = false;
+                text.push(' ');
+            }
+            _ if !in_tag => text.push(c),
+            _ => {}
+        }
+    }
+    let text: String = text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(600).collect();
+    eprintln!("mini web --body (public reader): {what}: {} {}: {text}", page.status, page.title);
 }
 
 /// The fragment: the read context line, then the body. The gateway adds the chrome.
@@ -322,10 +346,12 @@ fn get(site: &Site, parts: &[&str], target: &str) -> Page {
 fn front_doc_page(site: &Site) -> Option<Page> {
     let name = site.shell.as_ref()?.front_doc.as_deref()?;
     if !site.names().iter().any(|n| n == name) {
+        eprintln!("mini web --body (public reader): front document {name} is not among the reader's references (nothing published to the reader under that name yet); the index is shown");
         return None;
     }
     let mut page = site.route(&["doc".to_owned(), name.to_owned()]);
     if page.status != 200 {
+        log_public_failure(&format!("front document {name}, the index is shown instead"), &page);
         return None;
     }
     page.body.push_str(
@@ -611,11 +637,17 @@ fn import_inbox(site: &Site) {
                 }
             }
         }
-        let _ = Command::new(&exe)
+        let status = Command::new(&exe)
             .arg("workspace").arg("--action").arg("import").arg("--dir").arg(&site.root).arg("--name").arg(&chosen).arg("--from-ref").arg(&file)
             .env_clear().env("PATH", "/usr/bin:/bin").env("HOME", &shell.home)
             .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::inherit())
             .status();
+        // The import's own refusal is on the inherited stderr above; this line says which hint it was.
+        match status {
+            Ok(status) if status.success() => {}
+            Ok(status) => eprintln!("mini web --body: inbox {} not imported as {chosen}: workspace import {status}", file.display()),
+            Err(error) => eprintln!("mini web --body: inbox {} not imported as {chosen}: {error}", file.display()),
+        }
     }
 }
 

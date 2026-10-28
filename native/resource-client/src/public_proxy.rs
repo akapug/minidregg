@@ -298,7 +298,11 @@ fn check_upstream(path: &Path, config: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+/// The client receives the 254 frame (its bytes unchanged); the operator's log, this relay's
+/// stderr, receives the same reason with the peer that was refused.
 fn refusal(stream: &mut UnixStream, stop: &AtomicBool, bounds: Bounds, reason: &str) {
+    let peer = transport::peer_uid(stream).map_or_else(|_| "unknown".to_owned(), |uid| uid.to_string());
+    eprintln!("mini: public proxy refused uid {peer}: {reason}");
     let mut frame = vec![254];
     frame.extend_from_slice(reason.as_bytes());
     let _ = transport::write_frame(
@@ -340,7 +344,8 @@ fn connection(
     }) {
         Ok(Some(frame)) => frame,
         Ok(None) => return,
-        Err(_) => {
+        Err(error) => {
+            eprintln!("mini: public proxy frame read: {error}");
             return refusal(
                 &mut public,
                 stop,
@@ -369,7 +374,8 @@ fn connection(
     }
     let mut private = match connect(upstream, stop, Instant::now() + bounds.connect) {
         Ok(stream) => stream,
-        Err(_) => {
+        Err(error) => {
+            eprintln!("mini: public proxy upstream {} unavailable: {error}", upstream.display());
             return refusal(
                 &mut public,
                 stop,
@@ -393,6 +399,7 @@ fn connection(
     )
     .is_err()
     {
+        eprintln!("mini: public proxy op {} forward to the upstream failed; the outcome is uncertain", frame.first().copied().unwrap_or(0));
         return;
     }
     let response = match transport::read_frame(&mut BoundedStream {
@@ -401,7 +408,11 @@ fn connection(
         deadline: Instant::now() + bounds.response,
     }) {
         Ok(Some(frame)) => frame,
-        _ => return,
+        other => {
+            let why = match other { Err(error) => error.to_string(), _ => "the upstream closed without a reply".to_owned() };
+            eprintln!("mini: public proxy op {} reply lost; the outcome is uncertain: {why}", frame.first().copied().unwrap_or(0));
+            return;
+        }
     };
     let _ = transport::write_frame(
         &mut BoundedStream {
@@ -461,6 +472,7 @@ fn run(
                 if workers.handles.len() >= bounds.connections {
                     // Tiny refusal, one nonblocking attempt: overload must not
                     // stall acceptance or delay observing SIGTERM.
+                    eprintln!("mini: public proxy refused a connection: busy: public ingress connection limit ({})", bounds.connections);
                     let _ = transport::write_frame(
                         &mut stream,
                         b"\xfebusy: public ingress connection limit",

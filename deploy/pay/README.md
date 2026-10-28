@@ -1,6 +1,11 @@
 # The PAY watcher on a Mini box
 
-The pay rail is described in PAY.md. This directory has what runs it on the box:
+The pay rail's state and rules are the Lean pay cell (`Kernel/PayCell.lean`: tariff, deposit address book,
+assignments, enrolments), its observation receiver (`Kernel/PayObservation.lean`) and its self-enrollment
+receiver (`Kernel/PayEnrolReceiver.lean`). Comments in that code and in `native/pay-watcher` cite
+`PAY §N` and lane names such as P3b: sections and lanes of the payment design document of
+2026-09-30, which lives in a planning repository outside this tree. The Lean modules are the
+authority. This directory has what runs it on the box:
 
 - `mini-pay-watcher`: one tick. It derives the watcher config from the signed pay view, runs
   `pay-watcher`, retains and archives the complete tick, and submits one report with `mini pay observe`;
@@ -9,7 +14,7 @@ The pay rail is described in PAY.md. This directory has what runs it on the box:
 - `mini-pay-watcher.service` / `.timer`: the tick runs as a oneshot in `mini.slice`, 60 s after
   the previous tick finished.
 
-The watcher keeps no ledger, and no cursor except the enrollment row's (P1b, gated by receipts). The ticks connect only through the observer
+The watcher keeps no ledger, and no cursor except the enrollment row's (gated by receipts). The ticks connect only through the observer
 workspace's retained attempts and the kernel's nullifiers.
 
 ## The price, the address and the network
@@ -78,7 +83,7 @@ tariff before any enrollment can be decided; it is not an operating source of th
    - the observer's root capability C: verb `observePayment`, target and policy the pay cell;
    - the controller's pay-cell capability K (replace the observer: revoke C, delegate anew);
    - `C_enrol` E: the observer's `installPolicy` on the factory, narrowed by the factory law
-     to self-enrollment (PAY P3b).
+     to self-enrollment.
 
    `native/resource-client/newparticipant-acceptance.sh` does exactly this (subject 30,
    capabilities 4030/4031/4032) and is the template. A genesis without `payObserver` has no
@@ -143,7 +148,7 @@ tariff before any enrollment can be decided; it is not an operating source of th
    ```
    PAY_OBSERVER_WS=/var/lib/mini/pay/observer
    PAY_OBSERVER_CAPABILITY=C                 # genesis payObserver.capability
-   PAY_WATCH_ENROL=yes                       # watch the enrollment row (PAY §11)
+   PAY_WATCH_ENROL=yes                       # watch the enrollment row
    PAY_ENROL_CAPABILITY=E                    # genesis payObserver.enrolCapability (C_enrol)
    PAY_OPERATOR_SOCKET=/var/lib/mini/store/node/operator/mini.sock
    ```
@@ -227,7 +232,7 @@ tariff before any enrollment can be decided; it is not an operating source of th
   looked up exactly (op 111) before anything new is sent. If it was confirmed, its records get
   their receipts. If it is `absent`, its records are simply observed again.
 
-## What one tick decides at the enrollment index (PAY §11)
+## What one tick decides at the enrollment index
 
 - **Never in a report.** A record at the tariff's `enrolIndex` is routed out of the report (the
   observation receiver would refuse the whole report: `enrolIndexNeedsReceiver`). Each one is
@@ -265,7 +270,7 @@ tariff before any enrollment can be decided; it is not an operating source of th
   unset one (`EMBER_ENROL_ADDRESS`). The roster sync reads the same view with
   `mini enrollment-view --socket PUBLIC/mini.sock --host HOST` (the v2 envelope pins the Host image).
 
-## What a friend sees (PAY §5)
+## What a friend sees
 
 ```
 mini> pay address
@@ -303,23 +308,3 @@ The exact admission price buys enrollment and the first week. A member needs an
 additional deposit or renewal remainder to pay for resource/app creation. The
 v1 enrollment memo has no next-key commitment; it does not provide prerotation
 recovery merely because ordinary `mini keygen` supports that feature.
-
-## Current composed rehearsal (2026-10-02)
-
-With the source-matched native Host from `6a085328` (SHA-256
-`9afaf8ecaabde58e42975023260bcc455b519a39ee9e3322582ed64e11a09d42`), the
-adapted client and fresh private stores passed:
-
-- J-PAY-E4 **32/32**: Token-2022 fixture enrollment, exact replay, refusal cases,
-  renewal, rendered forced SSH proxy line, Mini shell subject, own-account read,
-  member-funded content birth (500 → 493), foreign-genesis refusal without debit,
-  cold read, and online/offline ledger audits.
-- J-PAY4 **25/25**: observer killed after submit marker, pending tick recovery,
-  exact lookup, one credit, retained below-floor audit events, and conservation.
-- J-ROSTER **26/26** in dregg-infra: actual private SSH server, live/lapsed keys,
-  forced commands, pin refusals, and rejection of old/malformed views.
-
-Evidence on persvati: `/tmp/pay-entry-a22-4/jpay-e4/rows.tsv`,
-`/tmp/pay-rail-a22-1/rt/jpay4/rows.tsv`, and
-`/tmp/jroster-paid-v3/jroster-result.json`. These use recorded/constructed chain
-responses; no mainnet transaction or public-service change was performed.

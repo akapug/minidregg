@@ -8,6 +8,12 @@ Lean owns the source binding and continuity decision. The native archive only
 retains, compares, reconstructs and repairs exact bytes. It does not install a
 world, select authority, replace a provider, export secret shares, or prune logs.
 
+**Build status.** The portable modules named here are built only by the opt-in research
+library (`lake build ResearchWip`). None is in the closure of `Minidregg` or `Host.Main`, and no
+Host operation dispatches them. The exception is `Compiler/ReceiptContinuityIO`, which the
+default build uses for receipt continuity. `Host/PortableContinuationProbe.lean` is in no library.
+`native/portable-archive` is a workspace crate. No whole-home transfer has run.
+
 ## Additive source and current consumers
 
 - `Kernel/PortableContinuationManifest.lean`: complete source identity/prefix,
@@ -28,8 +34,6 @@ world, select authority, replace a provider, export secret shares, or prune logs
 - `native/portable-archive`: private 64KiB chunks, exact position/length/hash,
   untrusted-provider repair and bounded ranges; new-output-only reconstruction;
   streaming stable-lock CAS with file+directory fsync and uncertain-reply replay.
-  Agreement's owner is adding a storage-only helper selector, retaining the
-  independent crypto/network helper and its physical frame limit.
 
 ## Source-owned inventory and current-authority joins still required
 
@@ -59,25 +63,14 @@ Uncertain external calls carry exact original custody and remain uncertain until
 the existing provider/completion/delivery receiver resolves them. Restoration
 cannot rerun them merely because it starts in a new directory.
 
-## Meaning of evidence
+## Native archive tests
 
-General named laws and native crash/repair tests are separate from live service
-qualification. Lean modules remain QUEUED UNCOMPILED. Native exact source r1 passed all five
-release nextest tests (zero skipped, 0.174 seconds) and release helper build on
-Persvati under 8GiB/no swap/CPU200% supervised lease. Source tar SHA256
-`32af5f3be155dfb9cca7f3505db2e73ac95777041c6eb2e3659295bf528f877a`;
-helper SHA256 `fe36b0d716190761291d7248572e549346c8d33be50a10e6d7ddd4399beb1567`.
-These are physical component cases, not a qualified whole-home transfer. The
-agreement owner is joining the actual source Storage consumer next.
-Registration/common receiving is owned by the kernel captain. No activation,
-actual cross-provider replacement, asset operation or private secret export is
-inferred from this source.
-
-Tests are source-authored to exercise >16MiB exact storage at the last byte,
-lost durable reply followed by exact reopen/retry conflict, stale/symlink
-refusal, unavailable chunk repair, wrong-position/forged chunk refusal,
-bounded cross-chunk retrieval and refusal to overwrite an existing source.
-These do not establish full SPK home transfer or malicious private portability.
+The `native/portable-archive` unit tests exercise exact storage past the network
+frame bound (compared at the last byte), a lost durable reply followed by exact
+reopen and a refused reapply, stale-prefix and symlink refusal, offline repair
+with bounded cross-chunk retrieval, and refusal of forged, wrong-position,
+missing and oversized ranges. They cover the physical component only, not an
+SPK home transfer or malicious private portability.
 
 ## Lifetime boundary
 
@@ -104,13 +97,6 @@ the Activity owner's summary invalidation. A repaired old prepared projection
 cannot become a fresh current-source authorization merely because its bytes
 were recovered intact.
 
-Actual current service source a593 is still completing SPK app INSTALL/START and
-controller registration before its generated full backup inventory is final.
-Activity source packets are separate WIP; that adapter is not in a593's current
-native artifact. The whole-home receiving test must therefore await finalized
-actual inventories and matched native roles. The standalone archive five-pass
-result is not evidence that this combined consumer has already run.
-
 ## Existing source worker fencing seam
 
 `ApplicationLifecycleClaimReceiver.Reservation.withFreshTip` and its v2/v3
@@ -130,7 +116,7 @@ the existing joint/current-source reservation must actually select that candidat
 retain historical liabilities, and authorize the child before physical activation.
 
 
-## Source-capsule and joint custody consumers (new WIP)
+## Source-capsule and joint custody consumers
 
 `Host/PortableContinuationProbe.lean` reuses the existing pinned source capsule
 and actual old executable journal audit. Capture retains the whole canonical
@@ -138,9 +124,7 @@ source image plus declared physical inventories and restores a new private
 quarantine file through the native helper. Reopening independently pins the
 retained inventory and re-audits the exact whole source cut. Existing files
 refuse overwrite. It does not claim physical inventory completeness or activate
-a worker. The source-capsule probe and inspection paths passed scoped Lean
-checks; the probe has not yet run on a complete operator capsule. The native
-helper remains the exact five-pass r1 binary.
+a worker. The probe has not run on a complete operator capsule.
 
 `Compiler/PortableJointCustodyIO.lean` consumes the actual opaque joint Pending
 receipt: current source reservation, exact physical append/readback and checked
@@ -155,7 +139,7 @@ worker-governance, old-worker fence and qualified successor rekey remain
 unfinished joins; reserveObject is not worker-transfer governance.
 
 
-## Participant-held acknowledgement (new WIP)
+## Participant-held acknowledgement
 
 `Compiler/PortableParticipantPinIO.lean` consumes the opaque archive-retained,
 signature-verified, continuity-checked ACK and persists its public endpoint in
@@ -165,41 +149,28 @@ and exact readback. Stale/forked or newer local pins refuse; a lost-reply retry
 uses same-bytes CAS/fsync rather than treating equality alone as durability.
 Bootstrap identity/key/first endpoint are independently authenticated and never
 learned from a restored manifest. This is a public client anchor, not a second
-source journal or authority plane. The archive ACK and participant-held pin paths passed scoped Lean checks.
-Their complete operator-capsule/native participant scenario is not yet run.
+source journal or authority plane. No operator-capsule or native participant
+scenario has run.
 
-Actual Bend custody join at 10:31UTC captured the qualified 329-byte cut-7
-checkpoint (SHA256 `2075ce3b1638d89dcc4b2577d1e1aeb39307e36ea184228e94b5b4b0feaf87be`),
-checked bounded retrieval and byte-exact restore, then repaired an independently
-empty receiving archive and restored the same checkpoint. Existing output and
-forged chunk refused; original producer bytes stayed intact. This confirms the
-physical continuation artifact join. A later separate process resumed the
-repaired cut-7 checkpoint through the existing qualified Bend probe and passed
-exact state/result/context/generation/canonical/capacity checks. This is an
-actual archive-repair-to-computation continuation; no Activity or successor
-activation is implied. Private runtime evidence remains outside the public source packet.
-
-
-The source-capsule probe's `check-restored` now additionally reads the actual
+The source-capsule probe's `check-restored` also reads the actual
 independently held canonical participant public pin, checks its configured
 subject/key/source identity, and verifies the supplied authenticated receipt
 continuity extension to the restored endpoint. A source/archive rollback cannot
 pass merely because its own old journal replays correctly. Lost participant
 anchors or compromised participant storage remain the explicit receipt
-continuity boundary. This WIP consumer has not yet run.
+continuity boundary. This consumer has not run.
 
-## Governed home transfer source construction (WIP, 2026-10-03)
+## Governed home transfer
 
-The additive PortableHomeTransfer law/control codec/frame and admission/receiver now model a single current source epoch through consent, quiesced cut, qualified successor custody, old-host fencing, destination activation and acknowledgment. Actual exported admission currently constructs only dual-owner/renter preparation with ordinary AcceptedInvocation credentials/audiences/law, exact guards/nullifiers/charge, control post and source CAS/agreement. All later native stage receipts remain unconstructed; the parameterized law is not a native activation capability. Event65 is reserved for captain-reviewed live/replay registration, which is not installed by these source files.
+The additive PortableHomeTransfer law/control codec/frame and admission/receiver model a single current source epoch through consent, quiesced cut, qualified successor custody, old-host fencing, destination activation and acknowledgment. Actual exported admission currently constructs only dual-owner/renter preparation with ordinary AcceptedInvocation credentials/audiences/law, exact guards/nullifiers/charge, control post and source CAS/agreement. All later native stage receipts remain unconstructed; the parameterized law is not a native activation capability. Event65 is reserved for live/replay registration, which is not installed by these source files.
 
 Current source control selects governed home cells and required physical inventory. Preparation blocks ordinary home writes; Activity dispatch still requires the current worker/generation gate. The SourceCutIO adapter retains the exact full source control and whole canonical genesis-walked image via existing verified chunk inventories. An export cannot choose an empty list to erase current source obligations. This does not establish native quiescence or prove undeployed registrations complete.
 
 Plan consent binds owner/renter, independently held acknowledged history, source/control, exact old/new private generation descriptors, one destination credential, original request/prepared context/provider custody and every retained liability. Preparation preserves exact liability status; reconciliation selects one exact liability, never all similarly named calls. Fresh work requires current destination phase and authoritative reconciliation of all old uncertainty. Source epoch/key revocation cannot erase previously learned shares/plaintext or retract old external dispatches. Actual private backend must provide qualified malicious resharing/privateRecovery into the new holder descriptor before activation. SPK STOP/completion and sandbox/config custody must join as real producers; pause-for-capture is insufficient.
 
-Actual native agreement consumer has now passed with the pinned archive helper as storageBinary, including real TCP/MLDSA, lost durable CAS reply/readback/restart/stale retry and selective COMMIT witness recovery. Whole-memory Lean replay and eventual logical network ancestry bounds remain open. Core portable4 Lean and axiom gates passed after parser/proof repairs on Persvati; governed phase/control/codec/frame and actual dual-consent admission passed
-scoped Lean checks. The final transfer receiver awaits a coherent current native
-cohort; live/replay registration, actual participant/capsule runtime use and
-physical/private stage qualification remain unfinished.
+Whole-memory Lean replay and logical network ancestry bounds are open. The final
+transfer receiver, live/replay registration, participant/capsule runtime use and
+physical/private stage qualification are unfinished.
 
 The current source law also permits a later transfer after release only with all old uncertainty settled, and permits old-host resumption only before fencing with the original host/private generation/descriptor plus an actual resumption producer and settled liabilities. Named general laws constrain epoch progression, retained request custody, governed cell membership, one successor of one current source phase, and generation changes only after fencing. SourceCutIO.Advanced reconstructs both retained cuts and checks the exact canonical accepted-record prefix and old obligation retention; height alone is insufficient. The native source consumer requires the actual captured cut and independently persisted authenticated participant ACK. ACK creation pins and snapshots the configured signature verifier. Native live/replay facet registration and physical/private stage producers remain required.
 
@@ -226,19 +197,17 @@ Destination start has a durable source `activationPending` phase and nonempty ex
 
 `Compiler/ReceiptContinuityIO` holds the existing public hash-only continuity
 producer and parser. `Compiler/PortableContinuationInspection` holds the whole
-source genesis-walk capture and repair inspection. Host modules export the prior
+source genesis-walk capture and repair inspection. Host modules export these
 APIs for their CLI consumers; CarriedSegmentIO and PortableHomeSourceCutIO use
-the lower libraries directly. These seven extraction paths passed scoped Lean
-checks without changing source admission or phase laws. A current native
-receiving cohort is still required for the final transfer receiver.
+the lower libraries directly. The extraction does not change source admission
+or phase laws.
 
-The joint Pending custody adapter passed its first scoped Lean and named axiom
-checks against the current qualified receiver cohort. It preserves exact full
+The joint Pending custody adapter preserves exact full
 source images, control pin/reservation, historical consensus context and checked
 commit; an actual native pending-receipt capture remains a separate runtime join.
 
 
-## Current home guard for signed Activity dispatch (callback WIP)
+## Current home guard for signed Activity dispatch
 
 `Compiler/PortableHomeWorkerContext` defines a new canonical WorkerCredential:
 an opaque credential identity plus an explicit source-authored native subject
@@ -247,18 +216,13 @@ The movable-home profile stores the canonical credential envelope in current
 source control; actual source-authorized initial credential birth remains a
 required producer. The exact signed home projection binds the configured
 cell/atom/schema, home, current host, full credential envelope, private generation
-and descriptor, epoch and phase. Both codecs passed scoped Lean and named
-roundtrip axiom checks.
+and descriptor, epoch and phase.
 
-A current-home guard after ordinary controller acceptance (a whole-control ReadGuard selected by
-a `Config.portableHomeControl` source seam) was drafted as `Kernel/PortableHomeCurrentGuard` and
-removed: the seam was never added to `NativeHost.Config`, so the draft never compiled.
-
-Config source-pinned portable facet/runtime parameter/live+replay registration
-is not yet supplied; the high guard source explicitly requires that field and
-has no caller-pin fallback. The guard and Activity composition are WIP until
-the coherent source cohort checks them. This closes neither worker activation
-nor private successor qualification.
+No current-home guard exists. It would be a whole-control ReadGuard after
+ordinary controller acceptance, and it needs a source-pinned portable facet,
+runtime parameter and live/replay registration in `NativeHost.Config`, with no
+caller-pin fallback. `NativeHost.Config` has no such field. Neither worker
+activation nor private successor qualification is closed.
 
 A frozen home also needs exact source-owned maintenance receiving for old
 Activity outcome/cancellation: the original pending identity/context/request

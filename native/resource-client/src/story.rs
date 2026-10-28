@@ -841,6 +841,13 @@ fn story_seal(session: &Session, name: &str) -> Result<(), Done> {
     let target = field(&story, "table")?;
     let rows = table_rows(&read(session, &story, "table", target, "resource")?)?;
     let table = table_of(&rows).map_err(|e| usage(format!("the table refuses: {e}")))?;
+    // Sealing is idempotent: a table that already carries the sealed law is left alone, so a seal that
+    // died after installing (or a seed that re-runs `story seal` to finish a failed one) writes nothing.
+    let policy = read(session, &story, "table-law", target, "policy")?;
+    if carries_unconditional_local_law(&policy, &table_sealed_law()) {
+        println!("story {name} is already sealed; nothing was written");
+        return Ok(());
+    }
     install(session, &format!("{name}/table"), &table_sealed_law())?;
     let clauses = player_clauses(&table, "{S}");
     println!("story {name} sealed: the table cannot be edited or re-lawed by anyone. Each player's cell will carry:");

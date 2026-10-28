@@ -1,9 +1,9 @@
-# Per-subject request rate in the Host: statement and integration plan (2026-10-27)
+# Per-subject request rate in the Host
 
-The "better" fix for gap 2 of dregg-infra `edge/demo/ABUSE-LIMITS.md` (a thousand `can` dry-runs or
+The fix for gap 2 of dregg-infra `edge/demo/ABUSE-LIMITS.md` (a thousand `can` dry-runs or
 reads from one member queue every other member's reads at the shared Store). The law is stated
-and proved in `Kernel/SubjectRate.lean`. This document is the integration plan, and it waits on
-two decisions before any Host code changes (§3).
+and proved in `Kernel/SubjectRate.lean`. This document states the law, the two decisions it
+needed (§3) and the Host integration (§4).
 
 ## 1. The law, as stated
 
@@ -34,19 +34,18 @@ peer uid (`serve_queue.rs`). Public members can arrive through the public ingres
 uid, so a peer is not a member. Only the Host knows the subject, and only after it verifies the
 signature. Hence the law's claim-checked, verify-charged shape.
 
-## 3. Decided (coordinator, 2026-10-27) and built
+## 3. Decisions
 
-- **The name:** `Compiler.RefusalReason.rateLimited`, tag 16, name `rate-limited`. The outcome
-  frame is now v7 (`NativeHostCodec.v6_outcome_refused`), spelled v7 at every site of the
-  `overBound` precedent. The StoreEpoch moves, so this is a re-genesis (accepted: flag days are not
-  held).
+- **The name:** `Compiler.RefusalReason.rateLimited`, tag 16, name `rate-limited`. Adding the tag
+  retired the v6 outcome frame (`NativeHostCodec.v6_outcome_refused`); the current frame is
+  `NativeProtocolFrames.outcomeFrame`. Moving the StoreEpoch is a re-genesis.
 - **Defaults:** `SubjectRate.hostDefault` is 300 signed requests per subject per 60 s. It applies
   when the Host config carries no `requestRate`. The operator's own subject and the sponsor's are
   exempt by verified subject. They are named in the Host config
   `"requestRate": {"limit": 300, "windowMs": 60000, "exempt": [OPERATOR, SPONSOR]}`, which the
   deployment writes (infra). Absent, no subject is exempt.
 
-## 4. What is built (lane/pd-host-rate)
+## 4. The Host integration
 
 - `Kernel/SubjectRate.lean`: the law, `hostDefault`, `Policy.make` (a zero limit or window
   refuses the config), and `exemptOf`.
@@ -84,10 +83,9 @@ signature. Hence the law's claim-checked, verify-charged shape.
 - Writes are paid from the member's funding. A refused write is free and is the remaining flood
   shape there.
 
-**Owed:**
-- `scripts/codec-shapes-regen.py` must re-emit `Compiler/PersistedCodecShapes.lean` for the v7
-  frame. The fingerprint needs the census build, a closure.
-- A journey row: a world with `requestRate.limit` 3 sends 4 signed queries as one subject. It
-  expects `rate-limited` on the 4th, and a second subject admitted at the same moment.
-- The laws page publishing the rate. It lives in Settings, not in `NativeHost.Config`, so op 0's
-  description does not carry it yet.
+**Covered elsewhere:** the journey row is `rate` (`native/resource-client/rate-journey.sh`): a world
+with `requestRate.limit` 3 refuses one subject's 4th signed read as `rate-limited`, admits a second
+subject at the same moment, never refuses the exempt sponsor, and admits again after the window.
+
+**Owed:** the laws page does not publish the rate. It lives in Host `Settings`, not in
+`NativeHost.Config`, so op 0's description does not carry it.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# J-PAY-3 (PAY.md P3): observed payments become Book credit, on a fresh private Store.
+# J-PAY-3 (PAY P3): observed payments become Book credit, on a fresh private Store.
 #
 # Follows the journey hook contract (journey.sh header): executed with HOST,
 # MINI, STORE, VERIFIER and JOURNEY_STEP_DIR exported; it starts its OWN Host on
