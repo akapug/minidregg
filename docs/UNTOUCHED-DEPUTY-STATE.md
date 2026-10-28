@@ -11,6 +11,7 @@ Inputs: docs/review/2026-10-27-untouched-areas/{LEAN,NATIVE}.md, docs/review/202
 5. App-id bound: widens to canonical u64 with the worker's id-derivation overflow folded in, statement first, to me when it has elaborated.
 6. The last japps red is the app-id bound (check_coordinates), not a script collision.
 7. Lake and git run as lanes, never root, and only in the faerie's own worktree.
+1-AMENDED (ember, via root, supersedes the "equality proofs, no statement change" clause of 1): "we do NOT need to 'prove by equality'. statements MAY need to change to be phrased more efficiently!" ac1e69b668c52c684 is not limited to statement-neutral cuts: where a statement or def is phrased so that it forces recomputation (whole-Store roots, the manifest semantics, List UInt8 codecs), rephrase it efficiently and re-prove downstream. Only weakening what a statement guarantees is off-limits; keystone changes get a short note to root, not a pre-approval. A separate perf-rake sub-Opus (ae523f43aa7bfc923) sweeps the whole Host closure and the Rust request path and lands fixes; it sends ac1e69b668c52c684 anything in its three spots (Pending charge, readback, cell.root), so they do not collide.
 After that, report only new events.
 
 ## Rules in force
