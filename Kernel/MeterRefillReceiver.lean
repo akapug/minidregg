@@ -9,7 +9,7 @@ nothing and carries the refill's amount as `credit`, which the extended install 
 exhausted meter (`PlatformCell.refill_funded_at_exhaustion`), so a refill is admitted when
 the meter is spent.
 
-Authorization (`PlatformCell.RefillAdmits`):
+Authorization (the deployed M2-c, `AcceptedRefill.sound`):
 * the sponsor IS the controller the platform cell names (`PlatformCellLayout.controllerOf`,
   written at genesis and never changed, `Reachable.controller_stays`): holding the control
   capability is not enough, so a delegate cannot refill;
@@ -309,7 +309,7 @@ def intent (accepted : AcceptedRefill deployment semantics ambient durable ingre
   postRootsBound := by intro write member; cases member
   guardsReadOnly := by intro guard _; simp
 
-/-- **An accepted refill is `RefillAdmits` on the deployed objects.** Its sponsor is the
+/-- **Keystone M2-c, deployed: an accepted refill.** Its sponsor is the
 controller the platform cell names; the sponsor's signature verified over the request; the
 control capability on the factory is the capability evidence of that request; the marker
 was unspent; and the committed intent writes nothing, charges nothing, claims exactly its
@@ -330,6 +330,33 @@ theorem AcceptedRefill.sound (accepted : AcceptedRefill deployment semantics amb
   ⟨accepted.prepared.controller, accepted.accepted.envelopeExact, accepted.accepted.evidence.property,
     accepted.prepared.fresh, rfl, rfl, rfl, rfl,
     fun guard member => accepted.prepared.authority.readGuards_exact guard member⟩
+
+/-- **Teeth (replay).** No refill is accepted on an image whose marker nullifier is already
+consumed. -/
+theorem spent_empty
+    (spent : durable.snapshot.model.consumed (nullifier deployment.domain semantics ingress) = true) :
+    IsEmpty (AcceptedRefill deployment semantics ambient durable ingress) := by
+  refine ⟨fun accepted => ?_⟩
+  have fresh := accepted.prepared.fresh
+  rw [accepted.prepared.authority.spentExact, accepted.prepared.authority.domainExact] at fresh
+  unfold CredentialAuthorityDomainReceiver.spentOf at fresh
+  unfold nullifier at spent
+  rw [spent] at fresh
+  cases fresh
+
+/-- **Teeth (forgery by a delegate).** No refill is accepted whose sponsor is not the
+controller the image's platform cell names, whatever capability it presents. -/
+theorem notController_empty
+    (other : ((PlatformCellDomain.load deployment durable.snapshot).bind
+      fun loaded => controllerOf loaded.cell.logical) ≠ some ingress.command.sponsor) :
+    IsEmpty (AcceptedRefill deployment semantics ambient durable ingress) := by
+  refine ⟨fun accepted => other ?_⟩
+  obtain ⟨found, loaded, same⟩ := PlatformCellDomain.load_exact deployment durable.snapshot
+    accepted.prepared.platform.cell accepted.prepared.platform.observed
+  rw [loaded]
+  show controllerOf found.cell.logical = some ingress.command.sponsor
+  rw [same]
+  exact accepted.prepared.controller
 
 /-- The committed meter of an accepted refill is the spec's `refilled`: the extended
 install of its intent raises every lane by the amount and spends its nullifier
@@ -396,5 +423,7 @@ def receiveLoaded (deployment : Deployment) (semantics : Digest) (ambient : Ambi
 #assert_axioms commandCodec_injective
 #assert_axioms AcceptedRefill.sound
 #assert_axioms intent_install_refilled
+#assert_axioms spent_empty
+#assert_axioms notController_empty
 
 end Minidregg.Kernel.MeterRefillReceiver

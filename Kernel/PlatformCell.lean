@@ -22,7 +22,7 @@ Realizer slots (law 1):
   (`Deployment.keyOf`, the authority snapshot). Unforgeability itself is the verifier's, not
   a Lean theorem: the statements are relative to the transcript, and no transcript entry is
   ever invented here.
-* `Deployment.holdsInstall` / `holdsRefill` are `capabilityEvidenceChecked` in capability mode
+* `Deployment.holdsInstall` is `capabilityEvidenceChecked` in capability mode
   under the factory's current law (PayBookReceiver's authority).
 * The controller is the deployment's `factoryController`; the genesis record is
   `genesisRecord` of the deployment's `NativeHost.Config`, not any valid record.
@@ -87,7 +87,6 @@ structure Deployment where
   genesis : Config
   keyOf : SubjectId → Option (List UInt8)
   holdsInstall : SubjectId → CapabilityId → Bool
-  holdsRefill : SubjectId → CapabilityId → Bool
   transcript : CredentialSignatureIO.Transcript
 
 def Deployment.controller (d : Deployment) : SubjectId := d.genesis.factoryController.subject
@@ -389,7 +388,6 @@ def toyDeployment (host : NativeHost.Config) (genesis : Config) (key : List UInt
   genesis := genesis
   keyOf s := if s = genesis.factoryController.subject then some key else none
   holdsInstall s _ := decide (s = genesis.factoryController.subject)
-  holdsRefill s _ := decide (s = genesis.factoryController.subject)
   transcript := ⟨verified⟩
 
 def toyContext (d : Deployment) : Context where
@@ -561,7 +559,13 @@ The meter is the commit protocol's `Snapshot.available`, not a cell. `install` s
 `available := available - exactCharge + credit` with `Intent.credit` (default zero), and
 `installAvailable` below is that install's meter as a spec.
 Only the refill family sets a nonzero credit; its exact charge is zero (a nullifier-only
-intent, which `preflight` admits), so it is admitted at an exhausted meter. -/
+intent, which `preflight` admits), so it is admitted at an exhausted meter.
+
+The keystones are the deployed ones (audit pass 21 addendum): M2-c is
+`MeterRefillReceiver.AcceptedRefill.sound` with `intent_install_refilled`, M2-b is
+`NativeHostReplay.NativeAdmission.credit_confined`, M2-d is `protocol_install_matches`
+below. This section keeps the meter's shape (`Refill`, `refilled`, `installAvailable`) that
+they are read against. -/
 
 inductive Family
   | meterRefill
@@ -638,62 +642,9 @@ structure Meter where
   remaining : ResourceCost.Charge
   consumed : Nullifier → Bool
 
-structure RefillContext where
-  deployment : Deployment
-  encode : Refill → List UInt8
-  covers : ∀ r s, encode r = encode s →
-    r.subject = s.subject ∧ r.capability = s.capability ∧ r.nonce = s.nonce ∧ r.amount = s.amount
-
-def RefillAdmits (ctx : RefillContext) (m : Meter) (r : Refill) : Prop :=
-  r.subject = ctx.deployment.controller ∧
-    ctx.deployment.verifies ctx.deployment.controller (ctx.encode r) r.envelope = true ∧
-    ctx.deployment.holdsRefill ctx.deployment.controller r.capability = true ∧
-    m.consumed r.nullifier = false
-
-instance (ctx : RefillContext) (m : Meter) (r : Refill) : Decidable (RefillAdmits ctx m r) := by
-  unfold RefillAdmits; infer_instance
-
-/-- **M2-b, credit has an admitted refill behind it.** Over the intents a deployment commits
-(`committed`: every `Receiving.Family.intent` with `credit := 0`, and the refill receiver's),
-a nonzero credit IS the intent of a refill admitted on some meter. The family label alone
-grants nothing. -/
-def CreditConfined (ctx : RefillContext) (committed : MeterIntent → Prop) : Prop :=
-  ∀ intent, committed intent → intent.credit ≠ 0 → ∃ m r, RefillAdmits ctx m r ∧ intent = r.intent
-
-/-- Satisfiable: committing only admitted refills' intents is confined. -/
-theorem admitted_refills_confined (ctx : RefillContext) :
-    CreditConfined ctx (fun intent => ∃ m r, RefillAdmits ctx m r ∧ intent = r.intent) :=
-  fun _ behind _ => behind
-
-/-- Teeth: an intent tagged `.meterRefill` with a credit and no refill behind it (no
-nullifier, which every refill intent carries) is not confined. -/
-theorem tagged_mint_refused (ctx : RefillContext) (minted : MeterIntent)
-    (noNullifier : minted.nullifiers = []) (lane : ResourceCost.Lane)
-    (positive : 0 < minted.credit lane) :
-    ¬ CreditConfined ctx (fun intent => intent = minted) := by
-  intro confined
-  obtain ⟨m, r, -, same⟩ := confined minted rfl (fun zero => by
-    have := congrFun zero lane
-    simp at this; omega)
-  have := congrArg MeterIntent.nullifiers same
-  rw [noNullifier] at this
-  simp [Refill.intent] at this
-
 /-- The post-state of an admitted refill: the extended install of its intent. -/
 def refilled (m : Meter) (r : Refill) : Meter :=
   ⟨installAvailable m.remaining r.intent, fun n => decide (n = r.nullifier) || m.consumed n⟩
-
-/-- **M2-c.** A lawful refill receiver admits exactly `RefillAdmits` and yields the extended
-install of the refill's intent. -/
-def RefillLawful (ctx : RefillContext) (post : Meter → Refill → Option Meter) : Prop :=
-  ∀ m r, (RefillAdmits ctx m r → post m r = some (refilled m r)) ∧
-    (¬ RefillAdmits ctx m r → post m r = none)
-
-def refillReference (ctx : RefillContext) (m : Meter) (r : Refill) : Option Meter :=
-  if RefillAdmits ctx m r then some (refilled m r) else none
-
-theorem refillReference_lawful (ctx : RefillContext) : RefillLawful ctx (refillReference ctx) :=
-  fun m r => ⟨fun ok => by simp [refillReference, ok], fun no => by simp [refillReference, no]⟩
 
 /-- Liveness: the refill's zero charge is funded by an exhausted meter. -/
 theorem refill_funded_at_exhaustion (r : Refill) :
@@ -709,27 +660,6 @@ theorem charged_refill_refused_at_exhaustion (c : ResourceCost.Charge)
   | true =>
       have := ((ResourceCost.Charge.fundedCheck_eq_true_iff c 0).mp h) .turnBytes
       simp at this; omega
-
-/-- One refill never lowers a lane. -/
-theorem lawful_monotone (ctx : RefillContext) (post : Meter → Refill → Option Meter)
-    (lawful : RefillLawful ctx post) (m next : Meter) (r : Refill)
-    (admitted : post m r = some next) : ∀ lane, m.remaining lane ≤ next.remaining lane := by
-  intro lane
-  by_cases ok : RefillAdmits ctx m r
-  · rw [(lawful m r).1 ok] at admitted
-    cases admitted
-    simp [refilled, installAvailable, Refill.intent]
-  · rw [(lawful m r).2 ok] at admitted
-    cases admitted
-
-/-- Replay: a consumed refill nullifier is refused. -/
-theorem replay_refused (ctx : RefillContext) (post : Meter → Refill → Option Meter)
-    (lawful : RefillLawful ctx post) (m : Meter) (r : Refill) (spent : m.consumed r.nullifier = true) :
-    post m r = none :=
-  (lawful m r).2 fun admitted => by
-    have fresh := admitted.2.2.2
-    rw [spent] at fresh
-    cases fresh
 
 /-- The family tag separates: another family's nullifier on the same subject and nonce is
 not the refill's. -/
@@ -849,9 +779,9 @@ theorem refilled_is_deployed_install {TxId CellId Event : Type} [DecidableEq Cel
   forged_refused relay_swap_refused trustsSubjectField_not_decides stale_version_refused
   invalid_refused zero_lifetime_invalid custodian_drop_refused uncosigned_rotation_refused
   cosigned_rotation_admitted sorted_load_bearing
-  install_conserves_with_credit installToday_loses_credit admitted_refills_confined tagged_mint_refused
-  installAvailable_refill refillReference_lawful refill_funded_at_exhaustion
-  charged_refill_refused_at_exhaustion lawful_monotone replay_refused family_tag_separates
+  install_conserves_with_credit installToday_loses_credit
+  installAvailable_refill refill_funded_at_exhaustion
+  charged_refill_refused_at_exhaustion family_tag_separates
   protocol_install_consumed protocol_install_matches uncredited_install_matches_zero
   uncredited_install_mismatch_with_credit refilled_is_protocol_install refilled_is_deployed_install
   records_push current_push chain_le_last staysSorted reachable_sorted versionMonotone recordsValid
