@@ -20,6 +20,10 @@
 #                                      reaches, stops and exports both apps on a scratch Store through that
 #                                      script; without one it says UNCONFIGURED for that part and still passes
 #                                      the rows above.
+#                                      With JAPPS_WORLD_ENV it also runs apps-e2e.sh: `mini apps bootstrap` on the world,
+#                                      a first member's `mini apps install` of Hacker Slides, and the restart rows
+#                                      (write, stop, start, write with no enroll step, renew current, a stale
+#                                      enrollment refused by name, renew, write).
 #
 # Output: one row per check (`PASS|FAIL<TAB>row<TAB>detail`), then `J-APPS PASS n/n` or `J-APPS FAIL k/n`
 # as the last line of stdout and stderr. Exit 0 only on PASS; 5 when a required input is absent.
@@ -258,6 +262,23 @@ if [ "$mode" = --box ]; then
   else
     echo "UNCONFIGURED lifecycle rows: need JAPPS_WORLD_ENV=RUN/WORLD.env from scripts/spk-platform/world-up.sh (or GRAINS_ROOT and BROKER_SOCKET), $BIN/spk-host and $BIN/minidregg-host" >&2
   fi
+fi
+
+# ---- the product path on a standing world: bootstrap, first install, restart then write --------
+# apps-e2e.sh drives the member verbs and the worker (docs/APP-MARKET-2026-10-27.md §3) with
+#   APPS_E2E_BOOTSTRAP=1  the manager runs `mini apps bootstrap` (tool attach, parent attach, parent reserve 1)
+#                         and the worker serves THOSE tasks, not the workroom's pre-activated 7901/7902, so
+#                         the first member install must be admitted at the tool reservation;
+#   APPS_E2E_RESTART=1    Hacker Slides: write, stop, start (generation +2), write again with no enroll step,
+#                         `apps renew` says current, an operator-direct restart (no worker enroll) is refused
+#                         by name, `apps renew` renews it, the write is admitted. Its rows are re-emitted here.
+if [ "$mode" = --box ] && [ -n "${WORLD_RUN:-}" ] && [ -x "$BIN/spk-host" ]; then
+  e2e=$(E2E_MINI=$MINI MINI_MARKET_CACHE=$W/state/quarantine APPS_E2E_BOOTSTRAP=1 APPS_E2E_RESTART=1 APPS_E2E_RESTART_APP=$SLIDES_APP \
+    bash "$REPO/scripts/spk-platform/apps-e2e.sh" "$JAPPS_WORLD_ENV" "$W/e2e" "$SLIDES_APP" 2>"$W/e2e.err")
+  while IFS=$'\t' read -r status name detail; do
+    case $status in PASS) row "$name" 1 "$detail" ;; FAIL) row "$name" 0 "$detail" ;; esac
+  done <<<"$e2e"
+  [ -n "$e2e" ] || row "apps-e2e.sh ran (bootstrap, first install, restart then write)" 0 "$(tail -1 "$W/e2e.err" | cut -c1-160)"
 fi
 
 verdict; rc=$?
