@@ -20,7 +20,6 @@ Inputs: docs/review/2026-10-27-untouched-areas/{LEAN,NATIVE}.md, docs/review/202
 
 ## Running now (each reports on events)
 - japps rows: a16c6e6a2655a4ca9, lane/un-japps-rows (remote tip 777096dc), hbox /tank/lanes/un-japps-rows on b26630168. Rows owed ON MAIN in japps.sh: (1) restart then write with no manual enroll (World::enroll after every START, bf5ead3fa) plus a separate `apps renew` row with the stale-generation refusal by name; (2) fresh-world `apps bootstrap` then first member install admitted (parent `reserve 1` fits its birth law: witnessTouchState wants gen 1, status 3). w1 36/39: bootstrap birthStale was a script red (manager workspace on genesis-era caps), fixed 9acb2317e; w2 + red.sh (skip-activate, skip-enroll plants) queued. It fixes once, reruns once, tears down, sends the integrator the sha.
-- a4e312352a7091f59 (japps veteran, ~553k): its last b26630168 japps run, then JAPPS-STATE.md (lane/un-stream-continuity) updated, teardown, stop. Do not give it new work.
 - B3 a85d12892ea6de3ca: B3 table on b26630168 (EtherDraw, Scrumblr, SwaggerEditor; DiagramsNet stays refused by name, "unsupported: declares permissions without a signed bridge schema", out of FEATURED, ruled).
 - B7 abf203f357754001b: rt world (market-large-v1) for Wekan (DDP login "Unrecognized options") and WBO (write, no detail). TextEditor write is blocked on grain-route latency only.
 - B8 a13f0bc9626b1320a: IPython capture run (world w-b8s): kernel websocket 503 / kernel gone after the 5 s alive check; the run captures the resident unit's stdio to name the kernel's exit. HedgeDoc / HedgeDocRT socket.io close frame unexamined (same family only until evidence says so).
@@ -28,6 +27,7 @@ Inputs: docs/review/2026-10-27-untouched-areas/{LEAN,NATIVE}.md, docs/review/202
 - Parked, waiting for the next candidate: B5 a0ef59eabda7075b4 (OwnTracks re-qualify, Lean fix 3a943f85e not in b26630168; ExpenseOwl 405, WordPress REST nonce, HackerCMS www 404, Hummingbird get-m 22, one world at a time). Story faerie acf88647b53657831 idle.
 
 ## App market (taken over from L13)
+- japps --box on b26630168: 29/29 (a4e312352a7091f59, retired). Co-edit over DDP (hot route admitted), Hacker Slides publish + write after restart and enroll-a2 (japps.sh:238 is the manual renew), Etherpad, export, qualify/signature, tampered copy. JAPPS-STATE.md at lane/un-stream-continuity f0df4bc24. Recorded with the rows validator for ROWS-OWED §0.
 - FEATURED (native/resource-client/src/apps.rs) is 27 on main; target 2-3 dozen. An app enters on lifecycle + beneath-HTML write green, one commit each, filtered test count = real length.
 - Green and featured: Etherpad, Hacker Slides, EtherCalc, DokuWiki, Datasette, HedgeDoc (lifecycle), Davros, sntfy, HledgerWeb, Mercurial, MediaWiki, Firefly III, FileDrop, Kiwix, Groove Basin, Tube, 2048, Perplexity Sudoku, 3D Blockstack, Simple Chat, and the earlier set (see apps.rs).
 - Other passes recorded by the validator (ROWS-OWED §0): SandMD, Permanote, Dillinger, YetAnotherTODO, Hugo, HakyllCMS, SandForms, Badgepack, Gogs (l+w).
