@@ -186,7 +186,7 @@ def provision(path):
     x.step("connector:package-observe",lambda:x.delegate(x.package_manifest,x.pkgcap,d["pkgObserve"],d["subject"]),effect_only=True)
     x.step("connector:ticket-reserve",lambda:x.reserve(3),effect_only=True)
     x.step("connector:ticket",lambda:x.issue(d,reserve=False,observe=False))
-    x.step("connector:ticket-observe",lambda:x.delegate(d["ticket"],d["ticketOwner"],d["ticketObserve"],d["subject"]),effect_only=True)
+    x.step("connector:ticket-observe",lambda:x.delegate(d["ticket"],d["ticketOwner"],d["ticketObserve"],d["subject"],by=x.creator),effect_only=True)
     x.step("connector:route",lambda:x.route(d["name"],d))
     x.step("connector:enrollment",lambda:x.enroll(d))
     x.step("connector:registration",lambda:register(x,d))
