@@ -301,6 +301,17 @@ pub fn connect_resident(executable: &Path, settings_bytes: Vec<u8>, launch: Comm
     connect_resident_kind(ResidentKind::Consent, executable, settings_bytes, launch)
 }
 
+/// [`connect_resident`], with a second handle on the connection for the caller to watch between
+/// frames: a resident that ended (killed, or its provider failed) closes it, and a caller that
+/// holds its session for hours (a web body) must notice before it sends, then connect again (the
+/// next resident starts from the binding's retained anchor).
+pub fn connect_resident_watched(executable: &Path, settings_bytes: Vec<u8>, launch: Command) -> Result<(Session, std::os::unix::net::UnixStream)> {
+    let stream = resident_connection(ResidentKind::Consent, executable, &settings_bytes, launch)?;
+    let watch = stream.try_clone().map_err(|e| e.to_string())?;
+    let input = stream.try_clone().map_err(|e| e.to_string())?;
+    Ok((Session::over(Box::new(input), Box::new(stream), executable.to_path_buf(), settings_bytes), watch))
+}
+
 /// Make `command` a daemon of its own session that inherits nothing from its caller but stdio: every
 /// fd above 2 is marked close-on-exec, so a lock or socket the caller holds (a `flock` wrapper's
 /// fd, a journey's pipe) is never kept alive by a resident that outlives it. Marking, rather than
@@ -331,10 +342,17 @@ fn detach(command: &mut Command) {
 /// command that serves [`serve_resident_kind`] of this kind for this executable and settings (the
 /// client binary's own `consent-resident` or `codec-resident` verb).
 pub fn connect_resident_kind(kind: ResidentKind, executable: &Path, settings_bytes: Vec<u8>, launch: Command) -> Result<Session> {
+    let stream = resident_connection(kind, executable, &settings_bytes, launch)?;
+    let input = stream.try_clone().map_err(|e| e.to_string())?;
+    Ok(Session::over(Box::new(input), Box::new(stream), executable.to_path_buf(), settings_bytes))
+}
+
+/// A connection to this binding's resident of `kind`, starting it when none listens.
+fn resident_connection(kind: ResidentKind, executable: &Path, settings_bytes: &[u8], launch: Command) -> Result<std::os::unix::net::UnixStream> {
     use std::os::unix::fs::OpenOptionsExt;
     use std::os::unix::process::CommandExt;
     let dir = private_anchor_dir()?;
-    let binding = binding(executable, &settings_bytes)?;
+    let binding = binding(executable, settings_bytes)?;
     let socket = resident_file(kind, &dir, &binding, "sock");
     let stream = match resident_stream(&socket) {
         Ok(stream) => stream,
@@ -365,8 +383,7 @@ pub fn connect_resident_kind(kind: ResidentKind, executable: &Path, settings_byt
             }
         }
     };
-    let input = stream.try_clone().map_err(|e| e.to_string())?;
-    Ok(Session::over(Box::new(input), Box::new(stream), executable.to_path_buf(), settings_bytes))
+    Ok(stream)
 }
 
 /// Removes the resident provider's socket and PID file when it ends, if they are still its own.

@@ -210,6 +210,11 @@ const HANGUP: libc::c_short = libc::POLLRDHUP;
 const HANGUP: libc::c_short = 0;
 
 impl Lifeline {
+    /// Watch a connection this module did not make: a resident consent provider's
+    /// (`mini_sdk::consent::connect_resident_watched`), which ends the same way when its process does.
+    pub(crate) fn watching(socket: UnixStream) -> Self {
+        Lifeline { socket, failed: Arc::new(AtomicBool::new(false)) }
+    }
     pub(crate) fn alive(&self) -> bool {
         if self.failed.load(Ordering::Acquire) {
             return false;
