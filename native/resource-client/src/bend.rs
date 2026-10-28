@@ -636,7 +636,14 @@ fn deliver_cmd(bend: &Bend, mut args: Args) -> Result<()> {
     let view = activity::view(&bend.ws, &json!({"objects": [&object], "births": [{"object": &object, "transaction": &transaction}]}))?;
     let (record, await_id) = deliverable(&view)?;
     let (payer, payer_cap) = bend.payer(account.as_deref())?;
-    let turn = json!({"kind": "deliver", "record": record, "await": await_id, "account": payer, "accountCapability": payer_cap});
+    let mut turn = json!({"kind": "deliver", "record": record, "await": await_id, "account": payer, "accountCapability": payer_cap});
+    // The resumed segment runs over the stored checkpoint: when it needs more heap than the
+    // escrowed envelope carries, the deliverer adds the difference (`heapUncovered`; priced,
+    // paid by me). The Host's read-only quote is the kernel's own `ResumeTail.needed`.
+    let quoted = activity::view(&bend.ws, &json!({"quotes": [{"record": &record, "await": &await_id}]}))?;
+    if let Some(heap) = extra_heap(&quoted, &record, &await_id)? {
+        turn["extra"] = extra_envelope(heap);
+    }
     let name = deliver_name(&await_id);
     let meta = json!({"kind": "deliver", "object": object, "transaction": transaction, "await": await_id});
     match bend.submit(&name, "deliver", &turn, &meta, false) {
@@ -655,6 +662,29 @@ fn deliverable(view: &Value) -> Result<(String, String)> {
     }
     let await_id = phase.pointer("/await/id").and_then(Value::as_str).ok_or("bend: the await names no id")?;
     Ok((record.to_owned(), await_id.to_owned()))
+}
+
+/// The heap a delivery must add to its escrowed envelope, from the view's quote of `(record, await)`:
+/// `needed - escrow`, or none when the escrow already covers the resumed segment.
+fn extra_heap(view: &Value, record: &str, await_id: &str) -> Result<Option<u128>> {
+    let quote = view.get("quotes").and_then(Value::as_array).into_iter().flatten()
+        .find(|q| q["record"] == record && q["await"] == await_id)
+        .ok_or("bend: the Host quoted no heap for this await")?;
+    if let Some(reason) = quote.get("refused") {
+        return Err(format!("refused: the pending await cannot be delivered: {reason}"));
+    }
+    let number = |k: &str| quote[k].as_str().and_then(|v| v.parse::<u128>().ok())
+        .ok_or_else(|| format!("bend: the heap quote's {k} is not a decimal"));
+    let (needed, escrow) = (number("needed")?, number("escrow")?);
+    Ok((needed > escrow).then(|| needed - escrow))
+}
+
+/// An added envelope carrying only heap: every other member zero.
+fn extra_envelope(heap: u128) -> Value {
+    let mut c = serde_json::Map::new();
+    for k in ENVELOPE_KEYS { c.insert(k.into(), json!("0")); }
+    c.insert("heap".into(), json!(heap.to_string()));
+    Value::Object(c)
 }
 
 fn deliver_name(await_id: &str) -> String {
@@ -709,6 +739,20 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deliver_adds_exactly_the_heap_the_quote_lacks() {
+        let quote = |needed: &str, escrow: &str| json!({"quotes": [{"record": "41", "await": "55", "needed": needed, "escrow": escrow}]});
+        assert_eq!(extra_heap(&quote("200018", "200000"), "41", "55").unwrap(), Some(18));
+        assert_eq!(extra_heap(&quote("200000", "200000"), "41", "55").unwrap(), None);
+        assert_eq!(extra_heap(&quote("10", "200000"), "41", "55").unwrap(), None);
+        assert!(extra_heap(&quote("1", "1"), "41", "56").is_err(), "a quote for another await is not this one's");
+        let refused = json!({"quotes": [{"record": "41", "await": "55", "refused": "awaitMismatch"}]});
+        assert!(extra_heap(&refused, "41", "55").unwrap_err().starts_with("refused:"));
+        let e = extra_envelope(18);
+        assert_eq!(e.as_object().unwrap().len(), ENVELOPE_KEYS.len());
+        assert_eq!((e["heap"].as_str(), e["stack"].as_str()), (Some("18"), Some("0")));
+    }
 
     #[test]
     fn deliver_names_the_awaiting_record_and_its_await() {
