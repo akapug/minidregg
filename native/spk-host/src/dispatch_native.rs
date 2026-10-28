@@ -47,7 +47,7 @@ fn read_bounded(path: &Path, bound: usize) -> io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
-/// Read a READ-ONLY pinned input (the Host config) through ONE descriptor: opened O_NOFOLLOW, then
+/// Read a READ-ONLY pinned input (the Host config) from a parent `pinned_input_dir` admits, through ONE descriptor: opened O_NOFOLLOW, then
 /// fstat'ed on that same descriptor (a regular file owned by this user or root and writable by
 /// neither group nor others), then read from it. A symlink, a directory or a file a non-owner can
 /// alter is refused by name. The bytes returned are the bytes of that descriptor, so a digest taken
@@ -60,6 +60,7 @@ pub(crate) fn read_pinned_input(path: &Path, bound: usize) -> io::Result<Vec<u8>
             format!("pinned input {} refused: {property}", path.display()),
         ))
     };
+    pinned_input_dir(path.parent().ok_or_else(|| invalid("pinned input parent absent"))?)?;
     let file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
@@ -2109,6 +2110,11 @@ mod tests {
         fs::set_permissions(&file, fs::Permissions::from_mode(0o660)).unwrap();
         let error = read_pinned_input(&file, 64).unwrap_err().to_string();
         assert!(error.contains("pinned input") && error.contains("writable by group or others"), "{error}");
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o640)).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o770)).unwrap();
+        let error = read_pinned_input(&file, 64).unwrap_err().to_string();
+        assert!(error.contains("pinned input directory") && error.contains("writable by group or others"), "{error}");
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o710)).unwrap();
         fs::remove_file(&link).unwrap();
         fs::remove_file(&file).unwrap();
         fs::remove_dir(&dir).unwrap();
