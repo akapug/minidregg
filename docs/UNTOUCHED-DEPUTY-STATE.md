@@ -50,7 +50,8 @@ fn out; private-backend stays; Effects/ registry is Phase 3 (EFFECTS.md); dues a
 - op 7 `physical report differs` (controlGroup over 256 bytes): 507d6ce78 (bound 4096) is on main as 76758dba6; its candidate build is armed after 7027e0ace. The japps co-edit row runs on the 76758dba6 candidate.
 - wip 25537e481 (lane tip) holds only a refinement beyond 507d6ce78: the bound derived from the naming scheme (317 = uid 10 + Store tag 16 x5 + app/generation 18 digits, under the user manager), `controlGroupWithin` shared by the three report versions, decide-examples (260 accepted, 317 accepted, 318 and empty refused), and a Rust broker test building the longest real path from grains_slice/class_slice/app_slice (= 317). Not needed for any row; lands after the codec-resident fix, elaborated on a box.
 - PRIORITY: SQLite `failure 15: locking protocol` (SQLITE_PROTOCOL) at world start is a PRODUCT red, not harness. Cause NOT yet found. It is NOT orphan residents: the codec-resident pairs on hbox are all under 30 min old and belong to live worlds (the coordinator had misread ps etime; none were killed). Leads, handed to a6603277e4ffe2d70: concurrent world-ups sharing mini-operator's HOME consent-anchor state or lock files (/home/mini-operator/.mini/consent-anchors/c-*.lock), or one SQLite database/WAL/-shm shared across worlds or a uid boundary. Fix at the cause (per-world state), with a two-worlds-at-once concurrency test that is red without it. Second, as hygiene only: codec-resident idle exit, exit on parent death, and a PID file inside the world so world-down stops a partial world.
-- Until it lands: app worlds start ONE AT A TIME. Killing the existing orphans waits on ember's word (no PID file: not ours to kill).
+- Until it lands: app worlds start ONE AT A TIME; every hbox world-up (mine and the rows validator's) runs as `flock /tank/lanes/world-up.lock <world-up command>`, the world-up phase only (B3, B5, B8 told; B7 abf203f357754001b runs under /tank too). Killing the existing orphans waits on ember's word (no PID file: not ours to kill).
+- hbox world-ups take `flock /tank/lanes/world-up.lock <world-up>` (world-up phase only), shared with the rows validator. install-user-world's passwordless sudo covers only source trees under /tank/dregg-build/claude-lanes/*/src.
 - Box hygiene: hbox staging (candidate copies, worlds, grain installs) under /tank, never / (85% used); each faerie deletes its own staging dirs when its run ends.
 
 ## Story law install red (lane/un-story-install, Sonnet acf88647b53657831)
@@ -58,7 +59,7 @@ fn out; private-backend stays; Effects/ registry is Phase 3 (EFFECTS.md); dues a
 
 ## Market reds on 2d8b7ed54 (beyond the resident-start and op 7 reds)
 - B8 (a13f0bc9626b1320a): IPython "583 segments > 512" is a harness red: grain-journey wrote grain-host.json without importProfile, so Class L installs ran at standard-v1. Fixed at 50ec8de76 (sent to the integrator); affects every large-profile table. Mercurial/MediaWiki/Firefly III stopped at resident start. Parked for the 76758dba6-or-later candidate.
-- B3 (a85d12892ea6de3ca): EtherDraw/Scrumblr/SwaggerEditor stopped at op 7 (fixed by 507d6ce78). DiagramsNet: `resident bootstrap refused: running app ViewInfo differs from signed bridge schema`; it is a non-bridge package (root /server speaks WebSession). The faerie now owns the fix on lane/un-spk-nonbridge (compare against the bridge schema only when the manifest declares a bridge, or a named unsupported refusal), red-first tests.
+- B3 (a85d12892ea6de3ca): EtherDraw/Scrumblr/SwaggerEditor stopped at op 7 (fixed by 507d6ce78). DiagramsNet is a non-bridge package whose /server declares permission `write` and roles editor/viewer while signing no bridge schema. RULED: keep the named refusal (lane/un-spk-nonbridge 0870373ae, `check_running_view_info`, red-first tests; sent to the integrator). Taking the running ViewInfo as signed would grant unsigned permissions. DiagramsNet stays out of FEATURED, with the reason in its row. B3 reruns on 76758dba6 + 0870373ae.
 - SQLite failure-15 findings so far (a6603277e4ffe2d70): no shared SQLite state across worlds (each DB, head anchor and lock sit under the world's store root); residents already idle-exit and write a PID file, but in the shared $HOME anchor dir where world-down cannot see it; 24 concurrent readers at load 50 did not reproduce. A two-worlds-at-once start under /tank is next.
 
 ## Coordinator status
@@ -69,6 +70,9 @@ Older: 2d8b7ed54 (jtemplates 196/196 there), 7027e0ace.
 
 ## Rows validator (a373556d56d56744d)
 Its hbox worlds: /tank/rows-2d8b7ed5-apps/w-{featured,b1,b2,b4,b6,rt,fixups}. Mine: b3 /tank/lanes/app-market-b3, b5 /tank/rows-b5, b7 and b8 under /tank; japps /build/lanes/un-stream-continuity-runs/w*, jtemplates /build/t/uns-run* (dregg-build). Verdicts go to it for ROWS-OWED section 0.
+
+## Shas sent to the integrator this round
+a8376ce8f (story GM install), 50ec8de76 (importProfile), 353a6d11d (pb helpers), 20f28ac31 (commons split + world READMEs). Infra told a8376ce8f fixes its demo-dry story red; the door README already says author = the seed's SEED_HOST (bc6c837ba).
 
 ## Next three
 1. Read the six runs on 2d8b7ed54 and the validator's batch tables; fix reds (recipes or spk-host); add every app green on lifecycle + write to FEATURED in apps.rs; tell the coordinator when DDP can rerun.
