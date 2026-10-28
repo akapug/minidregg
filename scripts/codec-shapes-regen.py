@@ -137,6 +137,8 @@ def classify(moved, baseline, fresh, bumped, prefixes, sources):
     (hexid -> (fingerprint, text)) at the start of the run and now; `bumped`: the
     hexids this run renamed; `prefixes`: declared bare-prefix texts; `sources`:
     [(file, text)] that are not the registry or the pins.
+    A prefix whose child this run renamed in the current round, before the build
+    that births the new name, is neither: it is judged again next round.
     Returns (repins: [(text, child text)], manual: [text])."""
     renamed = set(bumped) | {h for h in baseline if h not in fresh}
     born = {h for h in fresh if h not in baseline}
@@ -148,6 +150,9 @@ def classify(moved, baseline, fresh, bumped, prefixes, sources):
         under = lambda h: h.startswith(hexid) and len(h) > len(hexid)
         gone = sorted(h for h in renamed if under(h))
         new = sorted(h for h in born if under(h))
+        if gone and not new and any(h in bumped for h in gone) \
+                and not complete_frame_spellings(text, sources):
+            continue  # its child was renamed this round; the new name is born next round
         if not gone or not new or complete_frame_spellings(text, sources):
             manual.append(text)
             continue
@@ -176,6 +181,9 @@ def selftest():
          classify(moved, baseline, fresh_bumped, set(), set(), ok_src), ([], ["P"])),
         ("only an old child gone, no new one born: refused",
          classify(moved, baseline, {p: ("2" * 16, "P")}, set(), {"P"}, ok_src), ([], ["P"])),
+        ("a child bumped this round, its new name not built yet: judged next round",
+         classify(moved, baseline, {p: ("2" * 16, "P"), child_old: ("4" * 16, "P?")}, {child_old},
+                  {"P"}, ok_src), ([], [])),
     ]
     hx = lambda t: t.encode().hex()
     tags = "T.lean"

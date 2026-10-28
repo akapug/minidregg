@@ -305,7 +305,7 @@ namespace Minidregg.Compiler.PersistedCodecTags
 @[persisted_codec_tag] abbrev application_route_admission_challenge_v1 : String := "DREGG/APPLICATION/ROUTE-ADMISSION-CHALLENGE/v1"
 @[persisted_codec_tag] abbrev world_methods_byte_v1 : List UInt8 := "DREGG/WORLD/METHODS".toUTF8.toList ++ [1]
 @[persisted_codec_tag] abbrev policy_install_event_v1 : String := "DREGG.POLICY.INSTALL.EVENT/v1"
-@[persisted_codec_tag] abbrev native_host_log_tag : String := "DREGG/NATIVE-HOST/LOG-TAG"
+@[persisted_codec_tag] abbrev prefix_native_host_log_tag : String := "DREGG/NATIVE-HOST/LOG-TAG"
 @[persisted_codec_tag] abbrev application_lifecycle_claim_committed_v1 : String := "DREGG/APPLICATION/LIFECYCLE-CLAIM-COMMITTED/v1"
 @[persisted_codec_tag] abbrev fn_consumer_namespace_ingress_v1 : String := "DREGG/FN/CONSUMER-NAMESPACE-INGRESS/v1"
 @[persisted_codec_tag] abbrev authority_nullifier_v1 : String := "DREGG.AUTHORITY.NULLIFIER/v1"
