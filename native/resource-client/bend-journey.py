@@ -166,6 +166,7 @@ try:
             r = w.sh(label, w.mini, 'shell', '--socket', w.sock, '--host', w.host, '--config', w.config, '--workspace', w.second,
                      '--home', phome, '--line', line, ok=(0, 1, 2, 3, 4))
             return r.returncode, r.stdout.decode(errors='replace').strip(), r.stderr.decode(errors='replace').strip()
+        (w.second / 'refs').mkdir(mode=0o700, exist_ok=True)
         w.sh('poor-account', w.mini, 'workspace', '--action', 'import', '--dir', w.second, '--name', 'account', '--kind', 'account',
              '--target', w.SECOND, '--observe-capability', w.SECOND_SPEND, '--operation-capability', w.SECOND_SPEND)
         rc, out, err = pshell('poor-publish', 'bend publish poor @PoorTally.obend --entry tally')
