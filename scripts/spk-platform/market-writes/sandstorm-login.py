@@ -27,7 +27,9 @@ def post_login_token(route, token):
         if not chunk:
             break
         reply += chunk
-    return reply.split(b"\r\n", 1)[0].decode("latin1") + " " + reply.split(b"\r\n\r\n", 1)[-1][:120].decode("latin1")
+    # One line, whole status plus the first 400 bytes of the body (a 500 carries the app's stack trace).
+    text = reply.split(b"\r\n", 1)[0].decode("latin1") + " " + reply.split(b"\r\n\r\n", 1)[-1][:400].decode("latin1")
+    return " ".join(text.split())
 
 
 def login(send, wait, route, mid="0"):

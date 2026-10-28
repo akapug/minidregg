@@ -29,7 +29,7 @@ def main():
         a = ddp.connect(route); a.ddp()
         logged, posted = sl.login(a.send, a.until, route)
         if not logged or "error" in logged:
-            print("0 loginWithSandstorm refused: %s; POST /.sandstorm-login: %s" % (str(logged)[:160], posted[:100])); return
+            print("0 loginWithSandstorm refused: %s; POST /.sandstorm-login: %s" % (str(logged)[:160], posted[:450])); return
         a.send({"msg": "method", "method": "/Data/update", "id": "1",
                 "params": [{"_id": "default_id"}, {"$set": {"value": text}}]})
         res = a.until(lambda m: m.get("msg") == "result" and m.get("id") == "1", 120)
