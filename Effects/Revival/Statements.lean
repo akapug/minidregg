@@ -13,7 +13,7 @@ verdict.
   the deployed one (`Theory.Store`'s guarded `Op`s); the Book's posting algebra is the second
   (transfer, migration step 2).
 * §2 `EffectSpec`: ONE effect as ONE declaration.  Its semantics emits a first-order
-  descriptor (a list of primitives) or refuses BY NAME; the kernel's seal (the blinding
+  descriptor (a list of primitives) or refuses BY NAME; the kernel's rotate (the blinding
   ratchet), the field classification, the declared frame, the verb and the law's view are
   declaration data.  The checked executor `exec` is derived; nothing about it is authored.
 * §3 `Handler`, `Registry`, `dispatch`, `LawfulRegistry`: the open registry and the one
@@ -113,8 +113,8 @@ codec; `R` the refusals it may name.
 
 * `sem` emits the descriptor (the guarded patch) or refuses by name.  The post state is the
   descriptor's replay, never a second authored computation.
-* `seal` is the kernel's own per-cell step appended to every admitted descriptor (the
-  blinding ratchet, K-HIDE-ROTATE); `sealed` marks the locations it writes.
+* `rotate` is the kernel's own per-cell step appended to every admitted descriptor (the
+  blinding ratchet, K-HIDE-ROTATE); `rotated` marks the locations it writes.
 * `field` classifies locations into capability fields, `amount` their numeric weight (the
   footprint `fieldsCheck` judges); `frame` is the DECLARED set of fields an operation may
   write.
@@ -128,8 +128,8 @@ structure EffectSpec (Ctx : Type) (S : Substrate) (O R : Type) where
   accepts : ResourceKind → Bool
   version : Nat
   sem : Ctx → O → S.State → Except R (List S.Prim)
-  seal : Ctx → S.State → List S.Prim
-  sealed : S.Loc → Bool
+  rotate : Ctx → S.State → List S.Prim
+  rotated : S.Loc → Bool
   field : S.Loc → CellField
   amount : (loc : S.Loc) → S.Obs loc → Int
   frame : O → Finset CellField
@@ -155,13 +155,13 @@ namespace EffectSpec
 
 variable {Ctx : Type} {S : Substrate} {O R : Type} (E : EffectSpec Ctx S O R)
 
-/-- The full emitted descriptor: the operation's patch, then the kernel's seal. -/
+/-- The full emitted descriptor: the operation's patch, then the kernel's rotate. -/
 def emitted (ctx : Ctx) (op : O) (s : S.State) : Except R (List S.Prim) :=
-  (E.sem ctx op s).map fun ps => ps ++ E.seal ctx s
+  (E.sem ctx op s).map fun ps => ps ++ E.rotate ctx s
 
 /-- Every unsealed location a descriptor writes lies in a declared field of `op`. -/
 def InFrame (op : O) (ps : List S.Prim) : Prop :=
-  ∀ loc ∈ S.footprint ps, E.sealed loc = false → E.field loc ∈ E.frame op
+  ∀ loc ∈ S.footprint ps, E.rotated loc = false → E.field loc ∈ E.frame op
 
 instance (op : O) (ps : List S.Prim) : Decidable (E.InFrame op ps) := by
   unfold InFrame; infer_instance
@@ -174,8 +174,8 @@ def exec (code : Nat) (ctx : Ctx) (op : O) (s : S.State) : Except DispatchRefusa
   match E.sem ctx op s with
   | .error r => .error (.refused code (E.refusalName r))
   | .ok ps =>
-    if E.InFrame op (ps ++ E.seal ctx s) then
-      match S.run s (ps ++ E.seal ctx s) with
+    if E.InFrame op (ps ++ E.rotate ctx s) then
+      match S.run s (ps ++ E.rotate ctx s) with
       | none => .error (.guardFailed code)
       | some s' => .ok s'
     else .error (.outOfFrame code)
@@ -185,7 +185,7 @@ in its declared frame and its emitted descriptor replays: the dispatcher's two o
 refusals never fire, so every refusal of a complete declaration is one of its own names. -/
 def Complete : Prop :=
   ∀ ctx op s ps, E.sem ctx op s = .ok ps →
-    E.InFrame op (ps ++ E.seal ctx s) ∧ (S.run s (ps ++ E.seal ctx s)).isSome
+    E.InFrame op (ps ++ E.rotate ctx s) ∧ (S.run s (ps ++ E.rotate ctx s)).isSome
 
 end EffectSpec
 
@@ -271,7 +271,7 @@ structure Dispatches {Ctx Cell : Type} (R : Registry Ctx Cell) (legacy : List Na
     d code bytes ctx cell = .ok cell' →
       ∃ (op : e.O) (s s' : e.S.State), e.spec.opStream.toLawful.decode bytes = some op ∧
         e.select cell = some s ∧ e.select cell' = some s' ∧
-        ∀ loc, e.spec.sealed loc = false → e.spec.field loc ∉ e.spec.frame op →
+        ∀ loc, e.spec.rotated loc = false → e.spec.field loc ∉ e.spec.frame op →
           e.S.read s' loc = e.S.read s loc
 
 /-! ## §5. The engine keystone, the completeness keystone, and their poles. -/
@@ -326,32 +326,32 @@ frame `{slot 0}`; it never leaves it. -/
 def entryASpec : EffectSpec Unit ToySubstrate Nat ToyRefusal where
   opStream := StreamCodec.nat
   refusalName := toyRefusalName
-  accepts _ := true
+  accepts := fun _ => true
   version := 1
-  sem _ n s := if 9 < n then .error .tooLarge else .ok (toyWrite false n s)
-  seal _ _ := []
-  sealed _ := false
+  sem := fun _ n s => if 9 < n then .error .tooLarge else .ok (toyWrite false n s)
+  rotate := fun _ _ => []
+  rotated := fun _ => false
   field := toyField
-  amount _ _ := 0
-  frame _ := {.slot 0}
-  verb kind _ := DeclaredResourceScalar.ordinaryVerb kind
-  view _ _ _ := []
+  amount := fun _ _ => 0
+  frame := fun _ => {.slot 0}
+  verb := fun kind _ => DeclaredResourceScalar.ordinaryVerb kind
+  view := fun _ _ _ => []
 
 /-- Entry B (code 1): `true` writes field `true` (in its declared frame `{slot 1}`),
 `false` writes field `false` — OUT of its frame.  The dispatcher must refuse the latter. -/
 def entryBSpec : EffectSpec Unit ToySubstrate Bool ToyRefusal where
   opStream := StreamCodec.bool
   refusalName := toyRefusalName
-  accepts _ := true
+  accepts := fun _ => true
   version := 1
-  sem _ b s := .ok (toyWrite b 1 s)
-  seal _ _ := []
-  sealed _ := false
+  sem := fun _ b s => .ok (toyWrite b 1 s)
+  rotate := fun _ _ => []
+  rotated := fun _ => false
   field := toyField
-  amount _ _ := 0
-  frame _ := {.slot 1}
-  verb kind _ := DeclaredResourceScalar.ordinaryVerb kind
-  view _ _ _ := []
+  amount := fun _ _ => 0
+  frame := fun _ => {.slot 1}
+  verb := fun kind _ => DeclaredResourceScalar.ordinaryVerb kind
+  view := fun _ _ _ => []
 
 /-- The ghost of entry A: it reads the same operation as `n + 1`. -/
 def ghostASpec : EffectSpec Unit ToySubstrate Nat ToyRefusal :=
@@ -362,7 +362,7 @@ def toyEntry {O R : Type} (spec : EffectSpec Unit ToySubstrate O R) : Handler Un
   O := O
   R := R
   spec := spec
-  header _ _ := .ok ()
+  header := fun _ _ => .ok ()
   select c := some c
   pack s := s
 
@@ -398,7 +398,7 @@ def dispatchUnframed {Ctx Cell : Type} (R : Registry Ctx Cell) (code : Nat)
         match e.spec.sem ctx op s with
         | .error r => .error (.refused code (e.spec.refusalName r))
         | .ok ps =>
-          match e.S.run s (ps ++ e.spec.seal ctx s) with
+          match e.S.run s (ps ++ e.spec.rotate ctx s) with
           | none => .error (.guardFailed code)
           | some s' => .ok (e.pack s')
 
@@ -506,14 +506,14 @@ def contentSpec : ContentSpec where
   accepts kind := kind == .object
   version := ContentResource.commandVersion
   sem := contentSem
-  seal ctx s := HyperdocumentCell.contentBlinding.patch s ctx.ambient.height
-  sealed := fun (loc : Address Hyperdocument.layout) => match loc.1 with
+  rotate ctx s := HyperdocumentCell.contentBlinding.patch s ctx.ambient.height
+  rotated := fun (loc : Address Hyperdocument.layout) => match loc.1 with
     | .blinding => true
     | _ => false
   field := ResourceObservationAdmission.contentFieldAt
-  amount _ _ := 0
+  amount := fun _ _ => 0
   frame := contentFrame
-  verb kind _ := DeclaredResourceScalar.ordinaryVerb kind
+  verb := fun kind _ => DeclaredResourceScalar.ordinaryVerb kind
   view command before after := ContentResource.project before after command
 
 /-- A content target with the given header. -/
@@ -532,10 +532,10 @@ transaction context, content command and loaded content cell:
    exactly when the live arm computes `p` AND the live patch validates at the loaded
    store (what `prepareTarget` requires before it builds a candidate);
 3. refusal — a content refusal of the live arm is the declaration's, by name;
-4. descriptor — the live patch IS the declaration's descriptor followed by its seal
+4. descriptor — the live patch IS the declaration's descriptor followed by its rotate
    (`computeTarget`/`targetPatch` stop being twins);
 5. authority — `targetField`, `targetRatchet`, `targetAmount`, `payloadVerb` and
-   `targetProjection` are the declaration's `field`, `sealed`, `amount`, `verb`, `view`.
+   `targetProjection` are the declaration's `field`, `rotated`, `amount`, `verb`, `view`.
 
 Clause 2 also tests the declared frame: a live-admitted command that wrote outside
 `contentFrame` would be refused `outOfFrame` by `exec`. -/
@@ -566,14 +566,14 @@ def ContentAgreement (E : ContentSpec) : Prop :=
     (∀ ps, E.sem ctx command pre.logical = .ok ps →
       DeclaredResourceController.targetPatch ctx.snapshot ctx.semantics ctx.ambient ctx.command
           (contentTarget ctx E.version pre.root command observe epoch roster) pre =
-        ps ++ E.seal ctx pre.logical)) ∧
+        ps ++ E.rotate ctx pre.logical)) ∧
   (∀ version root,
     (∀ a : Address Hyperdocument.layout,
       DeclaredResourceController.targetField
         (contentTarget ctx version root command observe epoch roster) a = E.field a) ∧
     (∀ a : Address Hyperdocument.layout,
       DeclaredResourceController.targetRatchet
-        (contentTarget ctx version root command observe epoch roster) a = E.sealed a) ∧
+        (contentTarget ctx version root command observe epoch roster) a = E.rotated a) ∧
     (∀ (a : Address Hyperdocument.layout) (v : Hyperdocument.layout.Value a.1),
       DeclaredResourceController.targetAmount
         (contentTarget ctx version root command observe epoch roster) a v = E.amount a (some v)) ∧
@@ -584,7 +584,7 @@ def ContentAgreement (E : ContentSpec) : Prop :=
           E.view command before after))
 
 /-- The content declaration's own obligation: every admitted content command writes only
-its declared fields and its descriptor (with the seal) replays. -/
+its declared fields and its descriptor (with the rotate) replays. -/
 def ContentComplete : Prop := contentSpec.Complete
 
 /-! ### The live keystone's ATLAS fields. -/
@@ -604,13 +604,13 @@ def ContentAccepted : Prop :=
         (contentTarget ctx contentSpec.version pre.root command observe epoch roster) pre)
 
 /-- The ghost declaration: the same lowering without the kernel's blinding ratchet. -/
-def contentGhost : ContentSpec := { contentSpec with seal := fun _ _ => [] }
+def contentGhost : ContentSpec := { contentSpec with rotate := fun _ _ => [] }
 
 /-- The narrowed declaration: the same lowering, its frame without `annotations`. -/
 def contentNarrowed : ContentSpec :=
   { contentSpec with frame := fun command => (contentFrame command).erase .annotations }
 
-/-- **Teeth.**  The agreement refutes a declaration that drops the seal; completeness
+/-- **Teeth.**  The agreement refutes a declaration that drops the rotate; completeness
 refutes a frame that omits a field an action writes (`annotate`). -/
 def ContentTeeth : Prop :=
   ¬ ContentAgreement contentGhost ∧ ¬ contentNarrowed.Complete
@@ -640,7 +640,7 @@ source, the audience freshness and the authority legs stay the controller's). -/
 dispatch carries more). -/
 def EffectSpec.comap {C C' : Type} {S : Substrate} {O R : Type} (f : C' → C)
     (E : EffectSpec C S O R) : EffectSpec C' S O R :=
-  { E with sem := fun c => E.sem (f c), seal := fun c => E.seal (f c) }
+  { E with sem := fun c => E.sem (f c), rotate := fun c => E.rotate (f c) }
 
 /-- The host dispatch's context: the target computation's, plus the deployment and the
 target header (`selectTarget`'s cell law, the schema version, the expected root, the
@@ -727,7 +727,7 @@ def HostKeystone : Prop :=
   Dispatches [(1, contentHandler)] hostLegacy hostTargetDispatch
 
 /-- **Teeth.**  The host dispatch does not dispatch through a registry whose content
-handler drops the seal, nor through one that also keeps code 1 as a hand arm. -/
+handler drops the rotate, nor through one that also keeps code 1 as a hand arm. -/
 def HostTeeth : Prop :=
   ¬ Dispatches [(1, contentHandlerOf contentGhost)] hostLegacy hostTargetDispatch ∧
   ¬ Dispatches [(1, contentHandler)] (1 :: hostLegacy) hostTargetDispatch
