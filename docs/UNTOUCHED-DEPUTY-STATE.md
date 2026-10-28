@@ -1,4 +1,4 @@
-# Untouched-areas deputy: state (rewritten whole; 2026-10-28 09:20: un-spk-ioctx done)
+# Untouched-areas deputy: state (rewritten whole; 2026-10-28 09:40: japps w6 inconclusive, waits for the 7280f9db8 candidate)
 
 Inputs: docs/review/2026-10-27-untouched-areas/{LEAN,NATIVE}.md, docs/review/2026-10-27-blind-spots/BLIND-SPOTS.md Sweep 1.
 Each lane: /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>.
@@ -15,7 +15,8 @@ Each lane: /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>.
 ## Boxes after the 08:57 dregg-build OOM (coordinator)
 - dregg-build (30 GB) OOM-killed the integrator's host stage at load 76. It is the integration box only now: nothing heavy beside the integrator's builds.
 - Every faerie world run and box build goes to hbox under /tank/lanes/<lane>, `flock -o /tank/lanes/world-up.lock` around world-up, PID file, staging deleted after. All told and acknowledged: B3, B5, B7, B8, un-assurance (idle), japps faerie.
-- Only exception: japps w6 (a4e312352a7091f59, /build/lanes/un-stream-continuity/job7.pid, started 08:31) survived the OOM and finishes there; nothing new starts there. Its next run (391311929 + bf5ead3fa candidate) goes to hbox /tank/lanes/un-stream-continuity. Open risk it will name if hit: `japps --box` may need install-user-world's lanes sudoers rules, which exist only on dregg-build (hbox's passwordless rule covers only /tank/dregg-build/claude-lanes/*/src).
+- japps w6 FINISHED, INCONCLUSIVE for the Hacker Slides write (its box tree was on the old overlay 55510fca2, without the repeat-suffix and anchor fixes): 25/27, co-edit PASS, the two FAILs cascade from the stale enroll-a2. w1-w6 and bin2 removed; logs in /build/lanes/un-stream-continuity-evidence. Nothing of it runs on dregg-build. Next run: hbox, on the first candidate of main 7280f9db8 (carries 391311929 + bf5ead3fa), a clean checkout verified by ancestry; continuation file JAPPS-STATE.md asked for (context ~500k).
+- (history) japps w6 (a4e312352a7091f59, /build/lanes/un-stream-continuity/job7.pid, started 08:31) survived the OOM and finishes there; nothing new starts there. Its next run (391311929 + bf5ead3fa candidate) goes to hbox /tank/lanes/un-stream-continuity. Open risk it will name if hit: `japps --box` may need install-user-world's lanes sudoers rules, which exist only on dregg-build (hbox's passwordless rule covers only /tank/dregg-build/claude-lanes/*/src).
 - japps faerie context ~493k: continuation file by ~580k.
 
 ## Landed (all on main as of e05a19fe)
