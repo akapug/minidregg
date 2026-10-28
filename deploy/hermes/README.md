@@ -648,3 +648,18 @@ For an explicitly qualified controller binary successor before birth,
 `J14_ORACLE_CONTROLLER_UPGRADE` names a private JSON file containing `runtime`,
 `sha256`, and `sourceCommit`; the driver retains the stopped installer's upgrade
 receipt. Ordinary runs should start with the final selected runtime.
+
+The Oracle journey keeps private operator listeners under a private child of
+its socket directory. Public participant sockets remain outside that child;
+restoring a public listener reapplies the staged controller's connect ACL to
+its new inode.
+
+For a preserved world stopped before worker birth and the application's first
+START, `J14_ORACLE_OPERATOR_RELOCATION` may name a private JSON request with
+`protocol: mini-j14-operator-relocation-v1`, `previousSocket`, `socket`, and
+`hostConfigSha256`. The destination is the journey's `private/operator.sock`.
+The driver retains an exact transport transition for the baseline profile,
+operator workspaces and credential broker, then uses the stopped installer's
+`controller-operator-endpoint` operation. Store settings, keys and completed
+application attempts stay pinned. An active successor profile or a later
+application phase requires its own native recovery path.

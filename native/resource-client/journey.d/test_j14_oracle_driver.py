@@ -160,4 +160,88 @@ class ProcessEvidenceTests(unittest.TestCase):
             for suffix in ['stdout','stderr','process.json']:self.assertEqual((root/('provider.'+suffix)).read_text(),'prior evidence')
             self.assertEqual(j.daemons[0]['label'],'provider-01')
 
+class OperatorTransportTests(unittest.TestCase):
+    def fixture(self,root):
+        root=Path(root);sockets=root/'sockets';sockets.mkdir(mode=0o700)
+        work=root/'workspaces';work.mkdir();sponsor=root/'sponsor';sponsor.mkdir();(work/'alice').mkdir()
+        provider=sockets/'provider';provider.mkdir();state=root/'state';state.mkdir()
+        host=root/'host';host.write_bytes(b'pinned Host')
+        def private(path,value):
+            driver.write(path,value);path.chmod(0o600);return path
+        config=private(root/'host.json',{'store':'same','domain':7,'keys':'unchanged'})
+        old=sockets/'operator-v2.sock';old.with_suffix('.config').write_bytes(config.read_bytes());old.with_suffix('.config').chmod(0o600)
+        profile=private(state/'grain-host.json',{'miniOperatorSocket':str(old),'miniConfig':str(config),
+            'miniConfigSha256':driver.sha(config),'miniHost':str(host),'miniHostSha256':driver.sha(host),
+            'stateRoot':str(state),'managementSeed':'unchanged-private-path','managementSubject':'7'})
+        result=private(root/'profile-result.json',{'profilePath':str(profile),'stateRoot':str(state)})
+        workspace={'socket':str(old),'config':str(config),'host':str(host),'hostSha256':driver.sha(host),
+                   'subject':'7','key':'unchanged-private-key-path'}
+        paths=[profile,private(sponsor/'workspace.json',workspace),private(work/'alice/workspace.json',{**workspace,'subject':'8'})]
+        paths.append(private(provider/'broker.json',{'socket':str(provider/'keys.sock'),'credentials':{
+            'publicSocket':str(old),'hostConfig':str(config),'host':str(host),'hostSha256':driver.sha(host),
+            'publicSocketUid':driver.os.getuid(),'key':'unchanged-broker-key'}}))
+        request=private(root/'relocate.json',{'protocol':'mini-j14-operator-relocation-v1','previousSocket':str(old),
+            'socket':str(sockets/'private/operator.sock'),'hostConfigSha256':driver.sha(config)})
+        j=driver.Journey.__new__(driver.Journey);j.root=root;j.sockets=sockets;j.workspaces=work;j.host=str(host)
+        j.controller=True;j.resume_phase='worker_birth';j.layout={'controllerUid':driver.os.getuid()+100}
+        j.c={'operatorSocket':str(old),'publicSocket':str(sockets/'participant.sock'),'hostConfig':str(config),
+             'profileResult':str(result),'sponsorWorkspace':str(sponsor)}
+        j.restart_daemons=[{'label':'operator','argv':[str(host),'serve-operator','--socket',str(old)],'socket':str(old)},
+            {'label':'public','argv':[str(host),'serve-public-proxy','--socket',j.c['publicSocket'],'--upstream',str(old)],'socket':j.c['publicSocket']}]
+        return j,request,paths
+
+    def test_prebirth_relocation_changes_only_transport_and_retains_exact_reentry(self):
+        with tempfile.TemporaryDirectory(prefix='j14-operator-',dir='/tmp') as temp:
+            j,request,paths=self.fixture(temp);before=[driver.read(path) for path in paths]
+            settings=Path(j.c['hostConfig']).read_bytes()
+            with patch.dict(driver.os.environ,{'J14_ORACLE_OPERATOR_RELOCATION':str(request)}):
+                j.prepare_operator_relocation();new=j.c['operatorSocket']
+                after=[driver.read(path) for path in paths]
+                self.assertEqual(after[0],{**before[0],'miniOperatorSocket':new})
+                for i in [1,2]:self.assertEqual(after[i],{**before[i],'socket':new})
+                expected=driver.json.loads(driver.json.dumps(before[3]));expected['credentials']['publicSocket']=new
+                self.assertEqual(after[3],expected)
+                self.assertEqual(Path(j.c['hostConfig']).read_bytes(),settings)
+                plan=Path(j.c['operatorTransportTransition']);retained=plan.read_bytes()
+                j.prepare_operator_relocation();self.assertEqual(plan.read_bytes(),retained)
+                self.assertEqual(j.restart_daemons[0]['socket'],new)
+                self.assertEqual(j.restart_daemons[1]['argv'][-1],new)
+                with patch.object(j,'fixed',return_value=Path(temp)/'endpoint-receipt.json') as fixed:
+                    j.finish_operator_relocation()
+                    self.assertEqual([call.args for call in fixed.call_args_list],[('controller-stop',),('controller-operator-endpoint',new)])
+                changed=driver.read(paths[1]);changed['subject']='foreign';paths[1].write_text(driver.json.dumps(changed))
+                with self.assertRaisesRegex(ValueError,'outside retained'):j.prepare_operator_relocation()
+
+    def test_relocation_refuses_active_profile_or_changed_store_before_metadata_write(self):
+        for control in ['active','store','later','daemon']:
+            with self.subTest(control=control), tempfile.TemporaryDirectory(prefix='j14-operator-',dir='/tmp') as temp:
+                j,request,paths=self.fixture(temp);before=[path.read_bytes() for path in paths]
+                if control=='active':(paths[0].parent/'active-profile.json').write_text('{}')
+                elif control=='store':Path(j.c['hostConfig']).write_text('{"store":"foreign"}')
+                elif control=='later':j.application_unit='already-started.service'
+                elif control=='daemon':j.restart_daemons[0]['argv'][-1]='/foreign.sock'
+                with patch.dict(driver.os.environ,{'J14_ORACLE_OPERATOR_RELOCATION':str(request)}):
+                    with self.assertRaises(ValueError):j.prepare_operator_relocation()
+                self.assertEqual([path.read_bytes() for path in paths],before)
+
+    def test_private_operator_child_does_not_share_public_parent_permissions(self):
+        with tempfile.TemporaryDirectory(prefix='j14-operator-',dir='/tmp') as temp:
+            j,_,_=self.fixture(temp)
+            j.sockets.chmod(0o710)
+            path=j.private_operator_socket('operator-v2.sock')
+            self.assertEqual(path.parent.stat().st_mode&0o777,0o700)
+            path.parent.chmod(0o750)
+            with self.assertRaisesRegex(ValueError,'private operator custody'):j.private_operator_socket()
+
+    def test_public_socket_rebind_reapplies_only_controller_connect_acl(self):
+        with tempfile.TemporaryDirectory(prefix='j14-operator-',dir='/tmp') as temp:
+            j,_,_=self.fixture(temp);path=Path(j.c['publicSocket'])
+            with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as server:
+                server.bind(str(path));server.listen()
+                with patch.object(j,'run') as run:
+                    j.restore_public_socket_access(path)
+                    self.assertEqual(run.call_args.args,('public-socket-acl',['setfacl','-m',f"u:{j.layout['controllerUid']}:-w-",'--',path]))
+                j.layout['controllerUid']=driver.os.getuid()
+                with self.assertRaisesRegex(ValueError,'recipient or custody'):j.restore_public_socket_access(path)
+
 if __name__=='__main__':unittest.main()
