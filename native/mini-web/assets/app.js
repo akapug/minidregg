@@ -133,6 +133,8 @@
   document.addEventListener("click", (event) => {
     const a = event.target.closest("a[href]");
     if (!a || a.hasAttribute("data-full") || a.target || event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+    // Document outline anchors are native navigation, including without JavaScript.
+    if (a.getAttribute("href").startsWith("#")) return;
     const u = sameOrigin(a.getAttribute("href"));
     if (!u || u.pathname.startsWith("/assets/") || u.pathname.startsWith("/join")) return;
     event.preventDefault();
@@ -171,7 +173,12 @@
     for (const raw of location.hash.slice(1).split("|")) {
       // The hash is anyone's link: only a same-origin path opens a pane.
       let path = "";
-      try { const u = sameOrigin(decodeURIComponent(raw)); path = u ? u.pathname + u.search : ""; } catch (e) {}
+      try {
+        const decoded = decodeURIComponent(raw);
+        // Native anchors (including the skip link) are not workspace paths.
+        if (!decoded.startsWith("/") || decoded.startsWith("//")) continue;
+        const u = sameOrigin(decoded); path = u ? u.pathname + u.search : "";
+      } catch (e) {}
       if (path && !paneFor(path)) { const pane = newPane(path); load(pane, path); }
     }
   }
@@ -197,10 +204,10 @@
     pane.classList.add("term-pane");
     const Terminal = window.Terminal;
     const FitAddon = window.FitAddon.FitAddon;
-    const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+    const termBackground = getComputedStyle(host).getPropertyValue("--term-bg").trim();
     const term = new Terminal({
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", fontSize: 13, cursorBlink: true, scrollback: 5000,
-      theme: dark ? { background: "#0e0f12" } : { background: "#15161a" }
+      theme: { background: termBackground }
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -259,11 +266,32 @@
     if (pane.liveTimer) { clearInterval(pane.liveTimer); pane.liveTimer = null; }
     if (!section) return;
     const ms = Math.max(2000, parseInt(section.dataset.live, 10) || 5000);
-    pane.liveTimer = setInterval(() => {
+    let refreshing = false;
+    pane.liveTimer = setInterval(async () => {
       if (!document.body.contains(pane)) { clearInterval(pane.liveTimer); return; }
       const active = document.activeElement;
-      if (active && pane.contains(active) && (active.tagName === "INPUT" || active.tagName === "TEXTAREA") && active.value) return;
-      load(pane, pane.dataset.path, { quiet: true });
+      const edited = [...pane.querySelectorAll("input,textarea,select")].some(el =>
+        /^(checkbox|radio)$/.test(el.type) ? el.checked !== el.defaultChecked :
+        el.tagName === "SELECT" ? el.selectedIndex !== Math.max(0, [...el.options].findIndex(o => o.defaultSelected)) :
+        el.value !== el.defaultValue);
+      if (edited || document.hidden || refreshing || (active && pane.contains(active) && /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(active.tagName))) return;
+      // The landing activity refreshes only its own read, never the welcome document or market.
+      if (section.dataset.livePath && sameOrigin(section.dataset.livePath)) {
+        refreshing = true;
+        try {
+          const response = await fetch(section.dataset.livePath, { headers: { "X-Mini-Fragment": "1" }, credentials: "same-origin" });
+          if (!response.ok) return;
+          const fragment = document.createElement("template");
+          fragment.innerHTML = await response.text();
+          const updated = fragment.content.querySelector(".ops");
+          if (updated) section.replaceChildren(...updated.childNodes);
+        } catch (_) { /* Keep the last observation; the room link still works. */ }
+        finally { refreshing = false; }
+      } else {
+        refreshing = true;
+        try { await load(pane, pane.dataset.path, { quiet: true }); }
+        finally { refreshing = false; }
+      }
     }, ms);
   }
 

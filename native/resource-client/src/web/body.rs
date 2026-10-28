@@ -191,15 +191,14 @@ fn answer(stream: &mut UnixStream, page: &Page, site: &Site) -> Result<()> {
 fn get(site: &Site, parts: &[&str], target: &str) -> Page {
     match parts {
         ["tour"] => tour(site, None),
+        ["activity"] => Page { status: 200, title: "Life in this world".into(), stamp: Stamp::None, body: operations(site) },
         ["export"] if !site.front.read_only => export_page(site, None),
         ["subscribe"] if !site.front.read_only => super::subscribe::page(site, None),
         [] | ["doc"] => {
             if site.front.read_only {
                 import_inbox(site);
                 if parts.is_empty() {
-                    if let Some(page) = front_doc_page(site) {
-                        return page;
-                    }
+                    return public_front(site);
                 }
             }
             let mut page = site.index();
@@ -310,22 +309,40 @@ fn get(site: &Site, parts: &[&str], target: &str) -> Page {
 
 /// The public front page as the operator's published document (`--front-doc`), rendered through
 /// the same page path as `/doc/NAME`, so it carries the same shell and styles as every page. `None`
-/// (no setting, or the document is not published to the public reader, or its read fails): the caller
-/// serves today's index. `/doc` stays the index, linked from here.
+/// (no setting, or the document is not published to the public reader): the caller serves the
+/// index. A failed read keeps its explanation. `/doc` stays the index, linked from here.
 fn front_doc_page(site: &Site) -> Option<Page> {
     let name = site.shell.as_ref()?.front_doc.as_deref()?;
     if !site.names().iter().any(|n| n == name) {
         return None;
     }
-    let mut page = site.route(&["doc".to_owned(), name.to_owned()]);
-    if page.status != 200 {
-        return None;
-    }
-    page.body.push_str(
-        "<nav class=\"front-more\"><p><a href=\"/doc\">Every published document</a> · <a href=\"/receipts\">receipts</a> · \
-         <a href=\"/registry\">the laws of the box</a> · <a href=\"/tour\">the tour</a> · <a href=\"/join\">Join</a></p></nav>\n",
-    );
+    let page = site.route(&["doc".to_owned(), name.to_owned()]);
     Some(page)
+}
+
+/// Compose the existing signed document, activity and app views into one public entrance.
+/// The published welcome is still `Site::doc`, never a second copy of its contents.
+fn public_front(site: &Site) -> Page {
+    public_front_with_welcome(site, front_doc_page(site))
+}
+
+fn public_front_with_welcome(site: &Site, welcome: Option<Page>) -> Page {
+    let (stamp, reading) = match welcome {
+        Some(page) => (page.stamp, format!("<section><h2>{}</h2>{}<p><a href=\"/doc\">Every published document →</a></p></section>", escape(&page.title), page.body)),
+        None => (Stamp::None, format!("<section><h2>From the community</h2><p>Explore what members have shared with the public reader.</p>{}</section>", site.index().body)),
+    };
+    Page { status: 200, title: "Welcome to Mini".into(), stamp, body: format!(
+        "<section class=\"hero\"><p class=\"eyebrow\">A shared world, with rules you can read</p><h2>Make a little world together.</h2>\
+         <p class=\"lede\">Mini brings documents, rooms, apps and AI residents into one shared workspace. Every change meets the world's rules. When a change is refused, the reason is there to read.</p>\
+         <div class=\"actions\"><a class=\"button\" href=\"/join\" data-full>Join this world</a><a class=\"button secondary\" href=\"/tour\">Take the tour</a></div>\
+         <p class=\"note\">You are browsing as the public reader. Explore first; join when you want to make something.</p></section>\
+         <div class=\"front-grid\">{reading}{}</div>\
+         <section><div class=\"section-heading\"><h2>Tools to make it yours</h2><a href=\"/apps\">Browse all apps →</a></div>\
+         <p class=\"note\">Apps from the Sandstorm catalogue. Publisher claims and this box's verdict are shown separately.</p>{}</section>\
+         <section><div class=\"section-heading\"><h2>Find your way around</h2><a href=\"/registry\">Read the world's laws →</a></div>\
+         <ul class=\"place-list\"><li><a href=\"/room\">Gather in a room</a></li><li><a href=\"/story\">Step into a story</a></li><li><a href=\"/receipts\">Follow the receipts</a></li></ul></section>",
+        operations(site), apps::catalogue(site, "", 3)
+    ) }
 }
 
 /// `/board` and `/room`: the workspace's references, each opened as that place.
@@ -335,10 +352,10 @@ fn place_index(site: &Site, place: &str) -> Page {
         rows.push_str(&format!("<li><a href=\"/{place}/{n}\">{n}</a></li>\n", n = escape(&name)));
     }
     let (title, note) = match place {
-        "board" => ("Boards", "A reference read with the board layout: task n's state is field 2n+2, its owner field 2n+3."),
-        _ => ("Rooms", "A reference read as a room: its members (the Host's `who` view), the names bound in it, its streams."),
+        "board" => ("Boards", "See work as a board: tasks, their state and who has taken them. Open a reference below in the board layout."),
+        _ => ("Rooms", "Gather around a conversation, shared documents and a resident. Open a reference below as a room to see what your grants cover."),
     };
-    Page { status: 200, title: title.into(), stamp: Stamp::None, body: format!("<p class=note>{note}</p>\n<ul>{rows}</ul>{}", if place == "room" && !site.front.read_only { room_new_form() } else { String::new() }) }
+    Page { status: 200, title: title.into(), stamp: Stamp::None, body: format!("<p>{note}</p>\n<ul class=\"place-list\">{rows}</ul>{}", if place == "room" && !site.front.read_only { room_new_form() } else { String::new() }) }
 }
 
 fn room(site: &Site, name: &str) -> Page {
@@ -356,7 +373,7 @@ fn room(site: &Site, name: &str) -> Page {
         }
         if !site.front.read_only {
             page.body.push_str(&format!(
-                "<form method=\"post\" action=\"/room/{n}/say\" class=\"row\"><label for=\"say-{n}\">Say</label><input id=\"say-{n}\" type=\"text\" name=\"text\" maxlength=\"2000\" required autocomplete=\"off\"><button>Send</button></form>\n",
+                "<form method=\"post\" action=\"/room/{n}/say\" class=\"row\"><div><label for=\"say-{n}\">Add to the conversation</label><input id=\"say-{n}\" type=\"text\" name=\"text\" maxlength=\"2000\" required autocomplete=\"off\"></div><button>Send</button></form>\n",
                 n = escape(name)
             ));
         }
@@ -608,7 +625,7 @@ fn operations(site: &Site) -> String {
     }
     match verb(site, &["tail -n 20 --in operations".to_owned()]) {
         Some(ending) if ending.code == 0 => format!(
-            "<section class=\"ops chat\" data-live=\"30000\"><h2>Operations room</h2><p class=note>The box's ships, drills, certifier ticks and backup receipts, as signed turns of <code>mini-s-box</code>.</p><pre class=\"turns\">{}</pre><p><a href=\"/room/operations\">the room</a></p></section>\n",
+            "<section class=\"ops chat\" data-live=\"30000\" data-live-path=\"/activity\"><p class=\"eyebrow\">From the operations room</p><h2>Life in this world</h2><p class=note>Ships, drills, checkpoints and backups, as signed turns of <code>mini-s-box</code>.</p><pre class=\"turns\">{}</pre><p><a href=\"/room/operations\">the room</a></p></section>\n",
             escape(ending.text().trim())
         ),
         Some(ending) => format!("<section class=\"ops\"><h2>Operations room</h2>{}</section>\n", answered(&ending, &[])),
@@ -1527,6 +1544,9 @@ pub(super) fn quote(word: &str) -> String {
 #[cfg(test)]
 #[path = "body/redteam.rs"]
 mod redteam;
+#[cfg(test)]
+#[path = "body/design_preview.rs"]
+mod design_preview;
 
 #[cfg(test)]
 mod tests {

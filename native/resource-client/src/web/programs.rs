@@ -46,12 +46,12 @@ pub(super) fn index(site: &Site) -> Page {
         ));
     }
     let list = if rows.is_empty() {
-        "<p>You have run no bend program from this workspace yet (<code>bend publish</code>, then <code>bend run</code>, on <a href=\"/verb/bend\">the bend page</a>).</p>".to_owned()
+        "<p class=\"empty\">You have run no bend program from this workspace yet (<code>bend publish</code>, then <code>bend run</code>, on <a href=\"/verb/bend\">the bend page</a>).</p>".to_owned()
     } else {
         format!("<table><thead><tr><th>reference</th><th>bend</th><th>object</th><th>birth transaction</th><th></th></tr></thead><tbody>{rows}</tbody></table>")
     };
     let body = format!(
-        "<p>Each program you started with <code>bend run</code> is an activity on its object cell. While it awaits a reply, the reply slot names its decider: only that subject's answer is admitted, once.</p>\n\
+        "<p class=\"eyebrow\">Work that can wait for you</p><p>Follow the programs you have started and answer the decisions that are yours. Each activity names who can reply and its deadline; only that subject's answer is admitted, once.</p>\n\
          <section><h2>Your programs</h2>{list}</section>\n\
          <section><h2>Any activity</h2><p class=note>An await someone announced (<code>await OBJECT TRANSACTION</code> in a room) is read the same way.</p>\
          <form method=\"get\" action=\"/bend/await\" class=\"row\"><div><label for=\"aw-o\">Object cell</label><input id=\"aw-o\" name=\"object\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" required></div>\

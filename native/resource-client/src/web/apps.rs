@@ -24,60 +24,60 @@ fn grain_id(n: &str) -> Option<String> {
 /// `/apps[?q=TERM]`: the catalogue.
 pub(super) fn market(site: &Site, target: &str) -> Page {
     let term = super::body::query(target, "q").unwrap_or_default();
-    let mut line = String::from("apps search");
-    if !term.is_empty() {
-        line.push(' ');
-        line.push_str(&quote(&term));
-    }
-    line.push_str(" --json");
-    let mut body = format!(
-        "<p>The Sandstorm app market, as this box indexes it: the publisher's claims beside the box's verdict on the package (its signature, its signed app id, its size against the profile). Installing births the app under your own key and runs it as a grain of your own, on its own origin.</p>\
-         <form method=\"get\" action=\"/apps\" class=\"row\"><div><label for=\"q\">Search</label><input id=\"q\" name=\"q\" type=\"search\" value=\"{}\"></div><button>Search</button></form>\n",
-        escape(&term)
+    let body = format!(
+        "<p class=\"eyebrow\">The app market</p><p>Make room for your tools. Browse apps from the Sandstorm catalogue, then install a copy of your own.</p>\
+         <form method=\"get\" action=\"/apps\" class=\"row\"><div><label for=\"q\">Find an app</label><input id=\"q\" name=\"q\" type=\"search\" placeholder=\"Search the catalogue\" value=\"{}\"></div><button>Search apps</button></form>\
+         <p class=\"note\">Names, descriptions and publishers are catalogue claims. Each card separately shows this box's package verdict. Your installed copy runs on its own origin.</p>{installed}<section><h2>Available apps</h2>{}</section>",
+        escape(&term), catalogue(site, &term, usize::MAX),
+        installed = if site.front.read_only { "" } else { "<p><a href=\"/grain\">Open your installed apps →</a></p>" }
     );
-    let Some(ending) = verb(site, &[line]) else { return simple(500, "Apps", "this body has no shell paths") };
-    match reply(&ending).filter(|_| ending.code == 0) {
-        Some(value) => {
-            let apps = value["apps"].as_array().cloned().or_else(|| value["receipt"]["apps"].as_array().cloned()).unwrap_or_default();
-            let mut rows = String::new();
-            for app in &apps {
-                let verdict = &app["verdict"];
-                let state = verdict["state"].as_str().unwrap_or("?");
-                let install = if site.front.read_only {
-                    String::new()
-                } else {
-                    format!(
-                        "<form method=\"post\" action=\"/apps/install\" class=\"inline\"><input type=\"hidden\" name=\"app\" value=\"{}\"><select name=\"class\" aria-label=\"App size class\"><option value=\"\">auto</option><option>S</option><option>M</option><option>L</option></select> <button class=\"quiet\">Install</button></form>",
-                        escape(app["appId"].as_str().unwrap_or(""))
-                    )
-                };
-                rows.push_str(&format!(
-                    "<tr><td><a href=\"/apps/{id}\"><strong>{}</strong></a> {}<br><span class=\"note\">{}</span></td><td class=\"verdict {s}\">{s}{}</td><td>{}</td><td>{install}</td></tr>\n",
-                    escape(app["name"].as_str().unwrap_or("?")),
-                    escape(app["version"].as_str().unwrap_or("")),
-                    escape(app["publisher"].as_str().unwrap_or("")),
-                    verdict["reason"].as_str().map(|r| format!("<br><span class=\"note\">{}</span>", escape(r))).unwrap_or_default(),
-                    escape(app["suggestedClass"].as_str().unwrap_or("")),
-                    id = escape(app["appId"].as_str().unwrap_or("")),
-                    s = escape(state),
-                ));
-            }
-            body.push_str(&format!(
-                "<table class=\"market\"><thead><tr><th>app (the publisher's claim)</th><th>the box's verdict</th><th>class</th><th></th></tr></thead><tbody>{rows}</tbody></table><p class=note>{} of {} shown.</p>",
-                apps.len(),
-                value["total"].as_u64().or_else(|| value["receipt"]["total"].as_u64()).unwrap_or(apps.len() as u64)
-            ));
-        }
-        None => body.push_str(&super::body::outcome_html(&ending, &[("the apps verb", "/verb/apps")])),
-    }
     Page { status: 200, title: "Apps".into(), stamp: Stamp::None, body }
+}
+
+/// One catalogue, shared by the market and front page. The only input is `apps search`.
+/// A failed read keeps its explained outcome; an empty catalogue is never fabricated.
+pub(super) fn catalogue(site: &Site, term: &str, limit: usize) -> String {
+    let mut line = String::from("apps search");
+    if !term.is_empty() { line.push(' '); line.push_str(&quote(term)); }
+    line.push_str(" --json");
+    let Some(ending) = verb(site, &[line]) else { return "<p class=note>The app catalogue is unavailable: this body has no shell paths.</p>".into() };
+    let Some(value) = reply(&ending).filter(|_| ending.code == 0) else {
+        return super::body::answer_html(&ending, &[("Browse app commands", "/verb/apps")]);
+    };
+    let apps = value["apps"].as_array().or_else(|| value["receipt"]["apps"].as_array());
+    let apps = apps.map(Vec::as_slice).unwrap_or(&[]);
+    if apps.is_empty() {
+        return "<div class=\"empty\"><h3>No apps found</h3><p>Try another search, or <a href=\"/apps\">browse the whole catalogue</a>.</p></div>".into();
+    }
+    let cards: String = apps.iter().take(limit).map(|app| app_card(app, !site.front.read_only, 3)).collect();
+    format!("<div class=\"app-gallery\">{cards}</div><p class=note>{} of {} shown.</p>", apps.len().min(limit),
+        value["total"].as_u64().or_else(|| value["receipt"]["total"].as_u64()).unwrap_or(apps.len() as u64))
+}
+
+fn app_card(app: &Value, writes: bool, level: u8) -> String {
+    let text = |key: &str| escape(app[key].as_str().unwrap_or(""));
+    let id = text("appId");
+    let name = text("name");
+    let mark = escape(&app["name"].as_str().unwrap_or("?").chars().next().unwrap_or('?').to_string());
+    let state = escape(app["verdict"]["state"].as_str().unwrap_or("unchecked"));
+    let reason = escape(app["verdict"]["reason"].as_str().unwrap_or("No additional verdict details reported."));
+    let install = if writes {
+        format!("<form method=\"post\" action=\"/apps/install\" class=\"inline\"><input type=\"hidden\" name=\"app\" value=\"{id}\"><button class=\"quiet\">Install</button></form>")
+    } else { String::new() };
+    format!(
+        "<article class=\"app-card\" data-app=\"{id}\"><header><span class=\"app-mark\" aria-hidden=\"true\">{mark}</span><div><h{level}><a href=\"/apps/{id}\">{name}</a></h{level}><span class=\"publisher\">{}</span></div></header>\
+         <p>{}</p><p class=\"note\">Version {} · Size {}</p>\
+         <div class=\"verdict {state}\"><span class=\"badge\">{state}</span><p class=\"note\">{reason}</p></div>\
+         <div class=\"actions\"><a href=\"/apps/{id}\">View app →</a>{install}</div></article>",
+        text("publisher"), text("shortDescription"), text("version"), text("suggestedClass")
+    )
 }
 
 /// `/apps/APP-ID`: one entry whole.
 pub(super) fn show(site: &Site, app: &str) -> Page {
     let Some(ending) = verb(site, &[format!("apps show {} --json", quote(app))]) else { return simple(500, "Apps", "this body has no shell paths") };
     let mut body = match reply(&ending).filter(|_| ending.code == 0) {
-        Some(value) => super::body::json_tree_html(&value),
+        Some(value) => format!("{}<details><summary>Package details and publisher claims</summary>{}</details>", app_card(&value, false, 2), super::body::json_tree_html(&value)),
         None => super::body::outcome_html(&ending, &[("the market", "/apps")]),
     };
     if !site.front.read_only {

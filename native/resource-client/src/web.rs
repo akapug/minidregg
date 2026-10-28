@@ -55,22 +55,7 @@ use std::sync::{Arc, Mutex};
 
 const MAX_REQUEST: usize = 16 * 1024;
 
-const CSS: &str = "body{font:15px/1.45 system-ui,sans-serif;max-width:60rem;margin:1rem auto;\
-padding:0 1rem;color:#1d1d1f;background:#fdfdfb}a{color:#0b5cad}\
-header{border-bottom:1px solid #ccc;margin-bottom:1rem}.ctx{font-size:12px;color:#555}\
-table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #e3e3e3;padding:.2rem .4rem;\
-text-align:left;vertical-align:top}code,.id{font:12px ui-monospace,monospace;overflow-wrap:anywhere}\
-pre{white-space:pre-wrap;overflow-wrap:anywhere}\
-.refusal{border-left:4px solid #b3261e;padding:.4rem .8rem;background:#fbeeee}\
-.note{color:#555;font-size:13px}blockquote{border-left:3px solid #999;margin:.3rem 0;padding:0 .7rem}\
-.stale{color:#8a5a00}.ann{font-size:13px;color:#333;margin:.2rem 0 .2rem 1rem}\
-body:has(.editing){max-width:90rem}\
-.editing{display:grid;grid-template-columns:minmax(0,2fr) minmax(16rem,1fr);gap:2rem}\
-.editing textarea{display:block;box-sizing:border-box;width:100%;min-height:22rem;font:15px/1.6 ui-monospace,monospace;padding:1rem}\
-.editing button{padding:.6rem 1rem;margin:.5rem 0;font:inherit}\
-.editing .inspector{border-left:1px solid #ddd;padding-left:1rem}.editing code{overflow-wrap:anywhere}\
-.editing details{margin:.5rem 0}\
-@media(max-width:800px){.editing{display:block}.editing .inspector{border:0;padding:0}}";
+const CSS: &str = include_str!("../../mini-web/assets/app.css");
 
 pub(crate) fn run(mut args: Args) -> Result<()> {
     let root = absolute(&path(args.required("dir")?))?;
@@ -412,9 +397,9 @@ pub(crate) fn wrap(page: &Page, nav: &str, subject: &str) -> String {
     format!(
         "<!doctype html>\n<html lang=en><head><meta charset=utf-8>\
          <meta name=viewport content=\"width=device-width\"><meta name=referrer content=same-origin>\
-         <title>{title} | mini</title><style>{CSS}</style></head><body>\n\
-         <header><nav>{nav}</nav><h1>{title}</h1><div class=ctx>{context}</div></header>\n\
-         <main>\n{body}</main></body></html>\n",
+         <title>{title} | mini</title><style>{CSS}</style></head><body class=\"standalone reader\">\n\
+         <a class=\"skip\" href=\"#main\">Skip to content</a><header><nav>{nav}</nav><h1>{title}</h1><div class=ctx>{context}</div></header>\n\
+         <main id=\"main\" tabindex=\"-1\">\n{body}</main></body></html>\n",
         title = escape(&page.title),
         body = page.body,
     )
