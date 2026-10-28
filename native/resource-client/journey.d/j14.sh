@@ -890,6 +890,9 @@ if [ -n "$J14_AWAIT" ]; then
   ok await alice "ask lab please answer await $OBJ1 $TX1"
   hermes await "lists the program's await and answers it"
   own_pass await "$A"
+  # Hermes's resolve turn decides the slot; the program resumes when anyone delivers the
+  # settled outcome (Kernel.ObjectiveActivity `deliver`): alice, its owner, from her account.
+  ok await alice "bend deliver $OBJ1 $TX1"
   ok await alice "bend await $OBJ1 $TX1"; cp "$OUT" "$SD/await-1-after.json"
   check await "program 1 resumed with Hermes's answer: total 7" "{total=7}" "$(jq -r .stateText "$SD/await-1-after.json")"
   checkp await "it resumed at a later height" sh -c "[ \$(jq -r .height '$SD/await-1-after.json') -gt $AWH0 ]"
@@ -899,13 +902,13 @@ if [ -n "$J14_AWAIT" ]; then
   checkp await "mini_pending_awaits listed exactly program 1 for Hermes (decider $HS)" \
     sh -c "jq -e -s --arg o '$OBJ1' '[.[] | select(.id == \"aw-pending\") | .result.awaits[]?] | length >= 1 and all(.object == \$o)' '$AWLOG' >/dev/null"
   checkp await "the resolve turn was admitted, signed by Hermes (the slot's decider)" \
-    sh -c "jq -r 'select(.id == \"aw-answer-0\") | .content | tostring' '$AWLOG' | head -1 | grep -q 'admitted: bend answer'"
+    sh -c "jq -e -s '[.[] | select(.id == \"aw-answer-0\")] | first | .content | tostring | test(\"admitted: bend answer\")' '$AWLOG' >/dev/null"
   # The teeth: Hermes answers the slot alice decides; the kernel refuses it by name.
   ok await alice "ask lab please answer await $OBJ2 $TX2 slot $SLOT2"
   hermes await "tries to answer an await it does not decide"
   own_pass await "$A"
   checkp await "the kernel refused Hermes's answer: notDecider" \
-    sh -c "jq -r 'select(.id == \"aw-answer-0\") | .content | tostring' '$AWLOG' | tail -1 | grep -q notDecider"
+    sh -c "jq -e -s '[.[] | select(.id == \"aw-answer-0\")] | last | .content | tostring | test(\"notDecider\")' '$AWLOG' >/dev/null"
   ok await alice "bend await $OBJ2 $TX2"
   check await "program 2 is untouched: still awaiting alice, total 0" "awaiting $A {total=0}" "$(jq -r '"\(.phase) \(.decider) \(.stateText)"' "$OUT")"
 fi

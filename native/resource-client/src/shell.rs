@@ -1182,6 +1182,7 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 "run" => flags.extend([flag("action", "run"), flag("name", p.arg(0)), flag("object", p.arg(1))]),
                 "show" => flags.extend([flag("action", "show"), flag("object", p.arg(0))]),
                 "await" => flags.extend([flag("action", "await"), flag("object", p.arg(0)), flag("transaction", p.arg(1))]),
+                "deliver" => flags.extend([flag("action", "deliver"), flag("object", p.arg(0)), flag("transaction", p.arg(1))]),
                 "answer" => {
                     let file = p.arg(1).trim_start_matches('@');
                     session_file(file, "answer")?;
