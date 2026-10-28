@@ -20,10 +20,53 @@ Notation used in the commands:
 - "template" = the fixture's per-candidate world restored (`NEWPARTICIPANT_TEMPLATE_DIR`, on by default);
   "genesis" = the row writes its own genesis.
 
-The last full journey-rows run on record is custody-drivers' on candidate `a94bed71` (dregg-build,
-2026-10-27 13:42Z, templates on; `/build/lanes/custody-drivers-journeys-1/`): J1's enrolment seal red
-(`enrollment Plan inspection changed before signing`, fixed since in custody-drivers' mini) shadowed
-journey, demo, rooms, m3, m4, m8, fleetsign, jserve. No full run exists on cuts 12-14 or on main.
+## 0. Candidate 0ce31391 (validator run, 2026-10-28 02:00-03:40Z)
+
+Run against `/build/candidates/0ce31391790a7e2ed9f83eb1b8bb85d6556a0de3`'s binaries on hbox
+(journey rows, app worlds, FOUC, authority) and dregg-ref (effects, acceptance, oracle checks). Drivers
+from the candidate's tree, with the row-harness fixes below and, where the coordinator asked, main's
+scripts (effects: main bd37686c0's `world/` and drivers; jserve: lane/custody-b beb108d5f; grain-birth:
+L1c 746b182d2). The gate (tour, composed) and enrol-resume are the integrator's: build green,
+enrol-resume PASS.
+
+Row-harness fixes this run produced (lane/rows-ledger, all merged or routed to the integrator):
+7dfe4a3c4 (m4 provision folder 0700), b627478ec (native-share-member.sh worker-bare refused at prepare),
+0a05ab6ba (journey classifiers match OUTCOME/v8), 709cd12d0 (acceptance.sh consent provider beside the
+wrapper Host), 6ee5acb4c (check-fouc site pages), 96fc2701d (demo/kernel rows pass GRAIN_RUNTIME).
+
+| group | row | result on 0ce31391 | owner of the red |
+|---|---|---|---|
+| journey rows | journey (J0-J8, rotation) | PASS 15/15 | |
+| journey rows | activity seats bounty call send domain upgrade objectrecord welcomecontinuity m3 m8 fleetsign chargedfailure jbend jprivate rate hermes sshe2e m4 | PASS | |
+| journey rows | jserve | PASS with custody-b beb108d5f (253 refusals named); red on the candidate's own driver (envelope v1) | custody-b |
+| journey rows | jpay | JPAY1-4 PASS; JPAY6 FAIL `query parent-witness-tool-pre: request refused ... (phase observation)` | L1 / pay |
+| journey rows | rooms | J5 red was the v7 classifier; J5 8/8 and JPRIV1 229 PASS on the fixed tree | |
+| journey rows | m6grain | FAIL at the grain store (same worker-bare contract; rerun after b627478ec owed) | L1c / L13 |
+| journey rows | objective, hostupgrade, m7, exchange | UNCONFIGURED: no lean env; no previous candidate set; no M7 reference; fn is out | |
+| journey rows | births, perf | UNCONFIGURED (box not quiet; timing rows belong on dregg-build) | |
+| demo steps | J0-J8, J12X, KC, KT, K10, KIX, K10C, K12C/T/M/R/I/H, JPRIV1, JFEEDBACK | PASS | |
+| demo steps | J17 | FAIL: after a decided `bookRefused` pay, the next `pay lab week` says "a previous pay of this request was recorded but never submitted" | L1c prepare-refusal clients / pay |
+| demo steps | WEB | FAIL 4/38: extra `unavailable` in transclusion placeholders (3 rows); `board-fields` 403 | L12 web |
+| demo steps | JLI | FAIL: `law export show jli-room/notes` refused as a malformed reference name | L2 shell |
+| demo steps | KTPL | FAIL 12/163: `room new lab --template workroom` runs no template lines; index links missing | L2 shell |
+| demo steps | J12 | FAIL 1/139: row 87, index links to paper | L2 shell |
+| demo steps | J14 | L4b's (J14_TOOLS/AWAIT on this candidate) | L4b |
+| app tables | every world (b1, b2, b4, b6, rt, featured; standard and market-large) | BLOCKED: every install refused (`v3 BEGIN native reply ...`; in fact op69 claim assemble: "claim plan differs from original BEGIN", storeIdentity vs expectedSeed) | L1c, fix lane/prepare-refusal-clients 25cfb86bd |
+| app tables | b8 IPython | refused `Too many or too few segments 583` | L13 |
+| effects | effect dues bounty play ballot story commons | PASS 7/7 (19, 17, 21, 27, 27, 25, 20 rows) with main's world/ and drivers | |
+| acceptance | acceptance.sh, selected-release-acceptance.sh | FAIL `invocation preparation: DeclaredResourceController.Reject.unsupportedVersion` | custody-b |
+| acceptance | application-acceptance.sh | FAIL `sqlite-store error: published byte record is missing` | custody-b |
+| acceptance | grain-runtime acceptance (plain, PROVIDER_BOOTSTRAP) | FAIL `authorityBatch` at prepare (custody-b reports PROVIDER_BOOTSTRAP fixed in dabf7afdd) | custody-b |
+| acceptance | authority-acceptance.sh | FAIL :223, the denied write is refused at prepare (no call.bin); on the direct-binary route mini said "request status uncertain" (fixed in f73893fce) | L1c / custody-b |
+| acceptance | fn-e1e2 setup-mini | UNCONFIGURED: no fn fixture tree (fn is out) | |
+| oracle | focused harness checks | PASS 2/2 (test renamed `..._configuration_before_bootstrap`) | |
+| oracle | joracle, Oracle v7 fresh world | BLOCKED on the grain-install red | codex |
+| FOUC | check-fouc app, site | PASS 12/12, 12/12 | |
+| demo seed | deploy/demo-seed/seed.sh | not run here: needs the demo-vm frame; infra runs it on a dregg-ref scratch root | infra |
+
+Not this validator's (central or timing): templates on/off, births/perf, hot-path BEFORE/AFTER,
+generic-simplex load 200 (needs the integrator's built Verify exe), lifetime-grant Lean fixtures,
+cohort gate (needs a built Lean tree and bun).
 
 ## 1. The gate (integrator's; listed so nothing is lost)
 
@@ -106,12 +149,12 @@ Run on a worktree at the candidate's commit, one `swarm-build`, PID file. Eviden
 |---|---|---|
 | cohort gate | `bash scripts/check-world-cohorts.sh` (`WORLD_COHORTS_ONLY="world/dues world/bounty world/play world/ballot world/story world/commons"`) | not run since the protocol rewrite (four rows renamed) |
 | effect (satisfiable, teeth, purse-as-submitter, law-refused) | `scripts/world-native-admit.sh activity --route activity --scenario effect --method world/activity/Effects.obend --entry effects --deposit 100000000` | not run |
-| dues | `scripts/world-native-admit.sh dues --route activity --scenario dues --entry dues --deposit 300000000` | earlier dues evidence exists (`dues/`, pre-protocol); not run on the kernel protocol |
+| dues | `scripts/world-native-admit.sh dues --route activity --scenario dues --method world/dues/StandingDues.obend --entry dues --deposit 300000000` | earlier dues evidence exists (`dues/`, pre-protocol); not run on the kernel protocol |
 | bounty | `scripts/world-native-admit.sh bounty --route activity --scenario bounty --method world/bounty/BountyBoard.obend --entry bounty --deposit 300000000` | not run (scenario still to write) |
 | play | `scripts/world-native-admit.sh play --route activity --scenario play --entry play --deposit 300000000` | not run (scenario still to write) |
 | ballot | `scripts/world-native-admit.sh ballot --route activity --scenario ballot --entry ballot --deposit 100000000` | not run (scenario still to write) |
 | story | `scripts/world-native-admit.sh story --route activity --scenario story --entry tell --deposit 100000000` | not run (scenario still to write) |
-| commons | `scripts/world-native-admit.sh commons --route activity --scenario commons --entry lifecycle --deposit 100000000` | not run (scenario still to write) |
+| commons | `scripts/world-native-admit.sh commons --route activity --scenario commons --method world/commons/ResidentServiceCommons.obend --entry lifecycle --deposit 100000000` | not run (scenario still to write) |
 
 ## 5. Hermes (L4; `deploy/hermes/README.md` "State"; dregg-build sudo rule binds run dirs to `/build/lanes/hermes-live-run/`)
 
