@@ -18,7 +18,7 @@ import sys
 import time
 import uuid
 
-from binding import Engine, Refusal, Uncertain, digest, load, resolve, run_scenario, tools
+from binding import Engine, Refusal, Uncertain, digest, load, resolve, require_write_readback, run_scenario, tools
 from ddp import DDP
 
 
@@ -157,6 +157,8 @@ def main():
         parser.error('call requires --operation and --args')
     if options.package_id != d['packageId']:
         raise Refusal('package-version-mismatch')
+    if options.command == 'qualify':
+        require_write_readback(d)
     options.out.mkdir(mode=0o700, parents=False, exist_ok=False)
     (options.out / 'row.pid').write_text(str(os.getpid()))
     context = {'runId': 'ai-' + uuid.uuid4().hex[:20]}
