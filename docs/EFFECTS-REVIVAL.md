@@ -308,6 +308,12 @@ controller) worth keeping for the inversion work.
 `materialize_logical`, `storeSubstrate_framed`, `Substrate.run_frame`, `engineKeystone`,
 `completenessKeystone`, `enginePremise`, `engineSatisfiable`, `engineTeeth`,
 `entryA_lawful`, `completenessSatisfiable`, `completenessTeeth`, `completenessPremise`.
+`Effects/Revival/ContentProofs.lean`: `contentComplete` (`ContentComplete`), via a
+syntactic invariant `Emits` over the lowering's progress proved helper by helper and action
+by action (`step_emits`, `run_emits`), `run_executes`, and the rotation's guard (no content
+write touches the blinding).  The declared table `contentActionFrame` held for all fifteen
+actions with no change.  The Statements closure is now built in the hbox tree too, so the
+live proofs check there in seconds.
 
 **Where to check.**  The kernel-free files: hbox `/tank/lanes/effects-revival/src`, a
 private small-closure tree (packages a real copy of the warm base's, `.lake/native` built by
@@ -318,19 +324,14 @@ dregg-ref, via the concatenation check in `/build/lanes/effects-revival-scratch/
 the closure lock (contended by host builds; expect waits).
 
 **Proof order (remaining).**
-1. `ContentComplete`, action by action over the write sites of `ContentResource.step`.
-   **Risk:** `contentActionFrame` is a declared table.  If an action writes a field the
-   table omits, fix the table, not the statement's meaning, and tell the auditor.  This
-   needs the kernel closure: either build `Kernel.ContentResource`'s closure on hbox once
-   (it is smaller than the controller's) or check on dregg-ref.
-2. The doc-write fixture inhabitant (`Fixtures/NativeDocWriteFixture*`).  It needs a
+1. The doc-write fixture inhabitant (`Fixtures/NativeDocWriteFixture*`).  It needs a
    non-empty rotation and serves `ContentAccepted`, `HostAccepted` and the ghost clauses of
    `ContentTeeth`/`HostTeeth`.
-3. `ContentAgreement contentSpec`: unfold the content arm of `computeTarget`, then
+2. `ContentAgreement contentSpec`: unfold the content arm of `computeTarget`, then
    `ContentResource.prepareCell_ok_of_run`, `Patch.run_append`, the validate semantics,
    and `(storeSubstrate L).run s ps = some s' ↔ Patch.ValidFrom s ps ∧ Patch.run s ps = s'`.
    For the header clauses, case on the kind (the match in `payloadVerb`).
-4. `HostKeystone` lands with the migration commit, not before (§5 step 1).  Coordinate it
+3. `HostKeystone` lands with the migration commit, not before (§5 step 1).  Coordinate it
    with the platform lane (L1).
 
 **Not done, not this lane's:**
