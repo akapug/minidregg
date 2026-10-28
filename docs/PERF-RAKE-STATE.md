@@ -13,29 +13,30 @@ Present state; rewrite whole. The backlog itself is `docs/PERF-BACKLOG-2026-10-2
 - Not mine but landed: 94b8de93c charge cut, f90726140 ExactReadback via `Loaded.prepare`
   (lane/un-route-latency, owner ac1e69b).
 
-## Pushed, not yet sent to the integrator
+## Merged after this file was first written
 
-`lane/perf-rake` (on main 6bc302387): 9d64ce7d6 (store comparisons one pass, directory row
-table, identity-first list and Image equality, `Compiler/CompiledListOps.lean`), 84d8710b2
-(refusalAtTip? first-index table, validateCore once, ObjectiveActivity readOnly and charge),
-d9ab3b028 (FastKeyOrder default instance; fixes the WorldCompact red lane-check found),
-cd96cdb97 (scripts/perf/doc-submit-bench.py). Check in flight: dregg-ref
-`/srv/lanes/perf-rake`, unit `perf-rake-lc3` (as lanes, `XDG_RUNTIME_DIR=/run/user/1000`),
-log `/srv/lanes/perf-rake-lc3.log` (EXIT= line at the end), running `scripts/pipeline/lane-check`
-on the 12 changed files. Green: send the tip sha to the integrator with the file list. Red:
-fix forward in /Users/ember/dev/minidregg-lanes/perf-rake-fix and rerun the same lane-check
-(sync files with `tar cf - FILES | ssh dregg-ref 'runuser -u lanes -- tar xf - -C /srv/lanes/perf-rake'`).
+lane/perf-rake 53cb1e212 is on main as 02358d518 (ordering one pass, directory row table,
+identity-first list and Image equality, refusalAtTip? first-index, validateCore once,
+ObjectiveActivity readOnly/charge, the bench, the backlog); lane-check of all 12 files was
+green on dregg-ref. Its full closure is the main build after 327096423.
 
-## Sub-lanes (winding down 2026-10-28 on usage)
+## In flight: one batched landing (root's rule: deep Lean changes land together)
 
-- lane/perf-codec-writer 00580de11 (+ maybe a continuation note): StreamCodec `encodeInto`
-  writer and StoreCodec written-buffer hashing. 16 modules green; closure (DurableReceiverCore,
-  NativeHostReplay, Host.Main) was running under closure-lock on dregg-ref. Next: cursor-native
-  decode for leaf tag codecs (backlog item 8).
-- lane/perf-roots 523bba473 or later: cell roots once per image (Engine root table, Materialized
-  bytes/root cache, CredentialAuthorityDomain snapshot root). Closure on dregg-ref /srv/lanes/perf-roots.
-- lane/perf-rust follow-on (helper spawns onto the operator socket, backlog item 3): design in
-  the sub-lane's report; maybe PERF-RUST-STATE.md on lane/perf-rust-ops.
+`lane/perf-batch1` (c97273985 code, ad9486660 docs) = main + lane/perf-codec-writer a9d0bb995
++ lane/perf-roots 5cebf6301. Closure on dregg-ref: unit `perf-batch1-closure` (lanes,
+`XDG_RUNTIME_DIR=/run/user/1000`), script `/srv/lanes/perf-batch1-closure.sh`, log
+`/srv/lanes/perf-batch1-closure.log` (EXIT= line), tree `/srv/lanes/perf-rake` checked out at
+c97273985, `LEAN_NUM_THREADS=4`, `SWARM_MEM_MAX=24G` (lake has no -j). Green: send the
+integrator the batch sha as ONE landing. Red: fix forward on lane/perf-batch1 (the sub-lane
+notes in docs/PERF-CODEC-WRITER-STATE.md and docs/PERF-ROOTS-STATE.md name the likely reds:
+`Materialized.ext rfl` where a proof relied on `materialize M c.logical` being `c`; the
+`one_octet_tag` tactic on inline structures and `rfl` in `StreamCodec.fin`), rerun the script.
+
+Rust: lane/perf-rust 3de71b986 is on main (327ba9ac1). Its follow-on 40392d4dc + c169a712
+(author/inspect/signatures as operator ops 195-197, Lean arms in Host/Main.lean) is NOT merged:
+`lane-check Host/Main.lean` queued on dregg-ref, unit `perf-rust-lean-lc`, log
+`/srv/lanes/perf-rust-lean-lc.log`, tree `/srv/lanes/perf-rust-lean`. Green: send
+c169a712 to the integrator (it touches Host/Main and the generated op tables, not deep modules).
 
 ## Measurement
 
