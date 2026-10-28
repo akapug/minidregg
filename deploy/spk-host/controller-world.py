@@ -1830,6 +1830,16 @@ def controller_admin_fixed(store, helper, command):
         str(worker_state(r) / 'admin.sock'), command], timeout=1800)
 
 
+def controller_quiescence(store, helper):
+    """Inspect fixed native resident custody; no caller command or path selection."""
+    _, base, r = load(store, helper)
+    checked_units(base, r)
+    require(r.get('workerTask'), 'resident quiescence requires worker mode')
+    state = worker_state(r)
+    return controller_child(r, [str(base / 'bin/grain-runtime'), 'quiescence', 'inspect',
+        str(state / 'admin.sock'), str(state / 'resident')], timeout=1800)
+
+
 def export_state(store, helper):
     _, base, r = load(store, helper)
     checked_units(base, r)
@@ -2222,7 +2232,7 @@ def main(args):
                     and stat.S_IMODE(m.st_mode) == 0o600, 'controller lifecycle lock custody refused')
             shared = action in ('controller-tool', 'controller-tool-result', 'controller-tool-ack', 'controller-recover-session',
                                 'controller-journal', 'controller-export', 'controller-reserve-export',
-                                'controller-service-logs', 'controller-status', 'controller-run', 'controller-config-export', 'controller-host-config-export')
+                                'controller-service-logs', 'controller-status', 'controller-quiescence', 'controller-run', 'controller-config-export', 'controller-host-config-export')
             # Lock order is global allocator, then controller. Never wait on a
             # controller while holding the allocator: an active call gets a
             # visible busy refusal, not account/config deletion underneath it.
@@ -2256,6 +2266,9 @@ def main(args):
         elif action == 'controller-recover-api-unreserved' and len(extra) == 1:
             fcntl.flock(lock, fcntl.LOCK_UN)
             return recover_api_unreserved(store, helper, extra[0])
+        elif action == 'controller-quiescence' and not extra:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            return controller_quiescence(store, helper)
         elif action == 'controller-prepare-idle' and not extra:
             fcntl.flock(lock, fcntl.LOCK_UN)
             return controller_admin_fixed(store, helper, 'prepare idle')
