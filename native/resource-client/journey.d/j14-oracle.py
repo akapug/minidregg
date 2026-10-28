@@ -173,7 +173,13 @@ class Journey:
     def wait_socket(self,path):
         deadline=time.monotonic()+120
         while time.monotonic()<deadline:
-            if Path(path).is_socket():return
+            # A stopped endpoint can leave its socket inode behind. Readiness
+            # requires a listener, not merely a filesystem entry.
+            try:
+                with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as client:
+                    client.settimeout(.2);client.connect(str(path))
+                return
+            except (OSError,TimeoutError):pass
             time.sleep(.1)
         raise RuntimeError('socket did not appear: '+str(path))
 
