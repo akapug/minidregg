@@ -968,21 +968,34 @@ class Journey:
             raise ValueError('native application STOP did not identify the stopped test unit')
         return receipt
 
-    def probe(self):
+    @staticmethod
+    def validate_refusal_resume(value,provider_lines):
+        if (not isinstance(value,dict) or set(value)!={'askNumber','paidBefore'}
+                or not isinstance(value['askNumber'],str) or not re.fullmatch('[1-9][0-9]*',value['askNumber'])
+                or type(value['paidBefore']) is not int or value['paidBefore']<0 or provider_lines):
+            raise ValueError('retained refusal continuation requires exact ask and no provider dispatch')
+
+    def probe(self,resume_refusal=None):
         question='Who wrote Leaves of Grass?';oraclelog=self.root/'provider.oracle.jsonl'
         prior_operation=None;asks=set()
         def transcript():
             path=self.shell('alice','tail --in lab --json -n 200')
             return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
-        def turn(label,answer):
+        def turn(label,answer,resumed=None):
             nonlocal prior_operation
             old_lines=oraclelog.read_text().splitlines() if oraclelog.exists() else []
-            before=self.paid();self.shell('bob','ask lab oracle: '+question)
+            if resumed is None:
+                before=self.paid();self.shell('bob','ask lab oracle: '+question)
+            else:
+                self.validate_refusal_resume(resumed,old_lines)
+                before=resumed['paidBefore']
             rows=transcript()
             selected=[r for r in rows if r.get('author')==self.subjects['bob'] and r.get('to')==self.subjects['hermes']
                       and question in r.get('text','')]
             if not selected:raise ValueError('selected room ask absent from signed history')
             number=str(selected[-1]['n'])
+            if resumed is not None and number!=resumed['askNumber']:
+                raise ValueError('retained refusal ask differs from signed room history')
             if number in asks:raise ValueError('room ask did not create a fresh entry')
             asks.add(number)
             self.resident(label)
@@ -1007,7 +1020,7 @@ class Journey:
             if operation==prior_operation:raise ValueError('fresh turn reused an earlier native operation')
             prior_operation=operation
             return path
-        turn('refused',False);self.web('refused',False)
+        turn('refused-resumed' if resume_refusal is not None else 'refused',False,resume_refusal);self.web('refused',False)
         self.shell('alice','tariff lab set hermes/tools 8');self.web('granted',True)
         evidence=turn('answered',True)
         self.fixed('controller-stop');self.start_controller()
