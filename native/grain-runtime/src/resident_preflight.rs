@@ -21,7 +21,7 @@ fn checked_operator(config:&Config,text:&[u8])->Result<Value> {
         || value["hostProcessId"].as_u64().is_none_or(|pid|pid==0 || pid>u32::MAX as u64)
         || value["instanceId"].as_str().is_none_or(|id|!resident_origin::valid_digest(id))
         || value["requestNonce"].as_str().is_none_or(|id|!resident_origin::valid_digest(id))
-        || value["hostSha256"]!=sha256_file(&config.host)? || value["configSha256"]!=sha256_file(&config.host_config)? {
+        || value["hostSha256"]!=sha256_pinned_file(&config.host)? || value["configSha256"]!=sha256_file(&config.host_config)? {
         return Err("controller requires serving private operator with exact Host/config pins and current process identity".into());
     }
     Ok(value)

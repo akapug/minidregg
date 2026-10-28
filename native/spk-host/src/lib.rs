@@ -108,6 +108,10 @@ mod operation_ledger;
 /// Host's reply marker by these names only.
 #[path = "../../host-operations.rs"]
 pub mod host_operations;
+/// One inode's identity and the once-per-identity file digest, shared with grain-runtime.
+#[cfg(target_os = "linux")]
+#[path = "../../file_identity.rs"]
+mod file_identity;
 mod resident_launch;
 #[cfg(target_os = "linux")]
 pub mod resident_service;

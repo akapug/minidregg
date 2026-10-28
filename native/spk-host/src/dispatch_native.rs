@@ -54,6 +54,14 @@ fn read_bounded(path: &Path, bound: usize) -> io::Result<Vec<u8>> {
 /// over them (check_pin) pins the content the check saw; with a parent `pinned_input_dir` has
 /// admitted, no non-owner can swap the path between this check and the Host helper's own read.
 pub(crate) fn read_pinned_input(path: &Path, bound: usize) -> io::Result<Vec<u8>> {
+    read_pinned_input_fingerprinted(path, bound).map(|(bytes, _)| bytes)
+}
+
+/// As `read_pinned_input`, also returning the fingerprint of the descriptor the bytes came from.
+fn read_pinned_input_fingerprinted(
+    path: &Path,
+    bound: usize,
+) -> io::Result<(Vec<u8>, ImageFingerprint)> {
     let refuse = |property: &str| {
         Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -77,12 +85,32 @@ pub(crate) fn read_pinned_input(path: &Path, bound: usize) -> io::Result<Vec<u8>
     if metadata.permissions().mode() & 0o022 != 0 {
         return refuse("writable by group or others");
     }
+    let fingerprint = ImageFingerprint::of(&metadata);
     let mut bytes = Vec::new();
     file.take(bound as u64 + 1).read_to_end(&mut bytes)?;
     if bytes.is_empty() || bytes.len() > bound {
         return Err(invalid("private native artifact size refused"));
     }
-    Ok(bytes)
+    Ok((bytes, fingerprint))
+}
+
+/// Create-new, owner-private, unsynced. For SCRATCH only: a helper's input that the very next step
+/// hands to a child process (visible through the page cache) and that no recovery path reads back
+/// (the dispatch attempt's copies are removed by `dispatch_fence::strip` at settlement). Nothing
+/// recovery relies on may be written this way; use `write_new`.
+pub(crate) fn write_new_unsynced(directory: &Path, name: &str, bytes: &[u8]) -> io::Result<PathBuf> {
+    if bytes.is_empty() || bytes.len() > MAX_INSPECTION {
+        return Err(invalid("private native artifact size refused"));
+    }
+    let path = directory.join(name);
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&path).ctx("open", &path)?;
+    file.write_all(bytes)?;
+    Ok(path)
 }
 
 pub(crate) fn write_new(directory: &Path, name: &str, bytes: &[u8]) -> io::Result<PathBuf> {
@@ -283,30 +311,7 @@ fn read_exact_deadline(
     Ok(())
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct ImageFingerprint {
-    dev: u64,
-    ino: u64,
-    size: u64,
-    mode: u32,
-    uid: u32,
-    mtime: (i64, i64),
-    ctime: (i64, i64),
-}
-
-impl ImageFingerprint {
-    fn of(meta: &fs::Metadata) -> Self {
-        Self {
-            dev: meta.dev(),
-            ino: meta.ino(),
-            size: meta.size(),
-            mode: meta.mode(),
-            uid: meta.uid(),
-            mtime: (meta.mtime(), meta.mtime_nsec()),
-            ctime: (meta.ctime(), meta.ctime_nsec()),
-        }
-    }
-}
+use crate::file_identity::ImageFingerprint;
 
 struct VerifiedImage {
     path: PathBuf,
@@ -400,6 +405,52 @@ fn verified_image_hashing(
     Ok((VerifiedExecutable(file), true))
 }
 
+struct VerifiedConfig {
+    path: PathBuf,
+    sha256: String,
+    bytes: Vec<u8>,
+    fingerprint: ImageFingerprint,
+}
+
+static VERIFIED_CONFIGS: std::sync::Mutex<Vec<VerifiedConfig>> = std::sync::Mutex::new(Vec::new());
+
+/// The pinned config bytes, hashed once per inode. Every call still re-checks the parent
+/// directory (`pinned_input_dir`) and that the path names a regular file with the fingerprint
+/// (dev, ino, size, mode, owner, mtime, ctime) the bytes were read and hashed under; any
+/// difference drops the entry and re-reads through `read_pinned_input`, re-hashing. A writer
+/// cannot restore ctime, so an in-place edit is always seen.
+fn verified_config(path: &Path, expected_sha256: &str) -> io::Result<Vec<u8>> {
+    let parent = path.parent().ok_or_else(|| invalid("pinned input parent absent"))?;
+    pinned_input_dir(parent)?;
+    let named = fs::symlink_metadata(path).ctx("inspect", &path)?;
+    let named = named.is_file().then(|| ImageFingerprint::of(&named));
+    let mut cache = VERIFIED_CONFIGS
+        .lock()
+        .map_err(|_| invalid("Mini Host config cache poisoned"))?;
+    if let Some(named) = named {
+        if let Some(entry) = cache
+            .iter()
+            .find(|entry| entry.path == path && entry.sha256 == expected_sha256)
+        {
+            if entry.fingerprint == named {
+                return Ok(entry.bytes.clone());
+            }
+        }
+    }
+    cache.retain(|entry| entry.path != path);
+    let (bytes, fingerprint) = read_pinned_input_fingerprinted(path, MAX_CONFIG)?;
+    if expected_sha256 != hex(&Sha256::digest(&bytes)) {
+        return Err(invalid("selected Mini Host config SHA-256 drift"));
+    }
+    cache.push(VerifiedConfig {
+        path: path.to_path_buf(),
+        sha256: expected_sha256.to_owned(),
+        bytes: bytes.clone(),
+        fingerprint,
+    });
+    Ok(bytes)
+}
+
 /// The socket belongs to the separately started operator broker, never a
 /// tenant frontend. Version 2 pins the exact Host ELF and full config bytes.
 #[derive(Clone)]
@@ -439,10 +490,7 @@ impl PrivateOperator {
 
     fn check_pin(&self) -> io::Result<Vec<u8>> {
         self.verified_host()?;
-        let config = read_pinned_input(&self.config, MAX_CONFIG)?;
-        if self.config_sha256 != hex(&Sha256::digest(&config)) {
-            return Err(invalid("selected Mini Host config SHA-256 drift"));
-        }
+        let config = verified_config(&self.config, &self.config_sha256)?;
         let parent = self
             .socket
             .parent()
@@ -584,15 +632,8 @@ impl PrivateOperator {
         if payload.is_empty() || payload.len() >= HOST_MAX_FRAME {
             return Err(invalid("Mini operator request size refused"));
         }
-        let host_sha = self.host_sha256.as_bytes();
-        if host_sha.len() != 64 {
-            return Err(invalid("Mini Host SHA-256 pin malformed"));
-        }
-        let mut sha = [0u8; 32];
-        for (index, byte) in sha.iter_mut().enumerate() {
-            *byte = u8::from_str_radix(&self.host_sha256[index * 2..index * 2 + 2], 16)
-                .map_err(|_| invalid("Mini Host SHA-256 pin malformed"))?;
-        }
+        let sha: [u8; 32] = crate::canonical::unhex_array(&self.host_sha256)
+            .ok_or_else(|| invalid("Mini Host SHA-256 pin malformed"))?;
         let mut envelope = Vec::with_capacity(1 + 4 + config.len() + 32 + 1 + payload.len());
         envelope.push(2);
         envelope.extend_from_slice(&(config.len() as u32).to_le_bytes());
@@ -650,6 +691,25 @@ impl PrivateOperator {
     }
 }
 
+/// Block until `child` has exited or `deadline` passes, whichever is first, without reaping it: the
+/// caller `try_wait`s afterwards. A pidfd turns the exit into a readable event, so a helper that
+/// finishes is noticed at once instead of at the next 10 ms tick. Where `pidfd_open` is
+/// unavailable the wait degrades to a 2 ms sleep, still bounded by the caller's loop.
+pub(crate) fn wait_for_exit(child: &std::process::Child, deadline: Instant) {
+    let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, child.id() as libc::pid_t, 0) } as libc::c_int;
+    if fd < 0 {
+        std::thread::sleep(Duration::from_millis(2));
+        return;
+    }
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    let millis = remaining.as_micros().div_ceil(1000).min(1000) as libc::c_int;
+    let mut entry = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+    unsafe {
+        libc::poll(&mut entry, 1, millis);
+        libc::close(fd);
+    }
+}
+
 /// Run one pinned Host helper to completion under `deadline`. Its stderr is
 /// retained as `<output>.stderr` (at most `MAX_HELPER_STDERR` bytes, removed
 /// when empty), and a refusal carries the first line of it: Lean's refusal
@@ -694,7 +754,7 @@ fn run_pinned(mut process: Command, output: &Path, deadline: Instant) -> io::Res
             ));
         }
         // Bounded local child wait, never a Mini authority poll.
-        std::thread::sleep(Duration::from_millis(10));
+        wait_for_exit(&child, deadline);
     };
     if stderr_file.metadata()?.len() > MAX_HELPER_STDERR {
         stderr_file.set_len(MAX_HELPER_STDERR)?;
@@ -1022,7 +1082,7 @@ fn author_signed_ingress(
     private_dir(parent)?;
     DirBuilder::new().mode(0o700).create(attempt_dir)?;
     let request = custody.request_json(operation_id, http)?;
-    let request_json = write_new(attempt_dir, "request.json", &serde_json::to_vec(&request)?)?;
+    let request_json = write_new_unsynced(attempt_dir, "request.json", &serde_json::to_vec(&request)?)?;
     let request_bin = attempt_dir.join("request.bin");
     let request_bytes = operator.tool_until(
         "author",
@@ -1042,7 +1102,7 @@ fn author_signed_ingress(
         ));
     }
     let plan_bytes = &plan_reply[5..];
-    let plan_bin = write_new(attempt_dir, "plan.bin", plan_bytes)?;
+    let plan_bin = write_new_unsynced(attempt_dir, "plan.bin", plan_bytes)?;
     let plan_json_path = attempt_dir.join("plan.json");
     let plan_json = operator.tool_until(
         "inspect",
@@ -1052,7 +1112,7 @@ fn author_signed_ingress(
         deadline,
     )?;
     let signatures = custody.sign_plan(plan_bytes, &plan_json, &request_bytes, &request)?;
-    let signatures_json = write_new(
+    let signatures_json = write_new_unsynced(
         attempt_dir,
         "signatures.json",
         &serde_json::to_vec(&signatures)?,
@@ -2116,6 +2176,32 @@ mod tests {
         assert!(error.contains("pinned input directory") && error.contains("writable by group or others"), "{error}");
         fs::set_permissions(&dir, fs::Permissions::from_mode(0o710)).unwrap();
         fs::remove_file(&link).unwrap();
+        fs::remove_file(&file).unwrap();
+        fs::remove_dir(&dir).unwrap();
+    }
+
+    #[test]
+    fn verified_config_hashes_once_per_inode_and_rehashes_on_any_change() {
+        let dir = dir_with_mode("verified-config", 0o710);
+        let file = dir.join("config.json");
+        fs::write(&file, b"{\"a\":1}").unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o640)).unwrap();
+        let sha = hex(&Sha256::digest(b"{\"a\":1}"));
+        assert_eq!(verified_config(&file, &sha).unwrap(), b"{\"a\":1}");
+        assert_eq!(verified_config(&file, &sha).unwrap(), b"{\"a\":1}");
+        // A same-size in-place edit moves ctime: the entry is dropped and the new bytes drift the pin.
+        std::thread::sleep(Duration::from_millis(30));
+        fs::write(&file, b"{\"a\":2}").unwrap();
+        let error = verified_config(&file, &sha).unwrap_err().to_string();
+        assert!(error.contains("config SHA-256 drift"), "{error}");
+        // Restoring the pinned bytes verifies again; widening the mode is refused by name.
+        std::thread::sleep(Duration::from_millis(30));
+        fs::write(&file, b"{\"a\":1}").unwrap();
+        assert_eq!(verified_config(&file, &sha).unwrap(), b"{\"a\":1}");
+        std::thread::sleep(Duration::from_millis(30));
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o660)).unwrap();
+        let error = verified_config(&file, &sha).unwrap_err().to_string();
+        assert!(error.contains("writable by group or others"), "{error}");
         fs::remove_file(&file).unwrap();
         fs::remove_dir(&dir).unwrap();
     }
