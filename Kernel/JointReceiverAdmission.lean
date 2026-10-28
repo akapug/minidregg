@@ -102,6 +102,8 @@ structure Reserved {F : Type} [Field F] [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient ground command),
     ∃ accepted : JointPromiseAuthorization.Accepted prepared selected source.promise,
       IntentRecord.ofIntent original = IntentRecord.ofIntent (accepted.ordinary.dataIntent accepted.shape)
+  /-- A reservation credits no meter (M2: only the refill family carries credit). -/
+  uncredited : intent.credit = 0
 
 variable {Custody F : Type} [Field F] [DecidableEq F]
   {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
@@ -199,7 +201,7 @@ def buildReserve (codec : StreamCodec Custody) (pin : JointControlFrame.Pin)
                       some ⟨intent,effect,installation,rfl,rfl,rfl,rfl,rfl,held,pin,before,after,source,accepted.sourceExact,
                         rfl,by intro g hg; exact List.mem_append_right _ hg,
                         beforeExact,controlPost,funded,
-                        ⟨command,selected,prepared,accepted,rfl⟩⟩
+                        ⟨command,selected,prepared,accepted,rfl⟩, rfl⟩
                     else none
                   else none
                 else none

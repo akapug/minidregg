@@ -1407,10 +1407,22 @@ theorem NativeAdmission.credit_confined {config : Config} {opened : Opened confi
         (accepted : MeterRefillReceiver.AcceptedRefill config.deployment config.profile.semantics
           ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress),
         intent = MeterRefillReceiver.intent accepted := by
-  cases admission
-  all_goals first
-    | exact Or.inr ⟨_, _, rfl⟩
-    | exact Or.inl rfl
+  cases admission with
+  | meterRefill => rename_i accepted; exact Or.inr ⟨_, accepted, rfl⟩
+  | bootstrapBundle => rename_i accepted; left; rw [accepted.intentExact]; rfl
+  | jointReserve => rename_i reserved; exact Or.inl reserved.uncredited
+  | activity =>
+      rename_i verdict
+      left
+      cases verdict with
+      | accepted accepted => exact ActivitySeatEnd.AdmittedTurn.finalIntent_credit _ _ _ _
+      | failed => rfl
+  | applicationLifecycleClaimV3 =>
+      rename_i admitted
+      left
+      unfold ClaimAtV3.intent ApplicationLifecycleClaimV3Core.Conditional.intent
+      split <;> rfl
+  | _ => exact Or.inl rfl
 
 #assert_axioms NativeAdmission.credit_confined
 
