@@ -1193,6 +1193,69 @@ def list (codec : StreamCodec alpha) : StreamCodec (List alpha) where
 
 end StreamCodec
 
+/-- The cursor of a decoder that reads one tag octet and nothing after it (a
+namespace tag): the list decoder runs on that one octet. -/
+def tagCursor {α : Type} (decode : List UInt8 → Option (α × List UInt8)) (bytes : ByteArray)
+    (start : Nat) : Option (α × Nat) :=
+  if inside : start < bytes.size then
+    match decode [bytes[start]] with
+    | some (value, _) => some (value, start + 1)
+    | none => none
+  else none
+
+theorem tagCursor_spec {α : Type} (decode : List UInt8 → Option (α × List UInt8))
+    (empty : decode [] = none)
+    (oneOctet : ∀ tag rest, decode (tag :: rest) = (decode [tag]).map fun result => (result.1, rest))
+    (bytes : ByteArray) (start : Nat) (fits : start ≤ bytes.size) :
+    tagCursor decode bytes start = cursorOfPrefix decode bytes start := by
+  unfold tagCursor cursorOfPrefix
+  by_cases inside : start < bytes.size
+  · rw [dif_pos inside, StreamCodec.octets_drop bytes inside,
+      oneOctet bytes[start] (bytes.data.toList.drop (start + 1))]
+    cases decode [bytes[start]] with
+    | none => rfl
+    | some pair =>
+        simp only [Option.map_some, Option.some.injEq, Prod.mk.injEq, true_and]
+        rw [List.length_drop, StreamCodec.octets_length]
+        omega
+  · rw [dif_neg inside, StreamCodec.octets_drop_end bytes (by omega), empty]
+    rfl
+
+/-- A one-octet tag codec, decoding natively on the cursor. -/
+def withTagCursor {α : Type} (codec : StreamCodec α) (empty : codec.decodePrefix [] = none)
+    (oneOctet : ∀ tag rest, codec.decodePrefix (tag :: rest) =
+      (codec.decodePrefix [tag]).map fun result => (result.1, rest)) : StreamCodec α :=
+  { codec with
+    decodeAt := tagCursor codec.decodePrefix
+    decodeAt_spec := tagCursor_spec codec.decodePrefix empty oneOctet
+    cursorNative := true }
+
+set_option hygiene false in
+/-- Discharges `withTagCursor`'s `oneOctet` for a decoder that matches one literal
+tag octet per arm (`| 3 :: suffix => some (.c, suffix)`) and refuses the rest:
+each arm's answer does not depend on what follows the tag. -/
+macro "one_octet_tag" : tactic => `(tactic| (
+  intro tag rest
+  dsimp only
+  split
+  all_goals first
+    | (rename_i same; injection same with tagSame restSame; subst tagSame; subst restSame; rfl)
+    | (split <;> rename_i same <;> simp at same <;> simp_all)))
+
+
+namespace StreamCodec
+
+/-- A natural below `size`, CHECKED: the natural's bytes, and a decoded natural at or above
+`size` is refused. -/
+def fin (size : Nat) : StreamCodec (Fin size) :=
+  xmap (refine nat (· < size)) (fun index => ⟨index.val, index.isLt⟩)
+    (fun wire => ⟨wire.val, wire.property⟩) (by intro index; rfl) (by intro wire; rfl)
+
+theorem fin_encode (size : Nat) (index : Fin size) : (fin size).encode index = nat.encode index.val :=
+  rfl
+
+end StreamCodec
+
 /-! ## Primitive and controller-record codecs -/
 
 def digestStream : StreamCodec Digest :=
@@ -1653,57 +1716,65 @@ def merklePathStream : StreamCodec (List Digest) :=
 def merklePathCodec : LawfulCodec (List Digest) :=
   merklePathStream.toLawful
 
-def drawRoleStream : StreamCodec DrawRole where
-  encode
-    | .roundChallenge => [0]
-    | .queryChallenge => [1]
-  decodePrefix
-    | 0 :: suffix => some (.roundChallenge, suffix)
-    | 1 :: suffix => some (.queryChallenge, suffix)
-    | _ => none
-  decodePrefix_encode := by intro value suffix; cases value <;> rfl
+def drawRoleStream : StreamCodec DrawRole :=
+  withTagCursor
+  { encode := fun
+      | .roundChallenge => [0]
+      | .queryChallenge => [1]
+    decodePrefix := fun
+      | 0 :: suffix => some (.roundChallenge, suffix)
+      | 1 :: suffix => some (.queryChallenge, suffix)
+      | _ => none
+    decodePrefix_encode := by intro value suffix; cases value <;> rfl }
+    rfl (by one_octet_tag)
 
-def columnRoleStream : StreamCodec ColumnRole where
-  encode
-    | .semanticTrace => [0]
-    | .lookupAddress => [1]
-    | .lookupWeight => [2]
-    | .lookupTable => [3]
-    | .accumulator => [4]
-    | .checkpoint => [5]
-    | .auxiliary => [6]
-  decodePrefix
-    | 0 :: suffix => some (.semanticTrace, suffix)
-    | 1 :: suffix => some (.lookupAddress, suffix)
-    | 2 :: suffix => some (.lookupWeight, suffix)
-    | 3 :: suffix => some (.lookupTable, suffix)
-    | 4 :: suffix => some (.accumulator, suffix)
-    | 5 :: suffix => some (.checkpoint, suffix)
-    | 6 :: suffix => some (.auxiliary, suffix)
-    | _ => none
-  decodePrefix_encode := by intro value suffix; cases value <;> rfl
+def columnRoleStream : StreamCodec ColumnRole :=
+  withTagCursor
+  { encode := fun
+      | .semanticTrace => [0]
+      | .lookupAddress => [1]
+      | .lookupWeight => [2]
+      | .lookupTable => [3]
+      | .accumulator => [4]
+      | .checkpoint => [5]
+      | .auxiliary => [6]
+    decodePrefix := fun
+      | 0 :: suffix => some (.semanticTrace, suffix)
+      | 1 :: suffix => some (.lookupAddress, suffix)
+      | 2 :: suffix => some (.lookupWeight, suffix)
+      | 3 :: suffix => some (.lookupTable, suffix)
+      | 4 :: suffix => some (.accumulator, suffix)
+      | 5 :: suffix => some (.checkpoint, suffix)
+      | 6 :: suffix => some (.auxiliary, suffix)
+      | _ => none
+    decodePrefix_encode := by intro value suffix; cases value <;> rfl }
+    rfl (by one_octet_tag)
 
-def reprEqRoleStream : StreamCodec ReprEqRole where
-  encode
-    | .representationEquality => [0]
-    | .sameOpening => [1]
-  decodePrefix
-    | 0 :: suffix => some (.representationEquality, suffix)
-    | 1 :: suffix => some (.sameOpening, suffix)
-    | _ => none
-  decodePrefix_encode := by intro value suffix; cases value <;> rfl
+def reprEqRoleStream : StreamCodec ReprEqRole :=
+  withTagCursor
+  { encode := fun
+      | .representationEquality => [0]
+      | .sameOpening => [1]
+    decodePrefix := fun
+      | 0 :: suffix => some (.representationEquality, suffix)
+      | 1 :: suffix => some (.sameOpening, suffix)
+      | _ => none
+    decodePrefix_encode := by intro value suffix; cases value <;> rfl }
+    rfl (by one_octet_tag)
 
-def workKindStream : StreamCodec WorkKind where
-  encode
-    | .arithmetic => [0]
-    | .hash => [1]
-    | .transform => [2]
-  decodePrefix
-    | 0 :: suffix => some (.arithmetic, suffix)
-    | 1 :: suffix => some (.hash, suffix)
-    | 2 :: suffix => some (.transform, suffix)
-    | _ => none
-  decodePrefix_encode := by intro value suffix; cases value <;> rfl
+def workKindStream : StreamCodec WorkKind :=
+  withTagCursor
+  { encode := fun
+      | .arithmetic => [0]
+      | .hash => [1]
+      | .transform => [2]
+    decodePrefix := fun
+      | 0 :: suffix => some (.arithmetic, suffix)
+      | 1 :: suffix => some (.hash, suffix)
+      | 2 :: suffix => some (.transform, suffix)
+      | _ => none
+    decodePrefix_encode := by intro value suffix; cases value <;> rfl }
+    rfl (by one_octet_tag)
 
 abbrev RootSlotWire :=
   Digest × ColumnRole × Digest × Digest × Digest × Digest × Digest ×
