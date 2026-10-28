@@ -304,8 +304,9 @@ fn a_login_code_opens_one_session_whose_terminal_runs_as_the_member_until_logout
 /// grain's origin in a form). A stand-in body (the real helper spawns it on its root-only listener
 /// exactly as it spawns `mini web --body`) answers with planted titles, a form that posts to
 /// another origin, and redirects elsewhere; the real gateway must keep every one inert: the title
-/// escaped in the shell, the CSP forbidding inline script, the session's CSRF token only in forms
-/// that post here, and no redirect off this origin.
+/// escaped in the shell, the CSP allowing no script but this origin's and the one audited head
+/// script (by its pinned hash), the session's CSRF token only in forms that post here, and no
+/// redirect off this origin.
 #[test]
 fn a_planted_body_answer_stays_inert_in_the_shell() {
     let helper = helper_binary();
@@ -399,7 +400,9 @@ while True:
     assert!(page.body.contains("&lt;/title&gt;&lt;script&gt;alert(1)&lt;/script&gt;[U+202E]gnp.exe"), "{}", page.body);
     let csp = page.header("Content-Security-Policy").expect("a CSP");
     let script = csp.split(';').map(str::trim).find(|d| d.starts_with("script-src")).expect("a script-src");
-    assert_eq!(script, "script-src 'self'", "no inline script, no eval, no other origin: {csp}");
+    // The one inline script every page may run is the shell's constant head script (page::EARLY_JS,
+    // held script-to-hash by a page.rs unit test); the body's words change nothing here.
+    assert_eq!(script, "script-src 'self' 'sha256-Du+OJKJSbdUgz5nrHeWWINvez6XKDDU/tyj/5c2uvwo='", "no script but this origin's files and the one audited head script: {csp}");
     assert!(csp.contains("default-src 'none'") && csp.contains("base-uri 'none'") && csp.contains("frame-ancestors 'none'"), "{csp}");
     assert!(csp.contains("form-action 'self' https://*.demo.dregg.online"), "a grain's bootstrap may post to the grain origins and nowhere else: {csp}");
     let stage = page.body.split("<main").nth(1).unwrap();
