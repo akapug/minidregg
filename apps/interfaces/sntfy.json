@@ -1,0 +1,268 @@
+{
+  "format": "mini-app-interface-v1",
+  "name": "sntfy",
+  "interfaceVersion": 1,
+  "appId": "c6rk81r4qk6dm3k04x1kxmyccqewhh4npuxeyg1xrpfypn2ddy0h",
+  "packageId": "bc424d5fd3cf60977cacdac328adfbee",
+  "appVersion": "v2.28.0-sandstorm-18",
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 1048576,
+    "replyBytes": 4194304,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "operations": {
+    "notifications.publish": {
+      "description": "Publish a persisted notification on a topic within this grain.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,64}$"
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 16384
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "tags": {
+            "type": "array",
+            "maxItems": 16,
+            "items": {
+              "type": "string",
+              "maxLength": 64
+            }
+          }
+        },
+        "required": [
+          "topic",
+          "message",
+          "title",
+          "priority",
+          "tags"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "time": {
+            "type": "integer"
+          },
+          "event": {
+            "type": "string",
+            "maxLength": 32
+          },
+          "topic": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 16384
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 64
+            }
+          }
+        },
+        "required": [
+          "id",
+          "time",
+          "event",
+          "topic"
+        ],
+        "additionalProperties": true
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "POST",
+        "path": [],
+        "decode": "json",
+        "status": [
+          200
+        ],
+        "json": {
+          "topic": {
+            "arg": "topic"
+          },
+          "message": {
+            "arg": "message"
+          },
+          "title": {
+            "arg": "title"
+          },
+          "priority": {
+            "arg": "priority"
+          },
+          "tags": {
+            "arg": "tags"
+          }
+        }
+      }
+    },
+    "notifications.poll": {
+      "description": "Poll persisted notifications since a message ID or Unix timestamp; never open an unbounded stream.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,64}$"
+          },
+          "since": {
+            "type": "string",
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "topic",
+          "since"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "time": {
+              "type": "integer"
+            },
+            "event": {
+              "type": "string",
+              "maxLength": 32
+            },
+            "topic": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "message": {
+              "type": "string",
+              "maxLength": 16384
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "priority": {
+              "type": "integer"
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 64
+              }
+            }
+          },
+          "required": [
+            "id",
+            "time",
+            "event",
+            "topic"
+          ],
+          "additionalProperties": true
+        },
+        "maxItems": 1000
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          {
+            "arg": "topic",
+            "encoding": "segment"
+          },
+          "/json"
+        ],
+        "decode": "json-lines",
+        "status": [
+          200
+        ],
+        "query": {
+          "poll": "1",
+          "since": {
+            "arg": "since"
+          }
+        }
+      }
+    }
+  },
+  "qualification": [
+    {
+      "id": "publish",
+      "op": "notifications.publish",
+      "args": {
+        "topic": {
+          "context": "runId"
+        },
+        "message": "Mini native typed notification",
+        "title": "Mini",
+        "priority": 3,
+        "tags": [
+          "robot"
+        ]
+      }
+    },
+    {
+      "id": "poll",
+      "op": "notifications.poll",
+      "args": {
+        "topic": {
+          "context": "runId"
+        },
+        "since": "all"
+      },
+      "assert": [
+        {
+          "contains": {
+            "topic": {
+              "context": "runId"
+            },
+            "message": "Mini native typed notification"
+          }
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "kind": "member-session"
+  },
+  "sources": [
+    "https://github.com/orblivion/ntfy/blob/sandstorm/server/sandstorm.go",
+    "https://github.com/orblivion/ntfy/blob/sandstorm/server/server.go",
+    "https://github.com/orblivion/ntfy/blob/sandstorm/.sandstorm/launcher.sh"
+  ],
+  "$defs": {}
+}
