@@ -38,6 +38,7 @@ fn startup_budget_is_bounded_configurable_and_absent_from_legacy_serialization()
         .unwrap()
         .get("startupTimeoutSeconds")
         .is_none());
+    assert!(serde_json::to_value(&rt.config).unwrap().get("consentFullReadiness").is_none());
     drop(rt);
     fs::remove_dir_all(root).unwrap();
 }
@@ -143,6 +144,47 @@ fn startup_readiness_requires_signed_idle_state_and_admits_no_tool() {
         .unwrap_err()
         .contains("active or retained"));
     assert_eq!(rt.journal.next_operation_id, before);
+    drop(rt);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn startup_full_consent_is_opt_in_strict_and_precedes_signed_read() {
+    let (root, mut rt) = fixture("startup-full-consent");
+    let original = fs::read_to_string(&rt.config.mini).unwrap();
+    let wrapper = format!(r#"#!/bin/sh
+if [ "$1" = consent-full-ready ]; then
+  printf called > '{}/full-called'
+  cat '{}/full-reply'
+  exit 0
+fi
+{}"#, root.display(), root.display(), original);
+    fs::write(&rt.config.mini, wrapper).unwrap();
+    fs::write(root.join("full-reply"), br#"{"type":"mini-consent-full-readiness-v1","ready":true}"#).unwrap();
+    let receipt = rt.prepare_idle(Instant::now() + Duration::from_secs(30)).unwrap();
+    assert!(receipt["fullConsent"].is_null());
+    assert!(!root.join("full-called").exists());
+    rt.config.consent_full_readiness = Some(true);
+    let receipt = rt.prepare_idle(Instant::now() + Duration::from_secs(30)).unwrap();
+    assert_eq!(receipt["fullConsent"]["ready"], true);
+    assert!(root.join("full-called").exists());
+    for reply in [
+        r#"{"type":"mini-consent-full-readiness-v1","ready":false}"#,
+        r#"{"type":"other","ready":true}"#,
+        r#"{"type":"mini-consent-full-readiness-v1","ready":true,"ready":false}"#,
+        r#"{"type":"mini-consent-full-readiness-v1","ready":true,"unknown":1}"#,
+        "", "legacy usage",
+    ] {
+        fs::write(root.join("full-reply"), reply).unwrap();
+        let before = rt.journal.next_operation_id;
+        assert!(rt.prepare_idle(Instant::now() + Duration::from_secs(30)).is_err());
+        assert_eq!(before, rt.journal.next_operation_id, "invalid consent reply must stop before signed read");
+        assert!(rt.startup_deadline.is_none());
+    }
+    fs::write(&rt.config.mini, original).unwrap();
+    let before = rt.journal.next_operation_id;
+    assert!(rt.prepare_idle(Instant::now() + Duration::from_secs(30)).is_err());
+    assert_eq!(before, rt.journal.next_operation_id);
     drop(rt);
     fs::remove_dir_all(root).unwrap();
 }
