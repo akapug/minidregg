@@ -16,7 +16,7 @@
     "kind": "member-route"
   },
   "sources": [
-    "https://github.com/zombiezen/filedrop/blob/16b413cd24f23b29ccf7c4ef38a117962cfd31f4/filedrop.go",
+    "https://github.com/zombiezen/filedrop/blob/51f4f1d7ae6e567ddead5ddba7e1cb9d34935e8d/filedrop.go",
     "scripts/spk-platform/market-writes/b5.sh"
   ],
   "$defs": {
