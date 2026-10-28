@@ -10,11 +10,12 @@
 #
 # What is copied and what is shared (inode-level), and why:
 #   - source tree + .git: REAL copies (rsync). Editors and git write in place.
-#   - .lake/build (root package): cp -al, then every file UNSHARED except
-#       *.olean  (lean writes <f>.olean.tmp.<pid> then rename(2); strace on persvati 2026-10-04)
-#       *.o      (leanc writes a tmp then rename(2); same measurement)
-#     Everything else lean/lake writes IN PLACE with O_TRUNC (.ilean, .c, .trace, .hash,
-#     .setup.json, ...): a shared inode would leak the lane's write into the base.
+#   - .lake/build (root package): a REAL copy (`cp -a --reflink=auto`: a block clone where the
+#     filesystem allows it, else bytes), NEVER hard links. Lake rewrites a module's .trace in
+#     place, and its artifact cache (restoreAllArtifacts) and Lean 4.30's module outputs
+#     (.olean.private, .olean.server, .ir) add writers whose rename discipline was never
+#     measured; a shared inode lets one tree see another's olean under its own trace (cut 9's
+#     stale hard-linked olean). The cost is one build directory per lane (about 2 GB).
 #   - .lake/packages (mathlib & co): cp -al; UNSHARED are the small files lake may rewrite
 #     without recompiling (*.trace, *.hash, *.json, lakefile.olean*, manifests,
 #     lean-toolchain) and each package's .git except objects/. Package build products
@@ -107,7 +108,14 @@ read -r size_kb avail_kb < <(df --output=size,avail -k "$PARENT" | tail -1)
 # --- copy ---------------------------------------------------------------------
 mkdir -p "$DEST/logs" "$DEST/scratch"
 rsync -a --exclude=/.lake "$BASE/" "$DEST/src/"
-cp -al "$BASE/.lake" "$DEST/src/.lake"
+mkdir -p "$DEST/src/.lake"
+for entry in "$BASE"/.lake/* "$BASE"/.lake/.[!.]*; do
+  [ -e "$entry" ] || continue
+  case ${entry##*/} in
+    packages) cp -al "$entry" "$DEST/src/.lake/packages" ;;
+    *) cp -a --reflink=auto "$entry" "$DEST/src/.lake/" ;;
+  esac
+done
 
 unshare() { cp -p -- "$1" "$1.mklane.tmp" && mv -f -- "$1.mklane.tmp" "$1"; }
 export -f unshare
@@ -115,8 +123,6 @@ cd "$DEST/src/.lake"
 find . -mindepth 1 -maxdepth 1 ! -name build ! -name packages -print0 |
   xargs -0 -r -I{} find {} -type f -links +1 -print0 |
   xargs -0 -r -n 256 bash -c 'for f; do unshare "$f"; done' _
-find build -type f -links +1 ! -name '*.olean' ! -name '*.o' -print0 |
-  xargs -0 -r -P 8 -n 256 bash -c 'for f; do unshare "$f"; done' _
 find packages \( -path '*/.git/objects' -prune \) -o -type f -links +1 \( \
     -path 'packages/*/.git/*' -o -name '*.trace' -o -name '*.hash' -o -name '*.json' \
     -o -name 'lakefile.olean*' -o -name 'lake-manifest.json' -o -name 'lean-toolchain' \) -print0 |
@@ -125,7 +131,7 @@ find packages \( -path '*/.git/objects' -prune \) -o -type f -links +1 \( \
 # --- audit: every remaining shared inode must be on the allow-list --------------
 cd "$DEST/src"
 bad=$( { find .lake -path .lake/packages -prune -o -type f -links +1 ! -path '.lake/build/*' -print
-         find .lake/build -type f -links +1 ! -name '*.olean' ! -name '*.o' -print
+         find .lake/build -type f -links +1 -print
          find .lake/packages \( -path '*/.git/objects' -prune \) -o -type f -links +1 \( \
            -path '*/.git/*' -o -name '*.trace' -o -name '*.hash' -o -name '*.json' \
            -o -name 'lakefile.olean*' -o -name 'lean-toolchain' \) -print; } | head -20)
@@ -160,7 +166,7 @@ lane=$lane
 created=$(date -Is)
 from=$BASE
 tip=$TIP
-shared_inodes=root .lake/build *.olean *.o (tmp+rename); .lake/packages sources and build products, .git/objects
+shared_inodes=.lake/packages sources and build products, .git/objects (.lake/build is a real copy)
 rule=never change lake-manifest.json or lean-toolchain in this lane (package build products are shared inodes)
 first: git fetch github next && git rebase github/next     (lanes build on next; the keeper rebases arrivals onto it)
 check: $PIPELINE_ROOT/scripts/lean-ask check <File.lean>   (0.4 s; --reload after a fetch/rebase) or $PIPELINE_ROOT/scripts/lane-check <File.lean>
