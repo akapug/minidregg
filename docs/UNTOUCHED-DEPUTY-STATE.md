@@ -1,4 +1,4 @@
-# Untouched-areas deputy: state (rewritten whole; 2026-10-28 morning: bf5ead3fa on main)
+# Untouched-areas deputy: state (rewritten whole; 2026-10-28 09:10: dregg-build OOM, runs move to hbox)
 
 Inputs: docs/review/2026-10-27-untouched-areas/{LEAN,NATIVE}.md, docs/review/2026-10-27-blind-spots/BLIND-SPOTS.md Sweep 1.
 Each lane: /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>.
@@ -11,6 +11,12 @@ Each lane: /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>.
 - Integration is continuous (no cuts). Re-genesis is free (flag days are not held).
 - Never kill by pattern; no PID file: tell the coordinator.
 - Context (ember, COORDINATION 3a6aafdca): a continuation file by about 580k tokens, distill or hand off at about 600k, for the deputy and every faerie it briefs.
+
+## Boxes after the 08:57 dregg-build OOM (coordinator)
+- dregg-build (30 GB) OOM-killed the integrator's host stage at load 76. It is the integration box only now: nothing heavy beside the integrator's builds.
+- Every faerie world run and box build goes to hbox under /tank/lanes/<lane>, `flock -o /tank/lanes/world-up.lock` around world-up, PID file, staging deleted after. All told and acknowledged: B3, B5, B7, B8, un-assurance (idle), japps faerie.
+- Only exception: japps w6 (a4e312352a7091f59, /build/lanes/un-stream-continuity/job7.pid, started 08:31) survived the OOM and finishes there; nothing new starts there. Its next run (391311929 + bf5ead3fa candidate) goes to hbox /tank/lanes/un-stream-continuity. Open risk it will name if hit: `japps --box` may need install-user-world's lanes sudoers rules, which exist only on dregg-build (hbox's passwordless rule covers only /tank/dregg-build/claude-lanes/*/src).
+- japps faerie context ~493k: continuation file by ~580k.
 
 ## Landed (all on main as of e05a19fe)
 un-verify (Generic Simplex gate), un-bend (bend verb + lost reply), un-world (Tally/call/send native; DOMAINS.md), un-assurance (census, Door 11, StoryHistory, Kernel/StoryLaw), un-native-rows, un-moves, un-fixtures, un-seats, un-pb-codec (R8), un-pb-exec (R7/P9), un-pb-seal (R3 whole), un-pb-wal (R2 + five two-step dealers), un-pb-twins 134535c2 (§5.3 deletions, Pool/Cut, AnchorFixture -> real serve, P6 verifier), un-pb-helpers 353a6d11d (Lagrange, Horner, PRG/urandom, Nat cursors, outbox/phase codecs), un-web-front 0da04999, un-effects 2acd8acf (effect Plan kernel, keystone 5e116ec9, pass-11 additions, world apps on the kernel protocol), un-pred-census 44479e30 (Vouchers sweep: every receiver a Kernel.Receiving.Family at receiverVerifier, Ran private with one mint, gate rows receiver-verifier and ran-mint), un-stream-continuity 6544ea37 (hot-route op154 fixed at the cause; statement accepted e0916a53).
@@ -89,6 +95,7 @@ Its hbox worlds: /tank/rows-2d8b7ed5-apps/w-{featured,b1,b2,b4,b6,rt,fixups}. Mi
 - PASS: EtherCalc lifecycle + write, DokuWiki lifecycle + write, Datasette lifecycle + recorded read, HedgeDoc/Davros/HledgerWeb lifecycles.
 - HedgeDoc write "close frame" (socket.io): same family as IPython's kernel websocket; given to B8 (a13f0bc9626b1320a), fix at the cause for both.
 - Davros write, HledgerWeb write and sntfy lifecycle: ONE cause (B7 abf203f357754001b): featured-qualify gave the owner session role 0, the package's weakest (sntfy `api` lacks administration -> 401/400; Davros and hledger-web `viewer`). Fixed at 817e8c7f1 (owner basis allAccess, which a grain owner holds and the Lean enrollment admits; failing write rows now print status + 160 body bytes; failing lifecycle rows name the phase). Rerun of l/m/o queued behind the B7 table (job2.pid under /tank/lanes/app-market-b7). Sha to the integrator once green.
+- TextEditor write (b1 on 76758dba6, 7/8): `Client did not complete authentication handshake` (Meteor DDP). Given to B7 (abf203f357754001b) after its l/m/o rerun: reuse the japps DDP client, fix recipe or spk-host and say which, one row on a fresh hbox world.
 - spk-host io errors must name operation + path (coordinator): OWNED by a6603277e4ffe2d70 on lane/un-spk-ioctx (7ec878215: IoContext::ctx, 21 sites in broker_endpoint.rs + grain.rs, missing operator/broker socket and grain file tests). Told to finish whole (hostd, http_entrance, www_publish, broker...), one module per commit with the grep, then one sha. B3 (a85d12892ea6de3ca) told to stay out.
 
 ## Next three
