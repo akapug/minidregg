@@ -136,6 +136,21 @@ theorem Loaded.write_decodes {deployment : CanonicalCellRegistry.Deployment}
     decodeCell (loaded.write post).canonicalPostBytes = some post :=
   decodeCell_bytes post
 
+/-- The platform record a physical snapshot holds at the deployment's platform cell: the
+loaded cell's record, or `none` when the identifier holds no live platform cell. Every
+reader of a platform field (births, completions, the Host's pre-checks) reads it here, on
+the snapshot it commits against. -/
+def recordOn (deployment : CanonicalCellRegistry.Deployment) (physical : PhysicalSnapshot) :
+    Option PlatformCellLayout.Platform :=
+  (load deployment physical).bind fun loaded => PlatformCellLayout.recordOf loaded.cell.logical
+
+/-- The record depends only on the snapshot's bytes at the platform identifier. -/
+theorem recordOn_congr (deployment : CanonicalCellRegistry.Deployment) {a b : PhysicalSnapshot}
+    (same : a.canonicalBytes (cellIdOf deployment) = b.canonicalBytes (cellIdOf deployment)) :
+    recordOn deployment a = recordOn deployment b := by
+  unfold recordOn load
+  split <;> split <;> simp_all
+
 /-! ## The signing plan
 
 What the controller signs: the exact source-derived header over the command. The Host
@@ -170,5 +185,6 @@ theorem signingPlan_roundtrip (plan : SigningPlan) :
 #assert_axioms load_refuses
 #assert_axioms Loaded.root_exact
 #assert_axioms Loaded.write_pre_is_loaded_root
+#assert_axioms recordOn_congr
 
 end Minidregg.Kernel.PlatformCellDomain

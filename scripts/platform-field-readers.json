@@ -27,30 +27,6 @@
    "status": "owed"
   }
  },
- "Host/ApplicationFailedStartRecoveryAuthoring.lean": {
-  "config.completionCustodianKey": {
-   "count": 1,
-   "status": "owed"
-  }
- },
- "Host/ApplicationLifecycleCompletionOperator.lean": {
-  "config.completionCustodianKey": {
-   "count": 1,
-   "status": "owed"
-  }
- },
- "Host/ApplicationLifecycleLaunchCompletionAuthoring.lean": {
-  "config.completionCustodianKey": {
-   "count": 1,
-   "status": "owed"
-  }
- },
- "Host/ApplicationLifecycleRetryCompletionV4Authoring.lean": {
-  "config.completionCustodianKey": {
-   "count": 1,
-   "status": "owed"
-  }
- },
  "Host/BirthRuntimeProfile.lean": {
   "config.tariff": {
    "count": 1,
@@ -133,12 +109,6 @@
    "status": "other"
   }
  },
- "Kernel/ApplicationFailedStartRecoveryAdmission.lean": {
-  "config.completionCustodianKey": {
-   "count": 3,
-   "status": "owed"
-  }
- },
  "Kernel/ApplicationGrainBirth.lean": {
   "config.tariff": {
    "count": 4,
@@ -159,30 +129,6 @@
    "status": "owed"
   }
  },
- "Kernel/ApplicationLifecycleCompletionAdmission.lean": {
-  "config.completionCustodianKey": {
-   "count": 3,
-   "status": "owed"
-  }
- },
- "Kernel/ApplicationLifecycleCompletionV2Admission.lean": {
-  "config.completionCustodianKey": {
-   "count": 3,
-   "status": "owed"
-  }
- },
- "Kernel/ApplicationLifecycleRetryCompletionV4Admission.lean": {
-  "config.completionCustodianKey": {
-   "count": 3,
-   "status": "owed"
-  }
- },
- "Kernel/NativeHost.lean": {
-  "profile.template": {
-   "count": 1,
-   "status": "owed"
-  }
- },
  "Kernel/NativeHostBookInvariant.lean": {
   "config.tariff": {
    "count": 2,
@@ -192,11 +138,13 @@
  "Kernel/NativeHostContext.lean": {
   "config.completionCustodianKey": {
    "count": 2,
-   "status": "owed"
+   "reason": "runtimeParameters (genesis-parameter fingerprint) and validateChecks' 32-byte check of the genesis key that genesisRecord seeds; installs are checked by Platform.valid",
+   "status": "genesis"
   },
   "config.tariff": {
    "count": 13,
-   "status": "owed"
+   "reason": "runtimeParameters (the config's genesis-parameter fingerprint, and its lemma) and pinnedTariff's stand-in where the image holds no platform record, under which every birth refuses platformUnavailable",
+   "status": "genesis"
   },
   "grainBirthTariffValue": {
    "count": 2,
@@ -219,8 +167,9 @@
  },
  "Kernel/NativeHostReplay.lean": {
   "profile.template": {
-   "count": 2,
-   "status": "owed"
+   "count": 1,
+   "reason": "payEnrolAmbient's stand-in where the image holds no platform record, under which every pay plan refuses platformUnavailable (PayEnrolReceiver.AmbientCurrent)",
+   "status": "genesis"
   }
  },
  "Kernel/ObjectiveActivity.lean": {

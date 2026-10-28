@@ -384,8 +384,7 @@ def templateAt (template : CanonicalRuntimeProfile.FactoryTemplate)
 /-- The platform record `durable` holds at `deployment`'s platform cell. -/
 def platformRecordAt (deployment : Deployment) (durable : Durable) :
     Option PlatformCellLayout.Platform :=
-  (PlatformCellDomain.load deployment durable.snapshot).bind fun loaded =>
-    PlatformCellLayout.recordOf loaded.cell.logical
+  PlatformCellDomain.recordOn deployment durable.snapshot
 
 /-- The factory template a birth prepared against `durable` is bound by
 (`Pending.templateExact`): `templateAt` of that image's platform record. -/

@@ -521,7 +521,7 @@ def provisionPlanLoaded (config : Config) (opened : Opened config)
     opened.durable command).mapError (fun reason => s!"provisioning preparation: {repr reason}")
   let selected ← (CredentialSignatureAdmission.signingHeader prepared.authority.snapshot
     (ParticipantFactoryProvisioning.marker config.deployment.domain config.profile.semantics command)
-    ⟨.program, ParticipantFactoryProvisioning.request config.deployment config.profile.template
+    ⟨.program, ParticipantFactoryProvisioning.request config.deployment prepared.template
       prepared.authority.snapshot config.profile.semantics ambient command⟩).mapError
         (fun reason => s!"provisioning sponsor key: {repr reason}")
   pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,

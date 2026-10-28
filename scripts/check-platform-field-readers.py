@@ -17,6 +17,7 @@ status:
            workOf, domainWork, heap, stack), which the platform cell does not own;
   cell     reads the field through the platform record (`templateAt profile.template record`
            takes only issuer and birthSlack from the profile).
+A row's optional `reason` says why a non-owed status holds.
 
 A bare `profile.template` (the whole template handed on) counts as a reader of its owner
 budget and lifetime unless the row says otherwise; `templateAt profile.template` is the cell
@@ -25,7 +26,7 @@ path and is not counted. Comments are not code and are not counted.
   check-platform-field-readers.py           refuse any reader not in the census, or a count
                                             above its census row (a new silent twin);
   check-platform-field-readers.py --ship    also refuse while any `owed` row remains;
-  check-platform-field-readers.py --write   rewrite the counts (keeps statuses; new rows owed).
+  check-platform-field-readers.py --write   rewrite the counts (keeps statuses and reasons; new rows owed).
 """
 import json
 import re
@@ -37,7 +38,7 @@ ROOT = Path(__file__).resolve().parent.parent
 CENSUS = ROOT / "scripts" / "platform-field-readers.json"
 PATTERN = re.compile(r"template\.(?:ownerBudget|lifetime)|config\.tariff\b|grainBirthTariffValue"
                      r"|config\.completionCustodianKey"
-                     r"|(?<!templateAt )profile\.template\b"
+                     r"|(?<!templateAt )(?<!templateAt config\.)profile\.template\b"
                      r"(?!\.(?:issuer|birthSlack|ownerBudget|lifetime)\b)")
 EXCLUDED = ("Kernel/PlatformCell", "scripts/", "tests/", "Fixtures/", "Verify/", "Assurance/",
             ".lake/", "docs/")
@@ -96,8 +97,9 @@ def main(argv):
         out = {}
         for name, keys in sorted(found.items()):
             for key, count in sorted(keys.items()):
-                status = census.get(name, {}).get(key, {}).get("status", "owed")
-                out.setdefault(name, {})[key] = {"count": count, "status": status}
+                row = dict(census.get(name, {}).get(key, {"status": "owed"}))
+                row["count"] = count
+                out.setdefault(name, {})[key] = row
         CENSUS.write_text(json.dumps(out, indent=1, sort_keys=True) + "\n")
         return 0
     errors = []
