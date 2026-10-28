@@ -41,7 +41,7 @@ host=$(jq -r .host "$sponsor_ws/workspace.json")
 node=$(dirname "$(dirname "$config")")
 [[ -f $config && -S $socket && -x $host ]] || refuse "sponsor workspace does not pin a config, a live public socket and a Host"
 private_socket=$(jq -r '.operator // empty' "$node/ingress.json" 2>/dev/null || true)
-[[ -n $private_socket ]] || private_socket=$(dirname "$socket")/../operator/mini.sock
+[[ -n $private_socket ]] || private_socket=$(dirname "$(dirname "$socket")")/operator/mini.sock
 genesis=$node/genesis.json
 [[ -f $genesis ]] || refuse "no genesis.json beside the node's config ($node)"
 # ── the operator policy a grain host needs, pinned at genesis ────────────────
