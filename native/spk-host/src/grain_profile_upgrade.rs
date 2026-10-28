@@ -4,6 +4,7 @@
 //! genesis config hash (the profile lineage). The Store key is Mini's
 //! `storeTag`, unchanged by an upgrade because the genesis seed and the Store
 //! root are.
+use crate::io_context::IoContext;
 use super::*;
 use crate::dispatch_author::FixedAuthoring;
 use std::os::fd::AsRawFd;
@@ -76,7 +77,7 @@ fn profile_layout(path: &Path, profile: &HostProfile) -> io::Result<()> {
     }
     broker::socket_path(&profile.grains_root, profile.broker_socket.as_deref())?;
     root_ancestors(&profile.grains_root)?;
-    let root = fs::symlink_metadata(&profile.grains_root)?;
+    let root = fs::symlink_metadata(&profile.grains_root).ctx("inspect", &profile.grains_root)?;
     if !root.is_dir() || !crate::os::root_owner(root.uid()) || root.mode() & 0o022 != 0 {
         return Err(invalid("grains root custody refused"));
     }
@@ -101,7 +102,7 @@ pub(super) fn lock(state_root: &Path, exclusive: bool) -> io::Result<File> {
         .truncate(false)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(&path)?;
+        .open(&path).ctx("open", &path)?;
     let meta = file.metadata()?;
     if !meta.is_file()
         || meta.uid() != unsafe { libc::geteuid() }
@@ -308,7 +309,7 @@ fn stopped(store: &str, state_root: &Path) -> io::Result<()> {
         return Ok(());
     }
     private_dir(&apps)?;
-    for entry in fs::read_dir(apps)? {
+    for entry in fs::read_dir(&apps).ctx("list", &apps)? {
         let entry = entry?;
         let app = entry.file_name().to_string_lossy().into_owned();
         if !broker::decimal(&app) {
@@ -411,11 +412,11 @@ pub(super) fn rebind(old_path: &Path, admission_path: &Path) -> io::Result<Value
         .create_new(true)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(&temp)?;
+        .open(&temp).ctx("open", &temp)?;
     file.write_all(&serde_json::to_vec_pretty(&selection)?)?;
     file.sync_all()?;
-    fs::rename(&temp, &pointer)?;
-    File::open(&old.state_root)?.sync_all()?;
+    fs::rename(&temp, &pointer).ctx("rename", &temp)?;
+    File::open(&old.state_root).ctx("open", &old.state_root)?.sync_all()?;
     Ok(
         json!({"protocol":"mini-spk-profile-rebind-v1","store":store(&next)?,"previousProfile":old_path,
         "profile":next_path,"profileSha256":selection.sha256,"admission":admission_path,"activeProfile":pointer}),
