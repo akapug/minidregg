@@ -146,6 +146,22 @@ class ControllerWorldTests(unittest.TestCase):
             with self.assertRaises(ValueError): c.controller_run(r['store'], '/unused', str(path))
             self.assertEqual(execute.call_count, 1)
 
+    def test_worker_room_account_binds_once_without_changing_other_authority(self):
+        old = {'task': '12', 'subject': '13', 'room': {'room': 'lab', 'workspace': '/private/workspace', 'account': 'unsummoned'}}
+        c.unchanged_worker_tool(old, old)
+        for name in ('lab-hermes', 'lab/hermes-budget'):
+            new = {**old, 'room': {**old['room'], 'account': name}}
+            c.unchanged_worker_tool(old, new)
+            c.unchanged_worker_tool(new, new)
+            with self.assertRaises(ValueError): c.unchanged_worker_tool(new, old)
+            with self.assertRaises(ValueError): c.unchanged_worker_tool(new, {**new, 'room': {**new['room'], 'account': 'other'}})
+        for name in ('../secret', 'lab//account', 'lab_account', 'a' * 65, '/lab', 'lab/' + 'x' * 125):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                c.unchanged_worker_tool(old, {**old, 'room': {**old['room'], 'account': name}})
+        for change in ({'subject': '99'}, {'room': {**old['room'], 'room': 'other', 'account': 'lab-hermes'}}):
+            with self.assertRaises(ValueError): c.unchanged_worker_tool(old, {**old, **change})
+        c.unchanged_worker_tool(old, {**old, 'allowedApplicationLifetimeRoutes': [{'name': 'oracle-app'}]})
+
     def test_worker_runtime_copy_refuses_links_without_following_them(self):
         source = self.root / 'runtime-source'; source.mkdir(mode=0o700)
         secret = self.file('not-a-runtime-file', b'private')

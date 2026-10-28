@@ -21,7 +21,7 @@ try:
                 m.st_mode & 0o7022 == 0 and 0 < m.st_size <= 131072):
             raise ValueError('controller setup companion custody refused')
         code = source.read(131073)
-    if hashlib.sha256(code).hexdigest() != '9e062599a745a4d6abab7feabac6515236295e13d60f98a8378d53d2f9af4185':
+    if hashlib.sha256(code).hexdigest() != '185581e26f4f06aaddda873ed4b3e31907a6bb9b72ee172080586413b717be05':
         raise ValueError('controller setup companion code pin differs')
 except (OSError, ValueError) as error:
     sys.exit(str(error))

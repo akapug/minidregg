@@ -867,6 +867,26 @@ def validate_worker_config(value, base, r, previous=None):
                 'worker command, transport or service authority changed')
 
 
+def unchanged_worker_tool(previous, current):
+    """Allow one initial account reference selection; native handoff still grants access."""
+    allowed = {'registeredSharedApplications', 'allowedSessionFamilies', 'currentBirthHostSha256',
+               'allowedApplicationLifetimeRoutes', 'lifetimeApiHostSha256', 'applicationServices'}
+    old = {k:v for k,v in previous.items() if k not in allowed}
+    new = {k:v for k,v in current.items() if k not in allowed}
+    if old == new:
+        return
+    old_room, new_room = old.get('room'), new.get('room')
+    if isinstance(old_room, dict) and isinstance(new_room, dict) and old_room.get('account') == 'unsummoned':
+        account = new_room.get('account')
+        # Same syntactic boundary as native workspace::validate_ref_name. This
+        # selects a reference, never proves its ownership, funding or room grant.
+        valid = (isinstance(account, str) and account != 'unsummoned' and 0 < len(account) <= 128
+                 and all(re.fullmatch('[A-Za-z0-9-]{1,64}', part) for part in account.split('/')))
+        if valid:
+            new = {**new, 'room': {**new_room, 'account': 'unsummoned'}}
+    require(old == new, 'worker non-attachment tool config changed or room account already bound')
+
+
 def publish_worker_config(store, helper):
     _, base, r = load(store, helper)
     stage = checked_units(base, r)
@@ -1493,8 +1513,7 @@ def config_update(store, helper, source_arg):
         validate_worker_config(value, base, r, strict_json(old))
         previous = strict_json(old)
         require({k:v for k,v in value.items() if k != 'toolTask'} == {k:v for k,v in previous.items() if k != 'toolTask'}, 'worker non-tool config changed')
-        allowed = {'registeredSharedApplications', 'allowedSessionFamilies', 'currentBirthHostSha256', 'allowedApplicationLifetimeRoutes', 'lifetimeApiHostSha256', 'applicationServices'}
-        require({k:v for k,v in value['toolTask'].items() if k not in allowed} == {k:v for k,v in previous['toolTask'].items() if k not in allowed}, 'worker non-attachment tool config changed')
+        unchanged_worker_tool(previous['toolTask'], value['toolTask'])
     root = worker_layout(r)
     for name, content in proof.items():
         path = root / name
