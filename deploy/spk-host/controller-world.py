@@ -917,6 +917,22 @@ def validate_worker_config(value, base, r, previous=None):
                 'worker command, transport or service authority changed')
 
 
+def unchanged_worker_config(previous, current, state):
+    """Permit the first bounded foreground session allowance before native runtime custody."""
+    old = {k:v for k,v in previous.items() if k != 'toolTask'}
+    new = {k:v for k,v in current.items() if k != 'toolTask'}
+    if old == new:
+        return
+    if previous.get('foregroundTool') is None and current.get('foregroundTool') == {'reserve': '1', 'charge': '0'}:
+        journal = state / 'journal.json'
+        require(not journal.exists() and not journal.is_symlink(),
+                'initial foreground allowance requires no native controller journal')
+        new = dict(new)
+        if 'foregroundTool' in old: new['foregroundTool'] = old['foregroundTool']
+        else: del new['foregroundTool']
+    require(old == new, 'worker non-tool config changed')
+
+
 def unchanged_worker_tool(previous, current):
     """Allow one initial account reference selection; native handoff still grants access."""
     allowed = {'registeredSharedApplications', 'allowedSessionFamilies', 'currentBirthHostSha256',
@@ -1690,7 +1706,7 @@ def config_update(store, helper, source_arg):
     if worker:
         validate_worker_config(value, base, r, strict_json(old))
         previous = strict_json(old)
-        require({k:v for k,v in value.items() if k != 'toolTask'} == {k:v for k,v in previous.items() if k != 'toolTask'}, 'worker non-tool config changed')
+        unchanged_worker_config(previous, value, worker_state(r))
         unchanged_worker_tool(previous['toolTask'], value['toolTask'])
     root = worker_layout(r)
     for name, content in proof.items():

@@ -207,6 +207,24 @@ class ControllerWorldTests(unittest.TestCase):
             private.chmod(0o710)
             with self.assertRaisesRegex(ValueError,'mode refused'):c.operator_endpoint_upgrade(record['store'],'helper',str(endpoint))
 
+    def test_initial_foreground_allowance_is_minimal_and_prejournal_only(self):
+        state=self.root/'state';state.mkdir();base={'task':'1','commands':[],'toolTask':{}}
+        minimal={'reserve':'1','charge':'0'}
+        for previous in (base,{**base,'foregroundTool':None}):
+            current={**previous,'foregroundTool':minimal}
+            c.unchanged_worker_config(previous,current,state)
+            for changed in ({**current,'task':'2'},{**current,'foregroundTool':{'reserve':'2','charge':'0'}}):
+                with self.assertRaises(ValueError):c.unchanged_worker_config(previous,changed,state)
+        configured={**base,'foregroundTool':{'reserve':'2','charge':'1'}}
+        c.unchanged_worker_config(configured,configured,state)
+        with self.assertRaises(ValueError):c.unchanged_worker_config(configured,{**base,'foregroundTool':minimal},state)
+        (state/'journal.json').write_text('{}')
+        with self.assertRaisesRegex(ValueError,'no native controller journal'):
+            c.unchanged_worker_config(base,{**base,'foregroundTool':minimal},state)
+        (state/'journal.json').unlink();(state/'journal.json').symlink_to(state/'missing')
+        with self.assertRaisesRegex(ValueError,'no native controller journal'):
+            c.unchanged_worker_config(base,{**base,'foregroundTool':minimal},state)
+
     def test_stopped_failed_units_preserve_diagnostics_but_refuse_live_processes(self):
         r = self.worker_record()
         state = {'ActiveState': 'failed', 'MainPID': '0', 'ControlPID': '0'}
