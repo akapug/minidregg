@@ -969,3 +969,24 @@ this pass's own pass-2 overflow pole asked for one on that same false premise). 
 `RefillContext.layout`, the `fitsCheck` conjunct and `overflow_refused`. The remaining M2 statements
 stand. Record in `PlatformCell.lean`'s header that the meter is unbounded by design: any future
 fixed-width emitter of `available` must carry its own bound at that emitter (law 3).
+
+**Addendum, M2's deployed statements (L1d, local, unbuilt): the deployed forms are accepted. Retire the
+spec-level twin.**
+- K1, `protocol_install_matches` over the real `Snapshot.install`, with teeth against the uncredited install:
+  accepted.
+- K2, `AcceptedRefill.sound`, states the deployed facts: sponsor = `controllerOf` of the platform cell, the
+  verified envelope, the stored capability evidence, the unspent marker, and the exact intent shape
+  (no writes, zero charge, one marker nullifier, `credit = amount`, guards at the durable root). Together
+  with `intent_install_refilled` it is a stronger, more concrete M2-c than `RefillLawful ctx post`. The
+  deployed receiver is not a pure function of a meter and a refill, so a `post` would be invented for the
+  instantiation.
+- K3, the `credit_confined` disjunct naming an `AcceptedRefill` (private mk, built only by admission) with
+  `recordMatches_iff` carrying credit, is the deployed content of `CreditConfined` and needs no
+  `RefillAdmits ctx` wrapper.
+
+So the abstract `RefillContext`/`RefillAdmits`/`RefillLawful`/`CreditConfined` in `PlatformCell.lean`
+would now be parallel statements no live code instantiates (law 5). **Delete them, or relabel them as the
+shape and not keystones, pointing to K2/K3**, exactly as pass 18 did for `BirthsReadCurrent`. Then **move
+the teeth onto the deployed type**: `IsEmpty (AcceptedRefill …)` when the marker is spent (replay) and
+when the sponsor is not the platform cell's controller (forgery). K3's own statement already refutes a
+non-refill arm carrying credit.
