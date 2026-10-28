@@ -9,6 +9,7 @@
 //! names. A lookup reads the exact ingress the one original submit carried;
 //! it never submits, assembles or signs anything.
 
+use crate::io_context::IoContext;
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
 use crate::lifecycle_v3_native::{decimal, framed_payload, hex, text};
 use serde_json::Value;
@@ -106,7 +107,7 @@ pub(crate) fn lookup_view(
     ingress: &[u8],
 ) -> io::Result<(Value, String, Vec<u8>)> {
     let mut nonce = [0u8; 16];
-    File::open("/dev/urandom")?.read_exact(&mut nonce)?;
+    File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut nonce)?;
     let lookup_dir = attempt_dir.join(format!("op{lookup}-lookup-{}", hex(&nonce)));
     DirBuilder::new().mode(0o700).create(&lookup_dir)?;
     let reply = operator.invoke(lookup, ingress)?;
