@@ -38,7 +38,7 @@ const MAX_REPLY: usize = 64 * 1024;
 pub(crate) const STANDARD_RAW_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_TEXT: usize = 512;
 const WORKER_VERBS: &[&str] = &[
-    "list", "status", "install", "retry", "open", "stop", "start", "share", "export", "delete",
+    "list", "status", "install", "retry", "open", "stop", "start", "share", "export", "delete", "renew",
 ];
 
 /// One catalogue entry: the index's claims about one app, bounded and typed.
@@ -746,7 +746,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 }
             }
             args.finish()?;
-            if matches!(verb, "open" | "stop" | "start" | "share" | "export" | "delete" | "status") && !request.contains_key("grain") {
+            if matches!(verb, "open" | "stop" | "start" | "share" | "export" | "delete" | "status" | "renew") && !request.contains_key("grain") {
                 return Err(format!("{verb} requires --grain a<app>"));
             }
             if verb == "share" && !request.contains_key("to") {

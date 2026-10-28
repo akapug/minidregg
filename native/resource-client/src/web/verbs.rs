@@ -731,6 +731,12 @@ mod tests {
         let bends = alternatives_of("bend", bend.usage);
         assert_eq!(bends.iter().map(|a| a.literals()).collect::<Vec<_>>(), ["bend publish", "bend run", "bend lookup", "bend retry", "bend show", "bend await", "bend answer"]);
         assert_eq!(bends.len(), crate::shell_grammar::BEND.leaves.len(), "one form per grammar leaf");
+        // `apps`: one derived form per leaf, and `apps renew` is among them as a transition.
+        let apps = crate::shell::command_catalog().find(|v| v.name == "apps").expect("the shell has apps");
+        let app_alts = alternatives_of("apps", apps.usage);
+        assert_eq!(app_alts.len(), crate::shell_grammar::APPS.leaves.len(), "one form per grammar leaf");
+        let renew = app_alts.iter().position(|a| a.literals() == "apps renew").expect("apps renew has a derived form");
+        assert!(transition_of("apps", apps.usage, apps.operation, renew, "apps renew"), "apps renew writes an enrollment");
         for (i, is) in [true, true, false, true, false, false, true].into_iter().enumerate() {
             assert_eq!(transition_of("bend", bend.usage, bend.operation, i, &bends[i].literals()), is, "{}", bends[i].literals());
         }

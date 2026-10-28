@@ -178,7 +178,7 @@ private def prepareForIssue (config : Config) (opened : Opened config)
   -- A restart moves the app to a new serving generation and the participant renews its own
   -- (participant-signed) enrollment; name the stale case instead of the generic meaning refusal.
   if enrollment.appGeneration != actualApp.generation then
-    throw s!"session enrollment names app generation {enrollment.appGeneration} but the app now serves generation {actualApp.generation}: renew the session enrollment after the restart"
+    throw s!"session enrollment names app generation {enrollment.appGeneration} but the app now serves generation {actualApp.generation}: renew it with `mini apps renew --grain <grain>` (a restart starts a new generation)"
   let requested ← NativeHost.need "enrollment role unresolved"
     (interface.schema.resolve enrollment.role)
   let ceiling ← NativeHost.need "share ceiling unresolved"
