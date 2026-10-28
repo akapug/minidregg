@@ -3,6 +3,7 @@
 //! decodes the exact verified manifest. Publication remains atomic and exclusive.
 
 pub use minidregg_spk_package_stream::ImportProfile;
+use crate::io_context::IoContext;
 use minidregg_spk_package_stream::{self as stream, EntryKind, VerifiedPackage};
 use sandstorm_package::SpkManifest;
 use sha2::{Digest, Sha256};
@@ -85,7 +86,7 @@ fn write_tree(
                     .write(true)
                     .create_new(true)
                     .mode(0o600)
-                    .open(&path)?;
+                    .open(&path).ctx("open", &path)?;
                 spk.copy_member(index, &mut out)?;
                 out.set_permissions(fs::Permissions::from_mode(if *executable {
                     IMAGE_EXECUTABLE_MODE
@@ -100,22 +101,22 @@ fn write_tree(
 }
 
 fn sync_directory(path: &Path) -> io::Result<()> {
-    File::open(path)?.sync_all()
+    File::open(&path).ctx("open", &path)?.sync_all()
 }
 
 fn cleanup_staging(path: &Path) {
     fn make_removable(path: &Path) -> io::Result<()> {
-        let metadata = fs::symlink_metadata(path)?;
+        let metadata = fs::symlink_metadata(&path).ctx("inspect", &path)?;
         if metadata.is_dir() {
-            fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
-            for entry in fs::read_dir(path)? {
+            fs::set_permissions(path, fs::Permissions::from_mode(0o700)).ctx("set permissions", &path)?;
+            for entry in fs::read_dir(&path).ctx("list", &path)? {
                 make_removable(&entry?.path())?;
             }
         }
         Ok(())
     }
     let _ = make_removable(path);
-    let _ = fs::remove_dir_all(path);
+    let _ = fs::remove_dir_all(&path).ctx("remove", &path);
 }
 
 fn publish_no_replace(stage: &Path, destination: &Path) -> io::Result<()> {
@@ -241,7 +242,7 @@ pub fn materialize_spk_with_profile(
 ) -> io::Result<InstalledPackage> {
     let _protected_store = open_protected_directory(store, app_uid, false)?;
     let limits = profile.limits();
-    let input_length = fs::symlink_metadata(package)?.len();
+    let input_length = fs::symlink_metadata(&package).ctx("inspect", &package)?.len();
     // Simultaneous raw+decoded spools, extracted image, and retained compressed SPK.
     // This is an available-space preflight, not a disk reservation.
     stream::check_workspace(
@@ -253,7 +254,7 @@ pub fn materialize_spk_with_profile(
     )?;
     let spk = stream::verify(package, store, limits)?;
     let mut verified = verified_identity(&spk, PathBuf::new())?;
-    let store_metadata = fs::symlink_metadata(store)?;
+    let store_metadata = fs::symlink_metadata(&store).ctx("inspect", &store)?;
     if !store_metadata.is_dir() || store_metadata.file_type().is_symlink() {
         return Err(invalid("package store is not a real directory"));
     }
@@ -290,7 +291,7 @@ pub fn materialize_spk_with_profile(
             .write(true)
             .create_new(true)
             .mode(0o600)
-            .open(stage.join("package.spk"))?;
+            .open(stage.join("package.spk")).ctx("open", &(stage.join("package.spk")))?;
         spk.copy_raw(&mut stored_spk)?;
         stored_spk.set_permissions(fs::Permissions::from_mode(0o444))?;
         stored_spk.sync_all()?;
@@ -300,7 +301,7 @@ pub fn materialize_spk_with_profile(
             .write(true)
             .create_new(true)
             .mode(0o600)
-            .open(stage.join("manifest.json"))?;
+            .open(stage.join("manifest.json")).ctx("open", &(stage.join("manifest.json")))?;
         manifest_file.write_all(&manifest_json)?;
         manifest_file.set_permissions(fs::Permissions::from_mode(0o444))?;
         manifest_file.sync_all()?;
@@ -308,15 +309,15 @@ pub fn materialize_spk_with_profile(
             .write(true)
             .create_new(true)
             .mode(0o600)
-            .open(stage.join("import-policy.json"))?;
+            .open(stage.join("import-policy.json")).ctx("open", &(stage.join("import-policy.json")))?;
         policy_file.write_all(&serde_json::to_vec(&json!({"profile":profile.as_str()}))?)?;
         policy_file.set_permissions(fs::Permissions::from_mode(0o444))?;
         policy_file.sync_all()?;
         for directory in directories.into_iter().rev() {
-            fs::set_permissions(&directory, fs::Permissions::from_mode(IMAGE_DIRECTORY_MODE))?;
+            fs::set_permissions(&directory, fs::Permissions::from_mode(IMAGE_DIRECTORY_MODE)).ctx("set permissions", &directory)?;
             sync_directory(&directory)?;
         }
-        fs::set_permissions(&stage, fs::Permissions::from_mode(0o555))?;
+        fs::set_permissions(&stage, fs::Permissions::from_mode(0o555)).ctx("set permissions", &stage)?;
         sync_directory(&stage)?;
         publish_no_replace(&stage, &final_dir)?;
         sync_directory(store)?;
@@ -337,7 +338,7 @@ pub fn materialize_spk_with_profile(
 pub fn verify_installed_spk(image_dir: &Path, app_uid: u32) -> io::Result<InstalledPackage> {
     let _protected = open_protected_directory(image_dir, app_uid, false)?;
     let package_path = image_dir.join("package.spk");
-    let package_meta = fs::symlink_metadata(&package_path)?;
+    let package_meta = fs::symlink_metadata(&package_path).ctx("inspect", &package_path)?;
     if !package_meta.is_file()
         || package_meta.file_type().is_symlink()
         || package_meta.nlink() != 1
@@ -365,7 +366,7 @@ pub fn verify_installed_spk(image_dir: &Path, app_uid: u32) -> io::Result<Instal
         ));
     }
     let manifest_path = image_dir.join("manifest.json");
-    let manifest_meta = fs::symlink_metadata(&manifest_path)?;
+    let manifest_meta = fs::symlink_metadata(&manifest_path).ctx("inspect", &manifest_path)?;
     if !manifest_meta.is_file()
         || manifest_meta.file_type().is_symlink()
         || manifest_meta.nlink() != 1
@@ -375,7 +376,7 @@ pub fn verify_installed_spk(image_dir: &Path, app_uid: u32) -> io::Result<Instal
     {
         return Err(invalid("installed manifest custody changed"));
     }
-    let recorded: SpkManifest = serde_json::from_slice(&fs::read(manifest_path)?)?;
+    let recorded: SpkManifest = serde_json::from_slice(&fs::read(&manifest_path).ctx("read", &manifest_path)?)?;
     if recorded != verified.manifest {
         return Err(invalid("installed manifest differs from verified SPK"));
     }
@@ -404,7 +405,7 @@ fn retained_import_profile(image_dir: &Path) -> io::Result<ImportProfile> {
     {
         return Err(invalid("installed import policy custody changed"));
     }
-    let value: Value = serde_json::from_slice(&fs::read(path)?)?;
+    let value: Value = serde_json::from_slice(&fs::read(&path).ctx("read", &path)?)?;
     let object = value
         .as_object()
         .ok_or_else(|| invalid("invalid import policy"))?;
