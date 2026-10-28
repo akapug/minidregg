@@ -2,7 +2,7 @@
 //! OS key polynomial coefficients + recursive outbox before publication.
 //! Native current release authority is NOT supplied by these byte codecs.
 use crate::{
-    codec::{bad, bytes, Generation, Nat, Reader},
+    codec::{bad, bytes, Generation, Nat},
     consensus_wire::Cursor,
     custody,
     private_initial::Initial,
@@ -12,20 +12,6 @@ use crate::{
 };
 use std::{io::Result, path::Path};
 const DOMAIN: &[u8] = b"DREGG.PRIVATE.OUTPUT.INIT.FILE\x01";
-fn nat(c: &mut Cursor) -> Result<usize> {
-    let mut ds = vec![];
-    loop {
-        let v = c.byte()?;
-        ds.push(v);
-        if v == 255 {
-            break;
-        }
-    }
-    let mut r = Reader::new(&ds)?;
-    let n = r.count()?;
-    r.finish()?;
-    Ok(n)
-}
 fn outbox(ps: &[Send]) -> Vec<u8> {
     let mut b = vec![];
     Nat::new(ps.len() as u64).put(&mut b);
@@ -37,7 +23,7 @@ fn outbox(ps: &[Send]) -> Vec<u8> {
 }
 fn packets(b: &[u8], n: usize) -> Result<Vec<Send>> {
     let mut c = Cursor::new(b)?;
-    let count = nat(&mut c)?;
+    let count = c.count()?;
     if count > 65536 {
         return Err(bad("output recursive outbox capacity"));
     }
@@ -906,31 +892,6 @@ pub(crate) mod tests {
             .filter(|(i, _)| *i != 1)
             .all(|(_, s)| s.as_ref().unwrap().state().result().is_none()));
         drop(anchors);
-    }
-}
-
-#[cfg(test)]
-mod pin_helpers {
-    use super::*;
-    use crate::consensus_wire::Cursor as PinCursor;
-    fn pin(bytes: &[u8]) -> PinCursor<'_> {
-        PinCursor::new(bytes).unwrap()
-    }
-    /// Pins the shape of the per-module Nat reader: terminator-delimited,
-    /// canonical, refuses unterminated or noncanonical digits.
-    #[test]
-    fn pin_nat_cursor_private_output_store() {
-        let mut c = pin(&[45, 1, 255, 7]);
-        assert_eq!(nat(&mut c).unwrap(), 300);
-        assert_eq!(c.byte().unwrap(), 7);
-        assert_eq!(nat(&mut pin(&[255])).unwrap(), 0);
-        assert_eq!(nat(&mut pin(&[200, 254, 255])).unwrap(), 200 + 254 * 255);
-        for bad in [&[45u8, 1][..], &[45, 0, 255], &[][..]] {
-            assert!(nat(&mut pin(bad)).is_err());
-        }
-        let mut huge = vec![];
-        crate::codec::Nat::new(crate::codec::MAX as u64 + 1).put(&mut huge);
-        assert_eq!(nat(&mut pin(&huge)).is_err(), true);
     }
 }
 

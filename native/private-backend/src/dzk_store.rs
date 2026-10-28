@@ -40,22 +40,8 @@ fn put_fields(xs: &[Field], b: &mut Vec<u8>) {
         b.extend(x.0.to_le_bytes());
     }
 }
-fn count(c: &mut Cursor) -> Result<usize> {
-    let mut b = vec![];
-    loop {
-        let x = c.byte()?;
-        b.push(x);
-        if x == 255 {
-            break;
-        }
-    }
-    let mut r = crate::codec::Reader::new(&b)?;
-    let n = r.count()?;
-    r.finish()?;
-    Ok(n)
-}
 fn fields(c: &mut Cursor) -> Result<Vec<Field>> {
-    let n = count(c)?;
+    let n = c.count()?;
     if n > 128 {
         return Err(bad("dZK field vector bound"));
     }
@@ -130,7 +116,7 @@ fn outbox(ps: &[Send]) -> Vec<u8> {
 }
 fn parse_outbox(b: &[u8], n: usize) -> Result<Vec<Send>> {
     let mut c = Cursor::new(b)?;
-    let count = count(&mut c)?;
+    let count = c.count()?;
     if count > crate::codec::MAX / 40 {
         return Err(bad("dZK outbox capacity"));
     }
@@ -174,7 +160,7 @@ impl Machine for DzkMachine {
         let out = match c.byte()? {
             0 => {
                 let seed = c.fixed32()?;
-                let n = count(&mut c)?;
+                let n = c.count()?;
                 if n != self.state.profile.count {
                     return Err(bad("dZK event polynomial count"));
                 }
@@ -485,31 +471,6 @@ mod tests {
         let reopened = Store::open(&root.join("party2"), 2, 0, 4, 1, &g(), 1, 1).unwrap();
         assert_eq!(reopened.replay_outboxes().unwrap(), expected);
         assert_eq!(reopened.state().transferred(1).unwrap().values(), values);
-    }
-}
-
-#[cfg(test)]
-mod pin_helpers {
-    use super::*;
-    use crate::consensus_wire::Cursor as PinCursor;
-    fn pin(bytes: &[u8]) -> PinCursor<'_> {
-        PinCursor::new(bytes).unwrap()
-    }
-    /// Pins the shape of the per-module Nat reader: terminator-delimited,
-    /// canonical, refuses unterminated or noncanonical digits.
-    #[test]
-    fn pin_nat_cursor_dzk_store() {
-        let mut c = pin(&[45, 1, 255, 7]);
-        assert_eq!(count(&mut c).unwrap(), 300);
-        assert_eq!(c.byte().unwrap(), 7);
-        assert_eq!(count(&mut pin(&[255])).unwrap(), 0);
-        assert_eq!(count(&mut pin(&[200, 254, 255])).unwrap(), 200 + 254 * 255);
-        for bad in [&[45u8, 1][..], &[45, 0, 255], &[][..]] {
-            assert!(count(&mut pin(bad)).is_err());
-        }
-        let mut huge = vec![];
-        crate::codec::Nat::new(crate::codec::MAX as u64 + 1).put(&mut huge);
-        assert_eq!(count(&mut pin(&huge)).is_err(), true);
     }
 }
 

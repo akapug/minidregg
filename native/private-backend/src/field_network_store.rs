@@ -83,17 +83,7 @@ fn outbox<R: FieldRuntime>(ps: &[Send]) -> Vec<u8> {
 }
 fn decode_outbox_for<R: FieldRuntime>(b: &[u8], n: usize) -> Result<Vec<Send>> {
     let mut c = Cursor::new(b)?;
-    let mut ds = vec![];
-    loop {
-        let v = c.byte()?;
-        ds.push(v);
-        if v == 255 {
-            break;
-        }
-    }
-    let mut r = crate::codec::Reader::new(&ds)?;
-    let count = r.count()?;
-    r.finish()?;
+    let count = c.count()?;
     if count > 65536 {
         return Err(bad("field outbox count"));
     }

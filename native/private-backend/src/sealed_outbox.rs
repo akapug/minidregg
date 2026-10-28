@@ -3,7 +3,7 @@
 //! Honest crash WAL only, no native authority or independent rollback claim.
 use crate::{
     authenticated_ingress::{CommitteeParty, Outcome},
-    codec::{bad, bytes, Nat, Reader},
+    codec::{bad, bytes, Nat},
     consensus_wire::Cursor,
     recipient_seal::{self, DecryptedEnvelope, HidingDraft, RecipientSpec, SealedIngress},
     transition_journal::{Journal, Machine},
@@ -23,20 +23,6 @@ pub fn nullifier(party: &CommitteeParty, sequence: u64) -> Vec<u8> {
     b.extend(sequence.to_le_bytes());
     b
 }
-fn nat(c: &mut Cursor<'_>) -> Result<Nat> {
-    let mut b = vec![];
-    loop {
-        let v = c.byte()?;
-        b.push(v);
-        if v == 255 {
-            break;
-        }
-    }
-    let mut r = Reader::new(&b)?;
-    let n = r.nat()?;
-    r.finish()?;
-    Ok(n)
-}
 fn put_spec(s: &RecipientSpec, b: &mut Vec<u8>) {
     s.algorithm.put(b);
     s.key_epoch.put(b);
@@ -45,10 +31,10 @@ fn put_spec(s: &RecipientSpec, b: &mut Vec<u8>) {
 }
 fn get_spec(c: &mut Cursor<'_>) -> Result<RecipientSpec> {
     let s = RecipientSpec {
-        algorithm: nat(c)?,
-        key_epoch: nat(c)?,
+        algorithm: c.nat()?,
+        key_epoch: c.nat()?,
         key_id: c.bytes()?,
-        plaintext_bound: usize::try_from(nat(c)?.value()?).map_err(|_| bad("padding bound"))?,
+        plaintext_bound: usize::try_from(c.nat()?.value()?).map_err(|_| bad("padding bound"))?,
     };
     s.validate()?;
     Ok(s)
@@ -517,7 +503,7 @@ impl Store {
             return Err(bad("outbox original received protocol binding"));
         }
         let mut cursor = Cursor::new(outcome.outbox())?;
-        let count = usize::try_from(nat(&mut cursor)?.value()?).map_err(|_| bad("outbox count"))?;
+        let count = usize::try_from(cursor.nat()?.value()?).map_err(|_| bad("outbox count"))?;
         if count != receipts.len() || count > 65536 {
             return Err(bad("actual recursive outbox count"));
         }
@@ -1283,7 +1269,7 @@ mod tests {
             .unwrap();
         assert!(outcome.outbox().len() > 2);
         let mut cursor = Cursor::new(outcome.outbox()).unwrap();
-        let count = nat(&mut cursor).unwrap().value().unwrap();
+        let count = cursor.nat().unwrap().value().unwrap();
         assert_eq!(count, 4);
         let mut outgoing = Store::open(&path("outgoing"), b"party-2", 32).unwrap();
         let mut receipts = vec![];
@@ -1387,30 +1373,5 @@ mod tests {
         // Explicitly declared leakage here: public committee/context, message
         // count/padding class. This test is not native funded admission or MPC.
         keys.clear();
-    }
-}
-
-#[cfg(test)]
-mod pin_helpers {
-    use super::*;
-    use crate::consensus_wire::Cursor as PinCursor;
-    fn pin(bytes: &[u8]) -> PinCursor<'_> {
-        PinCursor::new(bytes).unwrap()
-    }
-    /// Pins the shape of the per-module Nat reader: terminator-delimited,
-    /// canonical, refuses unterminated or noncanonical digits.
-    #[test]
-    fn pin_nat_cursor_sealed_outbox() {
-        let mut c = pin(&[45, 1, 255, 7]);
-        assert_eq!(nat(&mut c).unwrap().value().unwrap(), 300);
-        assert_eq!(c.byte().unwrap(), 7);
-        assert_eq!(nat(&mut pin(&[255])).unwrap().value().unwrap(), 0);
-        assert_eq!(nat(&mut pin(&[200, 254, 255])).unwrap().value().unwrap(), 200 + 254 * 255);
-        for bad in [&[45u8, 1][..], &[45, 0, 255], &[][..]] {
-            assert!(nat(&mut pin(bad)).is_err());
-        }
-        let mut huge = vec![];
-        crate::codec::Nat::new(crate::codec::MAX as u64 + 1).put(&mut huge);
-        assert_eq!(nat(&mut pin(&huge)).is_err(), false);
     }
 }

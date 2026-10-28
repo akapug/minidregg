@@ -42,12 +42,26 @@ impl<'a> Cursor<'a> {
     pub fn fixed32(&mut self) -> Result<[u8; 32]> {
         Ok(self.take(32)?.try_into().unwrap())
     }
-    pub fn bytes(&mut self) -> Result<Vec<u8>> {
+    /// A canonical Nat: digits up to and including the 255 terminator.
+    pub fn nat(&mut self) -> Result<crate::codec::Nat> {
+        let start = self.i;
+        while self.byte()? != 255 {}
+        let mut r = crate::codec::Reader::new(&self.b[start..self.i])?;
+        let n = r.nat()?;
+        r.finish()?;
+        Ok(n)
+    }
+    /// A canonical Nat read as a count, bounded by `codec::MAX`.
+    pub fn count(&mut self) -> Result<usize> {
         let start = self.i;
         while self.byte()? != 255 {}
         let mut r = crate::codec::Reader::new(&self.b[start..self.i])?;
         let n = r.count()?;
         r.finish()?;
+        Ok(n)
+    }
+    pub fn bytes(&mut self) -> Result<Vec<u8>> {
+        let n = self.count()?;
         Ok(self.take(n)?.to_vec())
     }
     pub fn finish(self) -> Result<()> {
@@ -234,11 +248,7 @@ pub fn encode_outbox(ps: &[acs::Send]) -> Vec<u8> {
 pub fn decode_outbox(b: &[u8], n: usize) -> Result<Vec<acs::Send>> {
     // Output is trusted local machine data but remains bounded and canonical.
     let mut c = Cursor::new(b)?;
-    let start = c.i;
-    while c.byte()? != 255 {}
-    let mut r = crate::codec::Reader::new(&b[start..c.i])?;
-    let count = r.count()?;
-    r.finish()?;
+    let count = c.count()?;
     if count > crate::codec::MAX / 48 {
         return Err(bad("outbox packet bound"));
     }
@@ -342,5 +352,42 @@ mod pin_wire {
         }
         let mut c = crate::consensus_wire::Cursor::new(&[3, 0, 255]).unwrap();
         assert!(phase(&mut c).is_err());
+    }
+}
+
+#[cfg(test)]
+mod pin_cursor {
+    use super::*;
+    use crate::codec::{Nat, MAX};
+    fn pin(bytes: &[u8]) -> Cursor<'_> {
+        Cursor::new(bytes).unwrap()
+    }
+    /// The Nat readers every store used to copy: terminator-delimited,
+    /// canonical, refusing an unterminated or noncanonical digit string; a
+    /// count additionally refuses past `codec::MAX`.
+    #[test]
+    fn pin_nat_and_count_cursor() {
+        let mut c = pin(&[45, 1, 255, 7]);
+        assert_eq!(c.nat().unwrap().value().unwrap(), 300);
+        assert_eq!(c.byte().unwrap(), 7);
+        let mut c = pin(&[45, 1, 255, 7]);
+        assert_eq!(c.count().unwrap(), 300);
+        assert_eq!(c.byte().unwrap(), 7);
+        assert_eq!(pin(&[255]).nat().unwrap().value().unwrap(), 0);
+        assert_eq!(pin(&[255]).count().unwrap(), 0);
+        assert_eq!(pin(&[200, 254, 255]).count().unwrap(), 200 + 254 * 255);
+        for bad in [&[45u8, 1][..], &[45, 0, 255], &[][..]] {
+            assert!(pin(bad).nat().is_err());
+            assert!(pin(bad).count().is_err());
+        }
+        let mut huge = vec![];
+        Nat::new(MAX as u64 + 1).put(&mut huge);
+        assert!(pin(&huge).nat().is_ok());
+        assert!(pin(&huge).count().is_err());
+        let mut framed = vec![];
+        crate::codec::bytes(&[9, 8, 7], &mut framed);
+        assert_eq!(pin(&framed).bytes().unwrap(), vec![9, 8, 7]);
+        framed.pop();
+        assert!(pin(&framed).bytes().is_err());
     }
 }

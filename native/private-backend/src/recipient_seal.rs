@@ -4,7 +4,7 @@
 //! Decryption proves confidentiality/integrity binding, NOT native source authority.
 use crate::{
     authenticated_ingress::{CommitteeParty, Envelope},
-    codec::{bad, bytes, Nat, Reader},
+    codec::{bad, bytes, Nat},
     crypto_transit,
 };
 use chacha20poly1305::{
@@ -109,10 +109,10 @@ impl DraftPublic {
         let party = CommitteeParty::decode(&c.bytes()?)?;
         let sequence = c.u64()?;
         let recipient = RecipientSpec {
-            algorithm: cursor_nat(&mut c)?,
-            key_epoch: cursor_nat(&mut c)?,
+            algorithm: c.nat()?,
+            key_epoch: c.nat()?,
             key_id: c.bytes()?,
-            plaintext_bound: usize::try_from(cursor_nat(&mut c)?.value()?)
+            plaintext_bound: usize::try_from(c.nat()?.value()?)
                 .map_err(|_| bad("draft padding bound"))?,
         };
         let semantic_commitment = c.take(64)?.try_into().unwrap();
@@ -212,10 +212,10 @@ impl SealedIngress {
         let mut c = crate::consensus_wire::Cursor::new(&b[FRAME.len()..])?;
         let party = CommitteeParty::decode(&c.bytes()?)?;
         let sequence = c.u64()?;
-        let algorithm = cursor_nat(&mut c)?;
-        let key_epoch = cursor_nat(&mut c)?;
+        let algorithm = c.nat()?;
+        let key_epoch = c.nat()?;
         let key_id = c.bytes()?;
-        let plaintext_bound = cursor_nat(&mut c)?.value()? as usize;
+        let plaintext_bound = c.nat()?.value()? as usize;
         let semantic_commitment = c.take(64)?.try_into().unwrap();
         let hybrid_ciphertext = c.take(crypto_transit::HYBRID_CIPHERTEXT_BYTES)?.try_into().unwrap();
         let nonce = c.take(24)?.try_into().unwrap();
@@ -345,20 +345,6 @@ impl DecryptedEnvelope {
     pub fn into_inner(self) -> Envelope {
         self.inner
     }
-}
-fn cursor_nat(c: &mut crate::consensus_wire::Cursor<'_>) -> Result<Nat> {
-    let mut b = vec![];
-    loop {
-        let v = c.byte()?;
-        b.push(v);
-        if v == 255 {
-            break;
-        }
-    }
-    let mut r = Reader::new(&b)?;
-    let n = r.nat()?;
-    r.finish()?;
-    Ok(n)
 }
 /// Endpoint-local private message commitment. Its nonce is sampled before the
 /// native INNER credential is signed; public commitment is hiding, not merely a
@@ -520,7 +506,7 @@ impl crate::transition_journal::Machine for KeyState {
         let mut c = crate::consensus_wire::Cursor::new(event)?;
         match c.byte()? {
             EVENT_KEY => {
-                let epoch = cursor_nat(&mut c)?;
+                let epoch = c.nat()?;
                 let nonce: [u8; 24] = c.take(24)?.try_into().unwrap();
                 let wrapped = c.bytes()?;
                 let public = c.bytes()?;
@@ -543,7 +529,7 @@ impl crate::transition_journal::Machine for KeyState {
                 Ok(public)
             }
             EVENT_CURRENT => {
-                let epoch = cursor_nat(&mut c)?;
+                let epoch = c.nat()?;
                 c.finish()?;
                 if !self.keys.contains_key(&epoch) {
                     return Err(bad("recipient current epoch is not a retained epoch"));
@@ -744,30 +730,5 @@ impl RecipientKeyCustody {
             plaintext_bound: capsule.recipient.plaintext_bound,
         };
         capsule.open(secret, public, party, sequence, &expected)
-    }
-}
-
-#[cfg(test)]
-mod pin_helpers {
-    use super::*;
-    use crate::consensus_wire::Cursor as PinCursor;
-    fn pin(bytes: &[u8]) -> PinCursor<'_> {
-        PinCursor::new(bytes).unwrap()
-    }
-    /// Pins the shape of the per-module Nat reader: terminator-delimited,
-    /// canonical, refuses unterminated or noncanonical digits.
-    #[test]
-    fn pin_nat_cursor_recipient_seal() {
-        let mut c = pin(&[45, 1, 255, 7]);
-        assert_eq!(cursor_nat(&mut c).unwrap().value().unwrap(), 300);
-        assert_eq!(c.byte().unwrap(), 7);
-        assert_eq!(cursor_nat(&mut pin(&[255])).unwrap().value().unwrap(), 0);
-        assert_eq!(cursor_nat(&mut pin(&[200, 254, 255])).unwrap().value().unwrap(), 200 + 254 * 255);
-        for bad in [&[45u8, 1][..], &[45, 0, 255], &[][..]] {
-            assert!(cursor_nat(&mut pin(bad)).is_err());
-        }
-        let mut huge = vec![];
-        crate::codec::Nat::new(crate::codec::MAX as u64 + 1).put(&mut huge);
-        assert_eq!(cursor_nat(&mut pin(&huge)).is_err(), false);
     }
 }
