@@ -27,6 +27,9 @@ use std::path::{Path, PathBuf};
 pub(crate) const DEFAULT_INDEX: &str = "/var/lib/mini-market/index.json";
 pub(crate) const DEFAULT_META: &str = "/var/lib/mini-market/meta";
 pub(crate) const DEFAULT_VERDICTS: &str = "/var/lib/mini-apps/verdicts";
+/// The running worker's ingest identity, beside the verdicts: the SHA-256 of the spk-host binary it drives.
+/// A verdict is the ingest's answer, so it is valid only for the ingest that wrote it (`ingestKey`).
+pub(crate) const INGEST_KEY_FILE: &str = "ingest-key";
 pub(crate) const DEFAULT_WORKER_SOCKET: &str = "/run/mini-apps/worker.sock";
 pub(crate) const INDEX_URL: &str = "https://app-index.sandstorm.io/apps/index.json";
 pub(crate) const PACKAGE_URL: &str = "https://app-index.sandstorm.io/packages/";
@@ -353,8 +356,20 @@ pub(crate) fn verdict(verdicts: &Path, meta: &Path, package_id: &str) -> Verdict
             }
         }
     }
+    // The worker publishes the key of the ingest it runs; a verdict written by another ingest (an older
+    // candidate's refusal that survived a re-genesis) is absent, so the install is attempted again.
+    // With no key published yet (no worker has started here) every verdict is read as before.
+    let current = crate::fsio::read_bounded(&verdicts.join(INGEST_KEY_FILE), 128)
+        .ok()
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+        .map(|text| text.trim().to_owned())
+        .filter(|text| !text.is_empty());
     if let Ok(bytes) = crate::fsio::read_bounded(&verdicts.join(format!("{package_id}.json")), 16 * 1024) {
         if let Ok(value) = serde_json::from_slice::<Value>(&bytes) {
+            let written_by_this_ingest = current.as_deref().map_or(true, |key| value.get("ingestKey").and_then(Value::as_str) == Some(key));
+            if !written_by_this_ingest {
+                return out;
+            }
             if let Some(state) = value.get("verdict").and_then(Value::as_str) {
                 out.state = state.to_owned();
             }
@@ -1660,6 +1675,31 @@ mod tests {
         assert_eq!(verdict_line(&verdict(&verdicts, &meta, "5830d70137cdae158118884da8790870")), "verified, running 2");
     }
 
+
+    #[test]
+    fn apps_verdict_is_valid_only_for_the_ingest_that_wrote_it() {
+        let dir = scratch("verdict-key");
+        let meta = dir.join("meta");
+        let verdicts = dir.join("verdicts");
+        fs::create_dir_all(&meta).unwrap();
+        fs::create_dir_all(&verdicts).unwrap();
+        let package = "aee0806c9547d1f53c1ccef38ac195ba";
+        let refused_by = |key: &str| format!(r#"{{"verdict":"refused","reason":"installRefused: x","ingestKey":"{key}"}}"#);
+        fs::write(verdicts.join(format!("{package}.json")), refused_by("aaaa")).unwrap();
+        // Ingest A is running: its own refusal is reused.
+        fs::write(verdicts.join(INGEST_KEY_FILE), "aaaa\n").unwrap();
+        assert_eq!(verdict(&verdicts, &meta, package).state, "refused");
+        // A re-genesis onto ingest B: the same file is another ingest's answer, so the app is unverified again.
+        fs::write(verdicts.join(INGEST_KEY_FILE), "bbbb\n").unwrap();
+        let b = verdict(&verdicts, &meta, package);
+        assert_eq!((b.state.as_str(), b.reason.as_deref()), ("unverified", None));
+        // A verdict with no key at all (written before keys existed) is also not B's.
+        fs::write(verdicts.join(format!("{package}.json")), br#"{"verdict":"verified","running":1}"#).unwrap();
+        assert_eq!(verdict(&verdicts, &meta, package).state, "unverified");
+        // B's own verdict is read.
+        fs::write(verdicts.join(format!("{package}.json")), refused_by("bbbb")).unwrap();
+        assert_eq!(verdict(&verdicts, &meta, package).state, "refused");
+    }
 
     #[test]
     fn apps_request_law_renders_from_lean_and_binds_its_two_placeholders() {
