@@ -316,6 +316,8 @@ Before it can run:
   route; `meta-llama/llama-3.1-8b-instruct` at 20000 / 50000 micro-credits per
   million input / output tokens (OpenRouter's $0.02 / $0.05 per million) plus
   100 per call; the user (BYOK) route pays 5 per call.
+  Purse 9872003 is the lobby resident's (`INSTANCE=lobby BASE=9872000`, the shared house room),
+  at the same tariff as the house resident's 9870003.
 - **The worker is upstream Hermes Agent.** `build-runtime-root SOURCE OUT
   CANDIDATE` stages it from a hermes-agent checkout at 6d8a8beb with
   `hermes-agent/mini-tool-catalogue.patch` (the restricted resident admits a
