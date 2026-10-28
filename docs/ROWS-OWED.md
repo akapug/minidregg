@@ -73,6 +73,77 @@ Not this validator's (central or timing): templates on/off, births/perf, hot-pat
 generic-simplex load 200 (needs the integrator's built Verify exe), lifetime-grant Lean fixtures,
 cohort gate (needs a built Lean tree and bun).
 
+## 0a. Validator continuation (for the next validator)
+
+**Boxes and paths.** Journey rows, app worlds, FOUC and the authority acceptance run on hbox (user
+`hbox`, full sudo, Ubuntu 24.10, umask 002, operator account `mini-operator` uid 1001 with linger).
+Effects, the other acceptance scripts and the oracle checks run on dregg-ref (`lanes@2.31.71.194`,
+`~/.ssh/id_portable`, no `shasum`, no bun, no grain-world sudo rules). Neither box is the integrator's.
+
+| path | what it holds |
+|---|---|
+| hbox:/tank/dregg-build/rows-0ce31391/ | `box.env` (roots, `PIPELINE_JOURNEY_JOBS=3`, `PIPELINE_ROW_MEM_MAX=20G`, m6grain inputs: `MINI_OPERATOR_UID=1001`, `MINI_TEST_SPK`); `rerun-row.sh ROW` (one journey row from the covered tree, own results root `rerun-ROW/`); `app-job.sh NAME TABLE PROFILE` (world-up, featured-qualify, world-down) and `app-keep.sh` (the same without world-down); `demo-only*.sh` (journey.sh `--only` runs); `logs/`; every PID file; `pw/` (Playwright 1.62.1 and its Chromium under `pw/browsers`) |
+| hbox:/tank/dregg-build/claude-lanes/rows-0ce31391/src | the candidate's source.tar, extracted where /etc/sudoers.d/mini-operator covers two-world-journey.sh and install-user-world; `deploy/spk-host/{controller-world.py,install-user-world}` are chowned root (install-user-world refuses a companion owned by neither root nor SUDO_UID) |
+| hbox:/tank/rows-0ce31391-apps | worlds and qualify output, owned by mini-operator 0755 directly under root-owned /tank (world-up's scratch custody refuses any writable ancestor) |
+| hbox:/tank/rows-0ce31391-hbox | an hbox-owned 0700 root for the acceptance scripts' evidence; run them under `umask 077` (hbox's umask 002 makes the Store's head-anchor directory group-writable and the store refuses it) |
+| hbox:/build/candidates/SHA | a root-created, hbox-owned copy of the candidate at the manifest's absolute path (manifest.json and lib.sh name /build/candidates/SHA; a symlink fails "manifest .host does not name its candidate output"); box.env sets `ARTIFACT_ROOT=/build/candidates` |
+| dregg-ref:/build/lanes/rows-0ce31391/ | `cand/SHA` (the set), `src` (its source.tar), `src-main` (src with main's tree overlaid), `effects-job.sh`, `effects-main-job.sh`, `accept-job.sh`, `logs/`, PID files |
+
+Copy a candidate to a box by streaming it through the Mac:
+`ssh dregg-build "tar -C /build/candidates -cf - SHA" | ssh BOX "tar -C DEST -xf -"`, then
+`sha256sum -c SHA256SUMS`. On hbox also `sudo cp -a` it to /build/candidates/SHA.
+
+**Main's scripts over a candidate.** When the coordinator says a harness fix is on main and the
+candidate predates it, run the candidate's binaries with main's drivers. On dregg-ref:
+`git archive <main> world scripts native/resource-client/... | tar -x` over a copy of the candidate's
+tree (`src-main`), with `SRC=` set to that tree and the job cd'd into it. On hbox: copy the changed
+files over the covered tree. Name every file taken from main in the report; anything in main's
+scripts that disagrees with the candidate's binaries is reported, not mixed silently.
+
+**Journey rows.** `rerun-row.sh ROW` runs
+`journey-runner --tip SHA --row ROW --source-tree <covered tree> --results-root rerun-ROW` under
+swarm-build. A full run is `run-journeys.sh` (about 6 min, 3 jobs). Each row runs in its own systemd
+user scope, so its servers stop with it.
+
+**The demo row's tail: run it with `--only`.** The demo row gives journey.sh a 5,000 s budget
+(`PIPELINE_ROW_TIMEOUT_S` 5400 minus 400). On hbox JPRIV1 (1,146 s), KTPL (1,020 s) and J12W
+(861 s) spend it, and every later step reports "journey wall budget spent". Take the demo row's
+verdicts for the steps it reached, then run the rest in one fresh journey:
+`JOURNEY_KEEP_GOING=1 GRAIN_RUNTIME=$C/bin/grain-runtime TEST_PROVIDER=$C/fixtures/mini-hermes-test-provider LAUNCH_GATE=$C/bin/launch-gate PAY_WATCHER_BIN=$C/bin/pay-watcher CANDIDATE=$C/provenance.json journey.sh --only STEP ... $C/manifest.json NEW_RUN`.
+The flags come before the two positional arguments. journey.sh adds each step's dependencies itself.
+
+**Effects.** `SRC=<tree> swarm-build bash scripts/world-native-admit.sh DOMAIN ... --candidate <set>`
+(SRC is required: source.tar has no .git). dues needs `--method world/dues/StandingDues.obend` and
+commons needs `--method world/commons/ResidentServiceCommons.obend`: each directory holds two .obend files.
+
+**App worlds.** As mini-operator from the covered tree:
+`MINI_IMPORT_PROFILE=P MINI_OPERATOR_UID=1001 MINI_OPERATOR_NAME=mini-operator world-up.sh BIN BIN RUN`,
+then `QUALIFY_STOP=1 [QUALIFY_TABLE=market-batches/bN.tsv] featured-qualify.sh RUN/WORLD.env OUT`.
+One world per table: featured (default table), b1, b2, b6 on standard-v1; b4, rt and b8 on
+market-large-v1 (WordPress, Wekan, IPython). Seven worlds at once were fine on hbox (load about 20).
+A world from a candidate whose install failed cannot retry the install (UNRESOLVED by design): use a
+fresh world.
+
+**Acceptance scripts.** env `CANDIDATE=$set/provenance.json MINI=$B/mini STORE_BINARY=$B/minidregg-link-sqlite-store SIGNATURE_BINARY=$B/minidregg-credential-signature-verifier GRAIN=$B/grain-runtime`.
+Never set `MINI_CONSENT_HOST` alone (mini then demands `MINI_LOCAL_HOST` and `MINI_CONSENT_CONFIG` too).
+authority-acceptance.sh needs `shasum`, so run it on hbox under `umask 077`.
+
+**Next candidate (the first carrying 25cfb86bd and f73893fce): the plan.**
+1. App tables on fresh worlds (all seven above) and `japps --box` including the co-edit row. Expected
+   to clear the install red. Then the DAV rows, then joracle on an operator-appliance-v1 world, then
+   the fresh Oracle v7 world (section 7).
+2. The six genesis writers (acceptance, application, selected-release, authority, grain plain,
+   grain `PROVIDER_BOOTSTRAP=1`) plus JPAY2. Use the commands and the PyNaCl venv note in
+   docs/ONE-WIRE-STATE.md's state section (custody-b). The profiled grain mode is deleted (97aab6054).
+3. Every red from section 0, by name:
+   - journey rows: m6grain, JPAY6;
+   - demo steps: J17, WEB, JLI, KTPL, J12 row 87, JP2, JPD, JDISCLOSE;
+   - acceptance: authority-acceptance;
+   - app worlds: b8's `Too many or too few segments`.
+   Also check that the harness fixes listed in section 0 are on the candidate's tree.
+4. The full journey-rows run and the demo `--only` tail, as above. JCHAT needs `fake-discord`
+   beside `mini-discord-mirror`. M6 needs the operator uid. JR17 needs /etc/mini/keys-client.json.
+
 ## 1. The gate (integrator's; listed so nothing is lost)
 
 | row | proves | command | world | owner | last known |
