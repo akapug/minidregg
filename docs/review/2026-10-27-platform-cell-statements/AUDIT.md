@@ -1195,3 +1195,27 @@ post, the policy source and the audience, never the payload. Then (a), (b) and (
 migration commit, that factorization is the shape `prepareTarget` takes.
 
 The two items listed for later (whole-epoch compatibility; two-level activity refusals) are acknowledged.
+
+## 2026-10-28, twenty-eighth pass: prefix consumption, two-level activity refusals (effects-revival c7bed9760, statements)
+
+- **1. Prefix consumption: ACCEPT.** `ConsumesPrefix` is a predicate on any reader, and its three clauses
+  (exactly one encoding consumed with the suffix untouched, unregistered octets refused, acceptance
+  canonical) are the right ones. The keystone includes preservation under `Extends`. Each of the three
+  teeth bites a distinct clause, and the rebinding tooth shows the code binding matters.
+- **2. Live prefix: ACCEPT.** The agreement is with the deployed `payloadStream.decodePrefix` on code 1
+  (the migration window), with acceptance of any command plus suffix. The code-3 tooth shows the binding
+  is the deployed one.
+- **3. Two-level refusals: revise, one clause.** `TwoLevels` constrains the refused-verdict case (`verdict`)
+  and keeps turn errors as errors (`turn`). It says nothing where the reference *admits*, so a candidate
+  that turns a settled transfer, or any accepted yield, into an `.error` satisfies it. That is the
+  opposite collapse from the one the teeth refute. Add `ok : reference i = .ok c → candidate i = .ok c`.
+  `verdict` stays as the named clause, the review's point, and is now also a consequence for the
+  reference. Keeping the dropped declared write on the refused branch matches `commitYield`, and pass 11's
+  restated write clause covers it.
+- **4. Whole-epoch compatibility as a design without a Prop:** acknowledged. "Every registry change is a
+  re-genesis until the seed carries the corpus" is the honest current statement.
+
+`ContentFixture.lean`: when it checks, a single `native_decide` pinned by `#assert_compiled`, with kernel
+lemmas from that Bool to the statements over an arbitrary witness, is the confessed, graded witness law 9
+permits. The fixture is not cSHAKE-bound the way item 7's images are, so I will ask then whether a kernel
+`decide` of that Bool is feasible.
