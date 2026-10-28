@@ -44,8 +44,8 @@ un-verify (Generic Simplex gate), un-bend (bend verb + lost reply), un-world (Ta
 
 ## Owed / unowned
 - ember's ruling (memory "no hand-written kernel effects"): kernel effects must come from a revived Effects/ derivation engine. un-effects' transfer/commit are hand-written in Kernel/ObjectiveActivity.lean: deferrable for the demo, owed after (EFFECTS.md has the Phase-3 design: EffectSpec widened with refusal, authority demand and frame; the dispatch keystone; the hand arm deleted in the same commit).
-- private-backend: three child() Generation derivations (acss, dzk, sh2t) not yet checked for twinship.
-- private-backend P6 (lost reply on reserve/burn): open; the verifier exists.
+- private-backend child(): CLOSED. Not twins (distinct hash domains: ACSS.ID.CHILD.V1 with tag, SH2T.ID.CHILD.V1 without, dzk's holder_generation); only the shared clone-and-set tail merged as Generation::derived (9be4a7da3, on main via 550073827; pins from an independent Python oracle).
+- private-backend P6: DONE on lane/un-pb-helpers ee908664b (custody::reserve_with_receipt retains local.intent before sending; on retry a held batch with a matching intent is the answer, nothing resent; a held batch with no matching intent still refuses). Three lost-reply tests red/green on hbox; sent to the integrator. Flake to avoid: custody anchor tests in one process with king_store's kill-9 test (forked child holds the flock fd).
 - Tier 2 (after the opening): R1 the in-process MPC as a door. The sibling product deputy (a5a600787670d2be5) now owns the MPC demo door, invite codes, Host request rate, web3.js serializer, grain class slices: not ours.
 
 ## Web item (done)
@@ -130,4 +130,4 @@ Its hbox worlds: /tank/rows-2d8b7ed5-apps/w-{featured,b1,b2,b4,b6,rt,fixups}. Mi
 0. PRIORITY: the public-reader 403 and the poisoned consent transport (abe65d70bd4f62538): review each sha against the code, send it to the integrator and infra.
 1. Read B3/B5/B7/B8 on 76758dba6 (each serial under the world-up flock); fix reds (recipes or spk-host); every app green on lifecycle + write into FEATURED in apps.rs (B3 does its own commit; DiagramsNet stays out); target 2-3 dozen.
 2. When the integrator names the candidate of main f1b7add21 (host stage since 09:19; carries 7280f9db8, 391311929, bf5ead3fa, de74f4f5e, 3a8109059, 0870373ae; the allAccess owner fix and 7162b1d30 are on main's scripts; japps and B8 told): hand it to a4e312352a7091f59 (one japps run on hbox per JAPPS-STATE.md; context ~500k, it hands off by its file if it nears 580k); verdict -> validator for ROWS-OWED §0. That run confirms restart -> renew -> write and a fresh-world bootstrap -> install (the parent's `reserve 1` checked).
-3. Owed after the demo: revive Effects/ so transfer/commit come from the derivation engine (EFFECTS.md); private-backend P6 lost reply; the child() twin check.
+3. Owed after the demo: revive Effects/ so transfer/commit come from the derivation engine (EFFECTS.md).
