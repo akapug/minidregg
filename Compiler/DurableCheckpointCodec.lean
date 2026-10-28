@@ -513,7 +513,7 @@ theorem seedEpoch_commandsV1_refused (rest : List UInt8) :
 
 theorem seedEpoch_noAccumulator_refused (rest : List UInt8) :
     (SeedEpoch.ofBytes (bytesStream.encode (labelledFrame labelWithoutAccumulator) ++ rest)).refusal =
-      some "this Store was born in another epoch (history accumulator: Store none, this Host history/mmr-v1;index/trie-v1;checkpoint/v5); re-genesis the world" := by
+      some s!"this Store was born in another epoch (history accumulator: Store none, this Host {StoreEpoch.current.accumulator}); re-genesis the world" := by
   rw [seedEpoch_ofBytes_labelled]
   native_decide
 
@@ -525,7 +525,7 @@ def labelSpentMap : String :=
 accumulator), never read as this Host's. -/
 theorem seedEpoch_spentMap_refused (rest : List UInt8) :
     (SeedEpoch.ofBytes (bytesStream.encode (labelledFrame labelSpentMap) ++ rest)).refusal =
-      some s!"this Store was born in another epoch (cell schema references: Store schema-refs/v5, this Host {persistedSchemaRefs}; log tags: Store DREGG/NATIVE-HOST/LOG-TAG/v3, this Host DREGG/NATIVE-HOST/LOG-TAG/v4; history accumulator: Store history/mmr-v1;spent/trie-v1;checkpoint/v3, this Host history/mmr-v1;index/trie-v1;checkpoint/v5); re-genesis the world" := by
+      some s!"this Store was born in another epoch (cell schema references: Store schema-refs/v5, this Host {persistedSchemaRefs}; log tags: Store DREGG/NATIVE-HOST/LOG-TAG/v3, this Host {logTagLabel}; history accumulator: Store history/mmr-v1;spent/trie-v1;checkpoint/v3, this Host {StoreEpoch.current.accumulator}); re-genesis the world" := by
   rw [seedEpoch_ofBytes_labelled]
   native_decide
 
