@@ -52,6 +52,17 @@ class AuthFragments(unittest.TestCase):
             Engine(declaration, receiver, {}).call('file.put', {'path': 'test.bin', 'contentBase64': 'AA=='})
         self.assertEqual(receiver.calls, 1)
 
+    def test_empty_json_default_does_not_replace_nonempty_invalid_data(self):
+        declaration = {'limits': {'replyBytes': 1024}}
+        op = operation('json')
+        op['binding']['emptyValue'] = {'jobs': []}
+        self.assertEqual(decode_http(declaration, op, (200, {'content-type': 'application/json'}, b'')), {'jobs': []})
+        for body in [b' ', b'\n', b'{broken']:
+            with self.assertRaises(Refusal):
+                decode_http(declaration, op, (200, {'content-type': 'application/json'}, body))
+        with self.assertRaises(Refusal):
+            decode_http(declaration, op, (500, {'content-type': 'application/json'}, b''))
+
 
 if __name__ == '__main__':
     unittest.main()
