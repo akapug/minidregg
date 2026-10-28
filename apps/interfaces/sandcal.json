@@ -1,0 +1,52 @@
+{
+  "format": "mini-app-interface-v1",
+  "name": "sandcal",
+  "interfaceVersion": 1,
+  "appId": "f5z8uwz7ynf89c286f9d5tse5dwjknv32nyd78qzsyema3zf9m8h",
+  "packageId": "a84130b27030f06f981e78b06c499030",
+  "appVersion": "0.9.3",
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 16384,
+    "replyBytes": 1048576,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "$defs": {},
+  "operations": {
+    "calendar.export": {
+      "description": "Export the grain calendar as iCalendar. Mutations require a route/member CSRF MAC exposed only in rendered UI by this package; typed write is not advertised. No CalDAV or filtered query endpoint exists.",
+      "input": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string",
+        "maxLength": 1048576
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "export.ics"
+        ],
+        "decode": "text",
+        "status": [
+          200
+        ]
+      }
+    }
+  },
+  "qualification": [],
+  "auth": {
+    "kind": "member-route"
+  },
+  "sources": [
+    "http://github.com/zenhack/sandcal",
+    "https://github.com/zenhack/sandcal/blob/c449c3261bde9c9f0b1361b5ffa0ba3812af69c9/src/LibMain.hs",
+    "https://github.com/zenhack/sandcal/blob/c449c3261bde9c9f0b1361b5ffa0ba3812af69c9/src/Util/CSRF.hs"
+  ]
+}
