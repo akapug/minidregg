@@ -118,13 +118,14 @@ write_DokuWiki() {
 }
 # hledger-web 1.31 runs with --allow=sandstorm (the owner holds view, add, manage): its JSON API takes
 # PUT /add with the full JSON of one transaction (the form needs a Yesod _token). The read-back is
-# GET /transactions (JSON).
+# GET /transactions (JSON). tsourcepos is a pair of SourcePos objects in 1.31 (the first run, with the older
+# {tag: JournalSourcePos} shape, was refused: "expected Array, but encountered Object").
 write_HledgerWeb() {
   local amt='{"aprice":null,"acommodity":"$","aquantity":{"floatingPoint":Q,"decimalPlaces":10,"decimalMantissa":M},"aismultiplier":false,"astyle":{"ascommodityside":"L","asdigitgroups":null,"ascommodityspaced":false,"asprecision":2,"asdecimalpoint":"."}}'
   local a1=${amt//Q/3}; a1=${a1//M/30000000000}; local a2=${amt//Q/-3}; a2=${a2//M/-30000000000}
   local post1='{"pbalanceassertion":null,"pstatus":"Unmarked","pamount":['"$a1"'],"ptransaction_":"1","paccount":"expenses:demo","pdate":null,"ptype":"RegularPosting","pcomment":"","pdate2":null,"ptags":[],"poriginal":null}'
   local post2='{"pbalanceassertion":null,"pstatus":"Unmarked","pamount":['"$a2"'],"ptransaction_":"1","paccount":"assets:cash","pdate":null,"ptype":"RegularPosting","pcomment":"","pdate2":null,"ptags":[],"poriginal":null}'
-  local txn='{"tcomment":"","tpostings":['"$post1,$post2"'],"ttags":[],"tsourcepos":{"tag":"JournalSourcePos","contents":["",[1,1]]},"tdate":"2026-10-27","tcode":"","tindex":1,"tprecedingcomment":"","tdate2":null,"tdescription":"featured by a resident","tstatus":"Unmarked"}'
+  local txn='{"tcomment":"","tpostings":['"$post1,$post2"'],"ttags":[],"tsourcepos":[{"sourceName":"","sourceLine":1,"sourceColumn":1},{"sourceName":"","sourceLine":1,"sourceColumn":1}],"tdate":"2026-10-27","tcode":"","tindex":1,"tprecedingcomment":"","tdate2":null,"tdescription":"featured by a resident","tstatus":"Unmarked"}'
   local add; add=$(req PUT /add -H 'Content-Type: application/json' --data "$txn")
   local addbody; addbody=$(snip)
   local got; got=$(req GET /transactions)
