@@ -32,10 +32,11 @@ if [[ ${5:-} != --recover ]]; then
   mkdir -p "$ev/driver"
   cp "$0" "$data" "$here/grain-journey.sh" "$here/world-up.sh" "$here/world-down.sh" "$here/stop-residents.sh" "$ev/driver/"
 fi
-cleaned=0
+cleanup_attempted=0
 cleanup() {
   local rc=0
-  [[ $cleaned == 0 ]] || return 0
+  [[ $cleanup_attempted == 0 ]] || return 0
+  cleanup_attempted=1
   if [[ -f $world/WORLD.env ]]; then
     bash "$here/world-down.sh" "$world" >"$ev/world-down.log" 2>&1 || rc=1
   elif [[ -d $world/w ]]; then
@@ -55,7 +56,6 @@ cleanup() {
   fi
   if [[ $rc == 0 ]]; then
     rm -rf -- "$stage" # only this invocation's mktemp directory, after checked teardown
-    cleaned=1
   else
     echo "cleanup failed; retained $stage (see $ev); sweep stops" >&2
   fi

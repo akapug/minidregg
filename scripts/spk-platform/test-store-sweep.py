@@ -8,6 +8,7 @@ import subprocess
 import os
 import sys
 import threading
+import shutil
 import unittest
 
 spec = importlib.util.spec_from_file_location('sweep', Path(__file__).with_name('store-sweep-data.py'))
@@ -75,6 +76,46 @@ class StoreSweep(unittest.TestCase):
                                              BROKER_SOCKET=str(run/'removed/broker.sock'), BIN=tmp),
                                     capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_recovery_retains_user_manager_environment_and_cleans_only_own_staging(self):
+        here = Path(__file__).resolve().parent
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            driver = root/'driver'
+            driver.mkdir()
+            shutil.copy(here/'store-sweep-world.sh', driver/'store-sweep-world.sh')
+            (driver/'world-down.sh').write_text('''#!/bin/bash
+test "$XDG_RUNTIME_DIR" = "/run/user/$(id -u)" || exit 1
+test "$DBUS_SESSION_BUS_ADDRESS" = "unix:path=$XDG_RUNTIME_DIR/bus" || exit 1
+echo manager-environment-ok
+''')
+            (driver/'stop-residents.sh').write_text('exit 0\n')
+            stage = root/'staging'/'b.recover'
+            (stage/'w').mkdir(parents=True)
+            (stage/'w'/'WORLD.env').touch()
+            out = root/'out'
+            (stage/'sweep.json').write_text(json.dumps(dict(out=str(out), candidate='a'*40)))
+            env = {k: v for k, v in os.environ.items() if k not in ('XDG_RUNTIME_DIR', 'DBUS_SESSION_BUS_ADDRESS')}
+            cmd = ['bash', str(driver/'store-sweep-world.sh'), str(root/('a'*40)),
+                   str(out), str(stage.parent), str(stage), '--recover']
+            result = subprocess.run(cmd, env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(stage.exists())
+            self.assertIn('manager-environment-ok', (out/'evidence/b.recover/world-down.log').read_text())
+            (stage/'w').mkdir(parents=True)
+            (stage/'w'/'WORLD.env').touch()
+            (stage/'sweep.json').write_text(json.dumps(dict(out=str(out), candidate='a'*40)))
+            counter = root/'cleanup-attempts'
+            env['SWEEP_TEST_DOWN_ATTEMPTS'] = str(counter)
+            (driver/'world-down.sh').write_text('printf "attempt\\n" >> "$SWEEP_TEST_DOWN_ATTEMPTS"\nexit 1\n')
+            result = subprocess.run(cmd, env=env, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertTrue(stage.exists(), 'failed cleanup must retain staging')
+            self.assertEqual(counter.read_text().splitlines(), ['attempt'], 'EXIT must not repeat a failed teardown')
+            (stage/'sweep.json').write_text(json.dumps(dict(out='another-output', candidate='a'*40)))
+            result = subprocess.run(cmd, env=env, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertTrue(stage.exists(), 'never remove another run staging')
 
     @unittest.skipUnless(sys.platform == 'linux', 'resident PID custody uses /proc')
     def test_resident_cleanup_requires_this_world_in_recorded_pid_command(self):
