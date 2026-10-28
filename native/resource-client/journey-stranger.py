@@ -18,7 +18,7 @@ seed = open(keyfile, "rb").read()
 key = Ed25519PrivateKey.from_private_bytes(seed)
 config_bytes = open(config, "rb").read()
 HOST_PIN = hashlib.sha256(open(host_bin, "rb").read()).digest()  # envelope v2: the Host image pin (v1 is refused)
-TAG = b"DREGG/NATIVE-HOST/OUTCOME/v7"
+TAG = b"DREGG/NATIVE-HOST/OUTCOME/v8"
 
 def frame_of(s):
     def exact(n):
