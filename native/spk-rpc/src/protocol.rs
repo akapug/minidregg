@@ -506,6 +506,14 @@ fn bounded_len(value: usize, maximum: usize, field: &str) -> capnp::Result<u32> 
     u32::try_from(value).map_err(|_| capnp::Error::failed(format!("{field} is too large")))
 }
 
+/// What an app that declares nothing means: the decoding of an empty `ViewInfo`, the same value
+/// `default_bridge_config_bytes` decodes to.
+fn empty_view_info() -> capnp::Result<ViewInfo> {
+    let mut message = capnp::message::Builder::new_default();
+    let root = message.init_root::<grain_capnp::ui_view::view_info::Builder<'_>>();
+    decode_view_info(root.into_reader())
+}
+
 pub(crate) fn decode_view_info(
     info: grain_capnp::ui_view::view_info::Reader<'_>,
 ) -> capnp::Result<ViewInfo> {
@@ -616,8 +624,16 @@ impl SupervisorConnection {
     }
 
     pub async fn get_view_info(&self) -> capnp::Result<ViewInfo> {
-        let reply = self.view.get_view_info_request().send().promise.await?;
-        decode_view_info(reply.get()?)
+        match self.view.get_view_info_request().send().promise.await {
+            Ok(reply) => decode_view_info(reply.get()?),
+            // Sandstorm's own shell treats an app that does not implement getViewInfo as one that
+            // declares no permissions and no roles (UiView::Server's default throws UNIMPLEMENTED,
+            // and apps serving WebSession directly, such as Simple Chat, never override it). The
+            // caller still compares this against the signed schema, so an app that signed
+            // permissions and then says nothing is refused exactly as before.
+            Err(error) if error.kind == capnp::ErrorKind::Unimplemented => empty_view_info(),
+            Err(error) => Err(error),
+        }
     }
 
     pub async fn new_web_session(
@@ -1268,6 +1284,74 @@ mod tests {
         let mut trailing = object;
         trailing.push(0);
         assert!(decode_identity_object(&trailing, &secret).unwrap_err().starts_with("identityObjectRefused"));
+    }
+
+    /// A UiView that implements nothing (Simple Chat's shape), or whose getViewInfo fails.
+    struct SilentApp {
+        fails: bool,
+    }
+    impl grain_capnp::ui_view::Server for SilentApp {
+        async fn get_view_info(
+            self: capnp::capability::Rc<Self>,
+            _: grain_capnp::ui_view::GetViewInfoParams,
+            _: grain_capnp::ui_view::GetViewInfoResults,
+        ) -> capnp::Result<()> {
+            if self.fails {
+                Err(capnp::Error::failed("view info broke".into()))
+            } else {
+                Err(capnp::Error::unimplemented("getViewInfo".into()))
+            }
+        }
+    }
+
+    impl grain_capnp::main_view::Server<capnp::data::Owned> for SilentApp {}
+
+    async fn view_info_of(app: SilentApp) -> capnp::Result<ViewInfo> {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let (host_fd, app_fd) = UnixStream::pair().unwrap();
+                let main: grain_capnp::main_view::Client<capnp::data::Owned> =
+                    capnp_rpc::new_client(app);
+                let (reader, writer) = app_fd.compat().split();
+                let network = twoparty::VatNetwork::new(
+                    futures::io::BufReader::new(reader),
+                    futures::io::BufWriter::new(writer),
+                    Side::Client,
+                    reader_options(),
+                );
+                let mut app_rpc = RpcSystem::new(Box::new(network), Some(main.client));
+                let _api: grain_capnp::sandstorm_api::Client<capnp::data::Owned> =
+                    app_rpc.bootstrap(Side::Server);
+                tokio::task::spawn_local(app_rpc);
+                let (host, host_rpc) = SupervisorConnection::from_connected_stream(host_fd);
+                tokio::task::spawn_local(host_rpc);
+                host.get_view_info().await
+            })
+            .await
+    }
+
+    /// An app that does not implement getViewInfo declares nothing, as in Sandstorm. The
+    /// refusal this replaces ("Method not implemented") protected nothing: the launch path
+    /// compares the answer with the signed schema, and the empty answer equals only the empty
+    /// (default) schema, so the app gains no permission or role it did not sign.
+    #[tokio::test(flavor = "current_thread")]
+    async fn unimplemented_view_info_is_the_empty_declaration() {
+        let info = view_info_of(SilentApp { fails: false }).await.unwrap();
+        let default = crate::decode_bridge_config(&crate::default_bridge_config_bytes()).unwrap();
+        assert_eq!(info, default.view_info, "equal to the default config's schema");
+        assert!(info.permissions.is_empty() && info.roles.is_empty());
+        // The other side of the rule: a signed non-empty schema still differs from "says nothing".
+        let signed = crate::decode_bridge_config(include_bytes!(
+            "../tests/fixtures/gitweb-signed-bridge-config.capnp"
+        ))
+        .unwrap();
+        assert_ne!(info, signed.view_info, "a signed schema is still refused against silence");
+    }
+
+    /// Only UNIMPLEMENTED is read as "declares nothing"; any other failure stays a failure.
+    #[tokio::test(flavor = "current_thread")]
+    async fn failing_view_info_stays_a_failure() {
+        assert!(view_info_of(SilentApp { fails: true }).await.is_err());
     }
 
     #[tokio::test(flavor = "current_thread")]
