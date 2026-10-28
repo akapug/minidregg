@@ -159,7 +159,15 @@ operator = {"providerServices": [{"providerResourceId": PURSE, "tariff": {
 with open(path("enrollments.json"), "w") as out:
     json.dump([enrollment(s) for s in SUBJECTS if s != OPERATOR], out)
 spend, control, observe = CAPS[OPERATOR]
-overlay = (f"del(.grainPlatform) | .tailBound = {TAIL_BOUND} | .factoryControllerCapability = {FACTORY_CONTROL}"
+# The clock subject keeps its frame role but not the example's capability numbers
+# 71-74: the historical birth installs 71/72 (the parent's owner and control
+# capabilities) and the delegations install 73 and 75 (the parent witnesses), and
+# a birth whose grants reuse an installed capability is refused at prepare
+# (ResourceBirthController `authorityBatch`) - the grain acceptance moves its
+# clock the same way (native/grain-runtime/acceptance.sh).
+overlay = (f"del(.grainPlatform) | .clock += {{tickCapabilityId: 4071, spendCapabilityId: 4072,"
+           f" controlCapabilityId: 4073, factoryObserveCapabilityId: 4074}}"
+           f" | .tailBound = {TAIL_BOUND} | .factoryControllerCapability = {FACTORY_CONTROL}"
            f" | .sponsor.subject = {OPERATOR} | .sponsor.keyId = {1001 * OPERATOR} | .sponsor.accountId = {OPERATOR}"
            f" | .sponsor.spendCapabilityId = {spend} | .sponsor.controlCapabilityId = {control}"
            f" | .sponsor.factoryObserveCapabilityId = {observe} | .sponsor.initialBalance = {BALANCE[OPERATOR]}"
@@ -777,10 +785,18 @@ try:
         time.sleep(3)
         return owner if owner.poll() is None else None
     owner = wait_for("owner connection to the restarted controller", owner_connected, 600, 2)
+    # Recovery fences the uncertain send rather than settling it: the journaled
+    # record is sendStarted with no outcome (decision class crash-after-send) and
+    # the "provider reservation fenced" note; the "uncertain:crash-after-send"
+    # outcome string belongs to the LATER audited class-settle
+    # (provider_meter_class_inner), which this journey never drives.
     def recovered():
         j = journal()
-        notes = " ".join(str(n) for n in (j.get("unresolvedExternal") or []))
-        return j.get("connection") == "fenced" and "uncertain" in notes and j.get("providerAttempt") is not None
+        attempt = j.get("providerAttempt")
+        decision = ((attempt or {}).get("decision") or {}).get("class") or {}
+        return (j.get("connection") == "fenced" and attempt is not None
+                and attempt.get("sendStarted") is True and attempt.get("outcome") is None
+                and decision.get("kind") == "crash-after-send")
     wait_for("owner recovery", recovered, 900)
     # the connector prints the controller's replies on stdout, its own errors on stderr;
     # the attach-time recovery runs signed queries first, so its reply can trail the
@@ -799,7 +815,8 @@ try:
     row("recovery records the provider attempt as uncertain and keeps the hold",
         "sendStarted true, outcome null, hold reserveConfirmed, connection fenced",
         f"sendStarted={attempt.get('sendStarted')} outcome={attempt.get('outcome')} hold={hold.get('reserve')}/{hold.get('reserveConfirmed')} "
-        f"connection={j.get('connection')} note={[n for n in j.get('unresolvedExternal') or [] if 'uncertain' in str(n)][:1]}",
+        f"connection={j.get('connection')} decision={(((attempt.get('decision') or {}).get('class') or {}).get('kind'))}"
+        f" note={[n for n in j.get('unresolvedExternal') or [] if 'fenced' in str(n)][:1]}",
         attempt.get("sendStarted") is True and attempt.get("outcome") is None and hold.get("reserveConfirmed") is True)
     time.sleep(30)
     held, _ = mini_query("purse-held", PROVIDER, PURSE, 101)
