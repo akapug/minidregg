@@ -15,10 +15,14 @@ for file in "$dir"/*.pid; do
   [[ -f $file ]] || continue
   pid=$(tr -d '[:space:]' <"$file")
   [[ $pid =~ ^[0-9]+$ ]] || { echo "stop-residents: $file does not hold a pid" >&2; rc=1; continue; }
-  if [[ -r /proc/$pid/cmdline ]] && tr '\0' ' ' </proc/$pid/cmdline | grep -q -- '-resident '; then
+  if [[ -r /proc/$pid/cmdline ]] && tr '\0' ' ' <"/proc/$pid/cmdline" | grep -q -- '-resident '; then
+    # A reused PID must not let this world stop a different world's resident.
+    if ! tr '\0' '\n' <"/proc/$pid/cmdline" | grep -Fq -- "$(dirname "$(realpath "$dir")")/"; then
+      echo "stop-residents: $file names a resident outside this world's anchors" >&2; rc=1; continue
+    fi
     # the resident's descendants (its Host, store and verifier children), named before it ends
-    kids=$(descendants "$pid")
-    kill "$pid" 2>/dev/null && pids+=("$pid" $kids)
+    mapfile -t kids < <(descendants "$pid")
+    kill "$pid" 2>/dev/null && pids+=("$pid" "${kids[@]}")
   fi
 done
 for pid in "${pids[@]}"; do

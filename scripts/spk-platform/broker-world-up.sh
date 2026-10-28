@@ -40,6 +40,11 @@ root=/var/lib/mini-spk-worlds/$store
 [[ ! -e /etc/mini-spk-volumes/$store.json ]] || fail 'Store already has a registered grain world; use its existing profile'
 runid=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
 helper=/usr/local/libexec/mini-spk-volume-helper-$runid
+# A recovery locator is written before any root installation. broker.json remains
+# a success-only result; this separate record lets world-down finish interrupted setup.
+jq -n --arg store "$store" --arg root "$root" --arg helper "$helper" \
+  '{protocol:"mini-spk-world-recovery-v1",store:$store,grainsRoot:$root,
+    brokerSocket:($root+"/runtime-"+$store+"/broker.sock"),helper:$helper}' >"$run/recovery.json"
 # A free 16-ID slice of the operator's subordinate allocation: a lane box carries several standing
 # worlds, and the installer refuses a slice another world's registry already names.
 read -r start count < <(awk -F: -v user="$op_name" '$1==user && $3>=16 {print $2,$3;exit}' /etc/subuid)
