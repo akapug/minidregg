@@ -31,7 +31,8 @@ Goal: compute a cell's root once per distinct cell image, not once per query.
 ## Build on dregg-ref
 - Tree: `/srv/lanes/perf-roots` (root fs; `/build` is at 96%). `.lake` is seeded from un-enroll-renew.
 - Edits are synced as uncommitted files on origin/main 2cc5e9a9e.
-- Script: `/srv/lanes/perf-roots-b1.sh`. It runs `closure-lock swarm-build lake build -j 3` on the narrow modules, then NativeHostReplay, NativeHost and `+Host.Main:leanArts`.
+- Script: `/srv/lanes/perf-roots-b1.sh`. It runs `closure-lock swarm-build lake build` on the narrow modules, then NativeHostReplay, NativeHost and `+Host.Main:leanArts`.
+- Round 3 FAILED AT ONCE: lake has no `-j` flag (`unknown short option '-j'`), so nothing built. Before rerunning, delete `-j 3` from the script and cap parallelism with the env var `LEAN_NUM_THREADS=3` instead; round 2 was OOM-killed at 12G without a cap.
 - Unit: `perf-roots-b3` (user lanes). PID file: `/srv/lanes/perf-roots-b3.pid`. Log: `/srv/lanes/perf-roots-b1.log` (EXIT= line). Earlier logs: `*.round1.log`, `*.round2.log`.
 
 ## Next
