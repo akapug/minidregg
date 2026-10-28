@@ -12,12 +12,14 @@
 //! shell this helper started is stopped by the pid in the session record, and only that.
 
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
-use std::time::Duration;
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use mini_web_spawn::spawn::{self, BoxLayout, DevConfig, Layout, Member, Spawner};
 use mini_web_spawn::store::{Session, Store};
@@ -34,7 +36,26 @@ struct Helper {
     /// be another process, and connecting to a listener that no longer exists stranded the front
     /// page (dregg-build 2026-10-27: `connect body: No such file or directory`).
     children: std::collections::HashSet<u32>,
+    /// The live public body this helper started, while it lives (see [`Helper::warm_public`]).
+    public: Option<PublicBody>,
 }
+
+/// The public reader's body: its pid, the basis it was started from (`Spawner::public_basis`),
+/// and its warming request's state ([`WARMING`], [`WARM`] or [`COLD`]) with how many were sent.
+struct PublicBody {
+    pid: u32,
+    basis: String,
+    warm: Option<Arc<AtomicU8>>,
+    tries: u32,
+}
+
+const WARMING: u8 = 0;
+const WARM: u8 = 1;
+const COLD: u8 = 2;
+/// A warming request that did not answer 200 is sent again at the next sweeps, this many in all.
+const WARM_TRIES: u32 = 5;
+/// The warming request waits longer than the gateway's 120 s: it is the one meant to be slow.
+const WARM_DEADLINE: Duration = Duration::from_secs(600);
 
 fn main() {
     if let Err(error) = run() {
@@ -84,9 +105,10 @@ fn run() -> Result<(), String> {
         }
     };
     listener.set_nonblocking(true).map_err(|e| e.to_string())?;
-    let mut helper = Helper { store: Store::open(&state)?, spawner: Spawner { layout }, run, gateway_uid, dev: false, children: Default::default() };
+    let mut helper = Helper { store: Store::open(&state)?, spawner: Spawner { layout }, run, gateway_uid, dev: false, children: Default::default(), public: None };
     helper.dev = layout_is_dev(&helper.spawner.layout);
     helper.forget_bodies();
+    helper.warm_public();
     eprintln!("mini-web-spawn: serving (gateway uid {gateway_uid}{})", if helper.dev { ", dev" } else { "" });
     let mut last_sweep = std::time::Instant::now();
     loop {
@@ -106,6 +128,7 @@ fn run() -> Result<(), String> {
         if last_sweep.elapsed() > Duration::from_secs(60) {
             helper.sweep();
             helper.collect();
+            helper.warm_public();
             last_sweep = std::time::Instant::now();
         }
     }
@@ -204,7 +227,11 @@ impl Helper {
                         let member = self.spawner.member(&session.name)?;
                         (session, member)
                     }
-                    None => (self.store.public(), self.spawner.public()?),
+                    None => {
+                        let (mut session, member) = (self.store.public(), self.spawner.public()?);
+                        self.retire_stale_public(&mut session, &member);
+                        (session, member)
+                    }
                 };
                 let stream = self.body(&mut session, &member)?;
                 Ok((String::new(), Some(OwnedFd::from(stream))))
@@ -255,9 +282,8 @@ impl Helper {
     /// A connected stream to the session's body, spawning it on its root-only listener first if
     /// it is not one this helper started and still serving.
     fn body(&mut self, session: &mut Session, member: &Member) -> Result<UnixStream, String> {
-        let path = self.run.join("bodies").join(format!("{}.sock", &session.hash[..16.min(session.hash.len())]));
-        let live = session.body_pid.is_some_and(|pid| self.children.contains(&pid) && alive(pid)) && path.exists();
-        if !live {
+        let path = self.body_path(session);
+        if !self.live(session) {
             let _ = fs::remove_file(&path);
             let listener = UnixListener::bind(&path).map_err(|e| format!("bind body listener: {e}"))?;
             fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
@@ -267,10 +293,114 @@ impl Helper {
             self.children.insert(pid);
             session.body_pid = Some(pid);
             self.store.save(session)?;
+            if member.anonymous {
+                self.public = Some(PublicBody { pid, basis: self.spawner.public_basis(member), warm: None, tries: 0 });
+            }
             eprintln!("mini-web-spawn: body {pid} started for {}", member.account);
             // The listener lives in the body now; the kernel queues our connect until it accepts.
         }
         UnixStream::connect(&path).map_err(|e| format!("connect body: {e}"))
+    }
+
+    fn body_path(&self, session: &Session) -> PathBuf {
+        self.run.join("bodies").join(format!("{}.sock", &session.hash[..16.min(session.hash.len())]))
+    }
+
+    /// The session's body is one this helper started, still running, with its listener in place.
+    fn live(&self, session: &Session) -> bool {
+        session.body_pid.is_some_and(|pid| self.children.contains(&pid) && alive(pid)) && self.body_path(session).exists()
+    }
+
+    /// The public reader is the one body every anonymous visitor shares, and its first request is
+    /// the expensive one: the body starts, and its delegated consent worker (mini-consent@public,
+    /// socket-activated, idle-exiting) replays the Store before it answers. demo-dry 2026-10-28
+    /// (349e59ef1): 8.3 s with the worker warm, 23 s with both cold on an idle box, the gateway's
+    /// 504 at 120 s with load on top. So it is paid before any visitor: at the helper's start and at
+    /// every sweep, when the reader is enrolled and no live public body answers from the current
+    /// basis, the helper starts the body and sends it one `GET /`, the front page's own request
+    /// (its signed read opens the consent connection, so the worker is started and has replayed).
+    /// A warming request that fails is sent again at the next sweeps, [`WARM_TRIES`] in all.
+    /// This warms each start; whether the worker stays warm afterwards is its idle setting's.
+    fn warm_public(&mut self) {
+        if self.spawner.public_subject().is_none() {
+            return;
+        }
+        let Ok(member) = self.spawner.public() else { return };
+        let mut session = self.store.public();
+        self.retire_stale_public(&mut session, &member);
+        if self.live(&session) {
+            let retry = self.public.as_ref().is_some_and(|p| {
+                p.pid == session.body_pid.unwrap_or(0) && p.tries < WARM_TRIES && p.warm.as_ref().is_some_and(|w| w.load(Ordering::Acquire) == COLD)
+            });
+            if retry {
+                match UnixStream::connect(self.body_path(&session)) {
+                    Ok(stream) => self.send_warm(stream),
+                    Err(e) => eprintln!("mini-web-spawn: public reader not warmed: connect body: {e}"),
+                }
+            }
+            return;
+        }
+        match self.body(&mut session, &member) {
+            Ok(stream) => self.send_warm(stream),
+            Err(e) => eprintln!("mini-web-spawn: public reader not warmed: {e}"),
+        }
+    }
+
+    /// One `GET /` to the public body on its own thread (the helper serves on); its outcome is
+    /// logged and kept for [`Helper::warm_public`]'s retry.
+    fn send_warm(&mut self, mut stream: UnixStream) {
+        let Some(public) = self.public.as_mut() else { return };
+        let state = Arc::new(AtomicU8::new(WARMING));
+        public.warm = Some(state.clone());
+        public.tries += 1;
+        let pid = public.pid;
+        std::thread::spawn(move || {
+            let began = Instant::now();
+            let answer = (|| -> std::io::Result<String> {
+                stream.set_read_timeout(Some(WARM_DEADLINE))?;
+                stream.set_write_timeout(Some(Duration::from_secs(10)))?;
+                stream.write_all(b"GET / HTTP/1.1\r\nHost: mini-body\r\nX-Mini-Fragment: 1\r\nContent-Length: 0\r\n\r\n")?;
+                let mut bytes = Vec::new();
+                (&mut stream).take(8 * 1024 * 1024).read_to_end(&mut bytes)?;
+                let line = bytes.split(|b| *b == b'\r').next().unwrap_or_default();
+                Ok(String::from_utf8_lossy(line).into_owned())
+            })();
+            let secs = began.elapsed().as_secs_f64();
+            match answer {
+                Ok(line) if line.starts_with("HTTP/1.1 200 ") => {
+                    state.store(WARM, Ordering::Release);
+                    eprintln!("mini-web-spawn: public reader warmed (body {pid}): {line} in {secs:.1} s");
+                }
+                Ok(line) => {
+                    state.store(COLD, Ordering::Release);
+                    eprintln!("mini-web-spawn: public reader not warmed (body {pid}): answered {line:?} in {secs:.1} s");
+                }
+                Err(e) => {
+                    state.store(COLD, Ordering::Release);
+                    eprintln!("mini-web-spawn: public reader not warmed (body {pid}): {e} after {secs:.1} s");
+                }
+            }
+        });
+    }
+
+    /// End the live public body when its basis is not the current one (a re-enrolled reader, a new
+    /// front document, a re-initialised workspace, a re-genesis, a switched candidate), by the pid
+    /// this helper recorded when it started it; the next request or sweep starts a current one.
+    fn retire_stale_public(&mut self, session: &mut Session, member: &Member) {
+        let Some(public) = self.public.as_ref() else { return };
+        if session.body_pid != Some(public.pid) || !self.live(session) {
+            return;
+        }
+        if public.basis == self.spawner.public_basis(member) {
+            return;
+        }
+        let pid = public.pid;
+        unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+        let _ = fs::remove_file(self.body_path(session));
+        session.body_pid = None;
+        let _ = self.store.save(session);
+        self.public = None;
+        eprintln!("mini-web-spawn: public body {pid} ended: its basis changed");
     }
 
     /// End a session: its body and shells by their recorded pids, then the record.
@@ -294,6 +424,9 @@ impl Helper {
             }
             let pid = pid as u32;
             self.children.remove(&pid);
+            if self.public.as_ref().is_some_and(|p| p.pid == pid) {
+                self.public = None;
+            }
             let mut sessions = self.store.all();
             sessions.push(self.store.public());
             for mut s in sessions {

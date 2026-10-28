@@ -193,6 +193,19 @@ impl Spawner {
         }
     }
 
+    /// What a public body is started from, as one comparable line: the reader's subject and front
+    /// document (both passed as arguments), the identity of its `workspace.json` (rewritten only by
+    /// a lifecycle step: init, adoption, re-enrolment), the pinned config's (a re-genesis writes a
+    /// new one) and the candidate the `mini` path resolves to. The helper warms the public body
+    /// before any visitor, so a body started between a ship and the reader's re-initialisation must
+    /// not outlive it: when the basis changes, the helper replaces the body.
+    pub fn public_basis(&self, member: &Member) -> String {
+        let (mini, _, config, _, _) = self.paths();
+        let identity = |path: &Path| fs::metadata(path).map(|m| format!("{}:{}:{}.{}", m.dev(), m.ino(), m.mtime(), m.mtime_nsec())).unwrap_or_default();
+        let candidate = fs::canonicalize(&mini).map(|p| p.display().to_string()).unwrap_or_default();
+        format!("{:?} {:?} {} {} {candidate}", self.public_subject(), self.front_doc(), identity(&member.workspace.join("workspace.json")), identity(&config))
+    }
+
     /// Every hosted member's home (the hand-off sweep reads their published references).
     pub fn homes(&self) -> Vec<(String, PathBuf)> {
         match &self.layout {
