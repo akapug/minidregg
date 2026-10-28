@@ -1001,6 +1001,19 @@ fn bind(path: &Path, mode: u32, group: Option<&str>) -> Result<UnixListener> {
     Ok(listener)
 }
 
+/// The peer receives the reply unchanged; the worker's journal (the operator's log) keeps every
+/// refusal by name and every undecided outcome, with who asked and for what.
+fn log_unsettled(socket: &str, member: &str, request: Option<&Value>, reply: &Value) {
+    let decided = reply.get("decided").and_then(Value::as_bool).unwrap_or(true);
+    let Some(name) = reply.get("refused").and_then(Value::as_str).or(if decided { None } else { Some("undecided") }) else {
+        return;
+    };
+    let field = |key: &str| request.and_then(|r| r.get(key)).and_then(Value::as_str).unwrap_or("-");
+    let (verb, grain) = (field("verb"), field("grain"));
+    let detail = reply.get("detail").and_then(Value::as_str).unwrap_or("");
+    eprintln!("mini apps-worker: {socket} {member} {verb} {grain}: {name}: {detail}");
+}
+
 /// Serve both sockets until the process ends.
 pub(crate) fn serve(worker: Arc<Worker>, members: UnixListener, edge: UnixListener, dev_member: Option<String>) -> Result<()> {
     let edge_worker = worker.clone();
@@ -1009,7 +1022,12 @@ pub(crate) fn serve(worker: Arc<Worker>, members: UnixListener, edge: UnixListen
             let Ok(mut stream) = stream else { continue };
             let request = match read_line(&mut stream) {
                 Ok(request) => request,
-                Err(e) => { write_line(&mut stream, &refused("requestRefused", e)); continue; }
+                Err(e) => {
+                    let reply = refused("requestRefused", e);
+                    log_unsettled("edge", "-", None, &reply);
+                    write_line(&mut stream, &reply);
+                    continue;
+                }
             };
             let grain = request.get("grain").and_then(Value::as_str).unwrap_or("");
             let member = request.get("route").and_then(Value::as_str).unwrap_or("");
@@ -1017,7 +1035,9 @@ pub(crate) fn serve(worker: Arc<Worker>, members: UnixListener, edge: UnixListen
                 Some("connect") => edge_worker.connect_route(grain, member),
                 Some("www") => edge_worker.connect_www(grain),
                 _ => {
-                    write_line(&mut stream, &refused("unknownVerb", "the edge socket serves connect and www only"));
+                    let reply = refused("unknownVerb", "the edge socket serves connect and www only");
+                    log_unsettled("edge", "-", Some(&request), &reply);
+                    write_line(&mut stream, &reply);
                     continue;
                 }
             };
@@ -1028,7 +1048,10 @@ pub(crate) fn serve(worker: Arc<Worker>, members: UnixListener, edge: UnixListen
                     let _ = send_with_fd(&stream, &reply, fd);
                     unsafe { libc::close(fd) };
                 }
-                Err(refusal) => write_line(&mut stream, &refusal),
+                Err(refusal) => {
+                    log_unsettled("edge", if member.is_empty() { "-" } else { member }, Some(&request), &refusal);
+                    write_line(&mut stream, &refusal)
+                }
             }
         }
     }).map_err(|e| e.to_string())?;
@@ -1052,12 +1075,23 @@ pub(crate) fn serve(worker: Arc<Worker>, members: UnixListener, edge: UnixListen
         let member = match &dev_member {
             Some(name) => Some(name.clone()),
             None => match peer(&stream) {
-                Ok((uid, _)) => member_of_uid(uid),
-                Err(_) => None,
+                Ok((uid, _)) => {
+                    let member = member_of_uid(uid);
+                    if member.is_none() {
+                        eprintln!("mini apps-worker: member socket peer uid {uid} is not a member account");
+                    }
+                    member
+                }
+                Err(e) => {
+                    eprintln!("mini apps-worker: member socket peer credential unavailable: {e}");
+                    None
+                }
             },
         };
         let Some(member) = member else {
-            write_line(&mut stream, &refused("memberRefused", "the peer is not a member account (mini-s-NAME)"));
+            let reply = refused("memberRefused", "the peer is not a member account (mini-s-NAME)");
+            log_unsettled("member", "-", None, &reply);
+            write_line(&mut stream, &reply);
             continue;
         };
         let slot = {
@@ -1071,17 +1105,23 @@ pub(crate) fn serve(worker: Arc<Worker>, members: UnixListener, edge: UnixListen
             }
         };
         let Some(slot) = slot else {
-            write_line(&mut stream, &undecided("workerBusy", format!("{member} has {MEMBER_CONNECTIONS} requests open at the worker, or the worker holds {ALL_CONNECTIONS}; nothing was done"), "the same command, once an earlier one has answered"));
+            let reply = undecided("workerBusy", format!("{member} has {MEMBER_CONNECTIONS} requests open at the worker, or the worker holds {ALL_CONNECTIONS}; nothing was done"), "the same command, once an earlier one has answered");
+            log_unsettled("member", &member, None, &reply);
+            write_line(&mut stream, &reply);
             continue;
         };
         let worker = worker.clone();
         // A failed spawn drops the closure, its slot and its stream: the member sees the connection close.
         let _ = std::thread::Builder::new().name("mini-apps-member".into()).spawn(move || {
             let _slot = slot;
-            let reply = match read_line(&mut stream) {
-                Ok(request) => worker.handle(&member, &request),
-                Err(e) => refused("requestRefused", e),
+            let (request, reply) = match read_line(&mut stream) {
+                Ok(request) => {
+                    let reply = worker.handle(&member, &request);
+                    (Some(request), reply)
+                }
+                Err(e) => (None, refused("requestRefused", e)),
             };
+            log_unsettled("member", &member, request.as_ref(), &reply);
             write_line(&mut stream, &reply);
         });
     }

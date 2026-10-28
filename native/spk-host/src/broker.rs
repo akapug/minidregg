@@ -1279,7 +1279,13 @@ pub fn serve(config_path: &Path) -> io::Result<()> {
         let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
         let cred = match peer_credentials(&stream) {
             Ok(cred) => cred,
-            Err(_) => continue,
+            Err(error) => {
+                broker.log(&json!({
+                    "at":SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
+                    "ok":false,"error":format!("peer credentials unavailable: {error}"),
+                }));
+                continue;
+            }
         };
         let mut line = Vec::new();
         let read = BufReader::new((&stream).take(MAX_REQUEST + 1)).read_until(b'\n', &mut line);

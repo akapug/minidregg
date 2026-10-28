@@ -476,7 +476,10 @@ pub(crate) fn decide(
                         }
                     }
                 }
-                Err(_) => None,
+                Err(error) => {
+                    eprintln!("spk-host: op{operation_id} reply frame is no dispatch outcome: {error}");
+                    None
+                }
             };
             (frame.get(4).copied(), view)
         }
@@ -522,7 +525,10 @@ pub(crate) fn decide(
                     status: Status::RecordedUndelivered,
                     lean,
                 },
-                Err(_) => undecided(lean),
+                Err(error) => {
+                    eprintln!("spk-host: op{operation_id} settlement failed: {error}");
+                    undecided(lean)
+                }
             };
         }
     }
