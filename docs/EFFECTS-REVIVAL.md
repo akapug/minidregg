@@ -294,28 +294,43 @@ CI closure).
 | `LiveKeystone` = `ContentAgreement contentSpec ∧ ContentComplete` | `ContentAccepted` (fixture owed) | `ContentTeeth` (`contentGhost`, `contentNarrowed`) | `ContentAccepted` |
 | `HostKeystone` (known false today, by clause; it gates the migration commit) | `HostAccepted` (fixture owed) | `HostTeeth` | `HostPremise` = `contentHandler.Lawful` |
 
-**Proof order.**
-1. The materialize lemma, `CellState.materialize contentMaterializer value.logical = value`.
-   `Materialized` has the single field `logical`, so this is structure eta.  `HostPremise`
-   needs it.
-2. The toy pole: `EngineSatisfiable`, `EngineTeeth`, `EnginePremise` and the completeness
-   trio.  They are over `toyLayout`.  If DFinsupp equality blocks `decide`, use
-   `DFinsupp.ext` per address.
-3. `EngineKeystone` and `CompletenessKeystone`, generic.  Needed: `toLawful.decode_encode`,
-   the Sound fields, and a lemma that `Substrate.run` preserves locations outside
-   `footprint` when the substrate is `Framed`.  Also prove `(storeSubstrate L).Framed` from
-   `Op.apply`/`Store.set_ne`, and that `(storeSubstrate L).run s ps = some s'` holds iff
-   `Patch.ValidFrom s ps ∧ Patch.run s ps = s'`.
-4. `ContentComplete`, action by action over the write sites of `ContentResource.step`.
+**Files.**  `Effects/Revival/Engine.lean` (§1-§5: substrate, declaration, registry,
+dispatcher, engine and completeness keystones and the toy pole; kernel-free, imports only
+`Theory.Store`, `Theory.TypedAuthorization`, `Compiler.Tower256ConcreteBackend`).
+`Effects/Revival/Statements.lean` (§6-§7: the live content declaration, `ContentAgreement`,
+`HostKeystone`; imports Engine and `Kernel.DeclaredResourceController`).
+`Effects/Revival/EngineProofs.lean` (proofs of everything in Engine, plus the materialize
+lemma).  The split exists because Statements' kernel import is a 294-module project closure
+while Engine needs about 50: an abstraction seam (the engine does not depend on the
+controller) worth keeping for the inversion work.
+
+**Proved** (EngineProofs, `#assert_axioms` pinned; built green on hbox):
+`materialize_logical`, `storeSubstrate_framed`, `Substrate.run_frame`, `engineKeystone`,
+`completenessKeystone`, `enginePremise`, `engineSatisfiable`, `engineTeeth`,
+`entryA_lawful`, `completenessSatisfiable`, `completenessTeeth`, `completenessPremise`.
+
+**Where to check.**  The kernel-free files: hbox `/tank/lanes/effects-revival/src`, a
+private small-closure tree (packages a real copy of the warm base's, `.lake/native` built by
+`scripts/build-mini-kernels.sh`).  `scratchpad/effects-revival/hcheck.sh <module>` rsyncs
+`Effects/` there and runs `/tank/lanes/effects-revival/check.sh` (`swarm-build lake build`,
+PID file `check.pid`, log `check.log`); seconds per file.  The live file (kernel closure):
+dregg-ref, via the concatenation check in `/build/lanes/effects-revival-scratch/` under
+the closure lock (contended by host builds; expect waits).
+
+**Proof order (remaining).**
+1. `ContentComplete`, action by action over the write sites of `ContentResource.step`.
    **Risk:** `contentActionFrame` is a declared table.  If an action writes a field the
-   table omits, fix the table, not the statement's meaning, and tell the auditor.
-5. The doc-write fixture inhabitant (`Fixtures/NativeDocWriteFixture*`).  It needs a
-   non-empty seal and serves `ContentAccepted`, `HostAccepted` and the ghost clauses of
+   table omits, fix the table, not the statement's meaning, and tell the auditor.  This
+   needs the kernel closure: either build `Kernel.ContentResource`'s closure on hbox once
+   (it is smaller than the controller's) or check on dregg-ref.
+2. The doc-write fixture inhabitant (`Fixtures/NativeDocWriteFixture*`).  It needs a
+   non-empty rotation and serves `ContentAccepted`, `HostAccepted` and the ghost clauses of
    `ContentTeeth`/`HostTeeth`.
-6. `ContentAgreement contentSpec`: unfold the content arm of `computeTarget`, then use
-   `ContentResource.prepareCell_ok_of_run`, `Patch.run_append`, and the validate
-   semantics.  For the header clauses, case on the kind (the match in `payloadVerb`).
-7. `HostKeystone` lands with the migration commit, not before (§5 step 1).  Coordinate it
+3. `ContentAgreement contentSpec`: unfold the content arm of `computeTarget`, then
+   `ContentResource.prepareCell_ok_of_run`, `Patch.run_append`, the validate semantics,
+   and `(storeSubstrate L).run s ps = some s' ↔ Patch.ValidFrom s ps ∧ Patch.run s ps = s'`.
+   For the header clauses, case on the kind (the match in `payloadVerb`).
+4. `HostKeystone` lands with the migration commit, not before (§5 step 1).  Coordinate it
    with the platform lane (L1).
 
 **Not done, not this lane's:**
