@@ -278,6 +278,9 @@ pub(crate) fn connect_with_lifeline(
 }
 
 fn allowed(frame: &[u8]) -> bool {
+    if frame.first() == Some(&mini_sdk::host_operations::CONSENT_FULL_READY) {
+        return frame.len() == 1;
+    }
     matches!(
         frame.first().copied(),
         Some(
@@ -602,8 +605,9 @@ mod tests {
     #[test]
     fn consent_proxy_only_full_consent_frames() {
         for op in 0..=255 {
-            assert_eq!(allowed(&[op]), [220, 221, 222, 224, 226, 227].contains(&op));
+            assert_eq!(allowed(&[op]), [220, 221, 222, 224, 226, 227, 236].contains(&op));
         }
+        assert!(!allowed(&[236, 1]));
         assert!(!allowed(&[]));
         assert!(!allowed(&vec![220; CAP + 1]));
     }

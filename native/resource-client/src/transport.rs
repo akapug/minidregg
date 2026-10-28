@@ -575,6 +575,7 @@ fn allowed_operator_operation(request: &[u8]) -> bool {
         [208 | 209, ingress @ ..] => !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME,
         [151, payload @ ..] => continuity_request(payload),
         [153, payload @ ..] => carried_lookup_request(payload),
+        [156, ingress @ ..] => !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME,
         // STOP inspection only joins retained bytes to current verified history.
         [155, pair @ ..] => pair.len() < HOST_MAX_FRAME && exact_pair(pair).is_some(),
         // Read-only signed stream authority checks remain operator-private.
@@ -3464,6 +3465,15 @@ done"#;
         assert!(!response_operation_matches(mini_sdk::host_operations::APPLICATION_DISPATCH_SUBMIT, &[164]));
         assert!(!response_operation_matches(mini_sdk::host_operations::APPLICATION_ROUTE_INSPECT, &[34, 1]));
         assert!(!response_operation_matches(mini_sdk::host_operations::APPLICATION_DISPATCH_SUBMIT, &[]));
+    }
+
+    #[test]
+    fn accepted_grant_inspection_is_private_and_bounded() {
+        assert!(allowed_operator_operation(&[156, 1]));
+        assert!(!allowed_operation(&[156, 1], false));
+        assert!(!allowed_operation(&[156, 1], true));
+        assert!(!allowed_operator_operation(&[156]));
+        assert!(!allowed_operator_operation(&vec![156; HOST_MAX_FRAME + 1]));
     }
 
     #[test]

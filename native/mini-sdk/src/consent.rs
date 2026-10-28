@@ -594,8 +594,16 @@ impl Consent {
         answer
     }
 
-    /// Op 220 (thin: 230): `key` is the intent subject's current signing key at the verified
-    /// frontier. The provider must return the retained intent unchanged.
+    /// Complete independent full-history verification in this same retained session.
+    /// An anchor alone is insufficient. Only an exact empty response is readiness.
+    pub fn full_ready(&mut self) -> ConsentResult<()> {
+        let answer = self.call(crate::host_operations::CONSENT_FULL_READY, &[])?;
+        if !answer.is_empty() { return Err("full consent readiness returned payload".into()); }
+        Ok(())
+    }
+
+    /// Op 220 (thin: 230): key is current at the verified frontier.
+    /// The provider must return the retained intent unchanged.
     pub fn intent(&mut self, intent_bin: &[u8], key: &[u8], thin: bool) -> ConsentResult<()> {
         let checked = self.call(if thin { crate::host_operations::CONSENT_THIN_INTENT } else { crate::host_operations::CONSENT_INTENT }, &pair(intent_bin, &pair(key, &[])?)?)?;
         if checked != intent_bin {
@@ -726,6 +734,16 @@ mod tests {
 
     fn framed(body: &[u8]) -> Vec<u8> {
         [(body.len() as u32).to_le_bytes().as_slice(), body].concat()
+    }
+
+    #[test]
+    fn full_readiness_requires_its_exact_empty_acknowledgement() {
+        for (reply, ready) in [(vec![236], true), (vec![236, 1], false),
+            (vec![255], false), (vec![233], false)] {
+            let session = Session::over(Box::new(Vec::<u8>::new()),
+                Box::new(std::io::Cursor::new(framed(&reply))), "/stub".into(), vec![]);
+            assert_eq!(Consent(session).full_ready().is_ok(), ready);
+        }
     }
 
     /// A provider stub answering one frame with `answer` and `detail`, after reading 13 bytes.

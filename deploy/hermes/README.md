@@ -517,6 +517,8 @@ are checked before native writes; runtime/provider overlays and orchestration fi
 recorded separately. Use a fresh evidence directory. The socket directory is separately allocated
 under `/build/lanes` (override `J14_ORACLE_SOCKET_PARENT` for another protected, short parent),
 and task IDs are allocated per run so preserved worlds do not share system unit names.
+Before session creation or a restarted room turn, the journey also waits for native idle
+readiness; the presence of a controller socket alone does not establish readiness.
 
 The receiving checks cover the room's named refusal, the founder's grant, the actual Oracle
 answer joined to native dispatch settlement, a fresh paid room reply, and controller restart.
@@ -635,3 +637,31 @@ in controller-entry.py) is with infra a298031c78e86d651. install-hermes reds fix
 `subscribers`. A hard `/workspace` quota is an infra item; the code refuses a prompt over the class
 volume. The redteam rows (lane/redteam-q2 REDTEAM.md) are re-judged on the next run, now that the
 pass runs on its own ask.
+
+A failed initial worker-tree copy can continue with
+`controller-worker-prepare-resume` and its original preparation request. The
+installer accepts only an unchanged, unpublished stage with exact retained files;
+it refuses a controller which has advanced to native birth or publication.
+The J14 driver accepts a retained `mini-j14-worker-preparation-checkpoint-v1`
+for this boundary. A retained `mini-j14-worker-birth-checkpoint-v1` continues the exact native birth
+spec after a pre-submit failure or performs lookup of its retained signed attempt.
+Later failures require their native exact-attempt recovery.
+For an explicitly qualified controller binary successor before birth,
+`J14_ORACLE_CONTROLLER_UPGRADE` names a private JSON file containing `runtime`,
+`sha256`, and `sourceCommit`; the driver retains the stopped installer's upgrade
+receipt. Ordinary runs should start with the final selected runtime.
+
+The Oracle journey keeps private operator listeners under a private child of
+its socket directory. Public participant sockets remain outside that child;
+restoring a public listener reapplies the staged controller's connect ACL to
+its new inode.
+
+For a preserved world stopped before worker birth and the application's first
+START, `J14_ORACLE_OPERATOR_RELOCATION` may name a private JSON request with
+`protocol: mini-j14-operator-relocation-v1`, `previousSocket`, `socket`, and
+`hostConfigSha256`. The destination is the journey's `private/operator.sock`.
+The driver retains an exact transport transition for the baseline profile,
+operator workspaces and credential broker, then uses the stopped installer's
+`controller-operator-endpoint` operation. Store settings, keys and completed
+application attempts stay pinned. An active successor profile or a later
+application phase requires its own native recovery path.

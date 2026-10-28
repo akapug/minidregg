@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import stat
 import subprocess
+import socket
 import sys
 import tempfile
 import unittest
@@ -114,6 +115,150 @@ class ControllerWorldTests(unittest.TestCase):
             with self.subTest(destination=destination), self.assertRaises(ValueError): c.worker_inputs(changed, self.uid)
         with self.assertRaises(ValueError): c.worker_inputs({**request, 'files': request['files'] * 2}, self.uid)
 
+    def test_runtime_names_are_data_but_control_paths_remain_strict(self):
+        for name in ('pytz/Etc/GMT+0', 'contributors/felix@opper.ai', 'tests/a b.txt', 'data/λ.json'):
+            self.assertEqual(str(c.runtime_relative(name)), name)
+        with self.assertRaises(ValueError): c.worker_relative('pytz/GMT+0')
+        for name in ('../escape', '/absolute', 'a//b', 'a/./b', 'a/../b', 'a\x00b', 'a\nb'):
+            with self.subTest(name=name), self.assertRaises(ValueError): c.runtime_relative(name)
+
+    def test_runtime_inventory_rejects_links_and_pins_all_bytes(self):
+        source = self.root / 'runtime'; source.mkdir()
+        (source / 'GMT+0').write_bytes(b'timezone')
+        (source / 'person@example.org').write_bytes(b'author')
+        inventory = c.worker_tree_inventory(source, self.uid)
+        self.assertEqual(inventory['files']['GMT+0']['sha256'], c.sha(b'timezone'))
+        (source / 'linked').symlink_to(source / 'GMT+0')
+        with self.assertRaises((ValueError, OSError)): c.worker_tree_inventory(source, self.uid)
+        (source / 'linked').unlink(); os.link(source / 'GMT+0', source / 'linked')
+        with self.assertRaises((ValueError, OSError)): c.worker_tree_inventory(source, self.uid)
+
+    def test_runtime_partial_copy_only_accepts_exact_members(self):
+        source = self.root / 'runtime'; source.mkdir()
+        (source / 'GMT+0').write_bytes(b'timezone'); (source / 'next@file').write_bytes(b'next')
+        expected = c.worker_tree_inventory(source, self.uid)
+        dest = self.root / 'copy'; dest.mkdir(mode=0o755); dest.chmod(0o755)
+        copied = dest / 'GMT+0'; copied.write_bytes(b'timezone'); copied.chmod(0o444)
+        original_read, original_metadata = c.read_file, c.metadata
+        def owned_read(path, owner, *args, **kwargs): return original_read(path, self.uid if owner == 0 else owner, *args, **kwargs)
+        def owned_metadata(path, owner=None, mode=None): return original_metadata(path, self.uid if owner == 0 else owner, mode)
+        with patch.object(c, 'read_file', side_effect=owned_read), patch.object(c, 'metadata', side_effect=owned_metadata):
+            c.validate_retained_runtime(dest, expected)
+            copied.chmod(0o600); copied.write_bytes(b'wrong'); copied.chmod(0o444)
+            with self.assertRaises(ValueError): c.validate_retained_runtime(dest, expected)
+            copied.chmod(0o600); copied.write_bytes(b'timezone'); copied.chmod(0o444)
+            (dest / 'unexpected').write_bytes(b'foreign')
+            with self.assertRaises(ValueError): c.validate_retained_runtime(dest, expected)
+            (dest / 'unexpected').unlink(); copied.unlink(); copied.symlink_to(source / 'GMT+0')
+            with self.assertRaises(ValueError): c.validate_retained_runtime(dest, expected)
+
+    def test_worker_stage_resume_refuses_changed_inputs_and_later_publication(self):
+        base = self.root / 'base'; base.mkdir(); home = self.root / 'home'; home.mkdir()
+        pending = {'sourceBundle': '/original/input.json', 'files': {'host-config.json': c.sha(b'{}')},
+                   'binaries': {}, 'upstreamIdentity': [1, 2], 'acl': [], 'worker': {'task': '123'}}
+        retained = base / 'stage-pending.json'; retained.write_bytes(c.encoded(pending)); retained.chmod(0o600)
+        data = {'host-config.json': b'{}'}; target = home / 'host-config.json'; target.write_bytes(b'{}'); target.chmod(0o600)
+        original_read, original_write = c.read_file, c.write_new
+        def owned_read(path, owner, *args, **kwargs): return original_read(path, self.uid if owner == 0 else owner, *args, **kwargs)
+        def owned_write(path, content, *args, **kwargs): return original_write(path, content, self.uid, self.gid)
+        def check(value=pending): c.resume_worker_inputs(base, home, {'uid': self.uid}, value, data, {}, set(), {'directories': [], 'files': {}})
+        with patch.object(c, 'read_file', side_effect=owned_read), patch.object(c, 'write_new', side_effect=owned_write):
+            check({**pending, 'upstreamIdentity': [1, 3]})
+            self.assertEqual(retained.read_bytes(), c.encoded(pending))
+            self.assertEqual(len(list(base.glob('stage-resume-*.json'))), 1)
+            with self.assertRaises(ValueError): check({**pending, 'sourceBundle': '/changed/input.json'})
+            target.write_bytes(b'changed')
+            with self.assertRaises(ValueError): check()
+            target.write_bytes(b'{}'); (home / 'unexpected').write_bytes(b'foreign')
+            with self.assertRaises(ValueError): check()
+            (home / 'unexpected').unlink(); (base / 'worker-birth-spec.json').write_bytes(b'{}')
+            with self.assertRaises(ValueError): check()
+
+    def test_operator_endpoint_changes_only_transport_and_replays_exact_transition(self):
+        base=self.root/'base';base.mkdir();(base/'configs').mkdir();(base/'proxy').mkdir()
+        units=self.root/'units';units.mkdir();private=self.root/'private';private.mkdir(mode=0o700)
+        endpoint=private/'operator.sock';listener=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+        self.addCleanup(listener.close);listener.bind(str(endpoint));listener.listen(4);endpoint.chmod(0o600)
+        for path in (base/'proxy/config.json',endpoint.with_suffix('.config')):
+            path.write_bytes(b'{"sameStore":true}');path.chmod(0o600)
+        old_unit=b'ExecStart=/fixed/mini serve-agent-operator-proxy --upstream /old/operator.sock --config /fixed/config.json\n'
+        unit=units/'proxy.service';unit.write_bytes(old_unit);unit.chmod(0o644)
+        old_stage={'upstreamSocket':'/old/operator.sock','upstreamIdentity':[1,2],
+                   'units':{'proxy.service':c.sha(old_unit)},'binaries':{'mini':'original-pin'},'nativeIdentity':'unchanged'}
+        stage_path=base/'stage.json';stage_path.write_bytes(c.encoded(old_stage));stage_path.chmod(0o600)
+        record={'operatorUid':self.uid,'store':'0123456789abcdef','units':['runtime.service','proxy.socket','proxy.service']}
+        original_read,original_write=c.read_file,c.write_new
+        def owned_read(path,owner,*args,**kwargs):return original_read(path,self.uid if owner==0 else owner,*args,**kwargs)
+        def owned_write(path,content,uid=0,gid=0,mode=0o600):return original_write(path,content,self.uid,self.gid,mode)
+        with patch.object(c,'load',return_value=({},base,record)),patch.object(c,'UNITS',units),patch.object(c,'stopped_controller_units'),patch.object(c,'checked_units',return_value=old_stage),patch.object(c,'run'),patch.object(c,'read_file',side_effect=owned_read),patch.object(c,'write_new',side_effect=owned_write):
+            result=c.operator_endpoint_upgrade(record['store'],'helper',str(endpoint))
+            new_stage=json.loads(stage_path.read_bytes());self.assertEqual(new_stage['upstreamSocket'],str(endpoint))
+            self.assertEqual(new_stage['binaries'],old_stage['binaries']);self.assertEqual(new_stage['nativeIdentity'],'unchanged')
+            self.assertEqual(unit.read_bytes(),old_unit.replace(b'/old/operator.sock',str(endpoint).encode()))
+            retained=Path(result['operatorEndpointUpgrade']).read_bytes()
+            # Either exact publication half is recoverable after interruption.
+            unit.write_bytes(old_unit)
+            again=c.operator_endpoint_upgrade(record['store'],'helper',str(endpoint))
+            self.assertEqual(again['stageSha256'],result['stageSha256']);self.assertEqual(Path(result['operatorEndpointUpgrade']).read_bytes(),retained)
+            bad={**new_stage,'nativeIdentity':'changed'};stage_path.write_bytes(c.encoded(bad))
+            with self.assertRaisesRegex(ValueError,'outside operator endpoint'):c.operator_endpoint_upgrade(record['store'],'helper',str(endpoint))
+            stage_path.write_bytes(c.encoded(new_stage));endpoint.with_suffix('.config').write_bytes(b'{"sameStore":false}')
+            with self.assertRaisesRegex(ValueError,'different Store settings'):c.operator_endpoint_upgrade(record['store'],'helper',str(endpoint))
+            private.chmod(0o710)
+            with self.assertRaisesRegex(ValueError,'mode refused'):c.operator_endpoint_upgrade(record['store'],'helper',str(endpoint))
+
+    def test_initial_foreground_allowance_is_minimal_and_prejournal_only(self):
+        state=self.root/'state';state.mkdir();base={'task':'1','commands':[],'toolTask':{}}
+        minimal={'reserve':'1','charge':'0'}
+        for previous in (base,{**base,'foregroundTool':None}):
+            current={**previous,'foregroundTool':minimal}
+            c.unchanged_worker_config(previous,current,state)
+            for changed in ({**current,'task':'2'},{**current,'foregroundTool':{'reserve':'2','charge':'0'}}):
+                with self.assertRaises(ValueError):c.unchanged_worker_config(previous,changed,state)
+        configured={**base,'foregroundTool':{'reserve':'2','charge':'1'}}
+        c.unchanged_worker_config(configured,configured,state)
+        with self.assertRaises(ValueError):c.unchanged_worker_config(configured,{**base,'foregroundTool':minimal},state)
+        (state/'journal.json').write_text('{}')
+        with self.assertRaisesRegex(ValueError,'no native controller journal'):
+            c.unchanged_worker_config(base,{**base,'foregroundTool':minimal},state)
+        (state/'journal.json').unlink();(state/'journal.json').symlink_to(state/'missing')
+        with self.assertRaisesRegex(ValueError,'no native controller journal'):
+            c.unchanged_worker_config(base,{**base,'foregroundTool':minimal},state)
+
+    def test_stopped_failed_units_preserve_diagnostics_but_refuse_live_processes(self):
+        r = self.worker_record()
+        state = {'ActiveState': 'failed', 'MainPID': '0', 'ControlPID': '0'}
+        def properties(unit):
+            return {'LoadState': 'loaded', 'Transient': 'no', 'FragmentPath': str(c.UNITS / unit),
+                    'User': str(r['uid'] if unit == r['units'][0] else r['operatorUid']), **state}
+        with patch.object(c, 'manager_properties', side_effect=properties), patch.object(c, 'no_processes') as quiet:
+            c.stopped_controller_units(r)
+            quiet.assert_called_once_with(r['uid'])
+            for field, value in [('MainPID', '42'), ('ControlPID', '42'), ('ActiveState', 'active'), ('ActiveState', 'activating')]:
+                before = state[field]; state[field] = value
+                with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                    c.stopped_controller_units(r)
+                state[field] = before
+            quiet.side_effect = ValueError('controller account still has a process')
+            with self.assertRaisesRegex(ValueError, 'still has a process'):
+                c.stopped_controller_units(r)
+
+    def test_api_recovery_and_reconciliation_are_fixed_native_admin_commands(self):
+        r = self.record(); base = self.root / 'base'; request = 'ab' * 16
+        with patch.object(c, 'load', return_value=({}, base, r)), patch.object(c, 'checked_units'), patch.object(c, 'controller_child', return_value=0) as child:
+            self.assertEqual(c.recover_api_unreserved(r['store'], 'helper', request), 0)
+            self.assertEqual(child.call_args.args[1][-1], 'recover foreground api-unreserved ' + request)
+            for selector, command in (('parent', 'reconcile parent'), ('effects', 'reconcile effects'), ('foreground-audited', 'reconcile foreground audited')):
+                c.reconcile_controller(r['store'], 'helper', selector)
+                self.assertEqual(child.call_args.args[1][-1], command)
+            c.controller_admin_fixed(r['store'], 'helper', 'prepare idle')
+            self.assertEqual(child.call_args.args[1][-1], 'prepare idle')
+            self.assertEqual(child.call_args.kwargs['timeout'], 1800)
+            for bad in ('', '../x', request + ' reconcile', 'AB' * 16):
+                with self.assertRaises(ValueError): c.recover_api_unreserved(r['store'], 'helper', bad)
+            for bad in ('foreground', 'attach', 'parent;stop', ''):
+                with self.assertRaises(ValueError): c.reconcile_controller(r['store'], 'helper', bad)
+
     def test_worker_configuration_rejects_launcher_scope_or_custody_changes(self):
         r = self.worker_record(); base, config = self.worker_config_value(r)
         c.validate_worker_config(config, base, r)
@@ -145,6 +290,57 @@ class ControllerWorldTests(unittest.TestCase):
             request['program'] = '/bin/sh'; path.write_bytes(c.encoded(request))
             with self.assertRaises(ValueError): c.controller_run(r['store'], '/unused', str(path))
             self.assertEqual(execute.call_count, 1)
+
+    def test_worker_registration_input_is_exclusive_and_only_staged_inside_child(self):
+        r = self.worker_record(); requests = self.root / 'requests'; requests.mkdir(mode=0o700)
+        registrations = requests / 'registrations'; registrations.mkdir(mode=0o700)
+        source = self.file('registration-input.json', b'{"native":"registration"}')
+        target = registrations / 'member.json'
+        request = {'program': 'mini', 'args': ['hermes-handoff', '--action', 'registry'],
+                   'inputs': [{'source': str(source), 'destination': 'requests/registrations/member.json'}]}
+        path = self.file('run-registration.json', c.encoded(request))
+        pins = {'providerSha256': '12'*32, 'configSha256': '34'*32}
+        def child(record, argv, setup=None, timeout=None):
+            self.assertEqual(argv[0], str(self.root / 'bin/mini'))
+            self.assertEqual(record['uid'], self.uid)
+            setup()
+            return 0
+        with patch.object(c, 'load', return_value=({}, self.root, r)), patch.object(c, 'checked_units', return_value={'consent': pins}), \
+             patch.object(c, 'worker_manager'), patch.object(c, 'controller_child', side_effect=child) as execute:
+            self.assertFalse(target.exists())
+            self.assertEqual(c.controller_run(r['store'], '/unused', str(path)), 0)
+            self.assertEqual(target.read_bytes(), source.read_bytes())
+            self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
+            with self.assertRaises(FileExistsError): c.controller_run(r['store'], '/unused', str(path))
+            self.assertEqual(target.read_bytes(), source.read_bytes())
+            target.unlink(); registrations.rmdir()
+            with self.assertRaises(FileNotFoundError): c.controller_run(r['store'], '/unused', str(path))
+            outside = self.root / 'outside'; outside.mkdir(mode=0o700)
+            registrations.symlink_to(outside, target_is_directory=True)
+            with self.assertRaises(ValueError): c.controller_run(r['store'], '/unused', str(path))
+            self.assertFalse((outside / 'member.json').exists())
+            registrations.unlink(); registrations.mkdir(mode=0o777); registrations.chmod(0o777)
+            with self.assertRaises(ValueError): c.controller_run(r['store'], '/unused', str(path))
+            self.assertFalse(target.exists())
+
+    def test_worker_registration_input_refuses_other_subtrees_and_duplicate_destinations(self):
+        r = self.worker_record(); source = self.file('registration-source.json', b'{}')
+        request = {'program': 'mini', 'args': ['hermes-handoff', '--action', 'registry']}
+        path = self.file('run-registration.json', c.encoded(request))
+        pins = {'providerSha256': '12'*32, 'configSha256': '34'*32}
+        with patch.object(c, 'load', return_value=({}, self.root, r)), patch.object(c, 'checked_units', return_value={'consent': pins}), \
+             patch.object(c, 'worker_manager'), patch.object(c, 'controller_child') as execute:
+            for destination in ('requests/registrations/../escape.json', 'requests/registrations/nested/member.json',
+                                'requests/other/member.json', 'requests/registrations/member.txt',
+                                '/requests/registrations/member.json', None):
+                request['inputs'] = [{'source': str(source), 'destination': destination}]
+                path.write_bytes(c.encoded(request))
+                with self.subTest(destination=destination), self.assertRaises(ValueError):
+                    c.controller_run(r['store'], '/unused', str(path))
+            request['inputs'] = [{'source': str(source), 'destination': 'requests/registrations/member.json'}] * 2
+            path.write_bytes(c.encoded(request))
+            with self.assertRaises(ValueError): c.controller_run(r['store'], '/unused', str(path))
+            execute.assert_not_called()
 
     def test_worker_room_account_binds_once_without_changing_other_authority(self):
         old = {'task': '12', 'subject': '13', 'room': {'room': 'lab', 'workspace': '/private/workspace', 'account': 'unsummoned'}}

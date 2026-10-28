@@ -30,8 +30,22 @@ supported controller wrapper instead and supplies the retained result to
 issue-grant. prepare-route consumes the controller layout; activate consumes the
 actual native START result and emits a second installable update. No phase
 installs files into the controller account or starts its service itself.
+
+repair-prepared-bootstrap accepts --input with protocol
+mini-application-attachment-bootstrap-repair-v1, previousOrchestrator (preserved
+old source file), controllerStatus and controllerEvidence (fixed-installer JSON),
+expectedStore and expectedRuntimeSha256. Optional initializeForegroundTool:true
+also fills a missing foreground profile with reserve 1/charge 0, matching the
+fresh prepare-config default; existing profiles are preserved. It repairs the old bootstrap name
+before the controller has any journal or session phase; original native attempts
+remain unchanged. Install the repaired stage separately through the stopped
+controller installer, then refresh the controller config export.
 """
 import argparse
+import base64
+import fcntl
+import re
+import stat
 import hashlib
 import json
 import os
@@ -135,7 +149,6 @@ class Attachment:
         self.names = {"application": "oracle-app", "family": "oracle-session", "route": "oracle-agent-v1",
                       "display": "Oracle agent", "handle": "oracle-agent", "serviceProtocol": "oracle-operations-v1"}
         self.names.update(c.get("names", {}))
-        self.bootstrap_name = self.names["application"] + "-bootstrap"
         # Names enter private artifact paths as well as native route selectors.
         for field in ("application", "family", "route", "handle"):
             name = self.names[field]
@@ -143,6 +156,9 @@ class Attachment:
                 raise ValueError("attachment names require ASCII letters, digits or hyphens")
         if not self.names["application"].endswith("-app"):
             raise ValueError("application route name must end in -app")
+        self.bootstrap_name = self.names["application"][:-4] + "-bootstrap-app"
+        if len(self.bootstrap_name) > 64:
+            raise ValueError("bootstrap application reference exceeds native 64-byte name bound")
         config = read(paths["controllerConfig"])
         self.validate_controller(config)
         if sha(config["host"]) != sha(self.host) or sha(config["mini"]) != sha(self.mini):
@@ -180,6 +196,9 @@ class Attachment:
             files["publicKey/" + signer["keyId"]] = signer["publicKeyPath"]
         pinned = {"contract": c, "files": files, "sha256": {key: sha(path) for key, path in files.items()}}
         if self.root.exists():
+            repair = self.root / "repair-prepared-bootstrap"
+            if repair.exists() and not (repair / "complete.json").is_file():
+                raise ValueError("prepared bootstrap repair is incomplete; resume that exact repair first")
             if read(self.root / "attachment.json") != pinned:
                 raise ValueError("attachment inputs changed; retain existing attempts and reconcile explicitly")
             accepted_configs = [self.root / "controller-input.json", self.controller_stage]
@@ -278,6 +297,10 @@ class Attachment:
         c, a, caps = self.contract, self.agent, self.agent["plannedCaps"]
         home = Path(c["paths"]["controllerHome"])
         config = read(c["paths"]["controllerConfig"])
+        # The operator-driven session tool uses a parent allowance independently
+        # of its delegated tool charge. Preserve any explicit operator profile.
+        if config.get("foregroundTool") is None:
+            config["foregroundTool"] = {"reserve": "1", "charge": "0"}
         app = read(self.application["birthSource"])["applicationGrainBirth"]["applicationBirth"]["application"]
         if any(app[k] != self.allocation[k] for k in ("app", "packageManifest", "snapshotManifest")):
             raise ValueError("actual app birth differs from allocation")
@@ -610,7 +633,8 @@ class Attachment:
         pins_file = self.calls / "operator-pins.json"
         write(pins_file, pins)
         route_dir = self.calls / "source-route"
-        self.call("render-custody", ["sh", repo / "scripts/spk-platform/prepare-lifetime-route.sh", "--custody-only",
+        self.call("render-custody", ["sh", repo / "scripts/spk-platform/prepare-lifetime-route.sh",
+            "--served", self.mini, self.operator, sha(self.mini), "--custody-only",
             self.host, self.config, grant, lookups[-1], pins_file, route_dir, sha(self.host),
             self.allocation_path, a["route"]])
         request = {"protocol": "mini-spk-grain-agent-route-v1", "name": self.names["route"], "signedApiPath": "/",
@@ -695,7 +719,7 @@ class Attachment:
         write(pins_file, pins)
         routes = self.calls / "source-route"
         self.call("render-controller-route", ["sh", repo / "scripts/spk-platform/prepare-lifetime-route.sh",
-            self.host, self.config, registration["grantAttempt"], registration["lookup"], pins_file,
+            "--served", self.mini, self.operator, sha(self.mini), self.host, self.config, registration["grantAttempt"], registration["lookup"], pins_file,
             routes, sha(self.host), self.allocation_path, a["route"]])
         if (routes / "resident-custody-v3.json").read_bytes() != (Path(registration["sourceRoute"]) / "resident-custody-v3.json").read_bytes():
             raise ValueError("controller route reinspection changed registered resident custody")
@@ -765,6 +789,211 @@ def render_host_config(config_path, allocation_path, output):
     return output
 
 
+def repair_prepared_bootstrap(contract_path, request_path):
+    """Repair only the old prepared name; never invoke Mini or infer a session result.
+
+    Fixed-installer observations are retained operator evidence, not semantic
+    authority. The stopped installer must separately publish the returned stage.
+    A three-file compare-and-swap transaction permits only its exact old/new
+    bytes on reentry; native delegation attempts remain immutable throughout.
+    """
+    contract, request = read(contract_path), read(request_path)
+    if request.get("protocol") != "mini-application-attachment-bootstrap-repair-v1":
+        raise ValueError("prepared bootstrap repair protocol absent")
+    required = {"protocol", "previousOrchestrator", "controllerStatus", "controllerEvidence", "expectedStore", "expectedRuntimeSha256"}
+    if not required <= set(request) or set(request) - required - {"initializeForegroundTool"}:
+        raise ValueError("prepared bootstrap repair fields differ")
+    if "initializeForegroundTool" in request and type(request["initializeForegroundTool"]) is not bool:
+        raise ValueError("initializeForegroundTool must be a boolean")
+    root = Attachment.absolute(contract["paths"]["outputDir"])
+    def private_directory(path):
+        mode = path.lstat()
+        if not stat.S_ISDIR(mode.st_mode) or mode.st_uid != os.getuid() or mode.st_mode & 0o077:
+            raise ValueError("repair requires an owned private directory")
+    def regular(path):
+        mode = path.lstat()
+        if not stat.S_ISREG(mode.st_mode) or mode.st_nlink != 1 or mode.st_uid != os.getuid():
+            raise ValueError("repair artifact must be an owned regular single-link file")
+        return path.read_bytes()
+    def encoded(value):
+        return (json.dumps(value, indent=2) + "\n").encode()
+    def digest(raw):
+        return hashlib.sha256(raw).hexdigest()
+    def sync(path):
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+        try: os.fsync(fd)
+        finally: os.close(fd)
+    private_directory(root)
+    archive = root / "repair-prepared-bootstrap"
+    archive.mkdir(mode=0o700, exist_ok=True)
+    private_directory(archive)
+    lock = os.open(archive / "lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(lock, "rb+") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        paths = {"attachment": root / "attachment.json", "controller": root / "controller-stage/controller.json",
+                 "stage": root / "controller-stage.json"}
+        private_directory(paths["controller"].parent)
+        intent_path = archive / "intent.json"
+        if intent_path.exists():
+            intent = json.loads(regular(intent_path))
+            if json.loads(regular(archive / "request.json")) != request:
+                raise ValueError("repair request differs from retained transaction")
+            before = {name: regular(archive / ("before-" + name + ".json")) for name in paths}
+            after = {name: regular(archive / ("after-" + name + ".json")) for name in paths}
+            if any(digest(before[name]) != intent["before"][name] or digest(after[name]) != intent["after"][name] for name in paths):
+                raise ValueError("repair archived bytes changed")
+            if sha(__file__) != intent["newSourceSha256"]:
+                raise ValueError("repair implementation differs from retained transaction")
+        else:
+            before = {name: regular(path) for name, path in paths.items()}
+            retained, config, stage = (json.loads(before[name]) for name in ("attachment", "controller", "stage"))
+            if retained["contract"] != contract:
+                raise ValueError("repair contract differs from original attachment")
+            old_source = regular(Attachment.absolute(request["previousOrchestrator"]))
+            if digest(old_source) != retained["sha256"]["orchestrator"]:
+                raise ValueError("previous orchestrator differs from original source pin")
+            for key, expected in retained["sha256"].items():
+                if key != "orchestrator" and sha(retained["files"][key]) != expected:
+                    raise ValueError("repair input changed: " + key)
+            if sorted(path.name for path in root.glob("native-*")) != ["native-prepare-config"]:
+                raise ValueError("repair requires only the completed prepare-config phase")
+            expected_names = {"app", "manifest", "snapshot", "discovery-ticket", "controller-app", "controller-manifest"}
+            if stage.get("protocol") != "mini-application-attachment-stage-v1" or stage.get("configSha256") != digest(before["controller"]) \
+                    or stage.get("stage") != str(paths["controller"].parent) \
+                    or stage.get("home") != contract["paths"]["controllerHome"] \
+                    or set(stage.get("discoveryGrantReceipts", {})) != expected_names:
+                raise ValueError("repair requires the exact completed prepared stage")
+            for name in expected_names:
+                outcome = read(root / "native-prepare-config" / (name + "-attempt") / "outcome.json")
+                if receipt(outcome) != stage["discoveryGrantReceipts"][name]:
+                    raise ValueError("prepared native delegation receipt changed")
+            status_path = Attachment.absolute(request["controllerStatus"])
+            evidence_path = Attachment.absolute(request["controllerEvidence"])
+            status_raw, evidence_raw = regular(status_path), regular(evidence_path)
+            status, evidence = json.loads(status_raw), json.loads(evidence_raw)
+            store = request["expectedStore"]
+            if not isinstance(store, str) or not re.fullmatch("[0-9a-f]{16}", store) \
+                    or status.get("store") != store or status.get("stopped") is not True \
+                    or type(status.get("controllerUid")) is not int or status["controllerUid"] in (0, os.getuid()) \
+                    or f"mini-grain-controller@{config['task']}.service" not in status.get("stoppedUnits", []) \
+                    or status.get("controllerConfigSha256") != digest(before["controller"]) \
+                    or not isinstance(request["expectedRuntimeSha256"], str) \
+                    or not re.fullmatch("[0-9a-f]{64}", request["expectedRuntimeSha256"]) \
+                    or status.get("runtimeSha256") != request["expectedRuntimeSha256"] \
+                    or ("grainRuntime" in retained["sha256"] and retained["sha256"]["grainRuntime"] != request["expectedRuntimeSha256"]):
+                raise ValueError("repair lacks exact stopped controller evidence")
+            if evidence.get("protocol") != "mini-spk-controller-evidence-v1" or evidence.get("store") != store \
+                    or not isinstance(evidence.get("files"), dict):
+                raise ValueError("repair controller export differs from selected Store")
+            for name, row in evidence["files"].items():
+                rel = Path(name)
+                if rel.is_absolute() or ".." in rel.parts or str(rel) != name \
+                        or name == "journal.json" or name.startswith(("foreground-", "application-api-", "query-", "source-", "attempt-")):
+                    raise ValueError("repair requires a controller that never admitted its first session/tool")
+                if digest(base64.b64decode(row["base64"], validate=True)) != row["sha256"]:
+                    raise ValueError("controller export digest differs")
+            application = contract.get("names", {}).get("application", "oracle-app")
+            old_name, new_name = application + "-bootstrap", application[:-4] + "-bootstrap-app"
+            if not application.endswith("-app") or len(new_name) > 64:
+                raise ValueError("repair application name is outside native shape")
+            refs = config["toolTask"].get("registeredSharedApplications", [])
+            selected = [item for item in refs if item.get("name") == old_name]
+            if len(selected) != 1 or any(item.get("name") == new_name for item in refs) \
+                    or stage["nextTool"] != {"name": "mini_create_application_session", "arguments": {
+                        "family": contract.get("names", {}).get("family", "oracle-session"), "application": old_name}}:
+                raise ValueError("repair is not the exact legacy bootstrap name")
+            allocation = read(contract["allocation"])
+            if selected[0].get("appTarget") != allocation["app"]:
+                raise ValueError("repair reference names another application")
+            selected[0]["name"] = new_name
+            initialized_foreground = request.get("initializeForegroundTool", False) and config.get("foregroundTool") is None
+            if initialized_foreground:
+                config["foregroundTool"] = {"reserve": "1", "charge": "0"}
+            stage["nextTool"]["arguments"]["application"] = new_name
+            new_config = encoded(config)
+            stage["configSha256"] = digest(new_config)
+            retained["files"]["orchestrator"] = str(Path(__file__).resolve())
+            retained["sha256"]["orchestrator"] = sha(__file__)
+            after = {"attachment": encoded(retained), "controller": new_config, "stage": encoded(stage)}
+            immutable = {str(path.relative_to(root)): sha(path) for directory in (root / "native-prepare-config", root / "controller-stage/state")
+                         for path in directory.rglob("*") if path.is_file()}
+            immutable["controller-input.json"] = sha(root / "controller-input.json")
+            intent = {"protocol": "mini-application-attachment-bootstrap-repair-intent-v1",
+                      "before": {name: digest(raw) for name, raw in before.items()},
+                      "after": {name: digest(raw) for name, raw in after.items()}, "immutable": immutable,
+                      "oldName": old_name, "newName": new_name, "newSourceSha256": sha(__file__),
+                      "initializedForegroundTool": initialized_foreground}
+            saved = {"request.json": encoded(request), "source-before.py": old_source,
+                     "source-after.py": Path(__file__).read_bytes(), "controller-status.json": status_raw,
+                     "controller-evidence.json": evidence_raw}
+            saved.update({f"before-{name}.json": raw for name, raw in before.items()})
+            saved.update({f"after-{name}.json": raw for name, raw in after.items()})
+            intent["archiveSha256"] = {name: digest(raw) for name, raw in saved.items()}
+            for name, raw in saved.items():
+                destination = archive / name
+                if destination.exists():
+                    if regular(destination) != raw: raise ValueError("partial repair archive differs")
+                else: write(destination, raw)
+            write(intent_path, intent)
+            sync(archive)
+            sync(root)
+        for name, expected in intent["archiveSha256"].items():
+            if digest(regular(archive / name)) != expected:
+                raise ValueError("repair archived evidence changed")
+        # Even a resumed publication is this one name repair, never a generic
+        # configuration/source replacement selected by an edited archive.
+        old_pin, old_config, old_stage = (json.loads(before[name]) for name in ("attachment", "controller", "stage"))
+        new_pin, new_config, new_stage = (json.loads(after[name]) for name in ("attachment", "controller", "stage"))
+        application = old_pin["contract"].get("names", {}).get("application", "oracle-app")
+        old_name, new_name = application + "-bootstrap", application[:-4] + "-bootstrap-app"
+        renamed = [entry for entry in new_config["toolTask"]["registeredSharedApplications"] if entry.get("name") == new_name]
+        if len(renamed) != 1 or intent["oldName"] != old_name or intent["newName"] != new_name:
+            raise ValueError("repair archive is not the exact bootstrap rename")
+        renamed[0]["name"] = old_name
+        initialized_foreground = request.get("initializeForegroundTool", False) and old_config.get("foregroundTool") is None
+        if intent.get("initializedForegroundTool") != initialized_foreground:
+            raise ValueError("repair foreground selection differs from explicit request")
+        if initialized_foreground:
+            if new_config.get("foregroundTool") != {"reserve": "1", "charge": "0"}:
+                raise ValueError("repair foreground allowance is not the minimal session profile")
+            if "foregroundTool" in old_config: new_config["foregroundTool"] = old_config["foregroundTool"]
+            else: del new_config["foregroundTool"]
+        new_stage["nextTool"]["arguments"]["application"] = old_name
+        new_stage["configSha256"] = digest(before["controller"])
+        new_pin["files"]["orchestrator"] = old_pin["files"]["orchestrator"]
+        new_pin["sha256"]["orchestrator"] = old_pin["sha256"]["orchestrator"]
+        if (new_config, new_stage, new_pin) != (old_config, old_stage, old_pin):
+            raise ValueError("repair archive changes more than bootstrap name/source pin")
+        for key, expected in old_pin["sha256"].items():
+            if key != "orchestrator" and sha(old_pin["files"][key]) != expected:
+                raise ValueError("repair input changed: " + key)
+        if sorted(path.name for path in root.glob("native-*")) != ["native-prepare-config"]:
+            raise ValueError("repair requires only the completed prepare-config phase")
+        if read(contract_path) != json.loads(before["attachment"])["contract"]:
+            raise ValueError("repair contract changed")
+        if any(sha(root / name) != expected for name, expected in intent["immutable"].items()):
+            raise ValueError("repair native evidence changed")
+        for name in ("controller", "stage", "attachment"):
+            current = regular(paths[name])
+            if current == after[name]: continue
+            if current != before[name]: raise ValueError("repair target is outside exact old/new bytes")
+            temporary = archive / ("publish-" + name + ".json")
+            if temporary.exists():
+                if regular(temporary) != after[name]: raise ValueError("repair publication differs")
+            else: write(temporary, after[name])
+            os.replace(temporary, paths[name])
+            sync(paths[name].parent)
+        result = {"protocol": "mini-application-attachment-bootstrap-repair-v1", "stage": str(paths["stage"]),
+                  "configSha256": intent["after"]["controller"], "oldName": intent["oldName"], "newName": intent["newName"],
+                  "archive": str(archive), "initializedForegroundTool": intent["initializedForegroundTool"], "next": "Publish this stage through the stopped installer and refresh controllerConfig export; then create the first session once."}
+        completion = archive / "complete.json"
+        if completion.exists():
+            if read(completion) != result: raise ValueError("repair completion differs")
+        else: write(completion, result)
+        sync(archive)
+        return result
+
+
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "render-host-config":
         if len(sys.argv) != 5:
@@ -775,13 +1004,17 @@ def main():
         return
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("contract", type=Path, help="absolute mini-application-attachment-v1 JSON input")
-    parser.add_argument("phase", choices=("prepare-config", "create-session", "issue-grant", "prepare-route", "activate", "status"))
+    parser.add_argument("phase", choices=("prepare-config", "create-session", "issue-grant", "prepare-route", "activate", "status", "repair-prepared-bootstrap"))
     parser.add_argument("--input", type=Path, help="retained session tool result, controller layout, or native START result")
     args = parser.parse_args()
     if not args.contract.is_absolute() or (args.input is not None and not args.input.is_absolute()):
         parser.error("contract and phase input must be absolute")
-    if args.phase in ("issue-grant", "prepare-route", "activate") and args.input is None:
+    if args.phase in ("issue-grant", "prepare-route", "activate", "repair-prepared-bootstrap") and args.input is None:
         parser.error("this phase requires --input")
+    if args.phase == "repair-prepared-bootstrap":
+        os.umask(0o077)
+        print(json.dumps(repair_prepared_bootstrap(args.contract, args.input), indent=2))
+        return
     phase = args.phase
     if phase == "activate":
         generation = read(args.input).get("generation", "")

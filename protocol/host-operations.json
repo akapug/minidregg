@@ -1841,6 +1841,18 @@
       "effect": "none"
     },
     {
+      "code": 156,
+      "symbol": "AGENT_LIFETIME_GRANT_INSPECT",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk",
+      "purpose": "Read-only accepted event27 projection against the refreshed verified session",
+      "receiver": "dispatchSession",
+      "effect": "none"
+    },
+    {
       "code": 160,
       "symbol": "JOB_MONEY_PLAN",
       "status": "active",
@@ -2614,6 +2626,11 @@
     }
   ],
   "consent_frames": [
+    {
+      "code": 236,
+      "symbol": "CONSENT_FULL_READY",
+      "purpose": "Explicit full independent history verification before lifecycle signing"
+    },
     {
       "code": 220,
       "symbol": "CONSENT_INTENT",

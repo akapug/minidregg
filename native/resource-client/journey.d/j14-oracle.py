@@ -14,8 +14,10 @@ import re
 import secrets
 import shutil
 import signal
+import stat
 import socket
 import subprocess
+import sys
 import time
 
 HERE=Path(__file__).resolve().parent
@@ -115,8 +117,10 @@ class Journey:
         j.homes=j.root/'homes';j.workspaces=j.root/'workspaces'
         j.subjects={name:read(j.root/'subjects'/f'{name}.json')['subject'] for name in ['alice','bob','hermes','hhost','hprov','hdisp']}
         w=j.root/'world';h=read(w/'handoff.json');j.sponsor=str(read(w/'genesis-params.json')['sponsor']['subject'])
+        initial=Path(j.c.get('initialOperatorSocket',str(j.sockets/('private/operator.sock' if (j.sockets/'private/operator.config').exists() else 'operator.sock'))))
+        j.c['initialOperatorSocket']=str(initial)
         j.c.update(repo=str(REPO),world=str(w),hostConfig=h['config'],sponsorWorkspace=h['sponsorWorkspace'],
-                   operatorSocket=str(j.sockets/'operator-v2.sock'),publicSocket=str(j.sockets/'participant.sock'),allocation=str(j.root/'allocation.json'))
+                   operatorSocket=str(initial.with_name('operator-v2.sock')),publicSocket=str(j.sockets/'participant.sock'),allocation=str(j.root/'allocation.json'))
         room=read(Path(j.c['sponsorWorkspace'])/'refs/oracle-room.json');j.c['room']={'target':room['target'],'capability':room['observeCapability']}
         if read(j.c['allocation'])!=inputs.allocation(j.c) or sha(j.c['hostConfig'])!=sha(j.root/'operator-with-oracle.json'):
             raise ValueError('continuation allocation or installed metadata differs')
@@ -125,7 +129,7 @@ class Journey:
         if record.exists():raise ValueError('transport continuation already attempted; inspect its retained commands')
         write(record,{'previousSource':candidate['orchestrationSource'],'sourceCommit':os.environ.get('J14_ORACLE_ORCHESTRATION_COMMIT'),
             'driverSha256':sha(HERE/'j14-oracle.py'),'installerSha256':sha(j.installer),'helperSha256':sha(REPO/'deploy/spk-host/controller-world.py'),
-            'previousOperatorSocket':str(j.sockets/'operator.sock'),'operatorSocket':j.c['operatorSocket'],
+            'previousOperatorSocket':str(initial),'operatorSocket':j.c['operatorSocket'],
             'hostConfigSha256':sha(j.c['hostConfig']),'lastCompletedCommand':last})
         return j
 
@@ -189,15 +193,23 @@ class Journey:
         meta=path.stat()
         if meta.st_uid!=os.getuid() or meta.st_mode&0o077:raise ValueError('checkpoint must be private operator custody')
         value=read(path)
-        if value.get('protocol')!='mini-j14-checkpoint-v1' or value['nextPhase'] not in RESUMABLE:
+        preparation=(value.get('protocol')=='mini-j14-worker-preparation-checkpoint-v1' and value.get('nextPhase')=='worker_preparation')
+        birth=(value.get('protocol')=='mini-j14-worker-birth-checkpoint-v1' and value.get('nextPhase')=='worker_birth')
+        if not (preparation or birth) and (value.get('protocol')!='mini-j14-checkpoint-v1' or value['nextPhase'] not in RESUMABLE):
             raise ValueError('unsupported journey checkpoint phase')
+        if preparation or birth:
+            source=Path(value['workerPreparation'])
+            required={str(expected/'worker-prepare.json'),str(expected/'grain-spec.json')}
+            if (source!=expected/'worker-prepare.json' or bool(value['state'].get('controller'))!=birth
+                    or not required <= {p['path'] for p in value['basis']}):
+                raise ValueError('worker continuation lacks its exact retained preparation/spec boundary')
         for name,digest in value['pins'].items():
             if sha(name)!=digest:raise ValueError('checkpoint input changed: '+name)
         for proof in value['basis']:
             if sha(proof['path'])!=proof['sha256']:raise ValueError('checkpoint native basis changed')
         j=cls.__new__(cls)
         for name,data in value['state'].items():
-            setattr(j,name,Path(data) if name in {'root','logs','sockets','bins','installer','homes','workspaces','contract'} else data)
+            setattr(j,name,Path(data) if name in {'root','logs','sockets','bins','installer','homes','workspaces','contract','keyroot'} else data)
         if j.root!=expected:raise ValueError('checkpoint root differs')
         # A source update is explicit in the successor receipt. Native artifacts,
         # transports and controller custody stay pinned to the retained world.
@@ -215,12 +227,218 @@ class Journey:
         j.restart_daemons=prior_daemons
         return j
 
+    @classmethod
+    def adopt_checkpoint_source(cls,path,reason):
+        """Explicit reviewed helper update before first controller staging."""
+        os.umask(0o077)
+        expected=Path(os.environ['JOURNEY_STEP_DIR'])/'oracle'
+        if path.parent!=expected or path.is_symlink():raise ValueError('source adoption needs retained checkpoint')
+        metadata=path.stat()
+        if metadata.st_uid!=os.getuid() or metadata.st_mode&0o077:raise ValueError('source adoption requires private checkpoint custody')
+        value=read(path)
+        if value.get('protocol')!='mini-j14-checkpoint-v1' or value.get('nextPhase') not in RESUMABLE:
+            raise ValueError('source adoption is limited to pre-worker checkpoints')
+        if value['state'].get('controller') or (expected/'worker').exists() or any(p.is_dir() for p in expected.glob('worker-*')):
+            raise ValueError('source adoption cannot replace staged controller custody')
+        if not isinstance(reason,str) or not 1<=len(reason)<=400:raise ValueError('source adoption requires a bounded explanation')
+        j=cls.__new__(cls);j.root=expected;j.logs=expected/'commands';j.lock_root()
+        if j.frontier()[0]!=value['state']['counter']:raise ValueError('source adoption refuses newer native work')
+        for source,digest in value['pins'].items():
+            if sha(source)!=digest:raise ValueError('prior source/native input changed before adoption')
+        for proof in value['basis']:
+            if sha(proof['path'])!=proof['sha256']:raise ValueError('prior checkpoint evidence changed')
+        roles=['deploy/spk-host/install-user-world','deploy/spk-host/controller-world.py']
+        pins=dict(value['pins']);changed={}
+        for rel in roles:
+            old=[source for source in pins if source.endswith('/'+rel)]
+            if len(old)!=1:raise ValueError('source adoption role is ambiguous')
+            source=old[0];new=str(REPO/rel);digest=sha(new)
+            changed[rel]={'previousPath':source,'previousSha256':pins.pop(source),'path':new,'sha256':digest}
+            pins[new]=digest
+        value['pins']=pins;value['state']['installer']=str(REPO/'deploy/spk-host/install-user-world');value['state']['c']['repo']=str(REPO)
+        value['basis']=[*value['basis'],{'path':str(path),'sha256':sha(path)}]
+        value['sourceAdoption']={'previousCheckpoint':str(path),'sha256':sha(path),'reason':reason,'roles':changed}
+        value['sourceCommit']=os.environ.get('J14_ORACLE_ORCHESTRATION_COMMIT')
+        output=expected/f"checkpoint-{value['state']['counter']:04d}-source-successor.json"
+        write(output,value);return output
+
     def restore_services(self):
         for item in self.restart_daemons:
             if sha(item['argv'][0])!=item['executableSha256']:raise ValueError('checkpoint daemon executable changed')
-            self.spawn(item['label']+'-resume-'+str(self.counter),item['argv'])
+            argv=self.controller_public_args(item['argv']) if 'serve-public-proxy' in item['argv'] and self.controller else item['argv']
+            self.spawn(item['label']+'-resume-'+str(self.counter),argv)
             if item.get('socket'):self.wait_socket(item['socket'])
+            if 'serve-public-proxy' in item['argv'] and getattr(self,'controller',False):
+                self.restore_public_socket_access(item['socket'])
         del self.restart_daemons
+
+    def controller_public_args(self,args):
+        argv=list(args);uid=self.layout['controllerUid']
+        if type(uid) is not int or uid in (0,os.getuid()) or '--socket-gid' in argv:
+            raise ValueError('controller public relay identity differs')
+        for field,expected in [('--socket',self.c['publicSocket']),('--upstream',self.c['operatorSocket']),('--config',self.c['hostConfig'])]:
+            if argv.count(field)!=1 or argv[argv.index(field)+1]!=expected:
+                raise ValueError('controller public relay transport differs')
+        if '--controller-uid' in argv:
+            if argv.count('--controller-uid')!=1 or argv[argv.index('--controller-uid')+1]!=str(uid):
+                raise ValueError('controller public relay recipient differs')
+        else:argv.extend(['--controller-uid',str(uid)])
+        return argv
+
+    def ensure_controller_public_proxy(self):
+        live={p.pid:p for p in self.processes if p.poll() is None}
+        matches=[d for d in self.daemons if d.get('pid') in live and 'serve-public-proxy' in d['argv']]
+        if len(matches)!=1:raise ValueError('one owned public relay must be running before controller birth')
+        daemon=matches[0];argv=self.controller_public_args(daemon['argv'])
+        if argv==daemon['argv']:return
+        # Native controller ingress accepts the exact installer traversal ACL
+        # and recreates this UID's connect ACL whenever the inode is rebound.
+        process=live[daemon['pid']];process.terminate();process.wait(timeout=15)
+        self.spawn('participant-controller',argv);self.wait_socket(self.c['publicSocket'])
+
+    def private_operator_socket(self,name='operator.sock'):
+        directory=self.sockets/'private'
+        directory.mkdir(mode=0o700,exist_ok=True)
+        metadata=directory.lstat()
+        if (not stat.S_ISDIR(metadata.st_mode) or directory.is_symlink()
+                or metadata.st_uid!=os.getuid() or stat.S_IMODE(metadata.st_mode)!=0o700):
+            raise ValueError('operator socket parent must remain private operator custody')
+        return directory/name
+
+    @staticmethod
+    def private_metadata_bytes(path):
+        path=Path(path);metadata=path.lstat()
+        if (path.resolve()!=path or not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink!=1
+                or metadata.st_uid!=os.getuid() or metadata.st_mode&0o077 or metadata.st_size>1048576):
+            raise ValueError('transport metadata requires private regular operator custody: '+str(path))
+        return path.read_bytes()
+
+    @staticmethod
+    def retain_transport_bytes(path,data):
+        if path.exists():
+            if Journey.private_metadata_bytes(path)!=data:raise ValueError('retained transport evidence changed')
+            return
+        fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+        with os.fdopen(fd,'wb') as out:out.write(data);out.flush();os.fsync(out.fileno())
+
+    def prepare_operator_relocation(self):
+        selected=os.environ.get('J14_ORACLE_OPERATOR_RELOCATION')
+        if not selected:return
+        if not Path(selected).is_absolute():raise ValueError('operator relocation request path must be absolute')
+        request=json.loads(self.private_metadata_bytes(Path(selected)))
+        expected={'protocol','previousSocket','socket','hostConfigSha256'}
+        if (set(request)!=expected or request['protocol']!='mini-j14-operator-relocation-v1'
+                or request['socket']!=str(self.sockets/'private/operator.sock')
+                or request['previousSocket'] not in (str(self.sockets/'operator-v2.sock'),str(self.sockets/'operator.sock'))
+                or request['hostConfigSha256']!=sha(self.c['hostConfig'])
+                or self.c['operatorSocket'] not in (request['previousSocket'],request['socket'])):
+            raise ValueError('operator transport relocation identity differs')
+        if (self.resume_phase!='worker_birth' or not self.controller or getattr(self,'application_unit',None)
+                or (self.root/'attachment').exists()):
+            raise ValueError('operator transport relocation requires the pre-birth, pre-START boundary')
+        old,new=request['previousSocket'],request['socket']
+        # The old listener's retained sidecar binds the unchanged native Store.
+        if self.private_metadata_bytes(Path(old).with_suffix('.config'))!=self.private_metadata_bytes(Path(self.c['hostConfig'])):
+            raise ValueError('operator relocation requires identical native Store settings')
+        result=read(self.c['profileResult']);profile=Path(result['profilePath'])
+        state=Path(result['stateRoot'])
+        if profile!=state/'grain-host.json' or (state/'active-profile.json').exists():
+            raise ValueError('operator relocation cannot alter an active successor profile')
+        workspaces=[Path(self.c['sponsorWorkspace'])/'workspace.json',*sorted(self.workspaces.glob('*/workspace.json'))]
+        broker=self.sockets/'provider/broker.json'
+        paths=[(profile,'profile'),*[(path,'workspace') for path in workspaces],(broker,'provider')]
+        operator=public=0
+        for item in self.restart_daemons:
+            argv=item['argv']
+            if 'serve-operator' in argv:
+                index=argv.index('--socket')+1
+                if argv[index] not in (old,new):raise ValueError('retained operator daemon endpoint differs')
+                argv[index]=new;item['socket']=new;operator+=1
+            elif 'serve-public-proxy' in argv:
+                index=argv.index('--upstream')+1
+                if argv[index] not in (old,new):raise ValueError('retained public upstream differs')
+                argv[index]=new;public+=1
+            elif old in argv:raise ValueError('unclassified daemon still selects old operator endpoint')
+        if operator!=1 or public!=1:raise ValueError('operator relocation requires one recorded operator and public proxy')
+        self.private_operator_socket()
+        archive=self.root/'operator-transport';archive.mkdir(mode=0o700,exist_ok=True)
+        metadata=archive.lstat()
+        if (not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid!=os.getuid()
+                or stat.S_IMODE(metadata.st_mode)!=0o700):
+            raise ValueError('operator transport archive custody differs')
+        plan_path=archive/'transition.json'
+        if plan_path.exists():
+            plan=json.loads(self.private_metadata_bytes(plan_path))
+            if plan['request']!=request or [(row['path'],row['kind']) for row in plan['files']]!=[(str(path),kind) for path,kind in paths]:
+                raise ValueError('operator relocation inventory differs from retained transition')
+        else:
+            rows=[]
+            for index,(path,kind) in enumerate(paths):
+                before=self.private_metadata_bytes(path);value=json.loads(before)
+                if kind=='profile':
+                    if (value.get('miniOperatorSocket')!=old or value.get('miniConfig')!=self.c['hostConfig']
+                            or value.get('miniConfigSha256')!=request['hostConfigSha256']
+                            or value.get('miniHost')!=self.host or value.get('miniHostSha256')!=sha(self.host)
+                            or value.get('stateRoot')!=str(state) or value.get('genesisConfigSha256') is not None):
+                        raise ValueError('baseline profile transport pins differ')
+                    value['miniOperatorSocket']=new
+                elif kind=='workspace':
+                    if (value.get('socket')!=old or value.get('config')!=self.c['hostConfig']
+                            or value.get('host')!=self.host or value.get('hostSha256')!=sha(self.host)):
+                        raise ValueError('workspace transport pins differ')
+                    value['socket']=new
+                else:
+                    credentials=value.get('credentials',{})
+                    if (credentials.get('publicSocket')!=old or credentials.get('hostConfig')!=self.c['hostConfig']
+                            or credentials.get('host')!=self.host or credentials.get('hostSha256')!=sha(self.host)
+                            or credentials.get('publicSocketUid')!=os.getuid()):
+                        raise ValueError('provider transport pins differ')
+                    credentials['publicSocket']=new
+                after=(json.dumps(value,indent=2)+'\n').encode()
+                before_path=archive/f'{index:02d}-before.json';after_path=archive/f'{index:02d}-after.json'
+                self.retain_transport_bytes(before_path,before);self.retain_transport_bytes(after_path,after)
+                rows.append({'path':str(path),'kind':kind,'before':str(before_path),'after':str(after_path),
+                             'beforeSha256':sha(before_path),'afterSha256':sha(after_path)})
+            plan={'protocol':'mini-j14-operator-transport-transition-v1','request':request,'files':rows}
+            self.retain_transport_bytes(plan_path,(json.dumps(plan,indent=2)+'\n').encode())
+        # Persist the whole transition before replacing the first metadata file.
+        directory=os.open(archive,os.O_RDONLY)
+        try:os.fsync(directory)
+        finally:os.close(directory)
+        for row in plan['files']:
+            path=Path(row['path']);before=self.private_metadata_bytes(Path(row['before']));after=self.private_metadata_bytes(Path(row['after']))
+            if hashlib.sha256(before).hexdigest()!=row['beforeSha256'] or hashlib.sha256(after).hexdigest()!=row['afterSha256']:
+                raise ValueError('operator relocation archived bytes changed')
+            current=self.private_metadata_bytes(path)
+            if current==after:continue
+            if current!=before:raise ValueError('transport metadata changed outside retained transition')
+            temporary=path.with_name(path.name+'.operator-transport-next')
+            self.retain_transport_bytes(temporary,after);os.replace(temporary,path)
+            directory=os.open(path.parent,os.O_RDONLY)
+            try:os.fsync(directory)
+            finally:os.close(directory)
+        self.c['operatorSocket']=new
+        self.c['operatorTransportTransition']=str(plan_path)
+        self.operator_relocation=request
+
+    def restore_public_socket_access(self,path):
+        if str(path)!=self.c['publicSocket']:raise ValueError('public ACL restore selected another socket')
+        metadata=Path(path).lstat()
+        uid=self.layout['controllerUid']
+        if (not stat.S_ISSOCK(metadata.st_mode) or metadata.st_uid!=os.getuid()
+                or type(uid) is not int or uid==0 or uid==os.getuid()):
+            raise ValueError('public socket ACL recipient or custody differs')
+        self.run('public-socket-acl',['setfacl','-m',f'u:{uid}:-w-','--',path])
+        after=Path(path).lstat()
+        if (metadata.st_dev,metadata.st_ino)!=(after.st_dev,after.st_ino):
+            raise ValueError('public socket changed during ACL restoration')
+
+    def finish_operator_relocation(self):
+        request=getattr(self,'operator_relocation',None)
+        if request is None:return
+        self.fixed('controller-stop')
+        receipt=self.fixed('controller-operator-endpoint',request['socket'])
+        self.c['operatorEndpointReceipt']=str(receipt)
 
     def pin_candidate(self):
         candidate=read(self.candidate_manifest)
@@ -252,11 +470,16 @@ class Journey:
         return stem.with_suffix('.stdout')
 
     def spawn(self,label,args):
-        out=(self.logs/(label+'.stdout')).open('w');err=(self.logs/(label+'.stderr')).open('w')
-        p=subprocess.Popen(list(map(str,args)),stdout=out,stderr=err);out.close();err.close();self.processes.append(p)
+        stem=self.logs/label;generation=0
+        while any(Path(str(stem)+suffix).exists() for suffix in ['.stdout','.stderr','.process.json']):
+            generation+=1;stem=self.logs/f'{label}-{generation:02d}'
+        output=Path(str(stem)+'.stdout');error=Path(str(stem)+'.stderr')
+        with output.open('x') as out,error.open('x') as err:
+            p=subprocess.Popen(list(map(str,args)),stdout=out,stderr=err)
+        self.processes.append(p);p.journey_stdout=output
         argv=list(map(str,args))
-        write(self.logs/(label+'.process.json'),{'pid':p.pid,'argv':argv})
-        daemon={'label':label,'argv':argv,'executableSha256':sha(argv[0]),'pid':p.pid}
+        write(Path(str(stem)+'.process.json'),{'pid':p.pid,'argv':argv})
+        daemon={'label':stem.name,'argv':argv,'executableSha256':sha(argv[0]),'pid':p.pid}
         if '--socket' in argv:daemon['socket']=argv[argv.index('--socket')+1]
         self.daemons.append(daemon)
         return p
@@ -292,7 +515,7 @@ class Journey:
             'version':'1','model':'mini-hermes-protocol-fixture','routes':{'user':{'perOp':'5'},
             'pool':{'perOp':'7','inputMicroPerMillion':'100000','outputMicroPerMillion':'200000'},
             'homelab':{'perOp':'3','inputMicroPerMillion':'0','outputMicroPerMillion':'0'}}}}])
-        w=self.root/'world';sock=self.sockets/'operator.sock'
+        w=self.root/'world';sock=self.private_operator_socket('operator.sock');self.c['initialOperatorSocket']=str(sock)
         # Each run needs a distinct Store tag for its registered physical world.
         env=dict(os.environ,NEWPARTICIPANT_GRAIN_PLATFORM='1',NEWPARTICIPANT_SERVE='serve-operator',
                  NEWPARTICIPANT_TEMPLATE_DIR='',NEWPARTICIPANT_PROVIDER_SERVICES=str(tariff),NEWPARTICIPANT_SPONSOR_BALANCE='1000000')
@@ -340,7 +563,7 @@ class Journey:
         shutil.copyfile(fresh,self.c['hostConfig'])
         # Retained endpoint config pins are immutable. Preserve the old pin
         # and expose revised transport metadata on a fresh same-Store endpoint.
-        sock=self.sockets/'operator-v2.sock';self.c['operatorSocket']=str(sock)
+        sock=self.private_operator_socket('operator-v2.sock');self.c['operatorSocket']=str(sock)
         self.spawn('operator-v2',[self.mini,'serve-operator','--host',self.host,'--config',self.c['hostConfig'],'--socket',sock]);self.world_pid=None
         self.wait_socket(sock)
         self.spawn('participant',[self.mini,'serve-public-proxy','--socket',self.c['publicSocket'],'--upstream',sock,'--config',self.c['hostConfig']]);self.wait_socket(self.c['publicSocket'])
@@ -349,7 +572,7 @@ class Journey:
 
     def migrate_workspace_transport(self):
         """Explicit same-Store routing change; preserve every authority field."""
-        old=self.sockets/'operator.sock';new=self.c['operatorSocket']
+        old=Path(self.c.get('initialOperatorSocket',str(self.sockets/'operator.sock')));new=self.c['operatorSocket']
         if str(old)==new:return
         old_config=old.with_suffix('.config');before_config=read(old_config);after_config=read(self.c['hostConfig'])
         semantic=lambda value:{k:v for k,v in value.items() if k!='agentLifetimeDispatchTargets'}
@@ -436,8 +659,15 @@ class Journey:
             raise ValueError('worker release may update only the selected owned bin overlay')
         path=Path(selected)
         if not path.is_absolute():raise ValueError('worker release path must be absolute')
-        previous=sha(self.runtime);deadline=time.monotonic()+1800
-        write(self.root/'worker-wait.json',{'releasePath':str(path),'previousRuntimeSha256':previous,'maximumWaitSeconds':1800})
+        successor=self.root/'worker-runtime-successor.json'
+        prior=read(successor) if successor.exists() else None
+        previous=prior['previousRuntimeSha256'] if prior else sha(self.runtime)
+        deadline=time.monotonic()+1800
+        wait_record={'releasePath':str(path),'previousRuntimeSha256':previous,'maximumWaitSeconds':1800}
+        retained=self.root/'worker-wait.json'
+        if retained.exists():
+            if read(retained)!=wait_record:raise ValueError('retained worker release wait differs')
+        else:write(retained,wait_record)
         while not path.exists():
             if time.monotonic()>=deadline:raise TimeoutError('worker release not supplied; native Store and application attempts retained')
             time.sleep(1)
@@ -450,17 +680,20 @@ class Journey:
         source=Path(release['runtime'])
         if not source.is_absolute() or source.is_symlink() or not source.is_file() or not os.access(source,os.X_OK) or sha(source)!=release['sha256']:
             raise ValueError('released runtime differs from selected pin')
+        expected={'protocol':'mini-j14-runtime-successor-v1','previousRuntimeSha256':previous,
+                  'initialCandidateManifest':self.c['manifest'],'release':release}
+        if prior is not None and prior!=expected:raise ValueError('runtime successor differs from retained release')
+        if prior is not None and sha(self.runtime)==release['sha256']:return
         if sha(self.runtime)!=previous:raise ValueError('initial runtime changed while preparation was running')
         temporary=self.bins/('grain-runtime-release-'+secrets.token_hex(6))
         shutil.copyfile(source,temporary);temporary.chmod(0o755)
         if sha(temporary)!=release['sha256']:raise ValueError('runtime changed during release copy')
-        write(self.root/'worker-runtime-successor.json',{'protocol':'mini-j14-runtime-successor-v1',
-            'previousRuntimeSha256':previous,'initialCandidateManifest':self.c['manifest'],'release':release})
+        if prior is None:write(successor,expected)
         os.replace(temporary,self.runtime)
 
     def worker(self):
         home=Path(self.layout['controllerHome']);base=home.parent;grain=home/'grain'
-        staged=self.root/'worker';staged.mkdir();launcher=staged/'launcher';launcher.mkdir()
+        staged=self.root/f'worker-{self.counter+1:04d}';staged.mkdir();launcher=staged/'launcher';launcher.mkdir()
         physical=self.run('bwrap',['sh',REPO/'deploy/grain-host/resolve-bwrap']).read_text().strip()
         self.run('launcher',['python3',REPO/'deploy/grain-host/materialize-bwrap.py','--physical-bwrap',physical,'--physical-sha256',sha(physical),'--output',launcher/'bwrap'])
         shutil.copyfile(self.bins/'launch-gate',launcher/'launch-gate');os.chmod(launcher/'launch-gate',0o700)
@@ -480,10 +713,10 @@ class Journey:
             'endpoint':f'http://127.0.0.1:{port}/v1/chat/completions','models':['mini-hermes-protocol-fixture'],'credential':'user'}]})
         self.provider_process=self.spawn('provider',[self.provider,f'127.0.0.1:{port}',self.root/'provider.log','--room-librarian'])
         deadline=time.monotonic()+30
-        while f'http://127.0.0.1:{port}/v1' not in (self.logs/'provider.stdout').read_text():
+        while f'http://127.0.0.1:{port}/v1' not in self.provider_process.journey_stdout.read_text():
             if self.provider_process.poll() is not None or time.monotonic()>=deadline:raise RuntimeError('selected provider did not bind its loopback port')
             time.sleep(.1)
-        self.keyroot=Path(self.broker['grainsRoot'])/'j14-provider';self.keyroot.mkdir(mode=0o711)
+        self.keyroot=self.sockets/'provider';self.keyroot.mkdir(mode=0o711);self.keyroot.chmod(0o711)
         keysocket=self.keyroot/'keys.sock';keyclient=runtime/'keys-client.json'
         write(keyclient,{'type':'mini-keys-client-v1','socket':str(keysocket),'uid':os.getuid()})
         (self.keyroot/'credentials').mkdir(mode=0o700)
@@ -534,10 +767,40 @@ class Journey:
         for name in ['hhost','hermes','hprov','hdisp']:
             files.append({'source':str(self.homes/name/'keys/mini.key'),'destination':f'keys/{name}.key'})
         prepare=self.root/'worker-prepare.json';write(prepare,{'protocol':'mini-controller-worker-prepare-v1','task':self.task('controller'),
-            'files':files,'directories':['bootstrap/namespace','requests','requests/inbox','worker-work/.hermes','worker-work/.cache','worker-work/.config','worker-work/.local/share'],
+            'files':files,'directories':['bootstrap/namespace','requests','requests/inbox','requests/registrations','worker-work/.hermes','worker-work/.cache','worker-work/.config','worker-work/.local/share'],
             'launcherDirectory':str(launcher),'runtimeRoot':str(runtime)})
         self.fixed('controller-worker-prepare',prepare,self.bins,self.c['operatorSocket'],self.c['publicSocket'])
+        self.finish_worker(source,runtime)
+
+    def worker_preparation(self):
+        prepare=self.root/'worker-prepare.json';request=read(prepare)
+        self.keyroot=self.sockets/'provider'
+        self.fixed('controller-worker-prepare-resume',prepare,self.bins,self.c['operatorSocket'],self.c['publicSocket'])
+        self.finish_worker(self.root/'grain-spec.json',Path(request['runtimeRoot']))
+
+    def worker_birth(self):
+        # The native installer retains the exact birth spec. Native create
+        # resolves any signed attempt by lookup before it can author a new one.
+        self.keyroot=self.sockets/'provider'
+        self.finish_worker(self.root/'grain-spec.json',Path(read(self.root/'worker-prepare.json')['runtimeRoot']))
+
+    def finish_worker(self,source,runtime):
+        home=Path(self.layout['controllerHome'])
+        brokerconfig=self.keyroot/'broker.json';keysocket=self.keyroot/'keys.sock';keyclient=runtime/'keys-client.json'
         self.controller=True
+        self.ensure_controller_public_proxy()
+        successor=os.environ.get('J14_ORACLE_CONTROLLER_UPGRADE')
+        if successor:
+            release=Path(successor);metadata=release.stat();selected=read(release)
+            if metadata.st_uid!=os.getuid() or metadata.st_mode&0o077 or release.is_symlink():
+                raise ValueError('controller runtime successor must be private operator custody')
+            if (set(selected)!={'runtime','sha256','sourceCommit'} or not re.fullmatch('[0-9a-f]{40}',selected['sourceCommit'])
+                    or sha(selected['runtime'])!=selected['sha256']):
+                raise ValueError('controller runtime successor pins differ')
+            self.fixed('controller-stop')
+            receipt=self.fixed('controller-runtime-upgrade',selected['runtime'])
+            if read(receipt)['runtimeSha256']!=selected['sha256']:raise ValueError('installed controller successor differs')
+            self.c['controllerRuntimeSuccessor']={**selected,'release':str(release),'releaseSha256':sha(release),'receipt':str(receipt)}
         self.fixed('controller-worker-birth',source)
         self.controller_run('grain-runtime',['create',home/'requests/create.json'])
         self.fixed('controller-worker-publish')
@@ -558,9 +821,10 @@ class Journey:
         home=Path(self.layout['controllerHome']);grain=Path(self.c['controllerRoot'])
         room=read(self.workspaces/'alice/refs/lab.json')
         registration=self.controller_run('mini',['hermes-handoff','--action','registration','--dir',grain/'state/resource-workspace',
-            '--task',self.task('controller'),'--room-cell',room['target'],'--inbox',home/'requests/inbox','--socket',home/'operator/mini.sock'])
-        regs=self.root/'registrations';regs.mkdir();shutil.copyfile(registration,regs/(self.task('controller')+'.json'))
-        registry=self.run('registry',[self.mini,'hermes-handoff','--action','registry','--registrations',regs,'--socket',self.c['operatorSocket']])
+            '--task',self.task('controller'),'--room-cell',room['target'],'--inbox',home/'requests/inbox','--socket',self.c['publicSocket']])
+        registry=self.controller_run('mini',['hermes-handoff','--action','registry','--registrations',home/'requests/registrations',
+            '--socket',self.c['publicSocket']],files=[{'source':str(registration),'destination':'requests/registrations/'+self.task('controller')+'.json'}])
+        if not read(registry)['residents']:raise ValueError('native registry found no eligible controller custody')
         (self.homes/'alice/hermes').mkdir(exist_ok=True);shutil.copyfile(registry,self.homes/'alice/hermes/registry.json')
         summoned=self.shell('alice','summon lab as librarian --budget 1000').read_text()
         match=re.search(r'hand-off in (.+)',summoned)
@@ -571,31 +835,60 @@ class Journey:
         update=self.root/'summoned-controller.json';write(update,config)
         self.fixed('controller-config',update);self.controller_config()
         dispatched=self.controller_run('mini',['hermes-handoff','--action','dispatch','--registration',home/'requests/registration.json',
-            '--bundle',home/'requests/handoff.json','--socket',home/'operator/mini.sock'],files=[
+            '--bundle',home/'requests/handoff.json','--socket',self.c['publicSocket']],files=[
                 {'source':str(registration),'destination':'requests/registration.json'},
                 {'source':str(outbox/'handoff.json'),'destination':'requests/handoff.json'}])
         self.inbox=read(dispatched)['inbox'];self.prompts=0
+
+    def attachment_phase(self,contract,name,*extra):
+        helper=REPO/'scripts/application-attachment.py'
+        retained=Path(read(contract)['paths']['outputDir'])/'attachment.json'
+        if retained.exists():
+            pins=read(retained);helper=Path(pins['files']['orchestrator'])
+            if not helper.is_absolute() or sha(helper)!=pins['sha256']['orchestrator']:
+                raise ValueError('retained attachment orchestrator differs')
+        return self.run('attachment-'+name,['python3',helper,contract,name,*extra],timeout=3600)
 
     def attach(self):
         grain=Path(self.c['controllerRoot'])
         self.controller_run('grain-runtime',['hermes-room','resident-init',grain/'controller.json',grain/'state/resident'])
         contract=self.root/'attachment-input.json';write(contract,inputs.attachment(self.c));self.contract=contract
-        def phase(name,*extra):
-            return self.run('attachment-'+name,['python3',REPO/'scripts/application-attachment.py',contract,name,*extra],timeout=3600)
         # The CLI returns its retained result path, whose JSON is the phase result.
         def result(path):return read(path.read_text().strip())
-        prepared=result(phase('prepare-config'))
+        prepared=result(self.attachment_phase(contract,'prepare-config'))
         self.fixed('controller-config',prepared['stage'])
         exported=self.controller_config()
         # Preserve the original exported filename selected in the pinned input;
         # the attachment permits only its exact prepared/activated successor.
         shutil.copyfile(self.c['controllerConfig'],read(contract)['paths']['controllerConfig'])
+        self.finish_attachment(contract,prepared)
+
+    def start_controller(self):
         self.fixed('controller-start')
+        readiness=read(self.fixed('controller-prepare-idle'))
+        if (readiness.get('type')!='mini-grain-idle-readiness-v1' or readiness.get('ready') is not True
+                or readiness.get('task')!=self.task('controller')):
+            raise ValueError('native idle readiness did not identify this controller')
+
+    def finish_attachment(self,contract,prepared):
+        """Continue from an installed prepared config without repeating its delegations."""
+        self.contract=contract
+        self.start_controller()
         request=secrets.token_hex(16);args=self.root/'session-arguments.json';write(args,prepared['nextTool']['arguments'])
         write(self.root/'session-request.json',{'requestId':request,'tool':prepared['nextTool']['name'],'arguments':str(args)})
         session=self.fixed('controller-tool',request,prepared['nextTool']['name'],args)
+        self.finish_session_attachment(contract,session,request)
+
+    def finish_session_attachment(self,contract,session,request):
+        """Join the exact completed session, including explicit native recovery."""
+        self.contract=contract
+        def phase(name,*extra):return self.attachment_phase(contract,name,*extra)
+        def result(path):return read(path.read_text().strip())
         value=read(session)
-        if value.get('type')!='tool-complete' or value.get('isError') is not False:raise ValueError('session tool not complete; retain request ID for native tool-result')
+        if value.get('requestId')!=request:raise ValueError('session result belongs to another request')
+        if (value.get('type')!='tool-complete' or value.get('isError') is not False
+                or not isinstance(value.get('result'),dict) or value['result'].get('isError') is not False):
+            raise ValueError('session tool not complete; retain request ID for native tool-result')
         retained=self.fixed('controller-tool-result',request)
         if session.read_bytes()!=retained.read_bytes():raise ValueError('session retained result differs')
         self.fixed('controller-tool-ack',request)
@@ -609,7 +902,7 @@ class Journey:
         self.application_unit=read(start)['unit']
         activated=result(phase('activate','--input',start))
         self.enroll(activated['bundle'],'application')
-        self.fixed('controller-start')
+        self.start_controller()
         self.application_unit=read(start)['unit']
 
     def enroll(self,bundle,mode):
@@ -643,7 +936,8 @@ class Journey:
         return len([e for e in result['entries'] if e.get('subject')==self.subjects['hermes'] and e.get('amount')=='10'])
 
     def web(self,label,granted):
-        output=self.logs/f'web-{label}.stdout';p=self.spawn('web-'+label,[self.mini,'web','--dir',self.workspaces/'bob','--home',self.homes/'bob','--listen','127.0.0.1:0'])
+        p=self.spawn('web-'+label,[self.mini,'web','--dir',self.workspaces/'bob','--home',self.homes/'bob','--listen','127.0.0.1:0'])
+        output=p.journey_stdout
         try:
             deadline=time.monotonic()+30;url=None
             while time.monotonic()<deadline:
@@ -701,7 +995,7 @@ class Journey:
         turn('refused',False);self.web('refused',False)
         self.shell('alice','tariff lab set hermes/tools 8');self.web('granted',True)
         evidence=turn('answered',True)
-        self.fixed('controller-stop');self.fixed('controller-start')
+        self.fixed('controller-stop');self.start_controller()
         turn('controller-restarted',True)
         write(self.root/'result.json',{'protocol':'mini-j14-oracle-result-v1','passed':True,
             'store':self.broker['store'],'controllerUid':self.layout['controllerUid'],'operatorUid':os.getuid(),
@@ -718,18 +1012,22 @@ def main():
     resume=os.environ.get('J14_ORACLE_RESUME_WORLD')=='1'
     selected=os.environ.get('J14_ORACLE_RESUME_CHECKPOINT')
     checkpoint=Path(selected) if selected else None
-    generic=checkpoint is not None and read(checkpoint).get('protocol')=='mini-j14-checkpoint-v1'
+    generic=checkpoint is not None and read(checkpoint).get('protocol') in ('mini-j14-checkpoint-v1','mini-j14-worker-preparation-checkpoint-v1','mini-j14-worker-birth-checkpoint-v1')
     j=Journey.from_checkpoint(checkpoint) if generic else Journey.resume_transport(checkpoint) if checkpoint else Journey.resume_transport() if resume else Journey()
     phase='transport';start_counter=j.counter
     try:
-        if generic:j.restore_services()
+        if generic:
+            j.prepare_operator_relocation()
+            j.restore_services()
+            j.finish_operator_relocation()
         elif checkpoint:j.restart_transport()
-        phases=PHASES[PHASES.index(j.resume_phase):] if generic else PHASES[1:] if checkpoint else PHASES
+        phases=([j.resume_phase,*PHASES[PHASES.index('room'):]] if generic and j.resume_phase in ('worker_preparation','worker_birth')
+                else PHASES[PHASES.index(j.resume_phase):] if generic else PHASES[1:] if checkpoint else PHASES)
         for phase in phases:
             if phase=='worker':j.await_worker_release()
             (j.resume_world if resume and phase=='world' else getattr(j,phase))()
             write(j.root/('context-after-'+phase+'.json'),j.c)
-            next_index=PHASES.index(phase)+1
+            next_index=PHASES.index('worker' if phase in ('worker_preparation','worker_birth') else phase)+1
             if next_index<len(PHASES) and PHASES[next_index] in RESUMABLE:j.checkpoint(PHASES[next_index])
     except Exception as error:
         write(j.root/(f'failure-checkpoint-{start_counter:04d}.json' if checkpoint else 'failure-transport-continuation.json' if resume else 'failure.json'),{'phase':phase,'error':str(error),'passed':False,'lastCommand':j.counter,
@@ -737,4 +1035,7 @@ def main():
         raise
     finally:j.cleanup()
 
-if __name__=='__main__':main()
+if __name__=='__main__':
+    if len(sys.argv)==4 and sys.argv[1]=='adopt-checkpoint-source':
+        print(Journey.adopt_checkpoint_source(Path(sys.argv[2]),sys.argv[3]))
+    else:main()

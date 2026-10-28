@@ -784,31 +784,81 @@ def worker_inputs(request, operator):
     return data, directories
 
 
-def copy_worker_tree(source, destination, operator):
-    """Bounded regular-file snapshot; never dereference caller symlinks as root."""
+def runtime_relative(value):
+    """Runtime data names are filenames, never shell or systemd expressions."""
+    require(isinstance(value, str) and 0 < len(value.encode('utf-8')) <= 4096
+            and all(p not in ('', '.', '..') and len(p.encode('utf-8')) <= 255 for p in value.split('/'))
+            and all(ord(c) >= 32 and ord(c) != 127 for c in value), 'runtime relative path refused')
+    return Path(value)
+
+
+def worker_tree_inventory(source, operator):
+    """Validate the complete unprivileged tree before publishing any stage."""
     ancestry(source, {0, operator})
-    inventory = {}; total = 0; directories = 0
-    mkdir(destination, mode=0o755)
+    inventory = {}; total = 0; directories = []
     for directory, dirs, files in os.walk(source, followlinks=False):
-        directories += 1
         rel = Path(directory).relative_to(source)
-        require(directories <= 20000 and len(rel.parts) <= 32, 'worker runtime directory bound exceeded')
+        require(len(directories) <= 20000 and len(rel.parts) <= 32, 'worker runtime directory bound exceeded')
         for name in dirs:
             src = Path(directory) / name
+            relative = str(src.relative_to(source)); runtime_relative(relative)
             m = metadata(src, operator)
-            require(stat.S_ISDIR(m.st_mode) and not m.st_mode & 0o022, 'worker runtime directory custody refused')
-            worker_relative(str(src.relative_to(source)))
-            mkdir(destination / src.relative_to(source), mode=0o755)
+            require(stat.S_ISDIR(m.st_mode) and not m.st_mode & 0o7022, 'worker runtime directory custody refused')
+            directories.append(relative)
         for name in files:
             src = Path(directory) / name
-            relative = str(src.relative_to(source)); worker_relative(relative)
+            relative = str(src.relative_to(source)); runtime_relative(relative)
             require(len(inventory) < 100000, 'worker runtime file count exceeded')
             data = read_file(src, operator, 256 * 1024 * 1024, allow_empty=True)
             total += len(data); require(total <= 4 * 1024 * 1024 * 1024, 'worker runtime byte bound exceeded')
             mode = 0o555 if src.lstat().st_mode & 0o111 else 0o444
-            write_new(destination / relative, data, mode=mode)
             inventory[relative] = {'sha256': sha(data), 'mode': mode, 'size': len(data)}
-    return inventory
+    return {'directories': sorted(directories), 'files': inventory}
+
+
+def mkdir_exact(path, uid=0, gid=0, mode=0o700):
+    if path.exists() or path.is_symlink():
+        m = metadata(path, uid, mode)
+        require(stat.S_ISDIR(m.st_mode) and m.st_gid == gid, 'retained stage directory differs')
+    else:
+        mkdir(path, uid, gid, mode)
+
+
+def validate_retained_runtime(destination, expected):
+    if destination.exists() or destination.is_symlink():
+        metadata(destination, 0, 0o755)
+        # An interrupted copy may contain only exact members of this inventory.
+        for directory, dirs, files in os.walk(destination, followlinks=False):
+            for name in dirs + files:
+                path = Path(directory) / name; rel = str(path.relative_to(destination))
+                m = metadata(path, 0)
+                if name in dirs:
+                    require(rel in expected['directories'] and stat.S_ISDIR(m.st_mode), 'retained runtime directory differs')
+                else:
+                    require(rel in expected['files'], 'unrecorded retained runtime file')
+                    pin = expected['files'][rel]
+                    require(sha(read_file(path, 0, max(1, pin['size']), allow_empty=True, required_mode=pin['mode'])) == pin['sha256'],
+                            'retained runtime bytes differ')
+
+
+def copy_worker_tree(source, destination, operator, expected=None, resume=False):
+    """Bounded regular-file snapshot; never dereference caller symlinks as root."""
+    actual = worker_tree_inventory(source, operator)
+    require(expected is None or actual == expected, 'worker runtime changed after preflight')
+    expected = actual
+    if resume: validate_retained_runtime(destination, expected)
+    make = mkdir_exact if resume else mkdir
+    make(destination, mode=0o755)
+    for relative in sorted(expected['directories'], key=lambda v: (len(Path(v).parts), v)):
+        make(destination / relative, mode=0o755)
+    for relative, pin in expected['files'].items():
+        data = read_file(source / relative, operator, 256 * 1024 * 1024, allow_empty=True)
+        require(len(data) == pin['size'] and sha(data) == pin['sha256'], 'worker runtime source changed during copy')
+        if resume:
+            publish_exact(destination / relative, data, mode=pin['mode'], bound=256 * 1024 * 1024)
+        else:
+            write_new(destination / relative, data, mode=pin['mode'])
+    return expected['files']
 
 
 def worker_manager(base, r, action):
@@ -865,6 +915,22 @@ def validate_worker_config(value, base, r, previous=None):
         require(all(value.get(k) == previous.get(k) for k in ('commands', 'mini', 'host', 'hostConfig', 'hostSocket',
                 'policyControlCapability', 'providerTask', 'dispatchTask')),
                 'worker command, transport or service authority changed')
+
+
+def unchanged_worker_config(previous, current, state):
+    """Permit the first bounded foreground session allowance before native runtime custody."""
+    old = {k:v for k,v in previous.items() if k != 'toolTask'}
+    new = {k:v for k,v in current.items() if k != 'toolTask'}
+    if old == new:
+        return
+    if previous.get('foregroundTool') is None and current.get('foregroundTool') == {'reserve': '1', 'charge': '0'}:
+        journal = state / 'journal.json'
+        require(not journal.exists() and not journal.is_symlink(),
+                'initial foreground allowance requires no native controller journal')
+        new = dict(new)
+        if 'foregroundTool' in old: new['foregroundTool'] = old['foregroundTool']
+        else: del new['foregroundTool']
+    require(old == new, 'worker non-tool config changed')
 
 
 def unchanged_worker_tool(previous, current):
@@ -926,7 +992,10 @@ def controller_run(store, helper, request_arg):
     require(isinstance(inputs, list) and len(inputs) <= 32, 'worker command input count refused')
     copies = {}
     for entry in inputs:
-        require(isinstance(entry, dict) and set(entry) == {'source', 'destination'} and re.fullmatch(r'requests/[A-Za-z0-9_-]+\.json', entry['destination']), 'worker command input destination refused')
+        require(isinstance(entry, dict) and set(entry) == {'source', 'destination'}
+                and isinstance(entry['destination'], str)
+                and re.fullmatch(r'requests/(?:registrations/)?[A-Za-z0-9_-]+\.json', entry['destination']),
+                'worker command input destination refused')
         require(entry['destination'] not in copies, 'duplicate worker command input')
         copies[entry['destination']] = read_file(canonical(entry['source']), r['operatorUid'], 262144, required_mode=0o600)
     def setup():
@@ -1035,11 +1104,47 @@ def worker_birth(store, helper, source_arg):
     return result
 
 
-def stage(store, helper, bundle_arg, bins_arg, upstream_arg, public_arg, worker=False):
+def resume_worker_inputs(base, home, r, pending, data, binaries, worker_dirs, runtime_inventory):
+    previous = strict_json(read_file(base / 'stage-pending.json', 0, 65536, required_mode=0o600))
+    require({k:v for k,v in previous.items() if k != 'upstreamIdentity'} ==
+            {k:v for k,v in pending.items() if k != 'upstreamIdentity'}, 'pending stage inputs differ')
+    require(not previous['acl'] and not any((base / p).exists() for p in
+            ('worker-files.json', 'worker-birth-spec.json', 'worker-published.json', 'proxy/config.json', 'worker/launcher')),
+            'worker stage advanced past recoverable copy boundary')
+    # Every existing home member is one of the exact planned inputs. No
+    # task state or unexpected controller-authored path can be adopted.
+    expected_dirs = {'bin', 'operator', 'tool-requests', 'consent'} | worker_dirs
+    expected_files = set(data) | {'bin/' + n for n in binaries}
+    for directory, dirs, files in os.walk(home, followlinks=False):
+        for name in dirs + files:
+            path = Path(directory) / name; rel = str(path.relative_to(home))
+            m = metadata(path, r['uid'])
+            require((name in dirs and rel in expected_dirs and stat.S_ISDIR(m.st_mode)) or
+                    (name in files and rel in expected_files and stat.S_ISREG(m.st_mode)), 'unexpected retained controller input')
+    for name, content in data.items():
+        if (home / name).exists():
+            require(read_file(home / name, r['uid'], max(1, len(content)), required_mode=0o600) == content, 'retained worker input changed')
+    for name, content in binaries.items():
+        for path, uid, mode in ((base / 'bin' / name, 0, 0o755), (home / 'bin' / name, r['uid'], 0o500)):
+            if path.exists():
+                require(read_file(path, uid, len(content), required_mode=mode) == content, 'retained native binary changed')
+    for directory, allowed in ((base / 'worker', {'runtime-root'}), (base / 'proxy', set()),
+                               (base / 'configs', set()), (base / 'registrations', set()),
+                               (base / 'bin', set(binaries))):
+        if directory.exists():
+            require(set(p.name for p in directory.iterdir()) <= allowed, 'unrecorded staged publication')
+    validate_retained_runtime(base / 'worker/runtime-root', runtime_inventory)
+    recovery = {'protocol': 'mini-worker-stage-resume-v1', 'previousSha256': sha(encoded(previous)),
+                'current': pending, 'runtimeInventorySha256': sha(encoded(runtime_inventory))}
+    write_new(base / ('stage-resume-' + str(time.time_ns()) + '.json'), encoded(recovery))
+
+
+def stage(store, helper, bundle_arg, bins_arg, upstream_arg, public_arg, worker=False, resume=False):
     registry, base, r = load(store, helper)
     no_processes(r['uid'])
     require(not worker or has_consent(r), 'worker preparation requires version-2 consent services')
-    require(not (base / 'stage.json').exists() and not (base / 'stage-pending.json').exists(), 'controller stage already attempted')
+    require(not (base / 'stage.json').exists() and (resume or not (base / 'stage-pending.json').exists()), 'controller stage already attempted')
+    require(not resume or (worker and not r.get('workerTask')), 'only pre-publication worker staging can resume')
     bundle, bins, upstream, public = map(canonical, (bundle_arg, bins_arg, upstream_arg, public_arg))
     op = registry['operatorUid']
     ancestry(bundle.parent if worker else bundle, {0, op}); ancestry(bins, {0, op})
@@ -1088,43 +1193,53 @@ def stage(store, helper, bundle_arg, bins_arg, upstream_arg, public_arg, worker=
                              'userManager': f'user@{r["uid"]}.service', 'inputSha256': sha(encoded(request))}
     if consent is not None:
         pending['consent'] = consent
-    write_new(base / 'stage-pending.json', encoded(pending))
+    runtime_inventory = worker_tree_inventory(canonical(request['runtimeRoot']), op) if worker else None
+    if resume:
+        resume_worker_inputs(base, home, r, pending, data, binaries, worker_dirs, runtime_inventory)
+    else:
+        write_new(base / 'stage-pending.json', encoded(pending))
+    if worker:
+        publish_exact(base / 'worker-tree-input.json', encoded(runtime_inventory), bound=64 * 1024 * 1024)
+    make = mkdir_exact if resume else mkdir
+    def put(path, value, uid=0, gid=0, mode=0o600):
+        if resume: publish_exact(path, value, uid, gid, mode, bound=256 * 1024 * 1024)
+        else: write_new(path, value, uid, gid, mode)
     # Fresh home only; no running controller can redirect the root setup writes.
-    require(not list(home.iterdir()), 'controller home is not fresh')
+    require(resume or not list(home.iterdir()), 'controller home is not fresh')
     directories = {'bin', 'operator', 'tool-requests'} | (worker_dirs if worker else {'custody', 'state', 'state/shared-app-refs', 'state/oracle-grant', 'workspace'})
     for rel in sorted(directories, key=lambda p: (len(Path(p).parts), p)):
-        mkdir(home / rel, r['uid'], r['gid'])
+        make(home / rel, r['uid'], r['gid'])
     if has_consent(r):
-        mkdir(home / 'consent', r['uid'], r['gid'])
-        mkdir(base / 'consent', op, registry['operatorGid'])
-        mkdir(base / 'consent/anchors', op, registry['operatorGid'])
-        write_new(base / 'consent/config.json', data['host-config.json'], op, registry['operatorGid'])
-    mkdir(base / 'bin', mode=0o755); mkdir(base / 'configs'); mkdir(base / 'proxy', op, registry['operatorGid'])
+        make(home / 'consent', r['uid'], r['gid'])
+        make(base / 'consent', op, registry['operatorGid'])
+        make(base / 'consent/anchors', op, registry['operatorGid'])
+        put(base / 'consent/config.json', data['host-config.json'], op, registry['operatorGid'])
+    make(base / 'bin', mode=0o755); make(base / 'configs'); make(base / 'proxy', op, registry['operatorGid'])
     for n, value in data.items():
-        write_new(home / n, value, r['uid'], r['gid'])
+        put(home / n, value, r['uid'], r['gid'])
     for n, value in binaries.items():
-        write_new(base / 'bin' / n, value, mode=0o755)
-        write_new(home / 'bin' / n, value, r['uid'], r['gid'], 0o500)
+        put(base / 'bin' / n, value, mode=0o755)
+        put(home / 'bin' / n, value, r['uid'], r['gid'], 0o500)
     if not worker:
-        write_new(base / 'configs' / (sha(data['controller.json']) + '.json'), data['controller.json'])
+        put(base / 'configs' / (sha(data['controller.json']) + '.json'), data['controller.json'])
     else:
-        mkdir(base / 'worker', mode=0o755); mkdir(base / 'registrations', mode=0o755)
-        runtime = copy_worker_tree(canonical(request['runtimeRoot']), base / 'worker/runtime-root', op)
+        make(base / 'worker', mode=0o755); make(base / 'registrations', mode=0o755)
+        runtime = copy_worker_tree(canonical(request['runtimeRoot']), base / 'worker/runtime-root', op, runtime_inventory, resume)
         launcher = canonical(request['launcherDirectory']); ancestry(launcher, {0, op})
         require(set(p.name for p in launcher.iterdir()) == {'bwrap', 'launch-gate'}, 'fixed launcher files differ')
-        mkdir(base / 'worker/launcher', mode=0o755)
+        make(base / 'worker/launcher', mode=0o755)
         pins = {}
         for name in ('bwrap', 'launch-gate'):
             content = read_file(launcher / name, op, 256 * 1024 * 1024, True)
-            write_new(base / 'worker/launcher' / name, content, mode=0o555)
+            put(base / 'worker/launcher' / name, content, mode=0o555)
             pins['launcher/' + name] = sha(content)
         for name in ('hermes-acp', 'grain-runtime', 'grain-provider-bridge'):
             require(name in runtime and runtime[name]['mode'] == 0o555, 'worker runtime entrypoint absent')
             pins['runtime-root/' + name] = runtime[name]['sha256']
-        write_new(base / 'worker-files.json', encoded(runtime))
+        put(base / 'worker-files.json', encoded(runtime))
         pending['worker']['binaries'] = pins
         replace_root_record(base / 'receipt.json', encoded(r), 0o600)
-    write_new(base / 'proxy/config.json', data['host-config.json'], op, registry['operatorGid'])
+    put(base / 'proxy/config.json', data['host-config.json'], op, registry['operatorGid'])
     # Only traversal of private ancestors and access to the PUBLIC socket. The
     # operator's private listener and Store files receive no controller ACL.
     paths = [p for p in reversed((public.parent, *public.parent.parents)) if not metadata(p).st_mode & 0o001]
@@ -1145,7 +1260,7 @@ def stage(store, helper, bundle_arg, bins_arg, upstream_arg, public_arg, worker=
     return {**r, 'stage': str(base / 'stage.json'), **({'consent': consent_record(base, r, pending)} if has_consent(r) else {})}
 
 
-def checked_units(base, r, partial=False, consent_upgrade_hashes=(), runtime_upgrade_hashes=()):
+def checked_units(base, r, partial=False, consent_upgrade_hashes=(), runtime_upgrade_hashes=(), proxy_upgrade_hashes=()):
     stage_path = base / 'stage.json'
     if partial and not stage_path.exists():
         stage_path = base / 'stage-pending.json'
@@ -1158,7 +1273,7 @@ def checked_units(base, r, partial=False, consent_upgrade_hashes=(), runtime_upg
             continue
         actual = sha(read_file(UNITS / n, 0, 16384))
         require(actual == stage['units'][n] or (has_consent(r) and n == r['units'][4]
-                and actual in consent_upgrade_hashes), 'controller unit changed')
+                and actual in consent_upgrade_hashes) or (n == r['units'][2] and actual in proxy_upgrade_hashes), 'controller unit changed')
     for n in binary_names(r):
         if partial and not (base / 'bin' / n).exists() and not (base / 'bin' / n).is_symlink():
             continue
@@ -1225,7 +1340,8 @@ def stopped_controller_units(r):
         value = manager_properties(unit)
         require(value.get('LoadState') == 'loaded' and value.get('Transient') == 'no'
                 and value.get('FragmentPath') == str(UNITS / unit), 'stopped controller unit identity differs')
-        require(value.get('ActiveState') == 'inactive' and value.get('MainPID', '0') == '0'
+        # A failed unit can be physically stopped; keep its diagnostic state.
+        require(value.get('ActiveState') in ('inactive', 'failed') and value.get('MainPID', '0') == '0'
                 and value.get('ControlPID', '0') == '0', 'controller units must be stopped before storage upgrade')
         if unit.endswith('.service'):
             require(value.get('User') == str(r['uid'] if unit == r['units'][0] else r['operatorUid']),
@@ -1367,6 +1483,76 @@ def runtime_upgrade(store, helper, source_arg):
     checked_units(base, r)
     return {'store': store, 'runtimeUpgrade': str(intent_path), 'runtimeSha256': source_sha,
             'previousRuntimeSha256': intent['oldBinarySha256'], 'stageSha256': intent['newStageSha256']}
+
+
+def relocated_operator_stage(stage, unit, proxy_unit, upstream, identity):
+    old = f'--upstream {stage["upstreamSocket"]} --config '.encode()
+    new = f'--upstream {upstream} --config '.encode()
+    require(unit.count(old) == 1, 'operator proxy does not have one exact upstream argument')
+    changed_unit = unit.replace(old, new)
+    changed = strict_json(encoded(stage))
+    changed['upstreamSocket'] = str(upstream)
+    changed['upstreamIdentity'] = identity
+    changed['units'][proxy_unit] = sha(changed_unit)
+    return changed, changed_unit
+
+
+def operator_endpoint_upgrade(store, helper, socket_arg):
+    """Stopped transport relocation; Store/config/custody/native intents stay fixed."""
+    _, base, r = load(store, helper)
+    stopped_controller_units(r)
+    upstream = canonical(socket_arg); op = r['operatorUid']
+    ancestry(upstream.parent, {0, op}); metadata(upstream.parent, op, 0o700)
+    endpoint = metadata(upstream, op, 0o600)
+    require(stat.S_ISSOCK(endpoint.st_mode), 'operator successor is not a private socket')
+    settings = read_file(base / 'proxy/config.json', op, 1048576, required_mode=0o600)
+    require(read_file(upstream.with_suffix('.config'), op, 1048576, required_mode=0o600) == settings,
+            'operator successor has different Store settings')
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as peer:
+        peer.settimeout(2); peer.connect(str(upstream))
+        _, uid, _ = struct.unpack('3i', peer.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+        require(uid == op, 'operator successor peer identity differs')
+    stage_path = base / 'stage.json'; unit_path = UNITS / r['units'][2]
+    name = 'operator-endpoint-' + sha(str(upstream).encode())
+    intent_path = base / (name + '.json')
+    def archive(digest, kind):
+        require(re.fullmatch('[0-9a-f]{64}', digest), 'operator endpoint archive hash malformed')
+        return base / 'configs' / (name + '-' + digest + '.' + kind)
+    if not intent_path.exists() and not intent_path.is_symlink():
+        stage = checked_units(base, r)
+        old_stage = read_file(stage_path, 0, 65536, required_mode=0o600)
+        require(strict_json(old_stage) == stage, 'operator endpoint stage changed')
+        old_unit = read_file(unit_path, 0, 16384, required_mode=0o644)
+        next_stage, next_unit = relocated_operator_stage(stage, old_unit, r['units'][2], upstream,
+                                                        [endpoint.st_dev, endpoint.st_ino])
+        new_stage = encoded(next_stage)
+        intent = {'protocol': 'mini-controller-operator-endpoint-v1', 'store': store, 'upstream': str(upstream),
+                  'oldStageSha256': sha(old_stage), 'newStageSha256': sha(new_stage),
+                  'oldUnitSha256': sha(old_unit), 'newUnitSha256': sha(next_unit)}
+        for raw, kind in ((old_stage, 'stage'), (new_stage, 'stage'), (old_unit, 'service'), (next_unit, 'service')):
+            publish_exact(archive(sha(raw), kind), raw)
+        publish_exact(intent_path, encoded(intent))
+    intent = strict_json(read_file(intent_path, 0, 4096, required_mode=0o600))
+    require(set(intent) == {'protocol', 'store', 'upstream', 'oldStageSha256', 'newStageSha256', 'oldUnitSha256', 'newUnitSha256'}
+            and intent['protocol'] == 'mini-controller-operator-endpoint-v1' and intent['store'] == store
+            and intent['upstream'] == str(upstream), 'operator endpoint intent differs')
+    kept = {}
+    for key, kind in (('oldStage', 'stage'), ('newStage', 'stage'), ('oldUnit', 'service'), ('newUnit', 'service')):
+        digest = intent[key + 'Sha256']; kept[key] = read_file(archive(digest, kind), 0, 65536, required_mode=0o600)
+        require(sha(kept[key]) == digest, 'operator endpoint archive differs')
+    old_stage, new_stage = strict_json(kept['oldStage']), strict_json(kept['newStage'])
+    expected_stage, expected_unit = relocated_operator_stage(old_stage, kept['oldUnit'], r['units'][2], upstream,
+                                                            new_stage['upstreamIdentity'])
+    require(expected_stage == new_stage and expected_unit == kept['newUnit'], 'operator endpoint change exceeds transport coordinates')
+    require(sha(read_file(stage_path, 0, 65536, required_mode=0o600)) in
+            (intent['oldStageSha256'], intent['newStageSha256']), 'stage is outside operator endpoint transition')
+    checked_units(base, r, proxy_upgrade_hashes=(intent['oldUnitSha256'], intent['newUnitSha256']))
+    replace_root_record(unit_path, kept['newUnit'], 0o644)
+    replace_root_record(stage_path, kept['newStage'], 0o600)
+    run(['/usr/bin/systemctl', 'daemon-reload']); checked_units(base, r)
+    return {'store': store, 'operatorEndpointUpgrade': str(intent_path), 'operatorSocket': str(upstream),
+            'previousOperatorSocket': old_stage['upstreamSocket'], 'stageSha256': intent['newStageSha256'],
+            'observedSocketIdentity': [endpoint.st_dev, endpoint.st_ino]}
 
 
 def enroll(store, helper, source_arg):
@@ -1520,7 +1706,7 @@ def config_update(store, helper, source_arg):
     if worker:
         validate_worker_config(value, base, r, strict_json(old))
         previous = strict_json(old)
-        require({k:v for k,v in value.items() if k != 'toolTask'} == {k:v for k,v in previous.items() if k != 'toolTask'}, 'worker non-tool config changed')
+        unchanged_worker_config(previous, value, worker_state(r))
         unchanged_worker_tool(previous['toolTask'], value['toolTask'])
     root = worker_layout(r)
     for name, content in proof.items():
@@ -1621,6 +1807,27 @@ def recover_session(store, helper, request_id):
     require(re.fullmatch('[0-9a-f]{32}', request_id), 'request ID must be 32 lowercase hex')
     return controller_child(r, [str(base / 'bin/grain-runtime'), 'admin',
         str(worker_state(r) / 'admin.sock'), 'recover foreground session ' + request_id], timeout=1800)
+
+
+def recover_api_unreserved(store, helper, request_id):
+    """Ask native custody to audit an API intent which has no dispatch reservation."""
+    require(isinstance(request_id, str) and re.fullmatch('[0-9a-f]{32}', request_id),
+            'request ID must be 32 lowercase hex')
+    return controller_admin_fixed(store, helper, 'recover foreground api-unreserved ' + request_id)
+
+
+def reconcile_controller(store, helper, selector):
+    commands = {'parent': 'reconcile parent', 'effects': 'reconcile effects',
+                'foreground-audited': 'reconcile foreground audited'}
+    require(selector in commands, 'unsupported controller reconciliation')
+    return controller_admin_fixed(store, helper, commands[selector])
+
+
+def controller_admin_fixed(store, helper, command):
+    _, base, r = load(store, helper)
+    checked_units(base, r)
+    return controller_child(r, [str(base / 'bin/grain-runtime'), 'admin',
+        str(worker_state(r) / 'admin.sock'), command], timeout=1800)
 
 
 def export_state(store, helper):
@@ -2024,6 +2231,7 @@ def main(args):
         elif action == 'controller-resume-create' and not extra: result = resume_create(store, helper)
         elif action == 'controller-stage' and len(extra) == 4: result = stage(store, helper, *extra)
         elif action == 'controller-worker-prepare' and len(extra) == 4: result = stage(store, helper, *extra, worker=True)
+        elif action == 'controller-worker-prepare-resume' and len(extra) == 4: result = stage(store, helper, *extra, worker=True, resume=True)
         elif action == 'controller-worker-birth' and len(extra) == 1:
             fcntl.flock(lock, fcntl.LOCK_UN)
             return worker_birth(store, helper, extra[0])
@@ -2045,6 +2253,15 @@ def main(args):
         elif action == 'controller-recover-session' and len(extra) == 1:
             fcntl.flock(lock, fcntl.LOCK_UN)
             return recover_session(store,helper,extra[0])
+        elif action == 'controller-recover-api-unreserved' and len(extra) == 1:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            return recover_api_unreserved(store, helper, extra[0])
+        elif action == 'controller-prepare-idle' and not extra:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            return controller_admin_fixed(store, helper, 'prepare idle')
+        elif action == 'controller-reconcile' and len(extra) == 1:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            return reconcile_controller(store, helper, extra[0])
         elif action == 'controller-export' and not extra: result = export_state(store, helper)
         elif action == 'controller-reserve-export' and len(extra) == 1: result = reserve_export(store, helper, extra[0])
         elif action == 'controller-service-logs' and not extra: result = service_logs(store, helper)
@@ -2054,6 +2271,7 @@ def main(args):
             result = upgrade_public_listener(store,helper,*extra)
         elif action == 'controller-consent-storage' and not extra: result = consent_storage_upgrade(store, helper)
         elif action == 'controller-runtime-upgrade' and len(extra) == 1: result = runtime_upgrade(store, helper, extra[0])
+        elif action == 'controller-operator-endpoint' and len(extra) == 1: result = operator_endpoint_upgrade(store, helper, extra[0])
         elif action == 'controller-enroll' and len(extra) == 1:
             fcntl.flock(lock, fcntl.LOCK_UN)
             return enroll(store, helper, extra[0])

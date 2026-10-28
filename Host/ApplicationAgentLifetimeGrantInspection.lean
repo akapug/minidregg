@@ -102,7 +102,7 @@ def inspectPlan (bytes : List UInt8) : Except String Json := do
 
 /-- Historical route provenance comes from the verifier-selected event27,
 not a proposed grant plan. This does not authorize a current dispatch. -/
-private def inspectAcceptedVerified {config : NativeHost.Config}
+def inspectAcceptedVerified {config : NativeHost.Config}
     {target : NativeHost.Durable} (verified : NativeHostReplay.Verified config target)
     (bytes : List UInt8) : Except String Json := do
   let some ingress := ApplicationAgentLifetimeGrantSource.ingressCodec.decode bytes

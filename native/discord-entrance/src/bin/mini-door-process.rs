@@ -262,16 +262,20 @@ struct Ran {
 }
 
 impl Ran {
-    /// The first `error:|refused:|undecided:|usage:` line, or the last stderr line.
+    /// The diagnostic the operator reads in the log and a stranger's status: the first `error:`/
+    /// `refused:`/`undecided:`/`usage:` line in full (to 4000 bytes, not the 300 that cut a
+    /// `local process …/minidregg-client-consent ended before …` line mid-sentence), and the last
+    /// line when it says something else (the child's own last words).
     fn why(&self) -> String {
-        self.stderr
-            .lines()
-            .find(|l| ["error:", "refused:", "undecided:", "usage:"].iter().any(|w| l.starts_with(w)))
-            .or_else(|| self.stderr.lines().last())
-            .unwrap_or("no diagnostic")
-            .chars()
-            .take(300)
-            .collect()
+        let cap = |l: &str| -> String { l.chars().take(4000).collect() };
+        let first = self.stderr.lines().find(|l| ["error:", "refused:", "undecided:", "usage:"].iter().any(|w| l.starts_with(w)));
+        let last = self.stderr.lines().rev().find(|l| !l.trim().is_empty());
+        match (first, last) {
+            (Some(f), Some(l)) if f != l => format!("{} | last stderr line: {}", cap(f), cap(l)),
+            (Some(f), _) => cap(f),
+            (None, Some(l)) => cap(l),
+            (None, None) => "no diagnostic".to_owned(),
+        }
     }
 }
 
@@ -1412,6 +1416,17 @@ mod tests {
     fn run(w: &mut Processor<Fake>) {
         w.sponsor = None;
         w.run_once().unwrap();
+    }
+
+    #[test]
+    fn why_keeps_the_whole_diagnostic_line_and_the_childs_last_words() {
+        let long = format!("error: local process /var/lib/mini/candidate/bin/minidregg-client-consent ended before {}", "x".repeat(900));
+        let r = Ran { ok: false, stdout: String::new(), stderr: format!("noise\n{long}\nconsent closed\n") };
+        let w = r.why();
+        assert!(w.starts_with(&long), "the whole error line, not its first 300 bytes");
+        assert!(w.ends_with("last stderr line: consent closed"), "{w}");
+        let only = Ran { ok: false, stdout: String::new(), stderr: format!("{long}\n") };
+        assert_eq!(only.why(), long);
     }
 
     #[test]

@@ -56,8 +56,12 @@ try {
   const queryReply = page.waitForResponse(response => new URL(response.url()).pathname === '/query', {timeout: 120_000});
   await page.locator('#ask').click();
   result.query_status = (await queryReply).status();
-  await page.locator('#history .answer').first().waitFor();
-  result.query_answer = await page.locator('#history .answer').first().innerText();
+  const card = page.locator('#history article.result').first();
+  if (await card.locator('p.answer').innerText() !== ready.question)
+    throw new Error('rendered request card differs from the submitted question');
+  const answer = card.locator('div.answer');
+  await answer.filter({hasText: 'Whitman'}).waitFor();
+  result.query_answer = await answer.innerText();
   const wrongOrigin = await context.request.get(ready.url, {headers: {Origin: 'https://wrong-origin.invalid'}, timeout: 120_000});
   result.wrong_origin_status = wrongOrigin.status();
   if (![result.root_status, result.catalog_status, result.query_status].every(status => status === 200) ||
