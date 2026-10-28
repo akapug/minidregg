@@ -145,6 +145,13 @@ gates main and fixes reds itself.
 
 - Held for the conversion: lane/thin-birth 9509996a0 (b00bc41ff + docs; ad0906325ab57d1c3; continuation docs/THIN-BIRTH-2026-10-28.md §11; checkOpened, the re-encoding twin deleted; JP2 71/71 and THIN on e89fe7b8b with its consent binary). Tell it when the conversion is on main; it merges and re-converts, then sends a sha.
 - Held for the conversion window (touches .lean, Effects.lean imports it): lane/effects-revival 6b5464201 (owner a26c13b24522dee35 after the a83b7949ba401cca5 hand-off; it also owes a regenerated Fixtures/NativeDocWriteFixture.lean (stale since 3315a908), regenerated from the conversion candidate after READY and landed with its Effects sha; Engine, Statements, EngineProofs). After the conversion the lane merges main, converts its Effects files and sends one sha; land that, through a box build.
+- Held for the build after the conversion candidate (one .lean file): lane/app-market-b5 84938f78c
+  (Kernel/ApplicationSpkPackageIdentity.lean, safeApiTail admits a final segment with no trailing slash; OwnTracks
+  re-qualifies on the candidate carrying it; deputy a308118209b4a48ea). Land after the conversion, re-converted if
+  its header conflicts.
+- Rehearsal (ember, 10-28): the conversion candidate ships from its gate (tour + composed on EDGE_REV 7d2c765);
+  build at 22G; candidate line and verdict to the coordinator and infra ae95a4eac63b0715e. un-ingest-stale-stage
+  1f9a757de is in (256a98cbd).
 - Not held, nothing coming: lane/un-ns-owner 587c5acbd is the superseded work-in-progress branch; its clean
   form lane/un-ns-owner-clean (3a8109059, box-elaborated, plus e80f56422 and cf3c5d433) is on main (coordinator 10-28).
 - Module-conversion window: from iter-speed's (a0fd127abfb9aac75) "re-deriving now" until it sends its sha, no .lean or lakefile.toml change lands on main; Rust, shell and docs continue.
