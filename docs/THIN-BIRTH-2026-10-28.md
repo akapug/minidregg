@@ -187,5 +187,16 @@ when the arm lands.
 
 * Worktree `/Users/ember/dev/minidregg-lanes/thin-birth` (lane/thin-birth, from origin/main
   7265c5fc6). Box tree: `dregg-ref:/build/lanes/thin-birth` (clone-warm of `/build/minidregg`).
-* State: design written; statements in `Kernel/NativeThinBirth.lean`; auditor
-  af7a93e7b8ba729d4 not yet answered.
+* State: design and statements pushed (7410dd6d9); sent to auditor af7a93e7b8ba729d4 with five
+  questions (carrier form, conjuncts 3-7, Host authoring completeness as journey-witnessed, the
+  Opened pins premises, shown-not-judged coordinates). Elaboration of `Kernel/NativeThinBirth.lean`
+  is running on dregg-ref (`/build/lanes/thin-birth-check.{log,pid}`, lane-check; its imports
+  rebuild from da4a7645e). Rerun `scripts/pipeline/lane-check Kernel/NativeThinBirth.lean` in
+  `/build/lanes/thin-birth` after `git pull` for the revised statements.
+* Next after ACCEPT: proofs (birthValues_exact per branch, by rfl; then keystone and teeth from
+  checkHeader_binds + signedRequestBytes_eq_iff; completeness through prepareLoaded, where
+  `NativeHost.slot` is private and may need exposing); Host/ThinBirthConsent.lean (the author
+  instance over Json.birth with coordinates); frames 234/235 (protocol/host-operations.json,
+  ClientConsentCore.thin, 230/232 refuse a birth by name); mini-sdk thin_birth calls; the
+  workspace.rs birth path; jpriv2 row 19 plus restored lifecycle rows (from d79843207^) plus the
+  swapped-plan row.
