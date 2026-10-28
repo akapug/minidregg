@@ -134,6 +134,15 @@ jq -n --arg p "$PURSE_T" --arg m "$MODEL" --arg f "$USER_FEE" --arg pf "$POOL_FE
 # other provision with room to spare (the default sponsor holds 100000).
 SPONSOR_BALANCE=100000
 [ -z "$J14_AWAIT" ] || SPONSOR_BALANCE=$(( ${J14_AWAIT_FUNDING:-200000000} + 1000000 ))
+# J14_AWAIT runs Tally, an Objective program: the World pins the Objective
+# invocation policy the shipped Host authors (scripts/author-objective-policy.sh),
+# without which every activity turn is refused.
+OBJECTIVE=
+if [ -n "$J14_AWAIT" ]; then
+  OBJECTIVE=$("$REPO/scripts/author-objective-policy.sh" "$HOST" "$JOURNEY_STEP_DIR/objective-policy.hex" 2>/dev/null) \
+    || { echo "j14: cannot author the Objective policy with $HOST" >&2; exit 1; }
+fi
+OBJECTIVE_INVOCATION_POLICY=$OBJECTIVE \
 NEWPARTICIPANT_SPONSOR_BALANCE=$SPONSOR_BALANCE \
 NEWPARTICIPANT_SERVE=serve-operator NEWPARTICIPANT_PROVIDER_SERVICES=$JOURNEY_STEP_DIR/provider-services.json \
   sh "$REPO/native/resource-client/newparticipant-acceptance.sh" "$HOST" "$MINI" "${STORE:?}" "${VERIFIER:?}" \
