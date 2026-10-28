@@ -1,4 +1,4 @@
-# Untouched-areas deputy: state (rewritten whole; 2026-10-28 morning, runs on 2d8b7ed54)
+# Untouched-areas deputy: state (rewritten whole; 2026-10-28 morning, after the 2d8b7ed54 runs)
 
 Inputs: docs/review/2026-10-27-untouched-areas/{LEAN,NATIVE}.md, docs/review/2026-10-27-blind-spots/BLIND-SPOTS.md Sweep 1.
 Each lane: /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>.
@@ -44,8 +44,16 @@ Sources: docs/APP-MARKET-2026-10-27.md "State at hand-off"; docs/ROWS-OWED.md §
 ## Decided
 fn out; private-backend stays; Effects/ registry is Phase 3 (EFFECTS.md); dues and six more ride the effect Plan; DreggNet lease cluster parked; Contracts Cuts/Snapshot/Refinements/Futures kept; Pred BoundedQuantifiedView/CoordinationDial kept; twin conflict on un-pb-twins resolved to un-pb-wal 68d9f28e's design (82f3710b).
 
+## Resident / world-start reds (lane/un-ns-owner, Sonnet a6603277e4ffe2d70)
+- Journal-ancestor refusal on 2d8b7ed54 (4d933739 `unchanged()` owner 0 vs 65534): fixed on lane/un-ns-owner; start-a then passed bootstrap, namespace entry and journal open.
+- op 7 `physical report differs` (controlGroup over 256 bytes): 507d6ce78 (bound 4096) is on main as 76758dba6; its candidate build is armed after 7027e0ace. The japps co-edit row runs on the 76758dba6 candidate.
+- wip 25537e481 (lane tip) holds only a refinement beyond 507d6ce78: the bound derived from the naming scheme (317 = uid 10 + Store tag 16 x5 + app/generation 18 digits, under the user manager), `controlGroupWithin` shared by the three report versions, decide-examples (260 accepted, 317 accepted, 318 and empty refused), and a Rust broker test building the longest real path from grains_slice/class_slice/app_slice (= 317). Not needed for any row; lands after the codec-resident fix, elaborated on a box.
+- PRIORITY: SQLite `failure 15: locking protocol` at world start is a PRODUCT red, not harness. `mini codec-resident` (+ its `minidregg-host … codec`) detaches and never exits; ~40 orphan pairs on hbox (ppid 1, no PID file, up to 11 h) hold consent-anchor locks. Fix on the same lane: idle exit, exit on parent death, a PID file inside the world so world-down stops it, a concurrency test (several worlds starting together). The rehearsal frame starts several members' resources and would hit it.
+- Until it lands: app worlds start ONE AT A TIME. Killing the existing orphans waits on ember's word (no PID file: not ours to kill).
+- Box hygiene: hbox staging (candidate copies, worlds, grain installs) under /tank, never / (85% used); each faerie deletes its own staging dirs when its run ends.
+
 ## Coordinator status
-Candidate 2d8b7ed54 (/build/candidates/2d8b7ed544100acfaeb9ff2f9b597c31b8cb81e6, READY 05:48) carries 25cfb86bd, 621aded18, e4acc9df0, b3/b5/b7/b8, un-tale-welcome. Running on it now (one run each, fresh worlds, off the integrator's slots): b3 a85d12892ea6de3ca, b5 a0ef59eabda7075b4, b7 abf203f357754001b, b8 a13f0bc9626b1320a, japps co-edit a4e312352a7091f59, jtemplates a852f5df40229de24. The next report carries their results and the FEATURED additions.
+Candidate 2d8b7ed54 (/build/candidates/2d8b7ed544100acfaeb9ff2f9b597c31b8cb81e6, READY 05:48) carries 25cfb86bd, 621aded18, e4acc9df0, b3/b5/b7/b8, un-tale-welcome. Runs on it (fresh worlds, one at a time from now): b3 a85d12892ea6de3ca, b5 a0ef59eabda7075b4, b7 abf203f357754001b, b8 a13f0bc9626b1320a, jtemplates a852f5df40229de24 (run4 on dregg-build). japps co-edit (a4e312352a7091f59) is parked with world w2 kept as evidence; it reruns once on the 76758dba6 candidate.
 
 ## Next three
 1. Read the six runs on 2d8b7ed54 and the validator's batch tables; fix reds (recipes or spk-host); add every app green on lifecycle + write to FEATURED in apps.rs; tell the coordinator when DDP can rerun.
