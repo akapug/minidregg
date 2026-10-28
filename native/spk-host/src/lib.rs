@@ -64,6 +64,7 @@ mod lifecycle_receipt_lookup;
 mod lifecycle_selector;
 #[cfg(target_os = "linux")]
 pub mod grain;
+#[cfg(target_os = "linux")]
 mod io_context;
 #[cfg(target_os = "linux")]
 mod grain_export;
