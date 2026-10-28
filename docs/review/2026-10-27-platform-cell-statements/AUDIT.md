@@ -1282,3 +1282,35 @@ permits. The fixture is not cSHAKE-bound the way item 7's images are, so I will 
 
 **Lanes:** (1) Kernel hyperedge owner; (2) the Pred/bend-law owner; (3) the Selvage owner, plus the
 manifest; (4) the PredCompile owner. Routed via the root.
+
+## 2026-10-28, thirtieth pass: commuting content appends (lane/qualify-doc-contention ed3f512f9, statements)
+
+**Verdict: the effect-level statements are sound. One cross-lane consequence must be stated before this
+merges: it breaks thin consent's opened-view keystone for commuting commands.**
+
+1. *Non-vacuity.* `CommutingAppend` (the result is independent of the planned root header when
+   `commutes`) is near-definitional once the arm's only root use is the guarded `staleTarget`. Its content
+   is the header's claim that this was the *only* root pin (`planOf` zeroes `preStateRoot`/height,
+   `readRequest` observes at the loaded cell). `MovedRootAccepted` and `TwoAppendersOneObservation`
+   (two orders over one observation, with built witness data) carry the real content. Accepted.
+2. *`CommutingPrepare`'s satisfiable pole* inherits the doc-write fixture's role. The effects-revival lane
+   has since proved its poles over `blindedStore` without the fixture, so reuse that witness.
+3. *No blinding in the witness.* Every born cell has one, and the kernel rotation is a guarded write
+   computed from the *actual* pre-state. That is exactly the part a moved root exercises. Rebuild the
+   witness on a blinded cell (`ContentProofs.blindedStore`), so the pole shows commuting through the
+   rotation.
+4. *Replay.* State `ReplayRefused` through the durable nullifier (the operation id is consumed), not
+   through atom presence at the produced post. That holds at every later state without a non-deallocation
+   lemma.
+
+**The cross-lane break.** Thin consent's `OpenedDisplayIsCommitStatement` (pass 26, now proved on
+lane/thin-birth) concludes `prepared.post address = shown address` for every address that is neither
+kernel-owned nor sealed. `shown` is the patch run on the store *opened at the signed root*. For a
+commuting command the executor now prepares at a moved pre-state, so addresses other appenders wrote
+differ between the actual post and `shown`. Its collision disjunct does not fire, because the two roots
+legitimately differ. So the proved keystone either becomes false for commuting commands, or its premises
+exclude them, and neither is stated. The honest statement for a commuting command is narrower and is the
+member's actual consent: `prepared.post a = shown a` for every address the *member's patch writes*, and
+`prepared.post a = prepared.pre.logical a` elsewhere (others' appends kept). Either thin consent gains that
+commuting variant, or `checkOpened` refuses thin consent for `commutes = true` commands until it does. That
+decision belongs to the thin-birth owner and the root; this branch should not merge before it.
