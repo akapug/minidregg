@@ -1,0 +1,13 @@
+# Typed declarations and named unsupported-write rows; no HTML recipe fallback.
+a MediaWiki 16bcca05d59606b908681c07b202752a M / web
+b Etherpad aee0806c9547d1f53c1ccef38ac195ba S / web
+c EtherCalc 9b3b76152e7d8db9f54dba7455ea9239 S / web
+d Radicale 4b137047cf1bdf5832397c3abc75efd6 S / web
+e Hugo 7df1f202df51679cc84ed85e03d6d6c7 M / web
+f WordPress d6955e8f377ac431db17fd01855b3ce5 M / web
+g TinyTinyRSS ac6dfded255f6ea86172fb62064772fc M / web
+h Linksholder d11845a484a0a03767676c3c31c032e6 S / web
+i DokuWiki dda6d7e22e8e2566bdc804d8e3f9165f S /doku.php web
+j SandCal a84130b27030f06f981e78b06c499030 S / web
+k Permanote 4ecae843006080d7e5191c498a062fa1 S / web
+l HedgeDoc ff642cdb65178a6a2dff96ca15dd7028 M / web

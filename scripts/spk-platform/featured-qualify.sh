@@ -74,17 +74,6 @@ jreq() {
 snip() { head -c 160 "$body" 2>/dev/null | tr '\r\n\t' '   '; }
 
 # The beneath-HTML write per app: what a resident does instead of clicking.
-write_EtherCalc() {
-  local put; put=$(req PUT /_/featured -H 'Content-Type: text/csv' --data-binary $'item,qty\nwidgets,3\n')
-  local got; got=$(req GET /_/featured/csv)
-  [[ $put =~ ^20 && $got == 200 ]] && grep -q widgets "$body" && echo "1 PUT /_/featured text/csv $put; GET csv $got"
-}
-# HedgeDoc's package (ff642cdb) lacks node_modules/iconv-lite/encodings, which the packager's trace
-# never touched: every request body it parses (text, form or JSON) throws "Cannot find module
-# '../encodings'" in the app (400 or 500; POST /new answered 400 on w11). So its write never sends a
-# body over HTTP: GET /new makes the note (303 to /<id>) and the text goes in as a socket.io
-# `operation`, the one recipe shared with the rt table (write_HedgeDocRT in market-writes/rt.sh).
-write_HedgeDoc() { write_HedgeDocRT; }
 write_Davros() { typed_app_row davros; }
 
 write_sntfy() {
@@ -93,23 +82,6 @@ write_sntfy() {
   local got; got=$(req GET '/featured/json?poll=1&since=all')
   [[ $post == 200 && $got == 200 ]] && grep -q 'job done' "$body" && { echo "1 POST /featured $post; poll $got"; return; }
   echo "0 POST /featured $post [$postbody]; poll $got [$(snip)]"
-}
-# DokuWiki: the edit form (id dw__editform) posts sectok, id, rev, date, prefix, suffix, changecheck and
-# target as hidden fields next to wikitext, summary and the button do[save]. sectok is a hash of the PHP
-# session id, so the form GET and the POST must share the session cookie the GET sets (jreq keeps it);
-# the first recipe sent a bare sectok with no cookie, and DokuWiki refused the save.
-write_DokuWiki() {
-  jar=""
-  jreq GET '/doku.php?id=featured&do=edit'; local edit=$JS
-  local fields=() f
-  while IFS= read -r -d '' f; do fields+=(--data-urlencode "$f"); done < <(python3 -I "$here/market-writes/form-fields.py" dw__editform <"$body")
-  [[ $edit == 200 && ${#fields[@]} -gt 0 ]] || { echo "0 edit form $edit, no dw__editform hidden fields"; return; }
-  [[ " ${fields[*]} " == *sectok=* ]] || { echo "0 edit form $edit carries no sectok"; return; }
-  jreq POST '/doku.php?id=featured' "${fields[@]}" --data-urlencode $'wikitext======= Featured ======\nwritten by a resident\n' \
-    --data-urlencode 'summary=resident' --data-urlencode 'do[save]=Save'; local save=$JS
-  jreq GET '/doku.php?id=featured&do=export_raw'; local got=$JS
-  [[ $save =~ ^(200|302|303)$ && $got == 200 ]] && grep -q 'written by a resident' "$body" && { echo "1 POST do[save] $save; export_raw $got"; return; }
-  echo "0 POST do[save] $save; export_raw $got without the text"
 }
 # hledger-web 1.31 runs with --allow=sandstorm (the owner holds view, add, manage): its JSON API takes
 # PUT /add with the full JSON of one transaction (the form needs a Yesod _token). The read-back is

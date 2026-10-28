@@ -23,25 +23,6 @@ write_WBO() {
   echo "0 item $id is in the server's memory (getboard) but not in the saved board: GET /download/$board $dl after $try tries [$(head -c 100 "$body" | tr '\r\n\t' '   ')]"
 }
 
-# HedgeDoc 1.9.8: GET /new makes a note (303 to /<id>, row evidence from the featured table's
-# write_HedgeDoc); lib/realtime.js `operation` (revision, TextOperation JSON, selection) on
-# /socket.io/?noteId=<id> never reaches body-parser, so the package's missing iconv-lite is not hit.
-# The note is persisted on the server's dirty-note timer, so the read-back polls /download.
-write_HedgeDocRT() {
-  local made; made=$(req GET /new)
-  local note; note=$(grep -i '^location:' "$body.headers" | tr -d '\r' | awk '{print $2}'); note=${note#https://grain.test}; note=${note#/}
-  [[ $made =~ ^30 && -n $note ]] || { echo "0 GET /new $made: no note id"; return; }
-  local res; res=$(python3 -I "$rt_py" hedgedoc "$dir" "$note" 2>&1 | tail -1)
-  [[ $res == *'"ok": true'* ]] || { echo "0 socket.io operation on $note: ${res:0:160}"; return; }
-  local i got
-  for i in $(seq 1 20); do
-    got=$(req GET "/$note/download")
-    [[ $got == 200 ]] && grep -q 'written by a resident over socket.io' "$body" && { echo "1 socket.io operation -> $note; GET download $got (poll $i)"; return; }
-    sleep 3
-  done
-  echo "0 operation acked but /$note/download never showed the text (last $got)"
-}
-
 # The typed declarations own Wekan/Gogs methods, authentication and read-back.
 # These rows exercise the same source that emits their Hermes schemas.
 write_Wekan() { typed_app_row wekan; }
