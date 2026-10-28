@@ -2,6 +2,7 @@
 import importlib.util
 from pathlib import Path
 import socket
+import os
 import tempfile
 import threading
 import time
@@ -95,6 +96,21 @@ class CheckpointTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,'exact retained'):driver.Journey.from_checkpoint(path)
                 path.write_text(driver.json.dumps(value));resumed=driver.Journey.from_checkpoint(path)
                 self.assertEqual(resumed.resume_phase,'worker_birth');resumed._lock.close()
+
+class ControllerPublicRelayTests(unittest.TestCase):
+    def test_rebind_selects_native_controller_acl_and_preserves_other_arguments(self):
+        j=driver.Journey.__new__(driver.Journey);j.layout={'controllerUid':os.getuid()+100000}
+        j.c={'publicSocket':'/s/public.sock','operatorSocket':'/s/private/operator.sock','hostConfig':'/p/config.json'}
+        argv=['/p/mini','serve-public-proxy','--socket',j.c['publicSocket'],'--upstream',j.c['operatorSocket'],'--config',j.c['hostConfig']]
+        selected=j.controller_public_args(argv);self.assertEqual(selected,argv+['--controller-uid',str(j.layout['controllerUid'])])
+        self.assertEqual(j.controller_public_args(selected),selected)
+        with self.assertRaisesRegex(ValueError,'recipient differs'):j.controller_public_args(argv+['--controller-uid','1'])
+        with self.assertRaisesRegex(ValueError,'identity differs'):j.controller_public_args(argv+['--socket-gid','1'])
+        stopped=[];process=SimpleNamespace(pid=99,poll=lambda:None,terminate=lambda:stopped.append(99),wait=lambda timeout:0)
+        j.processes=[process];j.daemons=[{'pid':99,'argv':argv}]
+        with patch.object(j,'spawn') as spawn,patch.object(j,'wait_socket') as ready:
+            j.ensure_controller_public_proxy();spawn.assert_called_once_with('participant-controller',selected);ready.assert_called_once_with('/s/public.sock')
+        self.assertEqual(stopped,[99])
 
 class WorkerPreparationTests(unittest.TestCase):
     def test_partial_copy_continuation_keeps_original_spec_and_waits_for_installer(self):

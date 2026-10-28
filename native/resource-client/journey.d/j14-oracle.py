@@ -265,11 +265,36 @@ class Journey:
     def restore_services(self):
         for item in self.restart_daemons:
             if sha(item['argv'][0])!=item['executableSha256']:raise ValueError('checkpoint daemon executable changed')
-            self.spawn(item['label']+'-resume-'+str(self.counter),item['argv'])
+            argv=self.controller_public_args(item['argv']) if 'serve-public-proxy' in item['argv'] and self.controller else item['argv']
+            self.spawn(item['label']+'-resume-'+str(self.counter),argv)
             if item.get('socket'):self.wait_socket(item['socket'])
             if 'serve-public-proxy' in item['argv'] and getattr(self,'controller',False):
                 self.restore_public_socket_access(item['socket'])
         del self.restart_daemons
+
+    def controller_public_args(self,args):
+        argv=list(args);uid=self.layout['controllerUid']
+        if type(uid) is not int or uid in (0,os.getuid()) or '--socket-gid' in argv:
+            raise ValueError('controller public relay identity differs')
+        for field,expected in [('--socket',self.c['publicSocket']),('--upstream',self.c['operatorSocket']),('--config',self.c['hostConfig'])]:
+            if argv.count(field)!=1 or argv[argv.index(field)+1]!=expected:
+                raise ValueError('controller public relay transport differs')
+        if '--controller-uid' in argv:
+            if argv.count('--controller-uid')!=1 or argv[argv.index('--controller-uid')+1]!=str(uid):
+                raise ValueError('controller public relay recipient differs')
+        else:argv.extend(['--controller-uid',str(uid)])
+        return argv
+
+    def ensure_controller_public_proxy(self):
+        live={p.pid:p for p in self.processes if p.poll() is None}
+        matches=[d for d in self.daemons if d.get('pid') in live and 'serve-public-proxy' in d['argv']]
+        if len(matches)!=1:raise ValueError('one owned public relay must be running before controller birth')
+        daemon=matches[0];argv=self.controller_public_args(daemon['argv'])
+        if argv==daemon['argv']:return
+        # Native controller ingress accepts the exact installer traversal ACL
+        # and recreates this UID's connect ACL whenever the inode is rebound.
+        process=live[daemon['pid']];process.terminate();process.wait(timeout=15)
+        self.spawn('participant-controller',argv);self.wait_socket(self.c['publicSocket'])
 
     def private_operator_socket(self,name='operator.sock'):
         directory=self.sockets/'private'
@@ -763,6 +788,7 @@ class Journey:
         home=Path(self.layout['controllerHome'])
         brokerconfig=self.keyroot/'broker.json';keysocket=self.keyroot/'keys.sock';keyclient=runtime/'keys-client.json'
         self.controller=True
+        self.ensure_controller_public_proxy()
         successor=os.environ.get('J14_ORACLE_CONTROLLER_UPGRADE')
         if successor:
             release=Path(successor);metadata=release.stat();selected=read(release)
