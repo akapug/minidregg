@@ -138,8 +138,11 @@ pub(super) fn tools_html(room: &str, tools: Option<&str>, compute: Option<&str>,
          <p>{compute_line}</p>\
          <p class=note>Hermes gets what the operator's ceiling allows <em>and</em> this room grants: the ceiling is the operator's controller setting and is not part of this room's read, so a tool granted here may still be off on this box. The Oracle also needs the operator's Oracle route; without it Hermes refuses <code>oracle-not-configured</code>, and without bit 8 here, <code>oracle-not-granted</code>.</p>"
     );
+    // A room born by `room new` records no founder row (only `chat new` writes the roster); the
+    // form is offered there too, and the Host admits the change only from the room's founder.
     match founder {
-        Some(f) if f == me && writes => {
+        Some(f) if f != me => out.push_str(&format!("<p class=note>Only the room's founder (subject <code>{}</code>) sets this.</p>", escape(f))),
+        _ if writes => {
             let boxes: String = TOOLS.iter().map(|(bit, tool, _)| format!(
                 "<label class=\"check\" for=\"ht-{room}-{bit}\"><input type=\"checkbox\" id=\"ht-{room}-{bit}\" name=\"tool{bit}\" value=\"on\"{}> {tool}</label>",
                 if bits & bit != 0 { " checked" } else { "" }, room = escape(room)
@@ -148,11 +151,11 @@ pub(super) fn tools_html(room: &str, tools: Option<&str>, compute: Option<&str>,
                 "<div class=\"verb-form\"><form method=\"post\" action=\"/room/{r}/hermes-tools\"><input type=\"hidden\" name=\"was-tools\" value=\"{bits}\"><input type=\"hidden\" name=\"was-compute\" value=\"{seconds}\">\
                  <div class=\"fields\">{boxes}<label for=\"hc-{r}\">Sandbox CPU seconds per paid turn (0: the operator's default)</label>\
                  <input id=\"hc-{r}\" name=\"compute\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" value=\"{seconds}\"></div>\
-                 <p><button>Set what Hermes may do</button></p><p class=note>You founded this room, so you set its grant: each change is <code>tariff {r} set hermes/tools N</code> (or <code>hermes/compute</code>), one founder turn.</p></form></div>",
-                r = escape(room)
+                 <p><button>Set what Hermes may do</button></p><p class=note>{who} each change is <code>tariff {r} set hermes/tools N</code> (or <code>hermes/compute</code>), one founder turn.</p></form></div>",
+                r = escape(room),
+                who = if founder.is_some() { "You founded this room, so you set its grant:" } else { "This room's roster names no founder; the Host admits a change only from the room's founder:" }
             ));
         }
-        Some(f) if f != me => out.push_str(&format!("<p class=note>Only the room's founder (subject <code>{}</code>) sets this.</p>", escape(f))),
         _ => {}
     }
     out.push_str("</section>");
@@ -254,7 +257,8 @@ mod tests {
         let member = tools_html("lab", Some("9"), Some("30"), Some("42"), "43", true);
         assert!(!member.contains("<form") && member.contains("Only the room's founder (subject <code>42</code>)") && member.contains("<strong>30</strong>"), "{member}");
         assert!(!tools_html("lab", Some("9"), None, Some("42"), "42", false).contains("<form"), "a read-only face never offers the form");
-        assert!(tools_html("lab", None, None, None, "42", true).contains("data-hermes-tools=\"0\""), "an unset field grants nothing");
+        let unrostered = tools_html("lab", None, None, None, "42", true);
+        assert!(unrostered.contains("data-hermes-tools=\"0\"") && unrostered.contains("<form") && unrostered.contains("names no founder"), "an unset field grants nothing; a room without a roster still offers the form, the Host judges");
     }
 
     #[test]
