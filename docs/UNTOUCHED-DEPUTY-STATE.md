@@ -1,4 +1,4 @@
-# Untouched-areas deputy: state (rewritten whole; 2026-10-28 03:45Z)
+# Untouched-areas deputy: state (rewritten whole; 2026-10-28 04:00Z)
 
 Inputs: docs/review/2026-10-27-untouched-areas/{LEAN,NATIVE}.md, docs/review/2026-10-27-blind-spots/BLIND-SPOTS.md Sweep 1.
 Each lane: /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>.
@@ -32,8 +32,9 @@ un-verify (Generic Simplex gate), un-bend (bend verb + lost reply), un-world (Ta
 ## App market (taken over from L13, 2026-10-28; lane/app-market db312c6f is on main)
 Sources: docs/APP-MARKET-2026-10-27.md "State at hand-off"; docs/ROWS-OWED.md §0 and §3.
 - Every install on 0ce31391 was refused (op69 claim plan vs BEGIN); the fix 25cfb86bd is on main (81bca08c6), not in 1af366fe9; the first candidate carrying it is the build after 1af366fe9. On it: the batch tables run on fresh worlds (validator), and I own the reds.
-- app-writes-2 (Kimi) landed only Etherpad 956b91bff and Hacker Slides 8a3682c3e (merged); HakyllCMS, HackerCMS and OrgTodo are covered by faerie app-market-fixups. "tale invite": asked the coordinator what it names.
-- Faeries (Sonnet, recipes now, one run on the candidate): lane/app-market-b3 (diagrams.net, EtherDraw, Scrumblr, Swagger Editor), lane/app-market-b7 (2048, Sudoku, Blockstack, Simple Chat direct-capnp), lane/app-market-fixups (OrgTodo manifest, HakyllCMS START exit, HackerCMS write). Shared brief: scratchpad market-common.txt (copied into each prompt by reference).
+- app-writes-2 (Kimi) landed only Etherpad 956b91bff and Hacker Slides 8a3682c3e (merged); HakyllCMS, HackerCMS and OrgTodo are covered by faerie app-market-fixups.
+- Tale invite (the demo seed's item 4, decided): the door processor joins every enrolled member to `tale` once per world (lane/un-tale-welcome 19bb968e0, 4/4 filtered on dregg-build, sent to the integrator). Infra seam: `"story": {"author": "box", "name": "tale"}` in /etc/mini/door.json.
+- Faeries (Sonnet, recipes now, one run on the candidate): lane/app-market-b3 6f2bfd3bc pushed (DiagramsNet, EtherDraw, Scrumblr, SwaggerEditor; agent a85d12892ea6de3ca), lane/app-market-b7 d8ee43cdb pushed (2048, PerplexitySudoku, 3DBlockstack, SimpleChat; agent abf203f357754001b; its spk-rpc get_view_info UNIMPLEMENTED = empty ViewInfo change reviewed and accepted), lane/app-market-fixups (OrgTodo manifest, HakyllCMS START exit, HackerCMS write; not yet pushed). Shared brief: scratchpad market-common.txt.
 - japps co-edit row: faerie a4e312352a7091f59 runs it on the same candidate (stream-continuity 6544ea37 + 25cfb86bd), then L13's DDP rerun is mine to report.
 - Later: B5 (FileDrop, Kiwix; Groove Basin and Tube need streaming), B8 rest (Mercurial, MediaWiki, Firefly III; IPython recipe written), bodies > 8 MiB (designed §2b), the member install debit (apps-e2e.sh) into INSTALL.md §4. Each green app (lifecycle + write) goes into FEATURED in native/resource-client/src/apps.rs; target 2-3 dozen.
 
