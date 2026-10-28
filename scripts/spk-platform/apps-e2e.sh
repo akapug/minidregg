@@ -259,6 +259,7 @@ install_app() { # APP-ID
 # The member's own account pays: its balance before the first install and after each one is the
 # measured cost of an install (the budget figure INSTALL.md §4 states).
 balance() { mini credit --action balance --dir "$WS9" 2>/dev/null | sed -nE 's/^credit ([0-9]+) .*/\1/p' | head -1; }   # "credit N  (asset 0, account A, signed read at height H)"
+bal_start=$(balance)
 bal_before=$(balance); echo "member balance before installs: ${bal_before:-unreadable}" >>"$out/balances.log"
 for app in "$@"; do
   name=$(jq -r --arg a "$app" '.apps[] | select(.appId == $a or .packageId == $a) | .name' "$FIXTURE" | head -1)
@@ -272,6 +273,14 @@ for app in "$@"; do
   # application birth admitted (the request record keeps the birth receipt), not law-denied.
   adm=""; for rec in "$out"/state/requests/*.json; do case $rec in *.outcome.json) continue ;; esac
     adm=$(jq -r --arg a "$app" 'select(.appId == $a or .packageId == $a) | .documents.birthReceipt.effect // empty' "$rec" 2>/dev/null | head -1); [ -n "$adm" ] && break; done
+  # The funding is the measured install spend (about 10,360 on Hacker Slides: the request cell, six delegation
+  # proposals and the three-resource application birth at tariff base 2, perBirth 1, perInitialPayloadByte 1)
+  # plus a margin; a spend above the funding is refused by name, never absorbed.
+  if [ -n "$bal_start" ] && [ -n "$bal_after" ]; then
+    spend=$((bal_start - bal_after))
+    row "the member's install spend is within its funding ($MEMBER_FUNDING)" "$([ "$spend" -le "$MEMBER_FUNDING" ] && echo 1 || echo 0)" \
+      "$([ "$spend" -le "$MEMBER_FUNDING" ] || echo "spendOverFunding: ")spend $spend of $MEMBER_FUNDING"
+  fi
   row "the first install of $name is admitted by the Host at the tool reservation and the application birth (not law-denied)" \
     "$([ "$adm" = admitted ] && ! grep -q 'law-denied' "$out/install-$app.err" "$out/install-$app.json" 2>/dev/null && echo 1 || echo 0)" \
     "birth ${adm:-none}; $(grep -ohE 'law-denied|installRefused|no-grant|resourceBatch|birthStale' "$out/install-$app.err" "$out/install-$app.json" 2>/dev/null | sort -u | tr '\n' ' ')"

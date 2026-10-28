@@ -273,7 +273,7 @@ fi
 #                         `apps renew` says current, an operator-direct restart (no worker enroll) is refused
 #                         by name, `apps renew` renews it, the write is admitted. Its rows are re-emitted here.
 if [ "$mode" = --box ] && [ -n "${WORLD_RUN:-}" ] && [ -x "$BIN/spk-host" ]; then
-  e2e=$(E2E_MINI=$MINI MINI_MARKET_CACHE=$W/state/quarantine APPS_MAX=50000 MEMBER_FUNDING=100000 APPS_E2E_BOOTSTRAP=1 APPS_E2E_RESTART=1 APPS_E2E_RESTART_APP=$SLIDES_APP \
+  e2e=$(E2E_MINI=$MINI MINI_MARKET_CACHE=$W/state/quarantine APPS_MAX=50000 MEMBER_FUNDING=20000 APPS_E2E_BOOTSTRAP=1 APPS_E2E_RESTART=1 APPS_E2E_RESTART_APP=$SLIDES_APP \
     bash "$REPO/scripts/spk-platform/apps-e2e.sh" "$JAPPS_WORLD_ENV" "$W/e2e" "$SLIDES_APP" 2>"$W/e2e.err")
   while IFS=$'\t' read -r status name detail; do
     case $status in PASS) row "$name" 1 "$detail" ;; FAIL) row "$name" 0 "$detail" ;; esac
