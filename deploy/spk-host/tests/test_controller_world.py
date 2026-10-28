@@ -273,6 +273,21 @@ class ControllerWorldTests(unittest.TestCase):
             for bad in ('foreground', 'attach', 'parent;stop', ''):
                 with self.assertRaises(ValueError): c.reconcile_controller(r['store'], 'helper', bad)
 
+    def test_quiescence_uses_only_registered_worker_paths_and_inspection(self):
+        r = self.worker_record()
+        base = self.root / 'base'
+        with patch.object(c, 'load', return_value=({}, base, r)), patch.object(c, 'checked_units') as checked, patch.object(c, 'controller_child', return_value=0) as child:
+            self.assertEqual(c.controller_quiescence(r['store'], 'helper'), 0)
+            checked.assert_called_once_with(base, r)
+            state = c.worker_state(r)
+            self.assertEqual(child.call_args.args[1], [str(base / 'bin/grain-runtime'), 'quiescence', 'inspect',
+                str(state / 'admin.sock'), str(state / 'resident')])
+            self.assertEqual(child.call_args.kwargs['timeout'], 1800)
+            del r['workerTask']
+            with self.assertRaisesRegex(ValueError, 'worker mode'):
+                c.controller_quiescence(r['store'], 'helper')
+            self.assertEqual(child.call_count, 1)
+
     def test_worker_configuration_rejects_launcher_scope_or_custody_changes(self):
         r = self.worker_record(); base, config = self.worker_config_value(r)
         c.validate_worker_config(config, base, r)
