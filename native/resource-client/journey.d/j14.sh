@@ -342,8 +342,21 @@ hermes() { # STEP WHAT: one resident pass that runs exactly one more prompt (or 
   local next=$(( $(resident_completed) + 1 ))
   jq -n --arg c "$G/controller.json" --arg i "$RINBOX" --arg s "$RSTATE" --argjson m "$next" \
     '{type:"mini-hermes-room-resident-v1",controller:$c,inbox:$i,state:$s,maxPrompts:$m,intervalSeconds:5}' >"$RCFG"
+  # The peak the resident's uid holds during the pass (the quota must cover it, not the
+  # end state): the controller root and the room workspace, sampled every 5 s.
+  ( while :; do
+      printf '%s\t%s\t%s\t%s\n' "$(du -sk "$G" 2>/dev/null | cut -f1)" "$(find "$G" 2>/dev/null | wc -l)" \
+        "$(du -sk "$G/state/resource-workspace" 2>/dev/null | cut -f1)" "$(find "$G/state/resource-workspace" 2>/dev/null | wc -l)"
+      sleep 5
+    done >"$SD/sample-pass.tsv" ) &
+  local sampler=$!
+  echo "$sampler" >"$SD/sampler.pid"
   operator "$1" "hermes resident pass: $2" env "MINI_TRACE=$SD/trace-resident.jsonl" \
     timeout "$J14_PASS_SECONDS" "$GRAIN_RUNTIME" hermes-room resident "$RCFG"
+  kill "$(cat "$SD/sampler.pid")" 2>/dev/null; wait "$sampler" 2>/dev/null; rm -f "$SD/sampler.pid"
+  [ -s "$SD/footprint-passes.tsv" ] || printf 'pass\tpeak_kib\tpeak_inodes\tpeak_room_ws_kib\tpeak_room_ws_inodes\n' >"$SD/footprint-passes.tsv"
+  awk -F '\t' -v p="$1" '{for (i = 1; i <= 4; i++) if ($i + 0 > m[i]) m[i] = $i + 0}
+    END {printf "%s\t%d\t%d\t%d\t%d\n", p, m[1], m[2], m[3], m[4]}' "$SD/sample-pass.tsv" >>"$SD/footprint-passes.tsv"
   cp "$OUT" "$SD/resident-$1.jsonl"; cp "$ERR" "$SD/resident-$1.err"
   # After the pass, never between a member's ask and the pass that serves it:
   # the resident's brief reads the room's recent entries above the certified
