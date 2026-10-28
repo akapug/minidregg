@@ -4,6 +4,7 @@
 # a separate, currently unavailable operation.
 set -eu
 umask 077
+. "$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)/native/resource-client/journey.d/lib/evidence.sh"
 
 if [ "$#" -ne 2 ]; then
   echo "usage: $0 SOURCE_MATCHED_HOST NEW_EVIDENCE_DIRECTORY" >&2
@@ -23,7 +24,7 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 2; }
 [ ! -e "$EVIDENCE" ] || { echo "evidence directory already exists" >&2; exit 2; }
 mkdir -m 700 "$EVIDENCE"
 EVIDENCE=$(CDPATH='' cd -- "$EVIDENCE" && pwd)
-shasum -a 256 "$0" "$REPO/scripts/grain-birth/native-share-member.sh" \
+sha256 "$0" "$REPO/scripts/grain-birth/native-share-member.sh" \
   "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY" \
   >"$EVIDENCE/input-sha256.txt"
 
@@ -299,15 +300,6 @@ for target in app package snapshot; do
 done
 
 query app-tool-before-reopen 8 7902 81 "$EVIDENCE/workroom/tool.key" 43206
-# The Store's durable image (seed + every log record), read under the Store's own
-# anchor identity, as the Host's transport opens it (`Config.anchorIdentity`,
-# printed by `describe` as storeAnchorIdentity; never re-derived here). The legacy single-blob `read-to` image no longer
-# exists: the Store keeps a durable log, so `read-to` refuses ("published byte
-# record is missing").
-durable_image() {
-  _image_id=$("$HOST" "$CONFIG" describe | jq -er .storeAnchorIdentity)
-  "$STORE_BINARY" --anchor-identity "$_image_id" durable-read "$1" 1 1 "$2"
-}
 durable_image "$EVIDENCE/workroom/store" "$EVIDENCE/app-before-reopen-image.bin"
 stop_session
 start_session reopened-session
@@ -372,5 +364,5 @@ jq -e --slurpfile initial "$EVIDENCE/app-tool-attach-before/view.json" '
   "$EVIDENCE/tool-after/view.json" >/dev/null
 jq -e '.cell.grain.status == "3" and .cell.grain.reserved == "1"' \
   "$EVIDENCE/parent-after/view.json" >/dev/null
-shasum -a 256 -c "$EVIDENCE/input-sha256.txt" >"$EVIDENCE/input-recheck.txt"
+sha256 -c "$EVIDENCE/input-sha256.txt" >"$EVIDENCE/input-recheck.txt"
 echo "current metered app/session birth native acceptance PASS"

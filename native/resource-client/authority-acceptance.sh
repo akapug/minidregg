@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+. "$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)/native/resource-client/journey.d/lib/evidence.sh"
 
 if [ "$#" -ne 2 ]; then
   echo "usage: $0 MINIDREGG_HOST NEW_EVIDENCE_DIRECTORY" >&2
@@ -32,7 +33,7 @@ if [ -e "$EVIDENCE" ]; then
 fi
 mkdir "$EVIDENCE"
 EVIDENCE=$(CDPATH='' cd -- "$EVIDENCE" && pwd)
-SCRIPT_SHA256=$(shasum -a 256 "$0" | awk '{print $1}')
+SCRIPT_SHA256=$(sha256 "$0" | awk '{print $1}')
 
 decimal() {
   jq -er --arg field "$2" '.[$field] |
@@ -391,10 +392,10 @@ test ! -e "$EVIDENCE/bob-after-revoke-invoke/outcome.json"
 
 # Historical retry is allowed to return the original receipt, but must leave
 # the current boundary and height unchanged after the later revocation.
-CALL_HASH_BEFORE=$(shasum -a 256 "$EVIDENCE/bob-write-attempt/call.bin" | awk '{print $1}')
+CALL_HASH_BEFORE=$(sha256 "$EVIDENCE/bob-write-attempt/call.bin" | awk '{print $1}')
 "$MINI" retry --attempt "$EVIDENCE/bob-write-attempt" --mode submit \
   >"$EVIDENCE/bob-retry.stdout"
-CALL_HASH_AFTER=$(shasum -a 256 "$EVIDENCE/bob-write-attempt/call.bin" | awk '{print $1}')
+CALL_HASH_AFTER=$(sha256 "$EVIDENCE/bob-write-attempt/call.bin" | awk '{print $1}')
 test "$CALL_HASH_BEFORE" = "$CALL_HASH_AFTER"
 receipt "$EVIDENCE/bob-write-attempt/retry-0001.json" replayed
 for field in transactionId eventId acceptedCount worldRoot; do

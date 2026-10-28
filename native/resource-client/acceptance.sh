@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+. "$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)/native/resource-client/journey.d/lib/evidence.sh"
 
 if [ "$#" -ne 2 ]; then
   echo "usage: $0 MINIDREGG_HOST NEW_EVIDENCE_DIRECTORY" >&2
@@ -12,6 +13,8 @@ HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 REPO=$(CDPATH='' cd -- "$HERE/../.." && pwd)
 . "$REPO/native/resource-client/journey.d/lib/genesis-params.sh"
 resolve_params_sh "$REPO" || exit 2
+. "$REPO/native/resource-client/journey.d/lib/wire.sh"
+CONTENT_VERSION=$(content_command_version "$REPO")
 MINI=${MINI:-"$HERE/target/debug/mini"}
 STORE_BINARY=${STORE_BINARY:-"$REPO/native/hyperdocument-link-sqlite-store/target/debug/minidregg-link-sqlite-store"}
 SIGNATURE_BINARY=${SIGNATURE_BINARY:-"$REPO/native/credential-signature-verifier/target/debug/minidregg-credential-signature-verifier"}
@@ -141,7 +144,7 @@ cat >"$EVIDENCE/content-intent.json" <<EOF
           "target": "600",
           "capability": "61",
           "observeCapability": null,
-          "schemaVersion": "1",
+          "schemaVersion": "$CONTENT_VERSION",
           "expectedTargetRoot": "$TARGET_ROOT",
           "payload": {
             "type": "content",
@@ -185,12 +188,12 @@ test -f "$EVIDENCE/content-attempt/call.bin"
 test ! -e "$EVIDENCE/content-attempt/outcome.bin"
 test ! -e "$EVIDENCE/content-attempt/outcome.json"
 
-CALL_HASH_BEFORE=$(shasum -a 256 "$EVIDENCE/content-attempt/call.bin" | awk '{print $1}')
+CALL_HASH_BEFORE=$(sha256 "$EVIDENCE/content-attempt/call.bin" | awk '{print $1}')
 "$MINI" retry --attempt "$EVIDENCE/content-attempt" --mode submit \
   >"$EVIDENCE/retry-submit.stdout"
 "$MINI" retry --attempt "$EVIDENCE/content-attempt" --mode lookup \
   >"$EVIDENCE/retry-lookup.stdout"
-CALL_HASH_AFTER=$(shasum -a 256 "$EVIDENCE/content-attempt/call.bin" | awk '{print $1}')
+CALL_HASH_AFTER=$(sha256 "$EVIDENCE/content-attempt/call.bin" | awk '{print $1}')
 test "$CALL_HASH_BEFORE" = "$CALL_HASH_AFTER"
 jq -e '.type == "confirmed" and .confirmation == "replayed"' \
   "$EVIDENCE/content-attempt/retry-0001.json" >/dev/null
@@ -258,7 +261,7 @@ cat >"$EVIDENCE/joint-intent.json" <<EOF
             "target": "600",
             "capability": "61",
             "observeCapability": "61",
-            "schemaVersion": "1",
+            "schemaVersion": "$CONTENT_VERSION",
             "expectedTargetRoot": "$CONTENT_ROOT",
             "payload": {
               "type": "content",
@@ -323,10 +326,10 @@ JOINT_RECEIPT_BOUNDARY=$(receipt_field "$EVIDENCE/joint-attempt/outcome.json" wo
 test "$JOINT_BEFORE_RETRY_HEIGHT" = "13"
 test "$JOINT_BEFORE_RETRY_BOUNDARY" = "$JOINT_RECEIPT_BOUNDARY"
 
-JOINT_CALL_HASH_BEFORE=$(shasum -a 256 "$EVIDENCE/joint-attempt/call.bin" | awk '{print $1}')
+JOINT_CALL_HASH_BEFORE=$(sha256 "$EVIDENCE/joint-attempt/call.bin" | awk '{print $1}')
 "$MINI" retry --attempt "$EVIDENCE/joint-attempt" --mode submit \
   >"$EVIDENCE/joint-retry-submit.stdout"
-JOINT_CALL_HASH_AFTER=$(shasum -a 256 "$EVIDENCE/joint-attempt/call.bin" | awk '{print $1}')
+JOINT_CALL_HASH_AFTER=$(sha256 "$EVIDENCE/joint-attempt/call.bin" | awk '{print $1}')
 test "$JOINT_CALL_HASH_BEFORE" = "$JOINT_CALL_HASH_AFTER"
 jq -e '.type == "confirmed" and .confirmation == "replayed" and .acceptedCount == "3"' \
   "$EVIDENCE/joint-attempt/retry-0001.json" >/dev/null
