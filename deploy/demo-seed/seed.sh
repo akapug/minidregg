@@ -46,7 +46,10 @@ as() {
     env -i PATH=/usr/bin:/bin LANG=C.UTF-8 SSH_ORIGINAL_COMMAND="$line" \
     "$LIB/mini-shell-ssh" "$C/bin/mini" "$C/bin/minidregg-host" "$NODE/deployment/pinned-config.json" \
     "$NODE/public/mini.sock" "$S/$m/workspace" "$S/$m" </dev/null >"$T/out" 2>"$T/err"
-  RC=$?; OUT=$(cat "$T/out"); ERR=$(cat "$T/err"); return $RC
+  RC=$?; OUT=$(cat "$T/out"); ERR=$(cat "$T/err")
+  # timeout(1) exits 124 (137 after --kill-after): name it, it is not a failure of the line itself.
+  case $RC in 124|137) ERR="error: TIMEOUT rc=$RC after ${limit}s running: ${line:0:100}"$'\n'"$ERR" ;; esac
+  return $RC
 }
 # stage MEMBER FILE <stdin: contents>: a file under the member's HOME/requests (what @FILE names).
 stage() {
@@ -118,7 +121,7 @@ publish_public "$BOX" lobby
 # --- 4. the story table, its law, a first scene
 if as "$BOX" "story list" && grep -qw tale <<<"$OUT"; then skip_ "story tale exists"
 else
-  as "$BOX" "story new tale --from tale --gm $SAGES" && as "$BOX" "story seal tale" \
+  as "$BOX" "story new tale --from tale --gm $SAGES" 600 && as "$BOX" "story seal tale" 600 \
     && ok_ "story tale installed under the sealed law, GM $SAGE" || fail_ "story new/seal: $(errtail_)"
 fi
 if as "$SAGE" "story list" && grep -qw tale <<<"$OUT"; then skip_ "$SAGE already in story tale"
