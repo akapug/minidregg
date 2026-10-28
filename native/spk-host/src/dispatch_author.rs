@@ -12,7 +12,7 @@ use std::fs::{self, File};
 use std::io::{self, Read};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use crate::canonical::{decimal as canonical_decimal, hex};
+use crate::canonical::{decimal as canonical_decimal, hex, hex_matches};
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
@@ -159,16 +159,24 @@ impl FixedAuthoring {
             .get("request")
             .and_then(Value::as_object)
             .ok_or_else(|| invalid("source plan lacks decoded request"))?;
-        let mut comparable_request = source_request.clone();
-        let request_type = comparable_request.remove("type");
-        let canonical_request = comparable_request.remove("canonicalRequest");
+        let request_type = source_request.get("type");
+        let canonical_request = source_request.get("canonicalRequest");
+        // The decoded request, less the two plan-added members, is exactly the request we sent.
+        let echoes_request = request.as_object().is_some_and(|sent| {
+            let others = source_request
+                .iter()
+                .filter(|(name, _)| !matches!(name.as_str(), "type" | "canonicalRequest"));
+            others.clone().count() == sent.len()
+                && others.into_iter().all(|(name, value)| sent.get(name) == Some(value))
+        });
         if field(&plan, "type")? != "application-dispatch-author-plan-v1"
-            || field(&plan, "canonicalPlan")? != hex(plan_bytes)
-            || request_type.as_ref().and_then(Value::as_str)
+            || !hex_matches(field(&plan, "canonicalPlan")?, plan_bytes)
+            || request_type.and_then(Value::as_str)
                 != Some("application-dispatch-author-request-v1")
-            || canonical_request.as_ref().and_then(Value::as_str)
-                != Some(hex(request_bytes).as_str())
-            || Value::Object(comparable_request) != *request
+            || !canonical_request
+                .and_then(Value::as_str)
+                .is_some_and(|text| hex_matches(text, request_bytes))
+            || !echoes_request
             || field(&plan, "appResource")? != self.app
             || field(&plan, "sessionResource")? != self.session
             || field(&plan, "subject")? != self.subject

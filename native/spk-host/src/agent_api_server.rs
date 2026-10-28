@@ -132,12 +132,7 @@ pub(crate) fn unhex32(value: &str) -> io::Result<[u8; 32]> {
     {
         return Err(invalid("agent identity hex refused"));
     }
-    let mut output = [0; 32];
-    for (index, pair) in value.as_bytes().as_chunks::<2>().0.iter().enumerate() {
-        output[index] = u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16)
-            .map_err(|_| invalid("agent identity hex byte"))?;
-    }
-    Ok(output)
+    crate::canonical::unhex_array(value).ok_or_else(|| invalid("agent identity hex byte"))
 }
 
 pub(crate) fn digest_nat(value: &str) -> io::Result<[u8; 32]> {
@@ -159,6 +154,70 @@ pub(crate) fn digest_nat(value: &str) -> io::Result<[u8; 32]> {
     Ok(bytes)
 }
 
+/// The ACL entries of `path` as `getfacl -cpn` lists them (`user::rw-`, `user:1000:rw-`, `group::---`,
+/// `mask::rw-`, `other::---`), read from the `system.posix_acl_access` xattr of the path itself (never
+/// through a symlink): no process per accepted connection. A file with no extended ACL has the entries
+/// its mode bits give.
+fn acl_entries(path: &Path) -> io::Result<Vec<String>> {
+    use std::os::unix::ffi::OsStrExt;
+    let c_path = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| invalid("agent socket ACL path refused"))?;
+    let mut buffer = [0u8; 4 + 8 * 32];
+    let size = unsafe {
+        libc::lgetxattr(
+            c_path.as_ptr(),
+            c"system.posix_acl_access".as_ptr(),
+            buffer.as_mut_ptr().cast(),
+            buffer.len(),
+        )
+    };
+    if size < 0 {
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() != Some(libc::ENODATA) {
+            return Err(invalid("agent socket ACL inspection refused"));
+        }
+        let mode = fs::symlink_metadata(path).ctx("inspect", &path)?.mode();
+        return Ok(vec![
+            format!("user::{}", acl_perm(mode >> 6)),
+            format!("group::{}", acl_perm(mode >> 3)),
+            format!("other::{}", acl_perm(mode)),
+        ]);
+    }
+    parse_posix_acl(&buffer[..size as usize])
+}
+
+fn acl_perm(bits: u32) -> String {
+    [(4, 'r'), (2, 'w'), (1, 'x')]
+        .iter()
+        .map(|(bit, letter)| if bits & bit != 0 { *letter } else { '-' })
+        .collect()
+}
+
+/// The Linux `posix_acl_xattr` image: version 2 (LE u32), then 8-byte entries (tag u16, perm u16, id u32).
+fn parse_posix_acl(bytes: &[u8]) -> io::Result<Vec<String>> {
+    let refused = || invalid("agent socket ACL inspection encoding");
+    let (header, entries) = bytes.split_at_checked(4).ok_or_else(refused)?;
+    if header != 2u32.to_le_bytes() || entries.len() % 8 != 0 {
+        return Err(refused());
+    }
+    let mut lines = Vec::new();
+    for entry in entries.chunks_exact(8) {
+        let tag = u16::from_le_bytes([entry[0], entry[1]]);
+        let perm = acl_perm(u32::from(u16::from_le_bytes([entry[2], entry[3]])));
+        let id = u32::from_le_bytes([entry[4], entry[5], entry[6], entry[7]]);
+        lines.push(match tag {
+            0x01 => format!("user::{perm}"),
+            0x02 => format!("user:{id}:{perm}"),
+            0x04 => format!("group::{perm}"),
+            0x08 => format!("group:{id}:{perm}"),
+            0x10 => format!("mask::{perm}"),
+            0x20 => format!("other::{perm}"),
+            _ => return Err(refused()),
+        });
+    }
+    Ok(lines)
+}
+
 fn exact_acl(path: &Path, controller_uid: u32, directory: bool, install: bool) -> io::Result<()> {
     let owner_uid = unsafe { libc::geteuid() };
     let owner = if directory { "user::rwx" } else { "user::rw-" };
@@ -173,25 +232,12 @@ fn exact_acl(path: &Path, controller_uid: u32, directory: bool, install: bool) -
             return Err(invalid("agent socket ACL install refused"));
         }
     }
-    let output = Command::new("/usr/bin/getfacl")
-        .args(["-cpn"])
-        .arg(path)
-        .output()?;
-    if !output.status.success() {
-        return Err(invalid("agent socket ACL inspection refused"));
-    }
-    let listing = String::from_utf8(output.stdout)
-        .map_err(|_| invalid("agent socket ACL inspection encoding"))?;
+    let mut actual = acl_entries(path)?;
     let mut expected = vec![owner.to_owned(), "group::---".into(), "other::---".into()];
     if controller_uid != owner_uid {
         expected.push(format!("user:{controller_uid}:{other_uid}"));
         expected.push(format!("mask::{other_uid}"));
     }
-    let mut actual: Vec<_> = listing
-        .lines()
-        .filter(|line| !line.is_empty())
-        .map(str::to_owned)
-        .collect();
     expected.sort();
     actual.sort();
     if actual != expected {
@@ -245,38 +291,45 @@ fn protected_agent_socket_parent(
     }
 }
 
+/// Watches the caller's connection for the rest of one request. The watcher thread sleeps in
+/// `poll(2)` on the connection and on an eventfd that `Drop` signals: it wakes only when the caller
+/// sends, hangs up or errors (what the former 10 ms `MSG_PEEK` loop detected), or when the request
+/// ends, so there is no timer and `Drop` joins at once.
 pub(crate) struct CallerWatch {
     pub(crate) cancelled: Arc<AtomicBool>,
-    done: Arc<AtomicBool>,
+    done: std::os::fd::OwnedFd,
     thread: Option<JoinHandle<()>>,
 }
 
 impl CallerWatch {
     pub(crate) fn start(stream: &UnixStream) -> io::Result<Self> {
+        use std::os::fd::{FromRawFd, OwnedFd};
         let stream = stream.try_clone()?;
+        let raw = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC) };
+        if raw < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let done = unsafe { OwnedFd::from_raw_fd(raw) };
+        let wake = done.try_clone()?;
         let cancelled = Arc::new(AtomicBool::new(false));
-        let done = Arc::new(AtomicBool::new(false));
-        let (observed, finished) = (cancelled.clone(), done.clone());
+        let observed = cancelled.clone();
         let thread = thread::spawn(move || {
-            let mut byte = [0u8; 1];
-            while !finished.load(Ordering::Acquire) {
-                let count = unsafe {
-                    libc::recv(
-                        stream.as_raw_fd(),
-                        byte.as_mut_ptr().cast(),
-                        1,
-                        libc::MSG_PEEK | libc::MSG_DONTWAIT,
-                    )
-                };
-                if count >= 0 {
-                    observed.store(true, Ordering::Release);
-                    break;
+            let mut fds = [
+                libc::pollfd { fd: stream.as_raw_fd(), events: libc::POLLIN | libc::POLLRDHUP, revents: 0 },
+                libc::pollfd { fd: wake.as_raw_fd(), events: libc::POLLIN, revents: 0 },
+            ];
+            loop {
+                let ready = unsafe { libc::poll(fds.as_mut_ptr(), 2, -1) };
+                if ready < 0 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
+                    continue;
                 }
-                if io::Error::last_os_error().kind() != io::ErrorKind::WouldBlock {
+                // Anything on the connection (data, EOF, hang-up, error), or a poll failure,
+                // means the caller is no longer a silent waiter; a wake with the connection
+                // quiet means the request is over.
+                if ready < 0 || fds[0].revents != 0 {
                     observed.store(true, Ordering::Release);
-                    break;
                 }
-                thread::sleep(Duration::from_millis(10));
+                break;
             }
         });
         Ok(Self {
@@ -289,7 +342,8 @@ impl CallerWatch {
 
 impl Drop for CallerWatch {
     fn drop(&mut self) {
-        self.done.store(true, Ordering::Release);
+        let one = 1u64.to_ne_bytes();
+        unsafe { libc::write(self.done.as_raw_fd(), one.as_ptr().cast(), one.len()) };
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
@@ -602,16 +656,7 @@ impl ResidentAgent<'_> {
             .iter()
             .map(|h| (h.name.clone(), h.value.clone()))
             .collect();
-        let body = body_hex
-            .as_bytes()
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .map(|pair| {
-                u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16)
-                    .map_err(|_| invalid("agent body hex"))
-            })
-            .collect::<io::Result<Vec<_>>>()?;
+        let body = crate::canonical::unhex(body_hex).ok_or_else(|| invalid("agent body hex"))?;
         let path_and_query = if query.is_empty() {
             path.clone()
         } else {
@@ -1147,6 +1192,38 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
 
     static NEXT_LISTENER: AtomicUsize = AtomicUsize::new(1);
+
+    #[test]
+    fn posix_acl_xattr_lists_as_getfacl_does_and_refuses_other_encodings() {
+        let mut image = 2u32.to_le_bytes().to_vec();
+        for (tag, perm, id) in [(1u16, 6u16, u32::MAX), (2, 6, 1000), (4, 0, u32::MAX), (0x10, 6, u32::MAX), (0x20, 0, u32::MAX)] {
+            image.extend_from_slice(&tag.to_le_bytes());
+            image.extend_from_slice(&perm.to_le_bytes());
+            image.extend_from_slice(&id.to_le_bytes());
+        }
+        assert_eq!(
+            parse_posix_acl(&image).unwrap(),
+            ["user::rw-", "user:1000:rw-", "group::---", "mask::rw-", "other::---"]
+        );
+        assert!(parse_posix_acl(&image[..image.len() - 1]).is_err());
+        assert!(parse_posix_acl(&[1, 0, 0, 0]).is_err());
+        let mut unknown = 2u32.to_le_bytes().to_vec();
+        unknown.extend_from_slice(&[0x40, 0, 6, 0, 0, 0, 0, 0]);
+        assert!(parse_posix_acl(&unknown).is_err());
+    }
+
+    #[test]
+    fn a_file_without_extended_acl_lists_its_mode_bits() {
+        let path = std::env::temp_dir().join(format!(
+            "mini-acl-mode-{}-{}",
+            std::process::id(),
+            NEXT_LISTENER.fetch_add(1, Ordering::SeqCst)
+        ));
+        fs::write(&path, b"x").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+        assert_eq!(acl_entries(&path).unwrap(), ["user::rw-", "group::r--", "other::---"]);
+        fs::remove_file(&path).unwrap();
+    }
 
     #[test]
     fn inspect_observes_native_uncertainty_before_client_marker() {

@@ -490,7 +490,7 @@ impl ResidentLifetimeAgent<'_> {
             || u32::from_le_bytes(outer[..4].try_into().unwrap()) as usize + 4 != outer.len()
             || outer[4] != 76
             || &outer[5..] != committed_bytes.as_slice()
-            || field(&committed, "frameHex")? != hex(&committed_bytes)
+            || !crate::canonical::hex_matches(field(&committed, "frameHex")?, &committed_bytes)
         {
             return Err(refused("lifetime recovered fresh op76 frame drift"));
         }
