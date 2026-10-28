@@ -204,6 +204,12 @@ AUTHORITY_ROOT=$(jq -er '.authorityRoot |
   select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
   "$EVIDENCE/alice-before-delegate/challenge.json")
 BEFORE_DENIAL=$(challenge_decimal "$EVIDENCE/alice-before-delegate/challenge.json" worldRoot)
+# A fresh declared cell holds its declaration and no field: K-FIELD-CLOSURE
+# retired the born-holding-field-1 seed, and the declaration renders as its own
+# member, never among entries.
+jq -e '(.cell.entries | length) == 0 and
+  ((.cell.declaration // []) | sort) == ["0","2"]' \
+  "$EVIDENCE/alice-before-delegate/view.json" >/dev/null
 
 # A valid Alice signer and owner grant cannot mutate under the installed law.
 cat >"$EVIDENCE/alice-denied-intent.json" <<EOF
@@ -248,11 +254,8 @@ query_resource alice-after-denial 7 61 "$EVIDENCE/alice.key" 30008
 test "$(challenge_decimal "$EVIDENCE/alice-after-denial/challenge.json" worldRoot)" = "$BEFORE_DENIAL"
 test "$(challenge_decimal "$EVIDENCE/alice-after-denial/challenge.json" height)" = 12
 test "$(jq -er '.cell.root' "$EVIDENCE/alice-after-denial/view.json")" = "$TARGET_ROOT"
-jq -e '(.cell.entries | length) == 1 and
-  .cell.entries[0].key.type == "object" and
-  .cell.entries[0].key.resource == "600" and
-  .cell.entries[0].key.field == "1" and
-  .cell.entries[0].value == "0"' \
+jq -e '(.cell.entries | length) == 0 and
+  ((.cell.declaration // []) | sort) == ["0","2"]' \
   "$EVIDENCE/alice-after-denial/view.json" >/dev/null
 
 cat >"$EVIDENCE/delegate-intent.json" <<EOF
@@ -381,11 +384,12 @@ test "$FINAL_BEFORE_BOUNDARY" = "$(decimal "$EVIDENCE/revoke-attempt/outcome.jso
 FINAL_TARGET_ROOT=$(jq -er '.cell.root | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
   "$EVIDENCE/alice-before-retry/view.json")
 test "$FINAL_TARGET_ROOT" = "$POST_BOB_ROOT"
-jq -e '(.cell.entries | length) == 2 and
-  ([.cell.entries[] | select(.key.type == "object" and .key.resource == "600" and
-    .key.field == "0" and .value == "1")] | length) == 1 and
-  ([.cell.entries[] | select(.key.type == "object" and .key.resource == "600" and
-    .key.field == "1" and .value == "0")] | length) == 1' \
+jq -e '(.cell.entries | length) == 1 and
+  .cell.entries[0].key.type == "object" and
+  .cell.entries[0].key.resource == "600" and
+  .cell.entries[0].key.field == "0" and
+  .cell.entries[0].value == "1" and
+  ((.cell.declaration // []) | sort) == ["0","2"]' \
   "$EVIDENCE/alice-before-retry/view.json" >/dev/null
 FINAL_AUTHORITY_ROOT=$(jq -er '.authorityRoot |
   select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
@@ -426,11 +430,12 @@ done
 query_resource alice-final 7 61 "$EVIDENCE/alice.key" 30025
 test "$(challenge_decimal "$EVIDENCE/alice-final/challenge.json" worldRoot)" = "$FINAL_BEFORE_BOUNDARY"
 test "$(challenge_decimal "$EVIDENCE/alice-final/challenge.json" height)" = "$FINAL_BEFORE_HEIGHT"
-jq -e '(.cell.entries | length) == 2 and
-  ([.cell.entries[] | select(.key.type == "object" and .key.resource == "600" and
-    .key.field == "0" and .value == "1")] | length) == 1 and
-  ([.cell.entries[] | select(.key.type == "object" and .key.resource == "600" and
-    .key.field == "1" and .value == "0")] | length) == 1' \
+jq -e '(.cell.entries | length) == 1 and
+  .cell.entries[0].key.type == "object" and
+  .cell.entries[0].key.resource == "600" and
+  .cell.entries[0].key.field == "0" and
+  .cell.entries[0].value == "1" and
+  ((.cell.declaration // []) | sort) == ["0","2"]' \
   "$EVIDENCE/alice-final/view.json" >/dev/null
 
 birth_id=$(decimal "$EVIDENCE/birth-attempt/outcome.json" transactionId)
