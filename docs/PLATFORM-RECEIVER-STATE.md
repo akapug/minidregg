@@ -50,41 +50,44 @@ The auditor is af7a93e7b8ba729d4; passes 16–23 are on lane/audit-platform.
   23.7 GB) and cold on hbox. The targets were the twenty modules in
   /build/lanes/lean-audit-c-build.sh, plus the lifetime-grant and share-issue Host files and
   tests/lean/LifetimeGrantSourceAdversary.lean (lane-check). The integrator has it, held.
-- **lane/lean-audit-c-m2, tip 3fa536765**, is green on hbox at 1a29e71af, on top of 82c17c448's
+- **lane/lean-audit-c-m2, tip 31b3db1c8**, is green on hbox at 1a29e71af, on top of 82c17c448's
   tree (build-m2d). Targets: the same plus Kernel.MeterRefillReceiver, Kernel.NativeHostReplay
   and Assurance.DeployedCredentialLifecycle. 3fa536765 adds the World refill pole, built per
   module.
 
-### In progress: item 7's plan poles (audit pass 24)
+### Umbrella on lane + M2 (hbox, warm)
 
-- File: Fixtures/BirthPlanPoles.lean, on this branch, uncommitted when this section was
-  written. It is not in Verify/, because `Fixtures` is imported by no umbrella, keystone or
-  axiom census, and the umbrella target list builds it.
-- Contents:
-  - a source-built genesis opened purely (`openState`/`openLoaded`/`validateLoaded`);
-  - the one neutral content birth;
-  - the real `prepareDraft` and `preparePending`;
-  - `plan_passes_inhabited` (verdict `some true`, law `birth/7001 = exact root`);
-  - `plan_refuses_inhabited` (verdict `some false`, root + 1).
-- Decided by `native_decide` (law 9, confessed). The pin names the two auxiliary axioms Lean
-  4.30 emits (`…._native.native_decide.ax_1_1`). The file elaborated green alone in about 6 s.
-- The build of `Fixtures CensusChecks` was started on hbox in /othersys/lanes/lean-audit-c/src
-  as a foreground ssh swarm-build. **It has no PID file.** Rerun it detached with a PID file if
-  its result is lost.
-- Still owed for item 7, by the pass-24 ruling: the signed poles over a recorded transcript
-  (`CheckedSignature` with Oracle `.recorded`, CredentialSignatureAdmission.lean:287-296;
-  `check-native-transcripts.sh` re-checks the verdict). That covers:
+Built: `lake build Minidregg Fixtures ObjectiveProofs CensusChecks +Host.Main:leanArts
++Host.ClientConsentSession:leanArts` (build-umb.sh) over lane/lean-audit-c cdda94d42 + M2
+31b3db1c8. Remaining reds, none of them this lane's to fix before the merge:
+- Fixtures.NativeAcceptedFixture and NativeDocWriteFixture: recorded runs, stale under M2's turn
+  digest and frames. They are re-recorded with the regen.
+- Compiler.PersistedCodecTagCensus: the tag set is equal (refill tags registered, 31b3db1c8).
+  The shape pins move (DURABLE.IMAGE, DURABLE.SEED and identities hashing through them). That is
+  the integrator's codec-shapes regen.
+- Assurance.StoryLaw: a `#guard_msgs` namespace pin at the base's main (43074c134), not from
+  this lane. Re-check after merging main.
+
+### Item 7's plan poles (audit pass 24): landed on the branch
+
+- cdda94d42 Fixtures/BirthPlanPoles.lean: `plan_passes_inhabited` (verdict `some true`) and
+  `plan_refuses_inhabited` (`some false`), over a source-built genesis opened purely and the real
+  `prepareDraft`/`preparePending`.
+- Decided by `native_decide`, confessed. The pin names the two auxiliary native axioms. It is in
+  `Fixtures`, which the umbrella target list builds. It elaborates in about 6 s.
+- Still owed, by the pass-24 ruling: the signed poles over a recorded transcript
+  (`CheckedSignature` with Oracle `.recorded`, CredentialSignatureAdmission.lean:287-296).
   - `BranchAccepted … .factory` inhabited, and admission `.error .policyRejected` on the
     refusing law;
   - the `ReceiverReadsCurrent` satisfiable `AcceptedBirth`;
   - the completion `Candidate` passing `platformReadOnly`;
   - the Host-level refill at an exhausted meter.
-- Gate cost (pass 24): if a kernel version's total passes a few minutes, the native module
-  gates merges and the kernel one runs nightly. Measured cost of kernel cSHAKE: about 0.13 s per
-  hashed byte (100 B about 33 s, 1,000 B about 144 s).
-- Found while doing this: scripts/kn2/neutral-birth.lean is stale. Its genesis Config lacks
-  `payControlCapabilityId`, `clockControlCapabilityId` and the four `platform*` fields, so the
-  accepted interim executed witness does not elaborate. Fix it alongside the poles.
+- Gate cost: kernel cSHAKE runs about 0.13 s per hashed byte. If a kernel version's total passes a
+  few minutes, the native module gates merges and the kernel one runs nightly.
+- scripts/kn2/neutral-birth.lean is stale. Its genesis Config lacks `payControlCapabilityId`,
+  `clockControlCapabilityId` and the four `platform*` fields, so the interim executed witness
+  does not elaborate. Fix it alongside the signed poles (Fixtures/BirthPlanPoles.lean has the
+  right Config).
 
 ### Audit record (lane/audit-platform AUDIT.md)
 
@@ -107,7 +110,8 @@ The auditor is af7a93e7b8ba729d4; passes 16–23 are on lane/audit-platform.
   ever diverge, honest thin births are refused `draftNotAuthored`. Collapse them into one
   function both call, keep the better copy, and prove agreement with rfl or a filtered test. Do
   this after lean-audit-c and thin-birth are both on main.
-- thin-birth lands in the same window as the conversion. Expect overlap with this lane in
+- thin-birth is on main (eda65ced8); the DurableFastForwardProofs fix is on main (455f59d57, the same
+  edit as cdda94d42). Expect overlap with this lane in
   Host/SourceAgreementJson.lean (`birthCurrent`) and Host/HostOperations.lean when merging the
   converted main.
 
