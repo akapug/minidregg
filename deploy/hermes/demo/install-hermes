@@ -22,6 +22,19 @@
 #   controller controller.json names the summoned account; register; start
 #              mini-grain-controller@TASK
 #   dispatch   the sealed hand-off into Hermes's registered inbox
+#   dismiss    (repeatable, after resident) the founder's `dismiss ROOM`, its sealed
+#              dismissal dispatched into Hermes's inbox, and the wait (up to 10 min) for
+#              the running resident to return the budget's remainder to the founder
+#   resummon   (repeatable, after dismiss) summon, controller, dispatch and resident
+#              again for the founder's new assignment: its budget account has a new
+#              name, which the controller config must carry, and a fresh resident state
+#   refill     (repeatable, any time after create) the sponsor's Book account burns
+#              AMOUNT (50000) credit into a purse: PURSE provider (default: what each
+#              model call reserves and settles from; it starts at 50000 and a call on
+#              the pool route reserves up to perOp plus the token caps' metered price),
+#              parent or tool (PAY P6, `mini pay refill`). A refused reserve is the
+#              room's `no-credit` reply until then. An uncertain submit is resolved
+#              by the printed lookup, never by a second refill.
 #   resident   resident.json names the delivered assignment inbox; with both
 #              units stopped, register the resident too; start
 #              mini-grain-controller@TASK and mini-grain-resident@TASK
@@ -400,7 +413,7 @@ step_create() {
   as_op "$GRAIN" create "$SPEC" --birth-socket "$SOCKET" | as_op tee "$RECORD/grain-birth.json"
   chown -R "$RESIDENT:$RESIDENT" "$G"
   as_res "$GRAIN" create "$SPEC" | as_op tee "$RECORD/grain-created.json"
-  install -d -o "$RESIDENT" -g "$RESIDENT" -m 0700 "$S/room-home" "$S/resident"
+  install -d -o "$RESIDENT" -g "$RESIDENT" -m 0700 "$S/room-home"
   mark create
 }
 
@@ -452,7 +465,11 @@ step_resident() {
   current=$(find "$V/inbox" -name current.json | head -1)
   inbox=$(jq -r '.inbox // empty' "$current" 2>/dev/null)
   [ -n "$inbox" ] && [ -d "$inbox" ] || die "no delivered assignment inbox under $V/inbox (run dispatch)"
-  jq -n --arg c "$G/controller.json" --arg i "$inbox" --arg s "$S/resident" \
+  # One resident state per assignment: a later summon (after a dismissal) starts
+  # its own count and its own return, never the dismissed assignment's.
+  local assignment; assignment=$(jq -r '.assignment // empty' "$current")
+  case $assignment in ''|*[!0-9]*) die "the assignment pointer $current names no assignment" ;; esac
+  jq -n --arg c "$G/controller.json" --arg i "$inbox" --arg s "$S/resident-a$assignment" \
     '{type:"mini-hermes-room-resident-v1",controller:$c,inbox:$i,state:$s,maxPrompts:null,intervalSeconds:60}' \
     | as_res tee "$G/resident.json" >/dev/null
   as_res chmod 600 "$G/resident.json"
@@ -463,10 +480,63 @@ step_resident() {
   mark resident
 }
 
-[ $# -gt 0 ] || { sed -n '2,50p' "$0"; exit 64; }
+resident_state() { jq -r '.state // empty' "$G/resident.json" 2>/dev/null; }
+
+step_dismiss() {
+  done_step resident || die "dismiss follows a running resident (step resident)"
+  local state staged=$V/dismissal-staged
+  state=$(resident_state)
+  [ -n "$state" ] || die "no resident.json under $G"
+  sh_line founder "dismiss $ROOM" | as_op tee "$RECORD/dismiss-$(date -u +%Y%m%dT%H%M%SZ).out"
+  [ -s "$(cat "$RECORD/outbox")/dismissal.json" ] || die "the dismissal left no sealed bundle in $(cat "$RECORD/outbox")"
+  rm -rf "$staged"; install -d -o "$RESIDENT" -g "$RESIDENT" -m 0700 "$staged"
+  install -o "$RESIDENT" -g "$RESIDENT" -m 0600 "$(cat "$RECORD/outbox")/dismissal.json" "$staged/dismissal.json"
+  as_res "$MINI" hermes-handoff --action dispatch --registration "$V/registrations/$PARENT_T.json" \
+    --bundle "$staged/dismissal.json" --socket "$RSOCKET"
+  for _ in $(seq 1 120); do
+    [ "$(jq -r '.returned // empty | tostring' "$state/resident.json" 2>/dev/null)" != "" ] && break
+    sleep 5
+  done
+  [ -n "$(jq -r '.returned // empty | tostring' "$state/resident.json" 2>/dev/null)" ] \
+    || die "the resident has not returned the budget yet (journalctl -u mini-grain-resident@$PARENT_T); rerun dismiss's wait with: install-hermes resummon (it refuses until the return is journaled)"
+  echo "install-hermes: $ROOM dismissed; returned $(jq -c .returned "$state/resident.json")"
+}
+
+step_resummon() {
+  done_step resident || die "resummon follows a finished install"
+  local state; state=$(resident_state)
+  [ -n "$(jq -r '.returned // empty | tostring' "$state/resident.json" 2>/dev/null)" ] \
+    || die "the current assignment is not dismissed and returned ($state/resident.json): run dismiss first"
+  systemctl stop "mini-grain-resident@$PARENT_T.service" "mini-grain-controller@$PARENT_T.service"
+  as_op rm -f "$RECORD/summon.done" "$RECORD/controller.done" "$RECORD/dispatch.done" "$RECORD/resident.done"
+  step_summon; step_controller; step_dispatch; step_resident
+}
+
+step_refill() {
+  done_step create || die "refill needs the purses: run create first"
+  local amount=${AMOUNT:-50000} task attempt
+  case $amount in *[!0-9]*|''|0) die "AMOUNT must be a positive decimal" ;; esac
+  case ${PURSE:-provider} in
+    provider) task=$PURSE_T ;; parent) task=$PARENT_T ;; tool) task=$TOOL_T ;;
+    *) die "PURSE is provider, parent or tool" ;;
+  esac
+  attempt=$RECORD/refill-${PURSE:-provider}-$(date -u +%Y%m%dT%H%M%SZ)
+  # The payer is the sponsor's account (it signs with its own key; the
+  # credit asset is the PAY tariff's, so the Store's tariff must be set).
+  as_op "$MINI" pay refill --mode submit --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
+    --key "$NODE/keys/sponsor.key" --dir "$attempt" \
+    --subject "$(jq -r '.sponsor.subject' "$PARAMS")" --capability "$(jq -r '.sponsor.spendCapabilityId' "$PARAMS")" \
+    --account "$(jq -r '.sponsor.accountId' "$PARAMS")" --task "$task" --amount "$amount" \
+    | as_op tee "$attempt.out" \
+    || die "refill of $task by $amount not confirmed; resolve it with: runuser -u $OPERATOR -- $MINI pay refill --mode lookup --host $HOST --config $CONFIG --socket $SOCKET --dir $attempt"
+  echo "install-hermes: purse $task refilled by $amount (record $attempt)"
+}
+
+[ $# -gt 0 ] || { sed -n '2,70p' "$0"; exit 64; }
 for step in "$@"; do
   case $step in
     preflight|route|subjects|room|concierge|runtime|create|handoff|summon|controller|dispatch|resident) ;;
+    refill|dismiss|resummon) done_step preflight || die "run preflight first"; POOL_ROW=$(cat "$RECORD/pool-row"); "step_$step"; continue ;;
     *) die "unknown step $step" ;;
   esac
   [ "$step" = preflight ] || done_step preflight || die "run preflight first"

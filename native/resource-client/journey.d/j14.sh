@@ -56,6 +56,9 @@
 #             the till holds 10*turns, one `hermes` ledger entry per turn.
 #   audit     stop, cold audit re-admits every record (exit 0), serve; Hermes
 #             sends nothing more.
+#   resummon  alice summons again: a new budget account; the controller config is
+#             re-provisioned with it and restarted, the second hand-off dispatched;
+#             bob asks and Hermes answers from the new account on a fresh state.
 #
 # Hook contract: journey.sh (executed). Needs GRAIN_RUNTIME (grain-runtime,
 # with grain-provider-bridge beside it or GRAIN_PROVIDER_BRIDGE), TEST_PROVIDER
@@ -731,6 +734,7 @@ operator hermes "DISPATCH: the sealed hand-off into Hermes's registered inbox (v
   "$MINI" hermes-handoff --action dispatch --registration "$REG" --bundle "$OUTBOX/handoff.json" --socket "$SOCKET"
 RINBOX=$(jq -r '.inbox // empty' "$(find "$H/hermes" -name current.json | head -1)" 2>/dev/null)
 checkp hermes "the delivered assignment inbox is current ($RINBOX)" test -d "$RINBOX"
+RINBOX0=$RINBOX
 [ "$FAILED" = 0 ] || finish
 
 # ------------------------------------------------ attach 1: two docs, three things said
@@ -1128,6 +1132,43 @@ cp "$OUT" "$SD/tail-final.txt"
 # Hermes is dismissed by now, so the tail names it by its subject's short
 # form (s…LAST6), not by its member name.
 checkp audit "bob's tail after the audit shows Hermes's entries" grep -q "$HS\|hermes\|s…${HS: -6}" "$OUT"
+
+if [ -z "$J14_TIER" ]; then
+  # ---------------------------------------------- resummon: the founder summons again after a dismissal
+  # The new assignment funds a new budget account (its name is per assignment);
+  # the operator re-provisions the controller config with it, restarts the
+  # controller, dispatches the new hand-off, and the resident runs on a fresh
+  # state for the new assignment (install-hermes `resummon`).
+  ok resummon alice "summon lab as librarian --budget $BUDGET"
+  OUTBOX2=$(sed -n 's/.*hand-off in //p' "$OUT" | tail -1)
+  ACCT2=$(jq -r .account.name "$OUTBOX2/summon-lab.json" 2>/dev/null)
+  checkp resummon "the second assignment funds a new budget account ($ACCT2, was $ACCT)" sh -c "[ -n '$ACCT2' ] && [ '$ACCT2' != '$ACCT' ] && [ '$ACCT2' != null ]"
+  operator resummon "STOP: the controller (its config names the dismissed assignment's account)" systemctl --user stop "$UNIT.service"
+  operator resummon "PROVISION: the controller config names the new budget account $ACCT2" \
+    sh -c "jq --arg a '$ACCT2' '.toolTask.room.account = \$a' '$G/controller.json' >'$G/controller.json.new' && chmod 600 '$G/controller.json.new' && mv '$G/controller.json.new' '$G/controller.json'"
+  rm -f "$G/state/control.sock"
+  operator resummon "CONTROLLER: start $UNIT again" \
+    systemd-run --user --unit="$UNIT" --description="j14:$SD" \
+      --setenv=MINI_GRAIN_CONTROLLER_MANAGER=user --setenv=MINI_GRAIN_WORKER_MANAGER=user \
+      --setenv="MINI_GRAIN_CONTROLLER_UNIT=$UNIT.service" \
+      --property=Restart=on-failure --property=RestartSec=2s --property=KillMode=control-group \
+      --property=RuntimeMaxSec=7200s --property="StandardError=append:$SD/controller.stderr" \
+      --setenv="MINI_TRACE=$SD/trace-controller.jsonl" \
+      "$GRAIN_RUNTIME" serve "$G/controller.json"
+  for i in $(seq 1 600); do [ -S "$G/state/control.sock" ] && break; sleep 0.1; done
+  checkp resummon "the controller listens again" test -S "$G/state/control.sock"
+  operator resummon "DISPATCH: the second sealed hand-off" \
+    "$MINI" hermes-handoff --action dispatch --registration "$REG" --bundle "$OUTBOX2/handoff.json" --socket "$SOCKET"
+  CUR=$(find "$H/hermes" -name current.json | head -1)
+  RINBOX=$(jq -r '.inbox // empty' "$CUR" 2>/dev/null)
+  RSTATE=$G/state/resident-a$(jq -r '.assignment // "none"' "$CUR" 2>/dev/null)
+  checkp resummon "the current assignment inbox is the new one ($RINBOX)" sh -c "[ -d '$RINBOX' ] && [ '$RINBOX' != '$RINBOX0' ]"
+  ok resummon bob "ask lab what changed since $H0"
+  hermes resummon "answers bob under the second assignment"
+  own_pass resummon "$B"
+  check resummon "the pass paid from the new account (Hermes's signed read: below $BUDGET)" 1 \
+    "$( b=$(credit_of hermes "$ACCT2"); [ -n "$b" ] && [ "$b" -lt "$BUDGET" ] && echo 1 || echo 0 )"
+fi
 
 
 if [ -n "$J14_TIER" ]; then
