@@ -11,6 +11,8 @@ allocation, profile, host, hostConfig, spkHost, correctedRepo, controllerStatus,
 controllerJournal, controllerEvidence, stopReceipt, outputDir, successorName,
 inspectionMode (explicitly "detached" for these retained old cohorts). Optional contract
 selects a generic attachment whose two source pins are explicitly adopted.
+Optional miniUpgrade {binary,receipt} adopts an already installed controller
+Mini image only when the fixed installer receipt links its old and new hashes.
 Every path is absolute. outputDir must be attachmentRoot/repair-payer-custody.
 Reentry resumes only the identical retained request and publication transaction;
 an interrupted native invocation is never automatically submitted again.
@@ -147,6 +149,26 @@ def publish(path, before, after):
     sync(Path(path).parent)
 
 
+def adopt_mini(previous, upgrade, journal, status):
+    require(isinstance(upgrade, dict) and set(upgrade) == {"binary", "receipt"}, "Mini upgrade input differs")
+    for path in upgrade.values():
+        require(isinstance(path, str) and Path(path).is_absolute() and ".." not in Path(path).parts,
+                "absolute Mini upgrade paths required")
+    receipt = read(upgrade["receipt"])
+    new_sha = digest(raw(upgrade["binary"]))
+    installed = journal["binding"]["config"]["mini"]
+    require(receipt.get("store") == status["store"]
+            and receipt.get("previousMiniSha256") == previous["sha256"]["mini"]
+            and receipt.get("miniSha256") == new_sha == digest(raw(installed))
+            and receipt.get("miniUpgrade") == f"/var/lib/mini-spk-worlds/{status['store']}/controller/mini-upgrade-{new_sha}.json",
+            "Mini upgrade receipt does not bind the old attachment and installed image")
+    updated = copy.deepcopy(previous)
+    updated["contract"]["paths"]["mini"] = upgrade["binary"]
+    updated["files"]["mini"] = upgrade["binary"]
+    updated["sha256"]["mini"] = new_sha
+    return updated
+
+
 class Repair:
     def __init__(self, request):
         self.input = Path(request)
@@ -154,10 +176,11 @@ class Repair:
         c = self.c
         fields = {"protocol", "attachmentRoot", "allocation", "profile", "host", "hostConfig", "spkHost",
                   "correctedRepo", "controllerStatus", "controllerJournal", "controllerEvidence", "stopReceipt", "outputDir", "successorName", "inspectionMode"}
-        require(set(c) in (fields, fields | {"contract"}) and c["protocol"] == "mini-application-payer-successor-v1",
+        require(set(c) in (fields, fields | {"contract"}, fields | {"contract", "miniUpgrade"})
+                and c["protocol"] == "mini-application-payer-successor-v1",
                 "payer successor request shape differs")
         require(c["inspectionMode"] == "detached", "retained-cohort repair requires explicit detached inspection")
-        for k in set(c) - {"protocol", "successorName", "inspectionMode"}:
+        for k in set(c) - {"protocol", "successorName", "inspectionMode", "miniUpgrade"}:
             require(isinstance(c[k], str) and Path(c[k]).is_absolute() and ".." not in Path(c[k]).parts,
                     "absolute input paths required")
         require(re.fullmatch(r"[A-Za-z0-9_-]{1,48}", c["successorName"]), "successor name refused")
@@ -221,6 +244,11 @@ class Repair:
             for key in ("orchestrator", "routeRenderer"):
                 write(self.out / ("previous-" + key), raw(previous["files"][key]))
             updated = copy.deepcopy(previous)
+            if "miniUpgrade" in c:
+                updated = adopt_mini(previous, c["miniUpgrade"], journal, read(c["controllerStatus"]))
+                paths.extend(Path(p) for p in c["miniUpgrade"].values())
+                paths.append(Path(journal["binding"]["config"]["mini"]))
+                write(self.out / "mini-upgrade-receipt.json", raw(c["miniUpgrade"]["receipt"]))
             updated["contract"]["paths"]["repo"] = c["correctedRepo"]
             updated["contract"]["inspectionMode"] = c["inspectionMode"]
             for key, path in (("orchestrator", self.orchestrator), ("routeRenderer", self.renderer)):

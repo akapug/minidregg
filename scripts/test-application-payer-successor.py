@@ -194,5 +194,28 @@ class PayerSuccessorTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "successor input changed"):
             M.Repair(self.input)
 
+    def test_mini_adoption_requires_exact_installed_upgrade_chain(self):
+        old = self.file("old-mini", b"old image")
+        new = self.file("new-mini", b"qualified new image")
+        installed = self.file("controller-mini", b"qualified new image")
+        old_sha, new_sha = M.digest(M.raw(old)), M.digest(M.raw(new))
+        previous = {"contract": {"paths": {"mini": str(old)}}, "files": {"mini": str(old)}, "sha256": {"mini": old_sha}}
+        receipt = {"store": "abc", "previousMiniSha256": old_sha, "miniSha256": new_sha,
+                   "miniUpgrade": f"/var/lib/mini-spk-worlds/abc/controller/mini-upgrade-{new_sha}.json"}
+        proof = self.file("upgrade.json", receipt)
+        request = {"binary": str(new), "receipt": str(proof)}
+        journal = {"binding": {"config": {"mini": str(installed)}}}
+        result = M.adopt_mini(previous, request, journal, {"store": "abc"})
+        self.assertEqual(result["contract"]["paths"]["mini"], str(new))
+        self.assertEqual(result["sha256"]["mini"], new_sha)
+        self.assertEqual(previous["sha256"]["mini"], old_sha)
+        for key, value in (("store", "foreign"), ("previousMiniSha256", "0" * 64), ("miniSha256", "0" * 64)):
+            proof.write_bytes(M.encode(dict(receipt, **{key: value})))
+            with self.assertRaisesRegex(ValueError, "does not bind"):
+                M.adopt_mini(previous, request, journal, {"store": "abc"})
+        proof.write_bytes(M.encode(receipt)); installed.write_bytes(b"unexpected installed image")
+        with self.assertRaisesRegex(ValueError, "does not bind"):
+            M.adopt_mini(previous, request, journal, {"store": "abc"})
+
 
 if __name__ == "__main__": unittest.main()
