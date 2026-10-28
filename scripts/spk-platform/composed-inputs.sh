@@ -145,6 +145,8 @@ jq -n --arg config "$config" --arg genesis "$genesis" --arg manifest "$out/manif
      owner:{subject:$ms,keyId:$mk,keyEpoch:"2",seed:$mseed,publicKey:$mpub},
      management:{subject:$ms,keyId:$mk,keyEpoch:"2",seed:$mseed,publicKey:$mpub}},
    authority:$authority}' >"$out/platform-inputs.json"
+# ── the metered workroom: parent reserved, tool attached (workroom-ready.sh) ──────
+bash "$here/workroom-ready.sh" "$world" "$out/evidence/workroom" || refuse "the metered workroom is not ready"
 # The rooms phase creates "<op>-room" (composed-scenario.py generate; the gate passes op "jd3"); every member
 # holds it under that name, so the app and the resident adopt that room.
 op=${COMPOSED_OP:-jd3}
