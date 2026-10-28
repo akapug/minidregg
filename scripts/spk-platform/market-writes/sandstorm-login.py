@@ -33,9 +33,32 @@ def post_login_token(route, token):
 
 
 def login(send, wait, route, mid="0"):
-    """send(msg_dict); wait(pred, seconds) -> message or None. Returns (result_message_or_None, post_status)."""
+    """send(msg_dict); wait(pred, seconds) -> message or None. Returns (result_message_or_None, post_note).
+
+    The app waits only 10 s for the POST after the method call, and every request through the route is a
+    custodian-checked exchange with its own latency, so the POST goes out at once on a thread and is
+    repeated while the app answers 500 "no current login request" (the method not yet registered). The
+    note carries the timings so a timeout names which leg was slow."""
+    import threading
     token = "login-%d" % int(time.time() * 1000)
+    t0 = time.time()
+    notes = []
+
+    def poster():
+        for attempt in range(1, 6):
+            ts = time.time()
+            note = post_login_token(route, token)
+            notes.append("POST#%d %.1fs@%.1fs %s" % (attempt, time.time() - ts, ts - t0, note[:90]))
+            if " 204 " in note.split(" Error")[0] + " " or note.startswith("HTTP/1.1 204"):
+                return
+            if "no current login request" not in note:
+                return
+            time.sleep(0.3)
+
     send({"msg": "method", "method": "loginWithSandstorm", "id": mid, "params": [token]})
-    time.sleep(0.5)
-    posted = post_login_token(route, token)
-    return wait(lambda m: m.get("msg") == "result" and m.get("id") == mid, 30), posted
+    sent = time.time() - t0
+    th = threading.Thread(target=poster, daemon=True)
+    th.start()
+    res = wait(lambda m: m.get("msg") == "result" and m.get("id") == mid, 40)
+    th.join(5)
+    return res, "method sent %.1fs, result at %.1fs; %s" % (sent, time.time() - t0, " | ".join(notes))
