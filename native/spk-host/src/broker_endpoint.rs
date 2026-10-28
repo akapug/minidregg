@@ -1,6 +1,6 @@
 //! Explicit broker transport custody. No environment-selected endpoint or fallback.
-use super::*;
 use crate::io_context::IoContext;
+use super::*;
 use minidregg_compatible_upgrade_custody as custody;
 use std::os::unix::fs::FileTypeExt;
 
@@ -95,7 +95,7 @@ pub(super) fn call_at(root: &Path, socket: Option<&Path>, request: &Request) -> 
     protected_chain(root)?;
     protected_chain(path.parent().ok_or_else(||invalid("broker runtime parent"))?)?;
     let uid=unsafe{libc::geteuid()};
-    let parent=fs::symlink_metadata(path.parent().unwrap())?;
+    let parent=fs::symlink_metadata(path.parent().unwrap()).ctx("inspect", &(path.parent().unwrap()))?;
     if !parent.is_dir() || parent.uid()!=uid || parent.mode()&0o7777!=0o700 { return Err(invalid("broker runtime directory custody refused")); }
     selected_call(root,&path,request,uid)
 }
@@ -125,7 +125,7 @@ fn bind_owned(path: &Path, gid: u32, owner: u32) -> io::Result<(UnixListener, Fi
         .truncate(false)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(&lock_path)?;
+        .open(&lock_path).ctx("open", &lock_path)?;
     let meta = lock.metadata()?;
     if !meta.is_file() || meta.uid() != owner || meta.nlink() != 1 || meta.mode() & 0o7777 != 0o600
     {
@@ -151,7 +151,7 @@ fn bind_owned(path: &Path, gid: u32, owner: u32) -> io::Result<(UnixListener, Fi
     let listener = UnixListener::bind(path).ctx("bind", path)?;
     let meta=fs::symlink_metadata(path).ctx("inspect", path)?;
     if meta.uid()!=owner || meta.gid()!=gid { return Err(invalid("operator socket ownership differs")); }
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600)).ctx("set permissions", &path)?;
     Ok((listener, lock))
 }
 
