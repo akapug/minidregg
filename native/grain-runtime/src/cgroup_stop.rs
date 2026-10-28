@@ -248,7 +248,7 @@ struct CodecHostPin {
 fn codec_host_pin(config: &Config, environment: Option<&std::ffi::OsStr>) -> Result<CodecHostPin> {
     // Runtime Mini calls supply no explicit --local-host/toolchain override.
     // Follow the same environment/fallback resolver as the launched client.
-    let selected_path = mini_sdk::local::select_semantic_host(None, environment, &config.host)
+    let selected_path = mini_sdk::host_selection::select_semantic_host(None, environment, &config.host)
         .map_err(|e| e.to_string())?;
     let configured = file_pin(&config.host)?;
     let selected = file_pin(&selected_path)?;
@@ -276,7 +276,7 @@ fn codec_host_unchanged(
 ) -> Result<bool> {
     // Hash both images once at admission; subsequent snapshots retain their
     // file identity, size, mode and mtime/ctime instead of rereading the images.
-    let selected_path = mini_sdk::local::select_semantic_host(None, environment, &config.host)
+    let selected_path = mini_sdk::host_selection::select_semantic_host(None, environment, &config.host)
         .map_err(|e| e.to_string())?;
     Ok(selected_path == original.selected_path
         && file_pin(&config.host)? == original.configured

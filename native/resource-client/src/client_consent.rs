@@ -18,7 +18,7 @@ static DELEGATED_SESSION: OnceLock<Option<crate::consent_proxy::Selection>> = On
 /// A remote Host digest is not an executable or a local semantic authority.
 pub(crate) fn pure_host(host: &Path) -> Result<PathBuf> {
     let environment = std::env::var_os("MINI_LOCAL_HOST");
-    Ok(mini_sdk::local::select_semantic_host(
+    Ok(mini_sdk::host_selection::select_semantic_host(
         PINS.get().map(|pins| pins.semantic.as_path()),
         environment.as_deref(),
         host,
