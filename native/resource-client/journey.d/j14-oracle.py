@@ -5,6 +5,7 @@ Every transition uses native Mini; the fixed installer handles cross-UID
 transport. Retained command outputs and exact native attempts survive failure.
 """
 import hashlib
+import fcntl
 import importlib.util
 import json
 import os
@@ -20,6 +21,7 @@ import time
 HERE=Path(__file__).resolve().parent
 REPO=HERE.parents[2]
 PHASES=['world','prepare_platform','prepare_application','publish_data','worker','room','attach','probe']
+RESUMABLE={'prepare_platform','prepare_application','publish_data','worker'}
 spec=importlib.util.spec_from_file_location('inputs',HERE/'j14-oracle-inputs.py')
 inputs=importlib.util.module_from_spec(spec);spec.loader.exec_module(inputs)
 read,write,sha=inputs.read,inputs.write,inputs.sha
@@ -39,6 +41,7 @@ class Journey:
         os.umask(0o077)
         self.root=Path(os.environ['JOURNEY_STEP_DIR'])/'oracle'
         self.root.mkdir(mode=0o700)
+        self.lock_root()
         self.logs=self.root/'commands';self.logs.mkdir()
         self.processes=[];self.daemons=[];self.counter=0;self.controller=False
         # A separate fresh private root avoids sharing controller traversal ACLs
@@ -136,15 +139,44 @@ class Journey:
         self.restart_transport()
         self.c['nativeProfile']=str(self.run('native-profile',[self.host,self.c['hostConfig'],'profile']))
 
-    def checkpoint(self,next_phase,basis=None):
+    def __del__(self):
+        lock=getattr(self,'_lock',None)
+        if lock is not None:lock.close()
+
+    def lock_root(self):
+        fd=os.open(self.root/'journey.lock',os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
+        m=os.fstat(fd)
+        if m.st_uid!=os.getuid() or m.st_mode&0o077 or m.st_nlink!=1:
+            os.close(fd);raise ValueError('journey lock custody differs')
+        self._lock=os.fdopen(fd,'r+')
+        try:fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError:
+            self._lock.close();raise ValueError('another journey owns this evidence root')
+
+    def frontier(self):
+        rows=[(int(p.name.split('-',1)[0]),p) for p in self.logs.glob('*.argv.json') if re.match(r'^\d+-',p.name)]
+        if not rows:return 0,[]
+        number,path=max(rows)
+        result=path.with_name(path.name.replace('.argv.json','.result.json'))
+        if not result.is_file():raise ValueError('last command has no retained result; exact recovery required')
+        return number,[{'path':str(p),'sha256':sha(p)} for p in [path,result]]
+
+    def checkpoint(self,next_phase,basis=None,adjudication=None):
         """Retain orchestration coordinates, never fabricate native state."""
+        if next_phase not in RESUMABLE:raise ValueError('post-worker recovery requires native application lineage recovery')
+        frontier,proof=self.frontier()
+        if frontier!=self.counter:raise ValueError('checkpoint counter differs from actual command frontier')
+        if proof and read(proof[-1]['path'])!={'exitCode':0} and not adjudication:
+            raise ValueError('failed command requires explicit no-submission or exact-recovery adjudication')
         path_fields={'root','logs','sockets','bins','installer','homes','workspaces','contract'}
-        omit={'processes','world_pid'}
+        omit={'processes','world_pid','_lock'}
         state={k:str(v) if k in path_fields else v for k,v in vars(self).items() if k not in omit}
+        live={p.pid for p in self.processes if p.poll() is None}
+        state['daemons']=[{k:v for k,v in d.items() if k!='pid'} for d in self.daemons if d.get('pid') in live]
         pins={str(p):sha(p) for p in [self.mini,self.host,self.runtime,self.provider,self.bins/'spk-host',self.installer,
             REPO/'deploy/spk-host/controller-world.py',self.c['hostConfig']]}
         value={'protocol':'mini-j14-checkpoint-v1','nextPhase':next_phase,'state':state,'pins':pins,
-            'basis':basis or [],'sourceCommit':os.environ.get('J14_ORACLE_ORCHESTRATION_COMMIT')}
+            'basis':(basis or [])+proof,'adjudication':adjudication,'sourceCommit':os.environ.get('J14_ORACLE_ORCHESTRATION_COMMIT')}
         path=self.root/f'checkpoint-{self.counter:04d}-{next_phase}.json';write(path,value)
         return path
 
@@ -156,7 +188,7 @@ class Journey:
         meta=path.stat()
         if meta.st_uid!=os.getuid() or meta.st_mode&0o077:raise ValueError('checkpoint must be private operator custody')
         value=read(path)
-        if value.get('protocol')!='mini-j14-checkpoint-v1' or value['nextPhase'] not in PHASES[1:]:
+        if value.get('protocol')!='mini-j14-checkpoint-v1' or value['nextPhase'] not in RESUMABLE:
             raise ValueError('unsupported journey checkpoint phase')
         for name,digest in value['pins'].items():
             if sha(name)!=digest:raise ValueError('checkpoint input changed: '+name)
@@ -171,7 +203,8 @@ class Journey:
         prior_repo=j.c['repo'];j.c['repo']=str(REPO);j.installer=REPO/'deploy/spk-host/install-user-world'
         for rel in ['deploy/spk-host/install-user-world','deploy/spk-host/controller-world.py']:
             if sha(REPO/rel)!=value['pins'][str(Path(prior_repo)/rel)]:raise ValueError('checkpoint installer custody changed')
-        j.processes=[];j.world_pid=None;j.resume_phase=value['nextPhase']
+        j.processes=[];j.world_pid=None;j.resume_phase=value['nextPhase'];j.lock_root()
+        if j.frontier()[0]!=j.counter:raise ValueError('newer command exists after this checkpoint; exact phase recovery required')
         prior_daemons=j.daemons;j.daemons=[]
         record=j.root/f'checkpoint-resume-{j.counter:04d}-{j.resume_phase}.json'
         if record.exists():raise ValueError('checkpoint continuation already attempted; inspect its exact retained outputs')
@@ -221,7 +254,7 @@ class Journey:
         p=subprocess.Popen(list(map(str,args)),stdout=out,stderr=err);out.close();err.close();self.processes.append(p)
         argv=list(map(str,args))
         write(self.logs/(label+'.process.json'),{'pid':p.pid,'argv':argv})
-        daemon={'label':label,'argv':argv,'executableSha256':sha(argv[0])}
+        daemon={'label':label,'argv':argv,'executableSha256':sha(argv[0]),'pid':p.pid}
         if '--socket' in argv:daemon['socket']=argv[argv.index('--socket')+1]
         self.daemons.append(daemon)
         return p
@@ -655,7 +688,7 @@ def main():
             (j.resume_world if resume and phase=='world' else getattr(j,phase))()
             write(j.root/('context-after-'+phase+'.json'),j.c)
             next_index=PHASES.index(phase)+1
-            if next_index<len(PHASES):j.checkpoint(PHASES[next_index])
+            if next_index<len(PHASES) and PHASES[next_index] in RESUMABLE:j.checkpoint(PHASES[next_index])
     except Exception as error:
         write(j.root/(f'failure-checkpoint-{start_counter:04d}.json' if checkpoint else 'failure-transport-continuation.json' if resume else 'failure.json'),{'phase':phase,'error':str(error),'passed':False,'lastCommand':j.counter,
             'recovery':'Inspect retained exact native attempts; do not repeat an uncertain submission as new work.'})

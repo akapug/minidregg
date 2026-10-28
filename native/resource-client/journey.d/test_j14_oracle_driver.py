@@ -7,6 +7,7 @@ import threading
 import time
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 spec=importlib.util.spec_from_file_location('j14_oracle_driver',Path(__file__).with_name('j14-oracle.py'))
 driver=importlib.util.module_from_spec(spec);spec.loader.exec_module(driver)
@@ -39,17 +40,30 @@ class CheckpointTests(unittest.TestCase):
             j=driver.Journey.__new__(driver.Journey)
             j.root=root;j.logs=root/'commands';j.bins=root;j.installer=driver.REPO/'deploy/spk-host/install-user-world'
             j.mini=j.host=j.runtime=j.provider=str(binary)
-            j.counter=7;j.daemons=[];j.processes=[];j.world_pid=123
+            j.counter=7;j.daemons=[{'pid':11,'label':'stopped','argv':[str(binary)]},{'pid':12,'label':'live','argv':[str(binary)]}]
+            j.processes=[SimpleNamespace(pid=11,poll=lambda:1),SimpleNamespace(pid=12,poll=lambda:None)];j.world_pid=123
+            driver.write(j.logs/'0007-ready.argv.json',['native','read'])
+            driver.write(j.logs/'0007-ready.result.json',{'exitCode':0})
             j.c={'root':str(root),'repo':str(driver.REPO),'hostConfig':str(config)}
             checkpoint=j.checkpoint('prepare_application');checkpoint.chmod(0o600)
             retained=driver.read(checkpoint)
             self.assertNotIn('processes',retained['state']);self.assertNotIn('world_pid',retained['state'])
+            self.assertEqual([d['label'] for d in retained['state']['daemons']],['live'])
             with patch.dict(driver.os.environ,{'JOURNEY_STEP_DIR':temp}):
                 resumed=driver.Journey.from_checkpoint(checkpoint)
                 self.assertEqual(resumed.resume_phase,'prepare_application')
                 self.assertEqual(resumed.counter,7);self.assertEqual(resumed.processes,[])
+                resumed._lock.close()
                 binary.write_bytes(b'changed executable')
                 with self.assertRaisesRegex(ValueError,'input changed'):
+                    driver.Journey.from_checkpoint(checkpoint)
+                binary.write_bytes(b'pinned test executable')
+                driver.write(j.logs/'0008-later.argv.json',['native','effect'])
+                driver.write(j.logs/'0008-later.result.json',{'exitCode':0})
+                with self.assertRaisesRegex(ValueError,'newer command'):
+                    driver.Journey.from_checkpoint(checkpoint)
+                retained['nextPhase']='attach';checkpoint.write_text(driver.json.dumps(retained))
+                with self.assertRaisesRegex(ValueError,'unsupported'):
                     driver.Journey.from_checkpoint(checkpoint)
 
 if __name__=='__main__':unittest.main()
