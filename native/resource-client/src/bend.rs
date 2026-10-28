@@ -404,13 +404,27 @@ fn transaction_of(bend: &Bend, dir: &Path) -> Result<String> {
 }
 
 /// `bend lookup NAME`: the receipt-only lookup (op 213) of NAME's last attempt's retained ingress.
+/// The decided Host answer an attempt retained (`outcome.json` of type confirmed or refused).
+fn retained_decision(dir: &Path) -> Option<Value> {
+    let outcome: Value = serde_json::from_slice(&fs::read(dir.join("outcome.json")).ok()?).ok()?;
+    matches!(outcome.get("type").and_then(Value::as_str), Some("confirmed" | "refused")).then_some(outcome)
+}
+
 fn lookup_cmd(bend: &Bend, mut args: Args, retry: bool) -> Result<()> {
     let name = text(&mut args, "name")?;
     args.finish()?;
     name_ok(&name)?;
     let (dir, meta) = bend.latest(&name)?;
     let ingress = dir.join("ingress.bin");
-    let outcome = if retry { activity::resubmit(&bend.ws, &ingress) } else { activity::lookup(&bend.ws, &ingress) };
+    // The attempt's own decided answer (the Host's confirmation or refusal of exactly this
+    // ingress, retained when it was read) is the decided record. A receipt lookup cannot
+    // recover a refusal (a refused ingress leaves no receipt), so a lookup answers from it.
+    let retained = (!retry).then(|| retained_decision(&dir)).flatten();
+    let outcome = match retained {
+        Some(decision) => Ok(decision),
+        None if retry => activity::resubmit(&bend.ws, &ingress),
+        None => activity::lookup(&bend.ws, &ingress),
+    };
     let outcome = match outcome {
         Ok(o) => o,
         Err(e) => return ending_for(&name, e),
@@ -642,6 +656,22 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_lookup_answers_from_the_attempts_retained_decision() {
+        let dir = std::env::temp_dir().join(format!("bend-retained-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir_all(&dir).unwrap();
+        assert!(retained_decision(&dir).is_none(), "nothing retained: ask the Host");
+        let refused = json!({"type":"refused","refusal":"operation-rejected: pastDeadline"});
+        fs::write(dir.join("outcome.json"), refused.to_string()).unwrap();
+        assert_eq!(retained_decision(&dir), Some(refused.clone()));
+        assert!(matches!(decided(&refused), Decided::Refused(_)));
+        // An undecided answer is not a decision: the Host is asked.
+        fs::write(dir.join("outcome.json"), json!({"type":"undecided"}).to_string()).unwrap();
+        assert!(retained_decision(&dir).is_none());
+        fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn the_package_input_is_the_front_ends_spec() {
