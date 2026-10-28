@@ -55,3 +55,33 @@ Head-of-line: a WebSocket open (13 s) blocks the next request because dispatch i
 
 hbox umask is 0002: staged trees must be `chmod -R go-w` or world-up refuses ("companion custody
 refused", "writable ancestor"); world-up needs a fresh run root; the world-up lock queue was 40 to 66 min.
+
+## Result of the strace split (hbox, candidate 349e59ef1, SandMD, 2026-10-28 11:01, host load 8 to 13 on 24 cores)
+
+Method as above: `sudo strace -f -tt -T` on the world's serving Host (a stdio server; the
+operator process hands it frames), trace set %file,%desc,%process,fsync,fdatasync,futex,connect,
+sendmsg,recvmsg,poll,ppoll; frames delimited by `read(0, ...)` and the next `write(1, ...)`.
+
+One request's submit frame (`DREGG/RESOURCE/SIGNED-INGRESS`, 11:01:23.880, 5.75 s). Its 355 syscalls
+total 0.27 s of syscall time (a 0.269 s wait on the Store `serve` child reply, nothing on fsync, futex,
+connect or another process). The rest is six stretches with no syscall at all, in the Host's one
+thread: 0.45 s (after the request is read and its public key written/removed), 0.22 s, 1.48 s (after
+the first durable read's `request.bin` is handed out, before `record.bin` is written), 0.27 s, 1.53 s
+(after the second durable read's `read.bin`, before `checkpoint.key` is read), 1.35 s (before the
+`DISPATCH-COMMITTED-PERMIT` reply is written). About 5.3 s of single-thread computation inside the
+Lean Host. The other submit frame (11:01:00.358) was 5.38 s the same way; the plan frame
+(`DISPATCH-AUTHOR-REQUEST`) was 0.03 s on later requests and 1.1 s on the first.
+
+Not startup (the Host is resident; no exec, no olean load in the window), not Store open/read (0.27 s),
+not consent (none in the window), not fsync (none), not a wait on another process (none).
+
+### Design finding (one paragraph, for the coordinator and the statements auditor; no Lean touched)
+
+Every request through an already-enrolled route, GET included, is a full signed chain turn: the Host
+verifies the signed call, reads the durable state twice, re-derives and checks it, and builds the
+committed permit, about 5.3 s of single-thread CPU per request, serialised behind one dispatch loop. That
+is why a bare GET costs 6 to 12 s and a Meteor login POST (11 s alone, 18 s with a websocket open) can
+never meet the app's 10 s rendezvous wait. Performance is published, never a gate, so the number is
+not the red; the red is that a read-only request needs a chain turn at all, and that the turns queue.
+The fix is a design change (no new chain turn for a request the enrolment already authorises, or a turn
+whose state check is incremental instead of re-derived), which needs a statement first.
