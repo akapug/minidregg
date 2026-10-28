@@ -202,6 +202,13 @@ pub(crate) struct Lifeline {
     socket: UnixStream,
     failed: Arc<AtomicBool>,
 }
+/// Linux reports a half-closed peer as POLLRDHUP; elsewhere the peer's EOF is readable (POLLIN)
+/// and POLLHUP is always reported, so POLLIN alone sees the same death.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+const HANGUP: libc::c_short = libc::POLLRDHUP;
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+const HANGUP: libc::c_short = 0;
+
 impl Lifeline {
     pub(crate) fn alive(&self) -> bool {
         if self.failed.load(Ordering::Acquire) {
@@ -209,7 +216,7 @@ impl Lifeline {
         }
         let mut fd = libc::pollfd {
             fd: self.socket.as_raw_fd(),
-            events: libc::POLLIN | libc::POLLRDHUP,
+            events: libc::POLLIN | HANGUP,
             revents: 0,
         };
         // Between requests nothing is owed to us: readable or hung up means EOF (the worker or
