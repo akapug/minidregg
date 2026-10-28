@@ -77,6 +77,8 @@ the newest built main that passed the gate; each is reported in one line, and in
 | e89fe7b8b | — | CANDIDATE /build/candidates/e89fe7b8ba8c477d1538ed6ee1f0e7aeac70c97f 07:22 (consent 209 s, rust 212 s; no pin move, keeps the 2d8b7ed54 genesis; carries thin-birth, 25cfb86bd, 507d6ce78, a8376ce8f). Named to the coordinator, deputy, L4b, infra. Gate (gate-cut4, harness 5da1711bc; integ8/gate.pid) running beside gate-76758dba-g2. Owed on it: `journey.sh --only JP2` (thin birth) |
 | next | — | `integ4/next-main2.sh` (pid file integ4/next-main2.pid) waits for the e89fe7b8b chain (main-full.pid), moves outputs aside, launches main-full2.sh (gate-cut5, private runner) at main tip then (carries un-bend-seed, web-parity) |
 
+| aae3e2e37 | — | CANDIDATE /build/candidates/aae3e2e372b045dd43493183144db08212d51659 07:49 (from next-main2.sh; host 392 s, consent 117 s, rust 68 s; keeps the 2d8b7ed54 genesis). Gate gate-cut5, harness 3deedcb6f (integ8/gate.pid), no row-requires: the five 588855a71 JWF rows may red, expected. Named to coordinator, deputy, L4b, infra 08:0x |
+| e89fe7b8b composed iteration | — | coordinator 10-28: iterate composed against e89fe7b8b's binaries with main's harness, fix each harness red in place, rerun only the failing phase, until rooms/churn/documents/apps/connector/residents/restart pass; then record the verdict as candidate + final harness sha; a product red is named, not fixed. Driver `integ4/citer.sh` (pid file integ4/citer.pid; standing world /build/ci-e89, log/citer.log, composed/gate-<n>.json; `citer.sh gate RUN HARNESS` resumes from composed's retained ledger) |
 Gate harness rule (coordinator, 10-28): the tour and composed harness (scripts/, native/resource-client/*.sh|*.py, journey.d/) come from main at gate time over the candidate's source.tar and binaries (`integ4/harness-overlay.sh DEST SHA`; `HARNESS=<sha>` in tour-run2.sh and composed-full2.sh; gate-cut4.sh resolves main's tip, adds `harnessCommit` to the gate file after gate-from-runs.py, which binds only the candidate's SHA256SUMS). Infra was asked to copy harnessCommit in gate-from-runs.py itself (optional).
 Runner rule (coordinator, 10-28): launch builds with `integ4/main-full2.sh`, which gates with `gate-cut5.sh`: it copies tour-run2.sh, composed-full2.sh and harness-overlay.sh into `$G/runner` at gate start, runs only from that copy and writes `runnerSha256sums` beside `harnessCommit` in the gate file. Never edit a script a running job reads; change it under a new name.
 Merge-subject slip: 8e7940fea and 1a3240483 name the un-deputy sha in their subjects; their parents are un-story-install 733dd948f and red-authority-zero-field 108083a35. 733dd948f was a red-first test (shared_names.rs:1144), cleared by a8376ce8f (d2b639068).
@@ -124,6 +126,8 @@ gates main and fixes reds itself.
 
 ## Rulings (do not re-ask)
 
+- Row requirements: a row asserting behaviour newer than the oldest candidate a harness may judge gets a line in scripts/gates/row-requires.tsv in the same commit (5 JWF rows → 588855a71, 9b36d6d37).
+- Disk: dregg-build /build at 61 GB free on 10-28 08:0x (told the coordinator); under 60 GB pause new builds and tell, never delete others' files.
 - Context: write the continuation (this file, rewritten whole) by about 580k tokens; distill or hand off at about 600k (COORDINATION 3a6aafdca).
 - Intent.credit (L1d item 5, ops 244-247) persists in IntentRecord: durable log frame v3 and
   `DREGG.DURABLE.IMAGE` v3, shipped with the module conversion's re-genesis so the StoreEpoch moves once. Pending
