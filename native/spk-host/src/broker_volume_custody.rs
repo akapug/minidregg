@@ -1,6 +1,7 @@
 //! Root volume copies retain every directory/file handle. A durable freeze
 //! intent precedes FIFREEZE; startup takes the same lock and reconciles only
 //! that exact filesystem. No path-based chown, destination reopen or thaw.
+use crate::io_context::IoContext;
 use super::*;
 use std::io::{Seek,SeekFrom};
 use std::os::unix::process::CommandExt;
@@ -17,7 +18,7 @@ fn component(name:&str)->io::Result<CString>{
 impl Dir {
     fn absolute(path:&Path,allowed:&[u32])->io::Result<Self>{
         if !path.is_absolute(){return Err(invalid("volume custody absolute directory required"))}
-        let mut dir=Self(File::open("/")?);
+        let mut dir=Self(File::open("/").ctx("open", &"/")?);
         for part in path.components().skip(1) {
             let std::path::Component::Normal(part)=part else{return Err(invalid("noncanonical volume path"))};
             let name=part.to_str().ok_or_else(||invalid("volume path encoding"))?;
@@ -178,7 +179,7 @@ fn clear_pending(dir:&Dir,leaf:&str,thaw:impl FnOnce()->io::Result<()>)->io::Res
 }
 fn recover_locked(root:&Path,dir:&Dir)->io::Result<()>{
     let listing=PathBuf::from(format!("/proc/self/fd/{}",dir.0.as_raw_fd()));
-    for entry in fs::read_dir(listing)?{
+    for entry in fs::read_dir(&listing).ctx("list", &listing)?{
         let leaf=entry?.file_name().to_string_lossy().into_owned();
         if leaf==".freeze.lock"{continue}
         if !leaf.ends_with(".json"){return Err(invalid("unknown freeze custody artifact"))}
