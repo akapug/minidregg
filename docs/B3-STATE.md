@@ -19,6 +19,7 @@ Present-state, rewritten whole. Author: the B3 faerie, 2026-10-28, handed off at
   install step first. Both unchanged in the tree.
 
 ## Open (gate red, product red): the manager signs with a capability the member holds
+- delegation-check red: routed to acec1de6f1c53a04c, ruled child capability to the manager. (The B3 faerie does NOT implement it; the japps-rows faerie owns apps_worker.rs.)
 - Stage named by main 9bd52317c's composed run (/build/c-9bd523/w/log/store.log:7):
   `application-grain-share-issue: grain-backed app share issue refused: app delegation check` = admitNative
   branch 10, `ApplicationShareIssueDelegation.check`; `authorize` (Kernel/ApplicationShareIssueDelegation.lean:151-159)
