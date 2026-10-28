@@ -482,7 +482,7 @@ end Kernel
 #guard_msgs (whitespace := lax) in #print axioms table_refusal_explained
 /-- info: 'Minidregg.Assurance.StoryLaw.table_refusal_rendered' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms table_refusal_rendered
-/-- info: 'Minidregg.Assurance.StoryLaw.tale_embedded_is_law' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Kernel.StoryLaw.tale_embedded_is_law' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms tale_embedded_is_law
 /-- info: 'Minidregg.Assurance.StoryLaw.legal_step_admitted' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms legal_step_admitted
