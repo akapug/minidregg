@@ -171,6 +171,8 @@ fi
 exec "$REAL_HOST" "$@"
 EOF
 chmod 755 "$EVIDENCE/drop-first-submit.sh"
+# mini finds the consent provider beside --host: the wrapper needs the real one beside it.
+install -m 0755 "$(dirname -- "$HOST")/minidregg-client-consent" "$EVIDENCE/minidregg-client-consent"
 
 if "$MINI" submit --host "$EVIDENCE/drop-first-submit.sh" --config "$CONFIG" \
   --intent "$EVIDENCE/content-intent.json" --key "$EVIDENCE/alice.key" \
