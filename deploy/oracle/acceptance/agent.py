@@ -23,6 +23,9 @@ class Operator(_shared.Attachment):
     def __init__(self, run, phase="setup"):
         self.run = run
         self.root = run / "agent-lifetime"
+        repair = self.root / "repair-payer-custody"
+        if repair.exists() and not (repair / "complete.json").is_file():
+            raise ValueError("payer custody successor publication is incomplete")
         self.workroom = run / "world/store/base/workroom"
         self.config = self.workroom / "deployment/pinned-config.json"
         self.host = run / "bin/minidregg-host"

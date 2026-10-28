@@ -420,6 +420,12 @@ else: raise SystemExit('unexpected native command: '+repr(args))
             with self.subTest(runs=runs), self.assertRaises(ValueError):
                 module.require_current_start(start, status(runs))
 
+    def test_legacy_route_payer_producer_uses_shared_attachment(self):
+        spec = importlib.util.spec_from_file_location("oracle_route_pins", ROOT / "deploy/oracle/acceptance/agent.py")
+        module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        self.assertEqual(module.Operator.prepare_route.__code__.co_filename,
+                         str(ROOT / "scripts/application-attachment.py"))
+
     def test_route_renderer_legacy_and_explicit_allocation_guards(self):
         source = (ROOT / "scripts/spk-platform/prepare-lifetime-route.sh").read_text()
         # Execute the renderer's actual jq guard, not a parallel validator.
@@ -429,7 +435,7 @@ else: raise SystemExit('unexpected native command: '+repr(args))
             "enrollmentObserveCapability", "manifestObserveCapability", "maximumCharge",
             "parentCapability", "parentObserve", "purseCapability", "purseObserve",
             "reserveAmount", "sessionObserveCapability"], "1")
-        pins.update(appSigners=[{}], grantSigner={}, payerPins=[{}, {}, {}],
+        pins.update(appSigners=[{}], grantSigner={}, payerPins=[{"role":"4","index":"0"},{"role":"1","index":"0"}],
                     hostUid=1000, hostUnit="oracle.service", socketPath="/private/agent.sock",
                     controllerRouteName="workroom-app", signedApiPath="/repo.git/",
                     packageManifest="8402", snapshotManifest="8403", purseResource="7940", payerSubject="10")
@@ -444,6 +450,9 @@ else: raise SystemExit('unexpected native command: '+repr(args))
             self.assertTrue(check(pins, None))
             modern = dict(pins, **expected, controllerRouteName="oracle-app", signedApiPath="/")
             self.assertTrue(check(modern, expected))
+            for payer in [list(reversed(modern["payerPins"])), modern["payerPins"][:1],
+                          [modern["payerPins"][0], {"role":"8","index":"0"}, modern["payerPins"][1]]]:
+                self.assertFalse(check(dict(modern, payerPins=payer), expected))
             self.assertTrue(check(dict(modern, hostUnit=None), expected, True))
             self.assertFalse(check(dict(modern, hostUnit=None), expected))
             self.assertFalse(check(modern, None))

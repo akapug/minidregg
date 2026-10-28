@@ -317,6 +317,9 @@ class AttachmentTests(unittest.TestCase):
         self.assertEqual(argv[offset + 1:offset + 4], [op.mini, op.operator, M.sha(op.mini)])
         pins = M.read(op.calls / "operator-pins.json")
         self.assertEqual([(p["role"], p["index"]) for p in pins["payerPins"]], [("4", "0"), ("1", "0")])
+        self.assertEqual([(p["role"], p["index"]) for p in pins["appSigners"]],
+                         [("4", "0"), ("4", "1"), ("8", "0"), ("8", "1"), ("1", "0"),
+                          ("9", "0"), ("9", "1"), ("9", "2"), ("9", "3")])
         for pin in pins["payerPins"]:
             self.assertEqual(pin["keyId"], self.a["dispatch"]["keyId"])
             self.assertEqual(pin["keyEpoch"], "77")
