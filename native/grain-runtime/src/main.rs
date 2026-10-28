@@ -288,6 +288,20 @@ fn lifetime_purse_signers(
     Ok(approved)
 }
 
+/// The source-approved signer incidences determine the returned signature
+/// cardinality. Do not carry a separate legacy three-slot transport profile.
+fn validate_lifetime_payer_reply(result: &Value, plan_sha256: &str, approved: &[Value]) -> Result<()> {
+    if result.get("type").and_then(Value::as_str) != Some("minidregg-agent-lifetime-payer-signatures-v1")
+        || result.get("planSha256").and_then(Value::as_str) != Some(plan_sha256)
+        || result.get("signatures").and_then(Value::as_array).is_none_or(|list|
+            list.len() != approved.len() || list.iter().any(|entry|
+                entry.as_str().is_none_or(|signature| signature.len() != 128
+                    || !signature.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))))) {
+        return Err("lifetime detached payer signatures differ from approved plan".into());
+    }
+    Ok(())
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ProviderTask {
@@ -5616,27 +5630,7 @@ impl Runtime {
             ]);
             command
         })?;
-        if result.get("type").and_then(Value::as_str)
-            != Some("minidregg-agent-lifetime-payer-signatures-v1")
-            || result.get("planSha256").and_then(Value::as_str)
-                != Some(sha256_file(&directory.join("plan.bin"))?.as_str())
-            || result
-                .get("signatures")
-                .and_then(Value::as_array)
-                .is_none_or(|list| {
-                    list.len() != 3
-                        || list.iter().any(|entry| {
-                            entry.as_str().is_none_or(|signature| {
-                                signature.len() != 128
-                                    || !signature.bytes().all(|byte| {
-                                        byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)
-                                    })
-                            })
-                        })
-                })
-        {
-            return Err("lifetime detached payer signatures differ from approved plan".into());
-        }
+        validate_lifetime_payer_reply(&result, &sha256_file(&directory.join("plan.bin"))?, &payer_signers)?;
         Ok(json!({"type":"payer-signatures-v3",
             "attemptId":attempt_id,
             "bindingSha256":confirmed.get("bindingSha256"),
@@ -19038,6 +19032,15 @@ mod tests {
         let approved =
             lifetime_purse_signers(&slots, &signer, Path::new("/private/payer.key")).unwrap();
         assert_eq!(approved.len(), 2);
+        let reply = json!({"type":"minidregg-agent-lifetime-payer-signatures-v1", "planSha256":"plan",
+            "signatures":["a".repeat(128),"b".repeat(128)]});
+        validate_lifetime_payer_reply(&reply, "plan", &approved).unwrap();
+        for signatures in [json!(["a".repeat(128)]), json!(["a".repeat(128),"b".repeat(128),"c".repeat(128)]),
+            json!(["a".repeat(128),"G".repeat(128)])] {
+            let mut bad=reply.clone(); bad["signatures"]=signatures;
+            assert!(validate_lifetime_payer_reply(&bad,"plan",&approved).is_err());
+        }
+        assert!(validate_lifetime_payer_reply(&reply,"foreign-plan",&approved).is_err());
         assert_eq!(
             approved
                 .iter()
