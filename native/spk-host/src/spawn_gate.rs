@@ -7,7 +7,7 @@
 
 use crate::sandbox::{
     open_protected_directory, IMAGE_FD, MAX_BWRAP_ARGS, MAX_BWRAP_ARG_BYTES, RPC_FD, SECCOMP_FD,
-    VAR_FD, PUBLIC_DATA_FD,
+    VAR_FD, PUBLIC_DATA_FD, SHIM_FD,
 };
 use crate::io_context::IoContext;
 use sha2::{Digest, Sha256};
@@ -98,6 +98,9 @@ fn validate(spec: &SpawnSpec, test_mode: bool) -> io::Result<()> {
         }
     } else if !test_mode {
         return Err(invalid("SPK launch requires fd1-6"));
+    }
+    if spec.fds.is_none() && crate::sandbox::has_ifaddrs_shim_args(&spec.args) {
+        return Err(invalid("platform shim mount without descriptors"));
     }
     Ok(())
 }
@@ -231,6 +234,37 @@ fn duplicate_high(fd: RawFd) -> io::Result<OwnedFd> {
     Ok(unsafe { OwnedFd::from_raw_fd(duplicate) })
 }
 
+/// A sealed memfd holding the platform shim, for bubblewrap's `--ro-bind-data` on fd 8. The bytes are
+/// the spk-host binary's own (`sandbox::IFADDRS_SHIM`); nothing is read from the host filesystem.
+fn shim_memfd() -> io::Result<OwnedFd> {
+    let raw = unsafe { libc::memfd_create(c"mini-ifaddrs-shim".as_ptr(), libc::MFD_CLOEXEC | libc::MFD_ALLOW_SEALING) };
+    if raw < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let fd = unsafe { OwnedFd::from_raw_fd(raw) };
+    let bytes = crate::sandbox::IFADDRS_SHIM;
+    let mut written = 0;
+    while written < bytes.len() {
+        let n = unsafe { libc::write(fd.as_raw_fd(), bytes[written..].as_ptr().cast(), bytes.len() - written) };
+        if n < 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(error);
+        }
+        written += n as usize;
+    }
+    let seals = libc::F_SEAL_SEAL | libc::F_SEAL_SHRINK | libc::F_SEAL_GROW | libc::F_SEAL_WRITE;
+    if bytes.is_empty()
+        || unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_ADD_SEALS, seals) } != 0
+        || unsafe { libc::lseek(fd.as_raw_fd(), 0, libc::SEEK_SET) } != 0
+    {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "platform shim is empty or cannot be sealed"));
+    }
+    duplicate_high(fd.as_raw_fd())
+}
+
 unsafe fn fail(write_fd: RawFd) -> ! {
     let errno = *libc::__errno_location();
     let bytes = errno.to_le_bytes();
@@ -260,6 +294,8 @@ struct ChildExecInput<'a> {
     argv: &'a [*const libc::c_char],
     environ: &'a [*const libc::c_char],
     keep: &'a [u32],
+    /// Source of fd 8 when the arguments carry the platform shim mount.
+    shim: Option<RawFd>,
 }
 
 unsafe fn child_exec(input: ChildExecInput<'_>) -> ! {
@@ -272,6 +308,7 @@ unsafe fn child_exec(input: ChildExecInput<'_>) -> ! {
         argv,
         environ,
         keep,
+        shim,
     } = input;
     libc::close(read_fd);
     #[cfg(test)]
@@ -300,6 +337,11 @@ unsafe fn child_exec(input: ChildExecInput<'_>) -> ! {
         }
         if let Some(source) = fds.public_data {
             if libc::dup2(source, PUBLIC_DATA_FD) != PUBLIC_DATA_FD || libc::fcntl(PUBLIC_DATA_FD, libc::F_SETFD, 0) != 0 {
+                fail(write_fd);
+            }
+        }
+        if let Some(source) = shim {
+            if libc::dup2(source, SHIM_FD) != SHIM_FD || libc::fcntl(SHIM_FD, libc::F_SETFD, 0) != 0 {
                 fail(write_fd);
             }
         }
@@ -473,12 +515,16 @@ fn spawn_inner(spec: &SpawnSpec, test_mode: bool) -> io::Result<BoundedChild> {
     let mut argv: Vec<*const libc::c_char> = argv_strings.iter().map(|arg| arg.as_ptr()).collect();
     argv.push(std::ptr::null());
     let environ: [*const libc::c_char; 1] = [std::ptr::null()];
+    let shim = if spec.fds.is_some() && crate::sandbox::has_ifaddrs_shim_args(&spec.args) { Some(shim_memfd()?) } else { None };
     let mut keep = vec![executable.as_raw_fd() as u32, write_fd.as_raw_fd() as u32];
     if spec.fds.is_some() {
         keep.extend([RPC_FD, IMAGE_FD, VAR_FD, SECCOMP_FD].map(|fd| fd as u32));
     }
     if spec.fds.is_some_and(|fds| fds.public_data.is_some()) {
         keep.push(PUBLIC_DATA_FD as u32);
+    }
+    if shim.is_some() {
+        keep.push(SHIM_FD as u32);
     }
     keep.sort_unstable();
     keep.dedup();
@@ -497,6 +543,7 @@ fn spawn_inner(spec: &SpawnSpec, test_mode: bool) -> io::Result<BoundedChild> {
                 argv: &argv,
                 environ: &environ,
                 keep: &keep,
+                shim: shim.as_ref().map(AsRawFd::as_raw_fd),
             })
         }
     }
@@ -597,6 +644,7 @@ mod tests {
         let sandbox = crate::sandbox::SandboxSpec {
             bwrap: "/usr/bin/bwrap".into(), image_root: "/image".into(), persistent_var: "/var-test".into(),
             persistent_var_max_bytes: 1024, argv: vec!["/app".into()], environ: vec![], app_output: "/private/output".into(),
+            ifaddrs_shim: false,
         };
         let mut spec = SpawnSpec {
             program: sandbox.bwrap.clone(), sha256: "0".repeat(64),

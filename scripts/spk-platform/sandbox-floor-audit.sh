@@ -145,4 +145,6 @@ run() {
 floor=0; control=0
 run floor resident_launch::tests::operator_probe_holds_inside_production_resident_sandbox || floor=$?
 run pre-floor resident_launch::tests::operator_probe_breaches_under_pre_floor_arguments || control=$?
-[ "$floor" = 0 ] && [ "$control" = 0 ]
+shim=0
+run shim resident_launch::tests::operator_probe_holds_with_platform_shim || shim=$?
+[ "$floor" = 0 ] && [ "$control" = 0 ] && [ "$shim" = 0 ]
