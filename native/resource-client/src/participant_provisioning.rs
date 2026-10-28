@@ -283,6 +283,12 @@ fn result(grant: &ObserveGrant<'_>, capability: &str, receipt: &Value) -> Result
 }
 
 fn lookup_exact(grant: &ObserveGrant<'_>, capability: &str, ingress: &[u8]) -> Result<Value> {
+    let value = lookup_value(grant, ingress)?;
+    result(grant, capability, &value)
+}
+
+/// The Host's historical answer for the exact sealed ingress, retained, not yet judged.
+fn lookup_value(grant: &ObserveGrant<'_>, ingress: &[u8]) -> Result<Value> {
     let count = fs::read_dir(grant.directory)
         .map_err(|error| error.to_string())?
         .filter_map(|entry| entry.ok())
@@ -298,13 +304,12 @@ fn lookup_exact(grant: &ObserveGrant<'_>, capability: &str, ingress: &[u8]) -> R
         LOOKUP_OPERATION,
         ingress,
     )?;
-    let value = outcome(
+    outcome(
         grant,
         &format!("lookup-{count:04}"),
         &frame,
         LOOKUP_OPERATION,
-    )?;
-    result(grant, capability, &value)
+    )
 }
 
 fn generations(directory: &Path) -> Result<Vec<PathBuf>> {
@@ -357,7 +362,57 @@ fn sealed(generation: &Path) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>)> {
 /// superseded once, and a generation whose fresh observation the Host answers
 /// `stale-root` is superseded by the shared `replan` loop: each new generation
 /// authors the same request with a fresh observation. Re-running resumes.
+/// Plan, seal and submit; a submit the Host refuses with NO RECORD (a definite, decided refusal before
+/// any append, e.g. the signed message no longer the one the Host expects because the source moved
+/// between plan and submit) retires that attempt and authors the same request anew, at most
+/// `ATTEMPTS` times in one call; the Host's own words are then the error, not a lookup of an ingress
+/// that was never taken (which answered `absent` to every retry for ever).
 pub(crate) fn observe_grant(grant: &ObserveGrant<'_>) -> Result<Value> {
+    const ATTEMPTS: usize = 3;
+    let mut last = String::new();
+    for attempt in 1..=ATTEMPTS {
+        match observe_once(grant)? {
+            Attempt::Done(value) => return Ok(value),
+            Attempt::Refused(why) => {
+                eprintln!("mini: provision: attempt {attempt} of {ATTEMPTS}: {why}; the attempt is retired and the same request is authored anew");
+                last = why;
+            }
+        }
+    }
+    Err(format!("provisioning was refused by the Host with no record on all {ATTEMPTS} attempts; last: {last}"))
+}
+
+enum Attempt {
+    Done(Value),
+    Refused(String),
+}
+
+/// Retire a submit marker (and the retained submit answer beside it) under a numbered name, keeping
+/// every byte as evidence, so the next call authors anew without colliding with the retained files.
+fn retire_marker(grant: &ObserveGrant<'_>, why: &str) -> Result<PathBuf> {
+    let dir = grant.directory;
+    let prefix = format!("submit-marker.{why}-");
+    let n = fs::read_dir(dir)
+        .map_err(|error| error.to_string())?
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with(&prefix))
+        .count();
+    for stem in ["submit.frame", "submit.bin", "submit.json.frame", "submit.json"] {
+        let from = dir.join(stem);
+        if from.exists() {
+            fs::rename(&from, dir.join(format!("{why}-{n:04}-{stem}")))
+                .map_err(|error| format!("cannot retire {stem}: {error}"))?;
+        }
+    }
+    let retired = dir.join(format!("{prefix}{n:04}.json"));
+    fs::rename(dir.join("submit-marker.json"), &retired)
+        .map_err(|error| format!("cannot retire the submit marker: {error}"))?;
+    sync_directory_ancestors(dir)?;
+    new_generation(dir, generations(dir)?.len())?;
+    Ok(retired)
+}
+
+fn observe_once(grant: &ObserveGrant<'_>) -> Result<Attempt> {
     decimal(grant.holder, "provisioning holder")?;
     match fs::DirBuilder::new().mode(0o700).create(grant.directory) {
         Ok(()) => (),
@@ -369,7 +424,7 @@ pub(crate) fn observe_grant(grant: &ObserveGrant<'_>) -> Result<Value> {
     sync_directory_ancestors(grant.directory)?;
     let _lock = transport::service_lock(&grant.directory.join("provision.lock"))?;
     if grant.directory.join("result.json").exists() {
-        return json_private(&grant.directory.join("result.json"));
+        return Ok(Attempt::Done(json_private(&grant.directory.join("result.json"))?));
     }
     let (request, reserved) = record(grant)?;
     let capability = reserved.ids["capability"].clone();
@@ -379,7 +434,19 @@ pub(crate) fn observe_grant(grant: &ObserveGrant<'_>) -> Result<Value> {
         let generation = PathBuf::from(field(&prior, "generation")?);
         let (_, _, ingress) = sealed(&generation)?;
         pinned(&prior, "ingressSha256", &digest(&ingress))?;
-        return lookup_exact(grant, &capability, &ingress);
+        let value = lookup_value(grant, &ingress)?;
+        if !crate::participant_enrollment::absence_retires(true, &value) {
+            return Ok(Attempt::Done(result(grant, &capability, &value)?));
+        }
+        // An earlier invocation wrote the marker and died before the Host took the ingress (a consent
+        // or transport failure), or the Host refused it with no record: either way the Host's history
+        // has no record of it and nothing was admitted. Every retry would look the same absent ingress
+        // up for ever; the marker is retired beside its evidence and the same request is authored anew.
+        let retired = retire_marker(grant, "absent")?;
+        eprintln!(
+            "mini: provision: the Host has no record of the earlier submit; its marker is retired at {} and the same request is authored anew",
+            retired.display()
+        );
     }
     let latest = || -> Result<PathBuf> {
         let existing = generations(grant.directory)?;
@@ -431,12 +498,31 @@ pub(crate) fn observe_grant(grant: &ObserveGrant<'_>) -> Result<Value> {
         Ok(frame) => {
             let value = outcome(grant, "submit", &frame, SUBMIT_OPERATION)?;
             if confirmed(&value).is_ok() {
-                return result(grant, &capability, &value);
+                return Ok(Attempt::Done(result(grant, &capability, &value)?));
             }
-            lookup_exact(grant, &capability, &ingress)
+            if let Some(why) = refused_no_record(&value) {
+                retire_marker(grant, "refused")?;
+                return Ok(Attempt::Refused(why));
+            }
+            Ok(Attempt::Done(lookup_exact(grant, &capability, &ingress)?))
         }
-        Err(_) => lookup_exact(grant, &capability, &ingress),
+        Err(_) => Ok(Attempt::Done(lookup_exact(grant, &capability, &ingress)?)),
     }
+}
+
+/// The Host's decided refusal with no record (nothing appended), in its own words.
+fn refused_no_record(value: &Value) -> Option<String> {
+    let text = |key: &str| value.get(key).and_then(Value::as_str);
+    if text("type") != Some("refused") || text("effect") != Some("no-record") {
+        return None;
+    }
+    let detail = text("detail").and_then(|hex| mini_sdk::hex::decode(hex).ok()).and_then(|b| String::from_utf8(b).ok());
+    Some(format!(
+        "the Host refused the provisioning submit with no record: {} ({}){}",
+        text("reason").unwrap_or("?"),
+        text("phase").unwrap_or("?"),
+        detail.map(|d| format!(": {d}")).unwrap_or_default()
+    ))
 }
 
 /// Receipt-only replay of an already sealed and possibly submitted grant.
@@ -485,6 +571,19 @@ pub(crate) fn observe_lookup(grant: &ObserveGrant<'_>) -> Result<Value> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn a_decided_no_record_refusal_is_named_in_the_hosts_words_and_nothing_else_is() {
+        let refused = json!({"effect":"no-record","phase":"provision-factory-observe","reason":"operation-rejected","type":"refused",
+            "detail": crate::hex(b"Reject.signature wrongMessage")});
+        let why = refused_no_record(&refused).unwrap();
+        assert!(why.contains("operation-rejected") && why.contains("Reject.signature wrongMessage"), "{why}");
+        assert!(refused_no_record(&json!({"type":"absent","effect":"undecided"})).is_none());
+        assert!(refused_no_record(&json!({"type":"refused","effect":"undecided"})).is_none());
+        assert!(refused_no_record(&json!({"type":"confirmed","confirmation":"installed"})).is_none());
+    }
+
     use super::*;
 
     #[test]

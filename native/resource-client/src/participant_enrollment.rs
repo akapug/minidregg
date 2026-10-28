@@ -1849,7 +1849,11 @@ pub(crate) fn confirmed(value: &Value) -> Result<()> {
     if field(value, "type")? != "confirmed"
         || !matches!(field(value, "confirmation")?, "installed" | "replayed" | "recoveredAfterUncertainResponse")
     {
-        return Err("enrollment outcome is not a confirmed admitted key".into());
+        return Err(format!(
+            "enrollment outcome is not a confirmed admitted key (the Host's outcome: type {}, effect {})",
+            value.get("type").and_then(Value::as_str).unwrap_or("?"),
+            value.get("effect").and_then(Value::as_str).unwrap_or("none")
+        ));
     }
     for field_name in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
         decimal(field(value, field_name)?, field_name)?;
@@ -1887,7 +1891,15 @@ fn result(directory: &Path, pin: &Pin, receipt: &Value) -> Result<()> {
     print_json(&value)
 }
 
-fn lookup_exact(directory: &Path, pin: &Pin, ingress: &[u8]) -> Result<()> {
+/// `later`: this is a separate invocation after an earlier one ended with the submit marker written
+/// (a later `submit` that finds the marker, or `lookup`). The Host's historical lookup answering
+/// ABSENT then means the sealed ingress is in no history: the earlier process died before the Host
+/// took it (a consent or transport failure), nothing was admitted, and the attempt is retired for a
+/// fresh plan under the same request, exactly as a NO_RECORD refusal is (otherwise every retry looks
+/// the same absent ingress up again, forever). Within the submitting invocation (`later` false) a
+/// broken transport followed at once by ABSENT proves nothing (the Host may still be taking the
+/// frame), so it stays an error and the marker stays.
+fn lookup_exact(directory: &Path, pin: &Pin, ingress: &[u8], later: bool) -> Result<()> {
     let stem = format!(
         "lookup-{:04}",
         fs::read_dir(directory)
@@ -1901,8 +1913,16 @@ fn lookup_exact(directory: &Path, pin: &Pin, ingress: &[u8]) -> Result<()> {
     );
     let frame = session_invoke(&pin.host, &pin.operation_socket, &pin.config, mini_sdk::host_operations::PARTICIPANT_KEY_ENROLLMENT_LOOKUP, ingress)?;
     let value = outcome(directory, pin, &stem, &frame, mini_sdk::host_operations::PARTICIPANT_KEY_ENROLLMENT_LOOKUP)?;
+    if absence_retires(later, &value) {
+        return no_record(directory, pin, ingress, frame.first().copied().unwrap_or(0), Some(value));
+    }
     confirmed_lookup(&value)?;
     result(directory, pin, &value)
+}
+
+/// A historical lookup of a sealed ingress that answers `absent`, in a later invocation, retires the attempt.
+pub(crate) fn absence_retires(later: bool, lookup: &Value) -> bool {
+    later && lookup.get("type").and_then(Value::as_str) == Some("absent")
 }
 
 /// The Host answered the sealed plan's submit with NO RECORD (253): a refusal decided before any
@@ -1931,6 +1951,12 @@ fn no_record(directory: &Path, pin: &Pin, ingress: &[u8], response: u8, decoded:
     let reason = decoded
         .as_ref()
         .and_then(|outcome| outcome.get("reason").and_then(Value::as_str))
+        .or_else(|| {
+            decoded
+                .as_ref()
+                .filter(|outcome| outcome.get("type").and_then(Value::as_str) == Some("absent"))
+                .map(|_| "absent from the Host's history: the earlier submit never reached it")
+        })
         .unwrap_or("undecoded")
         .to_owned();
     save_json(
@@ -1958,7 +1984,7 @@ fn submit(directory: &Path) -> Result<()> {
     if marker.exists() {
         let prior = json_private(&marker)?;
         pinned(&prior, "ingressSha256", &digest(&ingress))?;
-        return lookup_exact(&directory, &pin, &ingress);
+        return lookup_exact(&directory, &pin, &ingress, true);
     }
     save_json(
         &marker,
@@ -1979,9 +2005,9 @@ fn submit(directory: &Path) -> Result<()> {
             {
                 return no_record(&directory, &pin, &ingress, frame.first().copied().unwrap_or(0), Some(value));
             }
-            lookup_exact(&directory, &pin, &ingress)
+            lookup_exact(&directory, &pin, &ingress, false)
         }
-        Err(_) => lookup_exact(&directory, &pin, &ingress),
+        Err(_) => lookup_exact(&directory, &pin, &ingress, false),
     }
 }
 
@@ -1993,7 +2019,7 @@ fn lookup(directory: &Path) -> Result<()> {
     if !directory.join("submit-marker.json").exists() {
         return Err("enrollment has no submitted or uncertain attempt".into());
     }
-    lookup_exact(&directory, &pin, &ingress)
+    lookup_exact(&directory, &pin, &ingress, true)
 }
 
 pub(crate) fn run(mut args: Args) -> Result<()> {
@@ -2046,6 +2072,15 @@ mod tests {
         ));
         fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
         root
+    }
+
+    #[test]
+    fn only_a_later_absent_lookup_retires_the_attempt() {
+        let absent = json!({"type":"absent","effect":"undecided"});
+        assert!(absence_retires(true, &absent));
+        assert!(!absence_retires(false, &absent), "the submitting invocation proves nothing from a broken transport");
+        assert!(!absence_retires(true, &json!({"type":"confirmed","confirmation":"replayed"})));
+        assert!(!absence_retires(true, &json!({"type":"refused","effect":"no-record"})));
     }
 
     #[test]

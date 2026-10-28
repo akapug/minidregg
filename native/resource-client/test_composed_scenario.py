@@ -201,6 +201,14 @@ class ComposedTests(unittest.TestCase):
             if len(argv) > 1 and argv[1] == "key-status":
                 return w.key_status(argv)
             calls.append(Path(argv[1]).name)
+            if calls[-1] == "connector-authority.py":
+                # The connector's own held task and document grant, named by the selection, under
+                # the selection's document as proposal; it runs after attachment, before provisioning.
+                flags = dict(zip(argv[2::2], argv[3::2]))
+                self.assertEqual(flags["--selection"], str(root / "selection.json"))
+                self.assertEqual(flags["--world-inventory"], str(self.world))
+                self.assertEqual(flags["--proposal-id"], w.selection["connector"]["document"])
+                return mock.Mock(returncode=0, stdout=b"{}", stderr=b"")
             binding = c.read(argv[2])
             if calls[-1] == "same-store-app.py":
                 target = Path(binding["root"]); target.mkdir()
@@ -226,7 +234,7 @@ class ComposedTests(unittest.TestCase):
             self.assertEqual(first["phases"], {"apps": "pass", "connector": "pass"})
             second = c.Scenario(value, "spec.json").run()
             self.assertEqual(second["phases"], first["phases"])
-        self.assertEqual(calls, ["same-store-app.py", "app-document-provision.py", "app-document-journey.py"])
+        self.assertEqual(calls, ["same-store-app.py", "connector-authority.py", "app-document-provision.py", "app-document-journey.py"])
         state = c.read(self.state / "state.json")
         self.assertEqual(set(state["derivedInputPins"]), {"sheet:attach", "sheet:connector", "sheet:journey"})
         (root / "selection.json").write_text("{}")
@@ -470,6 +478,17 @@ class ComposedTests(unittest.TestCase):
         path = self.root / "documents-binding.json"
         path.write_text(json.dumps({"protocol": "mini-protected-same-store-v1"}))
         return path
+
+    def test_spec_room_owner_names_the_shared_room_owner_within_the_population(self):
+        world_value = json.loads(self.world.read_text())
+        world_value["restart"] = {"argv": [str(self.root / "restart.sh")]}
+        self.world.write_text(json.dumps(world_value))
+        self.assertEqual(c.generate(str(self.world), str(self.state), 3, "jd3")["rooms"]["shared"]["owner"], "ada")
+        value = c.generate(str(self.world), str(self.state), 3, "jd3", room_owner="bo")
+        self.assertEqual(value["rooms"]["shared"]["owner"], "bo")
+        self.assertEqual(value["churn"]["rooms"]["shared"]["member"], "cy")
+        with self.assertRaisesRegex(ValueError, "not among the first 3"):
+            c.generate(str(self.world), str(self.state), 3, "jd3", room_owner="helper")
 
     def test_spec_documents_binding_declares_both_adapters_under_state(self):
         world_value = json.loads(self.world.read_text())
