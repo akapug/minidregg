@@ -41,8 +41,13 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 &json!({"method":p.method,"path":p.path,"query":p.query,"headers":p.ordered_headers.iter().map(|(k,v)|json!({"name":k,"value":v})).collect::<Vec<_>>(),"bodyHex":mini_sdk::hex::encode(&p.body),"packageId":p.package_id,"interfaceSha256":p.declaration_sha256,"operation":p.operation}),
             )
         }
-        Some("call") => {
-            let op = args.required("operation")?.to_string_lossy().into_owned();
+        Some("call" | "qualify") => {
+            let qualification = action == "qualify";
+            let op = if qualification {
+                "qualify".to_owned()
+            } else {
+                args.required("operation")?.to_string_lossy().into_owned()
+            };
             let input = value(&PathBuf::from(args.required("args")?))?;
             let tool = args.required("tool")?.to_string_lossy().into_owned();
             let alias = args.required("attachment")?.to_string_lossy().into_owned();
@@ -62,14 +67,17 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             let socket = PathBuf::from(args.required("controller-socket")?);
             let attempt = PathBuf::from(args.required("dir")?);
             args.finish()?;
-            // Schema validation without executing preparations or exposing token data.
-            d.validate_input(&op, &input).map_err(|e| e.to_string())?;
-            let spec = d
-                .tools()
-                .map_err(|e| e.to_string())?
-                .into_iter()
-                .find(|v| v["operation"] == op)
-                .ok_or("operation-unknown-or-internal")?;
+            // Schema validation without executing preparations or exposing tokens.
+            let spec = if qualification {
+                json!({"nativeQualification":true})
+            } else {
+                d.validate_input(&op, &input).map_err(|e| e.to_string())?;
+                d.tools()
+                    .map_err(|e| e.to_string())?
+                    .into_iter()
+                    .find(|v| v["operation"] == op)
+                    .ok_or("operation-unknown-or-internal")?
+            };
             if !runtime.is_absolute() || !socket.is_absolute() || !attempt.is_absolute() {
                 return Err("call paths must be absolute".into());
             }
@@ -87,6 +95,15 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             let id =
                 mini_sdk::hex::encode(&mini_sdk::random::bytes::<16>().map_err(|e| e.to_string())?);
             let input_path = attempt.join("arguments.json");
+            let mut input = if qualification {
+                json!({"context":input})
+            } else {
+                input
+            };
+            input
+                .as_object_mut()
+                .ok_or("input-schema")?
+                .insert("_miniInterfaceDigest".into(), json!(d.sha256));
             crate::create_private(
                 &input_path,
                 &serde_json::to_vec(&input).map_err(|e| e.to_string())?,
@@ -130,6 +147,6 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 ))
             }
         }
-        _ => Err("app-interface --action must be tools, prepare or call".into()),
+        _ => Err("app-interface --action must be tools, prepare, call or qualify".into()),
     }
 }

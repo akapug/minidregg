@@ -1,6 +1,7 @@
 //! One declaration supplies native typed calls, tool schemas and qualification.
 //! This layer encodes application data. Admission and exact dispatch receipts remain
 //! the existing Mini application receiver's responsibility. Never retry a mutation.
+use crate::app_interface_cookie::CookieJar;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -10,7 +11,7 @@ pub struct Refusal {
     pub name: String,
     pub uncertain: bool,
 }
-type Result<T> = std::result::Result<T, Refusal>;
+pub type Result<T> = std::result::Result<T, Refusal>;
 fn refuse(name: &str) -> Refusal {
     Refusal {
         name: name.into(),
@@ -54,20 +55,85 @@ fn scalar(v: &Value) -> Result<String> {
         _ => Err(refuse("binding-value-invalid")),
     }
 }
-fn canonical(v: &Value) -> Value {
-    match v {
-        Value::Object(o) => {
-            let mut keys: Vec<_> = o.keys().collect();
-            keys.sort();
-            let mut out = serde_json::Map::new();
-            for k in keys {
-                out.insert(k.clone(), canonical(&o[k]));
+// The contract hashes sorted JSON with Python-compatible number spelling and
+// ensure_ascii string escaping. Write number tokens directly: reparsing them as
+// Value would normalize away exponent sign/zero padding a second time.
+fn canonical_bytes(value: &Value) -> Result<Vec<u8>> {
+    fn quoted(value: &str, out: &mut String) -> Result<()> {
+        let raw = serde_json::to_string(value).map_err(|_| refuse("declaration-invalid"))?;
+        for c in raw.chars() {
+            if (c as u32) >= 127 {
+                let mut units = [0; 2];
+                for unit in c.encode_utf16(&mut units).iter() {
+                    out.push_str(&format!("\\u{unit:04x}"));
+                }
+            } else {
+                out.push(c)
             }
-            Value::Object(out)
         }
-        Value::Array(a) => Value::Array(a.iter().map(canonical).collect()),
-        _ => v.clone(),
+        Ok(())
     }
+    fn write(value: &Value, out: &mut String) -> Result<()> {
+        match value {
+            Value::Null => out.push_str("null"),
+            Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+            Value::String(s) => quoted(s, out)?,
+            Value::Array(values) => {
+                out.push('[');
+                for (i, v) in values.iter().enumerate() {
+                    if i > 0 {
+                        out.push(',')
+                    }
+                    write(v, out)?;
+                }
+                out.push(']');
+            }
+            Value::Object(values) => {
+                out.push('{');
+                let mut keys: Vec<_> = values.keys().collect();
+                keys.sort();
+                for (i, k) in keys.iter().enumerate() {
+                    if i > 0 {
+                        out.push(',')
+                    }
+                    quoted(k, out)?;
+                    out.push(':');
+                    write(&values[*k], out)?;
+                }
+                out.push('}');
+            }
+            Value::Number(n) => {
+                let raw = n.to_string();
+                if raw.contains(['.', 'e', 'E']) {
+                    let f = n
+                        .as_f64()
+                        .filter(|f| f.is_finite())
+                        .ok_or_else(|| refuse("declaration-number-invalid"))?;
+                    let repr = format!("{f:?}");
+                    if let Some((mantissa, exponent)) = repr.split_once('e') {
+                        let exponent = exponent
+                            .parse::<i32>()
+                            .map_err(|_| refuse("declaration-number-invalid"))?;
+                        out.push_str(&format!(
+                            "{mantissa}e{}{:02}",
+                            if exponent >= 0 { "+" } else { "-" },
+                            exponent.abs()
+                        ));
+                    } else {
+                        out.push_str(&repr)
+                    }
+                } else if raw == "-0" {
+                    out.push('0')
+                } else {
+                    out.push_str(&raw)
+                }
+            }
+        }
+        Ok(())
+    }
+    let mut out = String::new();
+    write(value, &mut out)?;
+    Ok(out.into_bytes())
 }
 fn percent(s: &str) -> String {
     let mut out = String::new();
@@ -158,6 +224,46 @@ pub fn resolve(x: &Value, args: &Value, context: &Value, results: &Value) -> Res
                 }
                 return Ok(json!(s));
             }
+            if let Some(v) = o.get("jsonStringify") {
+                return serde_json::to_string(&resolve(v, args, context, results)?)
+                    .map(|s| json!(s))
+                    .map_err(|_| refuse("binding-json-invalid"));
+            }
+            if let Some(v) = o.get("csv") {
+                let rows = resolve(v, args, context, results)?;
+                let mut out = String::new();
+                for row in rows.as_array().ok_or_else(|| refuse("csv-input-invalid"))? {
+                    let cells = row.as_array().ok_or_else(|| refuse("csv-input-invalid"))?;
+                    for (i, cell) in cells.iter().enumerate() {
+                        if i > 0 {
+                            out.push(',')
+                        }
+                        let cell = cell.as_str().ok_or_else(|| refuse("csv-input-invalid"))?;
+                        if cell.contains([',', '"', '\r', '\n'])
+                            || (cell.is_empty() && cells.len() == 1)
+                        {
+                            out.push('"');
+                            out.push_str(&cell.replace('"', "\"\""));
+                            out.push('"')
+                        } else {
+                            out.push_str(cell)
+                        }
+                    }
+                    out.push_str("\r\n");
+                }
+                return Ok(json!(out));
+            }
+            if let Some(v) = o.get("sha256") {
+                return Ok(json!(format!(
+                    "{:x}",
+                    Sha256::digest(
+                        resolve(v, args, context, results)?
+                            .as_str()
+                            .ok_or_else(|| refuse("hash-input-invalid"))?
+                            .as_bytes()
+                    )
+                )));
+            }
             if let Some(p) = o.get("path") {
                 return Ok(json!(path(p, args)?));
             }
@@ -202,7 +308,7 @@ impl Declaration {
             return Err(refuse("declaration-invalid"));
         }
         for key in ["bodyBytes", "replyBytes"] {
-            if number(&value["limits"][key])? > 1048576 {
+            if !(1..=67108864).contains(&number(&value["limits"][key])?) {
                 return Err(refuse("declaration-limit-invalid"));
             }
         }
@@ -220,13 +326,20 @@ impl Declaration {
                 check_schema(schema, 0)?;
             }
         }
-        let sha256 = format!(
-            "{:x}",
-            Sha256::digest(
-                serde_json::to_vec(&canonical(&value))
-                    .map_err(|_| refuse("declaration-invalid"))?
-            )
-        );
+        if let Some(steps) = value["qualification"].as_array() {
+            for step in steps {
+                if let Some(wait) = step.get("await") {
+                    if ops
+                        .get(string(&step["op"])?)
+                        .is_none_or(|op| op["write"] != false)
+                    {
+                        return Err(refuse("declaration-mutating-await"));
+                    }
+                    await_bounds(wait)?;
+                }
+            }
+        }
+        let sha256 = format!("{:x}", Sha256::digest(canonical_bytes(&value)?));
         let d = Self {
             value,
             sha256,
@@ -428,6 +541,15 @@ impl Declaration {
             {
                 return Err(refuse("header-identity-forbidden"));
             }
+            if lower == "cookie"
+                && s.split(';').any(|p| {
+                    p.trim()
+                        .split_once('=')
+                        .is_some_and(|(k, _)| k == "__Host-mini_spk_session")
+                })
+            {
+                return Err(refuse("app-cookie-reserved"));
+            }
             ordered_headers.push((k.clone(), s.into()));
         }
         let q = resolve(b.get("query").unwrap_or(&empty), args, context, results)?;
@@ -454,24 +576,54 @@ impl Declaration {
         headers: &[(String, String)],
         body: &[u8],
     ) -> Result<Value> {
-        let write = self.operation(&p.operation)?["write"] == true;
-        self.decode_inner(p, status, headers, body)
-            .map_err(|mut e| {
-                if write
-                    && matches!(
-                        e.name.as_str(),
-                        "output-schema"
-                            | "app-response-invalid"
-                            | "app-content-type"
-                            | "app-text-invalid"
-                            | "reply-over-bound"
-                            | "dav-response-invalid"
-                    )
-                {
-                    e.uncertain = true;
-                }
-                e
-            })
+        self.decode_for(p, &json!({}), &json!({}), status, headers, body)
+    }
+    pub fn decode_for(
+        &self,
+        p: &PreparedCall,
+        args: &Value,
+        context: &Value,
+        status: u16,
+        headers: &[(String, String)],
+        body: &[u8],
+    ) -> Result<Value> {
+        self.decode_results(p, args, context, &Value::Null, status, headers, body)
+    }
+    fn decode_results(
+        &self,
+        p: &PreparedCall,
+        args: &Value,
+        context: &Value,
+        results: &Value,
+        status: u16,
+        headers: &[(String, String)],
+        body: &[u8],
+    ) -> Result<Value> {
+        let op = self.operation(&p.operation)?;
+        let write = op["write"] == true;
+        (|| {
+            let value = self.decode_inner(p, status, headers, body)?;
+            let value = project(op, value, args, context, results)?;
+            self.validate(&op["output"], &value, "output", 0)?;
+            Ok(value)
+        })()
+        .map_err(|mut e: Refusal| {
+            if write
+                && matches!(
+                    e.name.as_str(),
+                    "output-schema"
+                        | "app-response-invalid"
+                        | "app-content-type"
+                        | "app-text-invalid"
+                        | "reply-over-bound"
+                        | "dav-response-invalid"
+                        | "projection-shape-invalid"
+                )
+            {
+                e.uncertain = true;
+            }
+            e
+        })
     }
     fn decode_inner(
         &self,
@@ -513,8 +665,19 @@ impl Declaration {
         let value = match string(&op["binding"]["decode"])? {
             "json" => {
                 if !headers.iter().any(|(k, v)| {
+                    let mime = v
+                        .split(';')
+                        .next()
+                        .unwrap_or("")
+                        .trim()
+                        .to_ascii_lowercase();
                     k.eq_ignore_ascii_case("content-type")
-                        && v.to_ascii_lowercase().contains("json")
+                        && (mime.contains("json")
+                            || op["binding"]["acceptedContentTypes"]
+                                .as_array()
+                                .is_some_and(|a| {
+                                    a.iter().any(|t| t.as_str() == Some(mime.as_str()))
+                                }))
                 }) {
                     return Err(refuse("app-content-type"));
                 }
@@ -535,16 +698,36 @@ impl Declaration {
             "text" => json!(std::str::from_utf8(body).map_err(|_| refuse("app-text-invalid"))?),
             "base64" => json!({"contentBase64":STANDARD.encode(body)}),
             "status" => json!({"status":status}),
-            "dav-multistatus" => dav(body)?,
+            "rss" => rss(
+                body,
+                number(&self.value["limits"]["snapshotDocuments"])? as usize,
+            )?,
+            "dav-multistatus" => dav(body, false)?,
+            "caldav-multistatus" => dav(body, true)?,
             _ => return Err(refuse("binding-decoding-unsupported")),
         };
-        self.validate(&op["output"], &value, "output", 0)?;
         Ok(value)
     }
     fn validate(&self, s: &Value, v: &Value, phase: &str, depth: usize) -> Result<()> {
         let bad = || refuse(&format!("{phase}-schema"));
         if depth > 64 {
             return Err(bad());
+        }
+        for key in ["oneOf", "anyOf", "allOf"] {
+            if let Some(choices) = s.get(key) {
+                let choices = choices.as_array().ok_or_else(bad)?;
+                let count = choices
+                    .iter()
+                    .filter(|sub| self.validate(sub, v, phase, depth + 1).is_ok())
+                    .count();
+                if match key {
+                    "oneOf" => count != 1,
+                    "anyOf" => count == 0,
+                    _ => count != choices.len(),
+                } {
+                    return Err(bad());
+                }
+            }
         }
         if let Some(r) = s.get("$ref") {
             let name = string(r)?.strip_prefix("#/$defs/").ok_or_else(bad)?;
@@ -597,6 +780,8 @@ impl Declaration {
                     self.validate(sub, x, phase, depth + 1)?
                 } else if s["additionalProperties"] == false {
                     return Err(bad());
+                } else if s["additionalProperties"].is_object() {
+                    self.validate(&s["additionalProperties"], x, phase, depth + 1)?;
                 }
             }
         }
@@ -649,6 +834,8 @@ impl Declaration {
         if let Some(n) = v.as_f64() {
             if s["minimum"].as_f64().is_some_and(|m| n < m)
                 || s["maximum"].as_f64().is_some_and(|m| n > m)
+                || s["exclusiveMinimum"].as_f64().is_some_and(|m| n <= m)
+                || s["exclusiveMaximum"].as_f64().is_some_and(|m| n >= m)
             {
                 return Err(bad());
             }
@@ -672,10 +859,10 @@ fn binary(v: &Value) -> Result<Vec<u8>> {
     }
     Ok(bytes)
 }
-fn dav(body: &[u8]) -> Result<Value> {
+fn dav(body: &[u8], caldav: bool) -> Result<Value> {
     let text = std::str::from_utf8(body).map_err(|_| refuse("dav-response-invalid"))?;
     let upper = text.to_ascii_uppercase();
-    if upper.contains("<!DOCTYPE") || upper.contains("<!ENTITY") {
+    if text.contains('\0') || upper.contains("<!DOCTYPE") || upper.contains("<!ENTITY") {
         return Err(refuse("dav-xml-unsafe"));
     }
     let doc = roxmltree::Document::parse(text).map_err(|_| refuse("dav-response-invalid"))?;
@@ -694,6 +881,7 @@ fn dav(body: &[u8]) -> Result<Value> {
         let mut collection = None;
         let mut size = Value::Null;
         let mut etag = Value::Null;
+        let mut calendar_data = None;
         for ps in r.children().filter(|n| tag(*n, "propstat")) {
             let status = ps
                 .children()
@@ -728,12 +916,21 @@ fn dav(body: &[u8]) -> Result<Value> {
                             .parse::<u64>()
                             .map_err(|_| refuse("dav-response-invalid"))?),
                     };
+                } else if p.has_tag_name(("urn:ietf:params:xml:ns:caldav", "calendar-data")) {
+                    calendar_data = Some(p.text().unwrap_or("").to_owned());
                 } else if tag(p, "getetag") {
                     etag = p.text().map(|t| json!(t)).unwrap_or(Value::Null)
                 }
             }
         }
-        out.push(json!({"href":href,"collection":collection.ok_or_else(||refuse("dav-property-missing"))?,"bytes":size,"etag":etag}));
+        if caldav {
+            if !etag.is_string() {
+                return Err(refuse("caldav-property-missing"));
+            }
+            out.push(json!({"href":href,"etag":etag,"calendarData":calendar_data.ok_or_else(||refuse("caldav-property-missing"))?}));
+        } else {
+            out.push(json!({"href":href,"collection":collection.ok_or_else(||refuse("dav-property-missing"))?,"bytes":size,"etag":etag}));
+        }
     }
     Ok(json!(out))
 }
@@ -797,7 +994,7 @@ impl Declaration {
                 binding,
                 &mut dispatch,
                 &mut receipts,
-                &mut vec![],
+                &mut CookieJar::default(),
                 0,
             )
         };
@@ -811,7 +1008,7 @@ impl Declaration {
         binding: &SessionBinding,
         dispatch: &mut F,
         receipts: &mut Vec<Value>,
-        cookies: &mut Vec<(String, String)>,
+        cookies: &mut CookieJar,
         depth: usize,
     ) -> Result<Value>
     where
@@ -898,10 +1095,27 @@ impl Declaration {
                 }
             }
         }
-        results["__mini_cookie_jar"] =
-            Value::Object(cookies.iter().map(|(k, v)| (k.clone(), json!(v))).collect());
+        let target = if op["binding"]["protocol"] == "http" {
+            path(&op["binding"]["path"], args)?
+        } else {
+            String::new()
+        };
+        let scoped = cookies.for_path(&target)?;
+        results["__mini_cookie_jar"] = json!(scoped);
+        if op["binding"]["protocol"] == "ddp" {
+            let value = self.execute_ddp(name, args, context, binding, dispatch, receipts)?;
+            return (|| {
+                let value = project(op, value, args, context, &results)?;
+                self.validate(&op["output"], &value, "output", 0)?;
+                Ok(value)
+            })()
+            .map_err(|mut e: Refusal| {
+                e.uncertain |= op["write"] == true;
+                e
+            });
+        }
         let mut call = self.encode_results(name, args, context, &results)?;
-        if !cookies.is_empty() {
+        if self.value["auth"]["appCookies"] == "retain" && !scoped.is_empty() {
             if call
                 .ordered_headers
                 .iter()
@@ -911,7 +1125,7 @@ impl Declaration {
             }
             call.ordered_headers.push((
                 "cookie".into(),
-                cookies
+                scoped
                     .iter()
                     .map(|(k, v)| format!("{k}={v}"))
                     .collect::<Vec<_>>()
@@ -920,39 +1134,17 @@ impl Declaration {
         }
         let reply = dispatch(binding, &call)?;
         receipts.push(reply.receipt.clone());
-        for (k, v) in &reply.headers {
-            if k.eq_ignore_ascii_case("set-cookie") {
-                let pair = v.split(';').next().unwrap_or("");
-                let (name, value) = pair
-                    .split_once('=')
-                    .ok_or_else(|| refuse("app-cookie-invalid"))?;
-                if name.is_empty()
-                    || name
-                        .chars()
-                        .any(|c| !c.is_ascii_alphanumeric() && !"_-".contains(c))
-                    || value.chars().any(|c| c.is_control() || c == ';')
-                {
-                    return Err(refuse("app-cookie-invalid"));
-                }
-                if let Some(existing) = cookies.iter_mut().find(|(k, _)| k == name) {
-                    existing.1 = value.into()
-                } else {
-                    cookies.push((name.into(), value.into()))
-                }
-                if cookies.len() > 64
-                    || cookies
-                        .iter()
-                        .map(|(k, v)| k.len() + v.len() + 2)
-                        .sum::<usize>()
-                        > 16384
-                {
-                    return Err(refuse("app-cookie-over-bound"));
-                }
-            }
-        }
-        let mut value = self
-            .decode(&call, reply.status, &reply.headers, &reply.body)
-            .map_err(|mut e| {
+        let value = self
+            .decode_results(
+                &call,
+                args,
+                context,
+                &results,
+                reply.status,
+                &reply.headers,
+                &reply.body,
+            )
+            .map_err(|mut e: Refusal| {
                 if call.write
                     && matches!(
                         e.name.as_str(),
@@ -968,18 +1160,13 @@ impl Declaration {
                 }
                 e
             })?;
-        if let Some(p) = op.get("projection") {
-            let expected = resolve(&p["where"], args, context, &results)?;
-            value = Value::Array(
-                value[string(&p["collection"])?]
-                    .as_array()
-                    .ok_or_else(|| refuse("output-schema"))?
-                    .iter()
-                    .filter(|v| matches_fields(v, &expected))
-                    .cloned()
-                    .collect(),
-            );
-            self.validate(&op["output"], &value, "output", 0)?;
+        if self.value["auth"]["appCookies"] == "retain" {
+            cookies
+                .retain(&reply.headers, &call.path)
+                .map_err(|mut e: Refusal| {
+                    e.uncertain |= call.write;
+                    e
+                })?;
         }
         Ok(value)
     }
@@ -999,38 +1186,70 @@ impl Declaration {
             if binding.package_id != self.package_id {
                 return Err(refuse("package-binding-mismatch"));
             }
-            for step in self.value["qualification"]
+            let steps = self.value["qualification"]
                 .as_array()
-                .ok_or_else(|| refuse("declaration-invalid"))?
-            {
+                .ok_or_else(|| refuse("declaration-invalid"))?;
+            let mut saw_write = false;
+            let mut readback = false;
+            for step in steps {
+                let op = self.operation(string(&step["op"])?)?;
+                if op["write"] == true {
+                    saw_write = true
+                } else if saw_write && step["assert"].as_array().is_some_and(|a| !a.is_empty()) {
+                    readback = true
+                }
+            }
+            if !readback {
+                return Err(refuse("qualification-write-readback-absent"));
+            }
+            for step in steps {
+                let name = string(&step["op"])?;
                 let args = resolve(&step["args"], &json!({}), context, &results)?;
-                let value = self.execute_inner(
-                    string(&step["op"])?,
-                    &args,
-                    context,
-                    binding,
-                    &mut dispatch,
-                    &mut receipts,
-                    &mut vec![],
-                    0,
-                )?;
-                results[string(&step["id"])?] = value.clone();
-                if let Some(checks) = step.get("assert") {
-                    for check in checks
-                        .as_array()
-                        .ok_or_else(|| refuse("declaration-invalid"))?
-                    {
-                        let ok = if let Some(expected) = check.get("contains") {
-                            let expected = resolve(expected, &json!({}), context, &results)?;
-                            value
-                                .as_array()
-                                .is_some_and(|a| a.iter().any(|v| matches_fields(v, &expected)))
-                        } else {
-                            *lookup(&value, &check["path"])?
-                                == resolve(&check["equals"], &json!({}), context, &results)?
-                        };
-                        if !ok {
-                            return Err(refuse("readback-mismatch"));
+                let (attempts, interval, retry) = if let Some(wait) = step.get("await") {
+                    if self.operation(name)?["write"] != false {
+                        return Err(refuse("declaration-mutating-await"));
+                    }
+                    await_bounds(wait)?
+                } else {
+                    (1, 0.0, vec![])
+                };
+                for attempt in 0..attempts {
+                    let mut status = None;
+                    let value = self.execute_inner(
+                        name,
+                        &args,
+                        context,
+                        binding,
+                        &mut |b, p| {
+                            let reply = dispatch(b, p)?;
+                            status = Some(reply.status);
+                            Ok(reply)
+                        },
+                        &mut receipts,
+                        &mut CookieJar::default(),
+                        0,
+                    );
+                    let checked = value.and_then(|value| {
+                        results[string(&step["id"])?] = value.clone();
+                        scenario_assertions(&value, step.get("assert"), context, &results)?;
+                        Ok(value)
+                    });
+                    match checked {
+                        Ok(_) => break,
+                        Err(e) => {
+                            let retryable = !e.uncertain
+                                && (e.name == "readback-mismatch"
+                                    || (e.name == "app-http-status"
+                                        && status.is_some_and(|s| retry.contains(&s))));
+                            if !retryable || attempt + 1 == attempts {
+                                return Err(e);
+                            }
+                            if interval > 0.0 {
+                                #[cfg(not(target_arch = "wasm32"))]
+                                std::thread::sleep(std::time::Duration::from_secs_f64(interval));
+                                #[cfg(target_arch = "wasm32")]
+                                return Err(refuse("qualification-native-required"));
+                            }
                         }
                     }
                 }
@@ -1070,8 +1289,9 @@ fn check_schema(s: &Value, depth: usize) -> Result<()> {
     for (k, v) in object {
         match k.as_str() {
             "type" | "$ref" | "enum" | "const" | "required" | "minimum" | "maximum"
-            | "minLength" | "maxLength" | "minItems" | "maxItems" | "title" | "description"
-            | "default" | "examples" | "contentMediaType" => {}
+            | "exclusiveMinimum" | "exclusiveMaximum" | "minLength" | "maxLength" | "minItems"
+            | "maxItems" | "title" | "description" | "default" | "examples"
+            | "contentMediaType" => {}
             "format" => {
                 if v != "relative-path" {
                     return Err(refuse("schema-format-unsupported"));
@@ -1087,11 +1307,18 @@ fn check_schema(s: &Value, depth: usize) -> Result<()> {
                     .map_err(|_| refuse("schema-pattern-unsupported"))?;
             }
             "additionalProperties" => {
-                if !v.is_boolean() {
-                    return Err(refuse("schema-keyword-unsupported"));
+                if v.is_object() {
+                    check_schema(v, depth + 1)?;
+                } else if !v.is_boolean() {
+                    return Err(refuse("schema-invalid"));
                 }
             }
             "items" => check_schema(v, depth + 1)?,
+            "oneOf" | "anyOf" | "allOf" => {
+                for sub in v.as_array().ok_or_else(|| refuse("schema-invalid"))? {
+                    check_schema(sub, depth + 1)?;
+                }
+            }
             "properties" | "$defs" => {
                 for sub in v
                     .as_object()
@@ -1105,4 +1332,431 @@ fn check_schema(s: &Value, depth: usize) -> Result<()> {
         }
     }
     Ok(())
+}
+
+impl Declaration {
+    fn conversation<F>(
+        &self,
+        name: &str,
+        binding: &SessionBinding,
+        path: &str,
+        descriptor: Value,
+        mutation: bool,
+        dispatch: &mut F,
+        receipts: &mut Vec<Value>,
+    ) -> Result<Value>
+    where
+        F: FnMut(&SessionBinding, &PreparedCall) -> Result<NativeReply>,
+    {
+        let body = serde_json::to_vec(&descriptor)
+            .map_err(|_| refuse("conversation-descriptor-invalid"))?;
+        if body.len() > 65536 {
+            return Err(refuse("body-over-bound"));
+        }
+        let call = PreparedCall {
+            method: "CONVERSATION".into(),
+            path: path.into(),
+            query: String::new(),
+            ordered_headers: vec![("content-type".into(), "application/json".into())],
+            body,
+            declaration_sha256: self.sha256.clone(),
+            package_id: self.package_id.clone(),
+            operation: name.into(),
+            write: mutation,
+        };
+        let reply = dispatch(binding, &call)?;
+        receipts.push(reply.receipt);
+        let result = (|| {
+            if reply.status != 200 {
+                return Err(refuse("conversation-http-refused"));
+            }
+            if reply.body.len() > 1048576 {
+                return Err(refuse("reply-over-bound"));
+            }
+            let v: Value = serde_json::from_slice(&reply.body)
+                .map_err(|_| refuse("conversation-response-invalid"))?;
+            if v["version"] != 1
+                || v["channel"] != descriptor["channel"]
+                || v["op"] != descriptor["op"]
+                || !v["frames"]
+                    .as_array()
+                    .is_some_and(|a| a.iter().all(Value::is_string))
+            {
+                return Err(refuse("conversation-response-mismatch"));
+            }
+            Ok(v)
+        })();
+        result.map_err(|mut e: Refusal| {
+            e.uncertain |= mutation;
+            e
+        })
+    }
+    fn ddp_frames<F>(
+        &self,
+        name: &str,
+        binding: &SessionBinding,
+        path: &str,
+        channel: &str,
+        reply: &Value,
+        state: &mut crate::app_interface_ddp::DdpState,
+        dispatch: &mut F,
+        receipts: &mut Vec<Value>,
+    ) -> Result<()>
+    where
+        F: FnMut(&SessionBinding, &PreparedCall) -> Result<NativeReply>,
+    {
+        for frame in reply["frames"]
+            .as_array()
+            .ok_or_else(|| refuse("conversation-response-invalid"))?
+        {
+            if let Some(pong) = state.frame(
+                string(frame)?,
+                number(&self.value["limits"]["snapshotDocuments"])? as usize,
+            )? {
+                let text = serde_json::to_string(&pong).map_err(|_| refuse("ddp-frame-invalid"))?;
+                self.conversation(
+                    name,
+                    binding,
+                    path,
+                    json!({"version":1,"op":"send","channel":channel,"text":text}),
+                    false,
+                    dispatch,
+                    receipts,
+                )?;
+            }
+        }
+        Ok(())
+    }
+    fn execute_ddp<F>(
+        &self,
+        name: &str,
+        args: &Value,
+        context: &Value,
+        binding: &SessionBinding,
+        dispatch: &mut F,
+        receipts: &mut Vec<Value>,
+    ) -> Result<Value>
+    where
+        F: FnMut(&SessionBinding, &PreparedCall) -> Result<NativeReply>,
+    {
+        let op = self.operation(name)?;
+        let b = &op["binding"];
+        let auth = &self.value["auth"];
+        if auth["kind"] != "sandstorm-ddp-rendezvous" {
+            return Err(refuse("auth-protocol-unsupported"));
+        }
+        let seed = context["rendezvousSeed"]
+            .as_str()
+            .ok_or_else(|| refuse("controller-rendezvous-seed-required"))?;
+        if seed.len() != 64
+            || !seed
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            return Err(refuse("controller-rendezvous-seed-invalid"));
+        }
+        let serial = receipts.len();
+        let root_id = context["operationId"]
+            .as_str()
+            .ok_or_else(|| refuse("controller-operation-id-required"))?;
+        let id = format!(
+            "{:x}",
+            Sha256::digest(format!("mini/ddp/op/v1/{root_id}/{serial}/{name}"))
+        );
+        let channel = format!("mini-{id}");
+        let token = format!(
+            "{:x}",
+            Sha256::digest(format!("mini/ddp/auth/v1/{seed}/{id}"))
+        );
+        let path = string(&auth["websocket"])?.trim_start_matches('/');
+        let mut state = crate::app_interface_ddp::DdpState::default();
+        let open=self.conversation(name,binding,path,json!({"version":1,"op":"open","channel":channel,"protocol":"ddp-v1","maxFrames":64,"maxBytes":65536,"deadlineMs":30000}),false,dispatch,receipts)?;
+        let mut sent_mutation = false;
+        let result=(||{
+            self.ddp_frames(name,binding,path,&channel,&open,&mut state,dispatch,receipts)?;
+            let connect=json!({"msg":"connect","version":"1","support":["1"]}).to_string();
+            let reply=self.conversation(name,binding,path,json!({"version":1,"op":"send","channel":channel,"text":connect}),false,dispatch,receipts)?;
+            self.ddp_frames(name,binding,path,&channel,&reply,&mut state,dispatch,receipts)?;
+            if !state.connected{
+                let reply=self.conversation(name,binding,path,json!({"version":1,"op":"receive","channel":channel,"condition":{"msg":"any"},"maxFrames":64,"maxBytes":65536,"deadlineMs":30000}),false,dispatch,receipts)?;
+                self.ddp_frames(name,binding,path,&channel,&reply,&mut state,dispatch,receipts)?;
+                if !state.connected{return Err(refuse("ddp-connect-incomplete"))}
+            }
+            let login_id=format!("login-{id}");let login=json!({"msg":"method","method":auth["method"],"id":login_id,"params":[token]}).to_string();
+            let reply=self.conversation(name,binding,path,json!({"version":1,"op":"rendezvous","channel":channel,"text":login,"http":{"method":"POST","path":string(&auth["postPath"])?.trim_start_matches('/'),"query":"","headers":[{"name":"content-type","value":auth["contentType"]}],"bodyHex":crate::hex::encode(token.as_bytes())},"maxFrames":64,"maxBytes":65536,"deadlineMs":30000}),false,dispatch,receipts)?;
+            self.ddp_frames(name,binding,path,&channel,&reply,&mut state,dispatch,receipts)?;
+            if reply["httpStatus"]!=204{return Err(refuse("auth-rendezvous-refused"))}
+            let login=self.ddp_finish(name,binding,path,&channel,&login_id,&mut state,false,dispatch,receipts)?;
+            let uid=login[string(&auth["userIdField"])?].as_str().filter(|s|!s.is_empty()).ok_or_else(||refuse("auth-member-required"))?;
+            let mut local=context.clone();local["userId"]=json!(uid);local["operationId"]=json!(id);
+            let params=resolve(&b["params"],args,&local,&Value::Null)?;
+            match string(&b["kind"])?{
+                "method"=>{
+                    let frame=json!({"msg":"method","method":b["method"],"id":id,"params":params}).to_string();
+                    let reply=self.conversation(name,binding,path,json!({"version":1,"op":"send","channel":channel,"text":frame}),op["write"]==true,dispatch,receipts)?;
+                    sent_mutation=op["write"]==true;
+                    self.ddp_frames(name,binding,path,&channel,&reply,&mut state,dispatch,receipts)?;
+                    let value=self.ddp_finish(name,binding,path,&channel,&id,&mut state,sent_mutation,dispatch,receipts)?;
+                    if b["result"]=="insert-id" {if value!=id{return Err(refuse("ddp-insert-id-mismatch"))}Ok(json!({"id":id}))}else if b["result"]=="json"{Ok(value)}else{Err(refuse("ddp-result-unsupported"))}
+                },
+                "snapshot"=>{
+                    let frame=json!({"msg":"sub","id":id,"name":b["publication"],"params":params}).to_string();
+                    let reply=self.conversation(name,binding,path,json!({"version":1,"op":"send","channel":channel,"text":frame}),false,dispatch,receipts)?;
+                    self.ddp_frames(name,binding,path,&channel,&reply,&mut state,dispatch,receipts)?;
+                    let collections=b["collections"].as_array().ok_or_else(||refuse("declaration-invalid"))?.iter().map(|v|string(v).map(str::to_owned)).collect::<Result<Vec<_>>>()?;
+                    if let Some(value)=state.snapshot(&id,&collections)?{return Ok(value)}
+                    let reply=self.conversation(name,binding,path,json!({"version":1,"op":"receive","channel":channel,"condition":{"msg":"ready","id":id},"maxFrames":64,"maxBytes":65536,"deadlineMs":30000}),false,dispatch,receipts)?;
+                    self.ddp_frames(name,binding,path,&channel,&reply,&mut state,dispatch,receipts)?;
+                    state.snapshot(&id,&collections)?.ok_or_else(||refuse("ddp-publication-incomplete"))
+                },_=>Err(refuse("ddp-kind-unsupported")),
+            }
+        })().map_err(|mut e|{if sent_mutation&&e.name!="ddp-method-refused"{e.uncertain=true;}e});
+        // A close is a fresh admitted operation, never a replay of any method.
+        let close = self.conversation(
+            name,
+            binding,
+            path,
+            json!({"version":1,"op":"close","channel":channel}),
+            false,
+            dispatch,
+            receipts,
+        );
+        match result {
+            Err(e) => Err(e),
+            Ok(v) => {
+                close.map_err(|mut e: Refusal| {
+                    e.uncertain |= sent_mutation;
+                    e
+                })?;
+                Ok(v)
+            }
+        }
+    }
+    fn ddp_finish<F>(
+        &self,
+        name: &str,
+        binding: &SessionBinding,
+        path: &str,
+        channel: &str,
+        id: &str,
+        state: &mut crate::app_interface_ddp::DdpState,
+        mutation: bool,
+        dispatch: &mut F,
+        receipts: &mut Vec<Value>,
+    ) -> Result<Value>
+    where
+        F: FnMut(&SessionBinding, &PreparedCall) -> Result<NativeReply>,
+    {
+        if let Some(v) = state.method_result(id)? {
+            return Ok(v);
+        }
+        // Both result and updated are required; receive preserves all intervening
+        // frames, so either order and a combined frame batch are accepted.
+        for _ in 0..64 {
+            if let Some(v) = state.method_result(id)? {
+                return Ok(v);
+            }
+            let msg = state.method_waiting_for(id);
+            let reply=self.conversation(name,binding,path,json!({"version":1,"op":"receive","channel":channel,"condition":{"msg":msg,"id":id},"maxFrames":64,"maxBytes":65536,"deadlineMs":30000}),mutation,dispatch,receipts)?;
+            self.ddp_frames(
+                name, binding, path, channel, &reply, state, dispatch, receipts,
+            )?;
+        }
+        state.method_result(id)?.ok_or_else(|| Refusal {
+            name: "ddp-method-incomplete".into(),
+            uncertain: mutation,
+        })
+    }
+}
+
+fn project(
+    op: &Value,
+    value: Value,
+    args: &Value,
+    context: &Value,
+    results: &Value,
+) -> Result<Value> {
+    let Some(p) = op.get("projection") else {
+        return Ok(value);
+    };
+    let expected = resolve(&p["where"], args, context, results)?;
+    let collection = value
+        .get(string(&p["collection"])?)
+        .ok_or_else(|| refuse("projection-shape-invalid"))?;
+    let rows: Vec<&Value> = if p["values"] == true {
+        collection
+            .as_object()
+            .ok_or_else(|| refuse("projection-shape-invalid"))?
+            .values()
+            .collect()
+    } else {
+        collection
+            .as_array()
+            .ok_or_else(|| refuse("projection-shape-invalid"))?
+            .iter()
+            .collect()
+    };
+    if rows.iter().any(|v| !v.is_object()) {
+        return Err(refuse("projection-shape-invalid"));
+    }
+    Ok(Value::Array(
+        rows.into_iter()
+            .filter(|v| matches_fields(v, &expected))
+            .cloned()
+            .collect(),
+    ))
+}
+
+fn await_bounds(wait: &Value) -> Result<(usize, f64, Vec<u16>)> {
+    let bad = || refuse("declaration-await-invalid");
+    let o = wait.as_object().ok_or_else(bad)?;
+    if o.len() != 3 {
+        return Err(bad());
+    }
+    let attempts = wait["attempts"]
+        .as_u64()
+        .filter(|n| (1..=20).contains(n))
+        .ok_or_else(bad)?;
+    let interval = wait["intervalSeconds"]
+        .as_f64()
+        .filter(|n| (0.0..=3.0).contains(n))
+        .ok_or_else(bad)?;
+    let statuses = wait["retryStatuses"].as_array().ok_or_else(bad)?;
+    if statuses.len() > 3 {
+        return Err(bad());
+    }
+    let mut retry = vec![];
+    for s in statuses {
+        let s = s
+            .as_u64()
+            .filter(|s| (502..=504).contains(s))
+            .ok_or_else(bad)? as u16;
+        if retry.contains(&s) {
+            return Err(bad());
+        }
+        retry.push(s)
+    }
+    Ok((attempts as usize, interval, retry))
+}
+fn scenario_assertions(
+    value: &Value,
+    checks: Option<&Value>,
+    context: &Value,
+    results: &Value,
+) -> Result<()> {
+    if let Some(checks) = checks {
+        for check in checks
+            .as_array()
+            .ok_or_else(|| refuse("declaration-invalid"))?
+        {
+            let ok = if let Some(expected) = check.get("containsText") {
+                let expected = scalar(&resolve(expected, &json!({}), context, results)?)?;
+                let got = if let Some(path) = check.get("path") {
+                    lookup(value, path).ok()
+                } else {
+                    Some(value)
+                };
+                got.and_then(Value::as_str)
+                    .is_some_and(|s| s.contains(&expected))
+            } else if let Some(expected) = check.get("contains") {
+                let expected = resolve(expected, &json!({}), context, results)?;
+                value.as_array().is_some_and(|a| {
+                    a.iter().any(|v| {
+                        if expected.is_object() {
+                            matches_fields(v, &expected)
+                        } else {
+                            *v == expected
+                        }
+                    })
+                })
+            } else {
+                lookup(value, &check["path"]).is_ok_and(|got| {
+                    resolve(&check["equals"], &json!({}), context, results)
+                        .is_ok_and(|expected| *got == expected)
+                })
+            };
+            if !ok {
+                return Err(refuse("readback-mismatch"));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn rss(body: &[u8], limit: usize) -> Result<Value> {
+    let text = std::str::from_utf8(body).map_err(|_| refuse("rss-response-invalid"))?;
+    let upper = text.to_ascii_uppercase();
+    if text.contains('\0') || upper.contains("<!DOCTYPE") || upper.contains("<!ENTITY") {
+        return Err(refuse("rss-xml-unsafe"));
+    }
+    let doc = roxmltree::Document::parse(text).map_err(|_| refuse("rss-response-invalid"))?;
+    let root = doc.root_element();
+    if !root.has_tag_name("rss")
+        || root.tag_name().namespace().is_some()
+        || root.attribute("version") != Some("2.0")
+    {
+        return Err(refuse("rss-response-invalid"));
+    }
+    let channels: Vec<_> = root
+        .children()
+        .filter(|n| n.has_tag_name("channel") && n.tag_name().namespace().is_none())
+        .collect();
+    if channels.len() != 1 {
+        return Err(refuse("rss-response-invalid"));
+    }
+    let mut out = vec![];
+    let mut ids = std::collections::BTreeSet::new();
+    for item in channels[0]
+        .children()
+        .filter(|n| n.has_tag_name("item") && n.tag_name().namespace().is_none())
+    {
+        if out.len() >= limit {
+            return Err(refuse("rss-items-over-bound"));
+        }
+        let mut fields = std::collections::BTreeMap::new();
+        let mut enclosure = Value::Null;
+        for child in item.children().filter(|n| n.is_element()) {
+            if child.tag_name().namespace().is_some() {
+                continue;
+            }
+            let name = child.tag_name().name();
+            if matches!(name, "guid" | "title" | "link" | "description" | "pubDate") {
+                if fields
+                    .insert(name, child.text().map(str::to_owned))
+                    .is_some()
+                {
+                    return Err(refuse("rss-response-invalid"));
+                }
+            } else if name == "enclosure" {
+                if !enclosure.is_null() {
+                    return Err(refuse("rss-response-invalid"));
+                }
+                let url = child
+                    .attribute("url")
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(|| refuse("rss-response-invalid"))?;
+                let kind = child
+                    .attribute("type")
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(|| refuse("rss-response-invalid"))?;
+                let len = child
+                    .attribute("length")
+                    .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .ok_or_else(|| refuse("rss-response-invalid"))?;
+                enclosure = json!({"url":url,"bytes":len,"type":kind});
+            }
+        }
+        let id = fields
+            .get("guid")
+            .and_then(Option::as_ref)
+            .or_else(|| fields.get("link").and_then(Option::as_ref))
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| refuse("rss-item-identity-missing"))?;
+        if !ids.insert(id.clone()) {
+            return Err(refuse("rss-item-duplicate"));
+        }
+        out.push(json!({"id":id,"title":fields.get("title").and_then(Option::as_ref),"link":fields.get("link").and_then(Option::as_ref),"description":fields.get("description").and_then(Option::as_ref),"published":fields.get("pubDate").and_then(Option::as_ref),"enclosure":enclosure}));
+    }
+    Ok(json!(out))
 }

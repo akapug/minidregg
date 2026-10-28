@@ -15,9 +15,18 @@ contains only the final typed value and sanitized receipt references.
 
 `Refusal.uncertain` means the mutation may have happened. Never automatically replay it.
 Callback transport errors retain their existing no-send/uncertain distinction. A malformed
-successful mutation response is uncertain too. App cookies live only for one execution's
+successful mutation response is uncertain too. App cookies require `auth.appCookies: "retain"` (default: omit) and live only for one execution's
 preparations/request and its exact member/session; no global or cross-member jar exists.
 `{"cookie":"name"}` resolves solely from this jar, never caller context.
+Path/default-path and Max-Age are enforced; ambiguous duplicate names refuse.
+Domain attributes and Expires without Max-Age explicitly refuse as unsupported.
+The custody-owned `__Host-mini_spk_session` cookie is never accepted from apps.
+
+DDP emits exact `CONVERSATION` descriptors through that same admission callback,
+including one jointly admitted login-frame/HTTP rendezvous. It requires trusted
+controller context `operationId`, `nowMs` and fresh cryptographic `rendezvousSeed`
+(32-byte lowercase hex). The app's login result alone supplies `userId`.
+Result and updated are both required; no reconnect/replay recovers a mutation.
 
 The shell uses the controller's existing foreground tool IPC, preserving its same admission,
 attachment checks, exact request custody and recovery ID:
@@ -32,7 +41,14 @@ mini app-interface --action call --declaration /abs/gogs.json \
 
 The controller must already have that package-pinned attachment and generated tool installed.
 A declaration or socket pathname confers no grant. `prepare` is an offline encoding diagnostic;
-`call` invokes the semantic controller tool and returns its native result. Lost calls retain
+`call` invokes the semantic controller tool and returns its native result.
+It sends `_miniInterfaceDigest`, which the controller must verify against the
+attachment and strip before argument validation. `qualify` invokes the hidden
+`mini_app_<alias>_qualify` tool with `{context: ARGS, _miniInterfaceDigest: DIGEST}`;
+this runs the same native executor. Qualification refuses before dispatch unless
+the scenario declares a write followed by a read with a nonempty assertion.
+Only explicitly bounded readonly readiness steps can retry declared transient
+statuses or failed readback assertions. Lost calls retain
 `request.json` and recover with `grain-runtime tool-result SOCKET REQUEST_ID`, never a fresh
 call. Exact arguments and replies are stored in the new private attempt directory.
 
