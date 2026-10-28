@@ -28,7 +28,7 @@ After that, report only new events.
 
 ## Candidates
 - Next build (after 9bd52317c, starts at main's tip): first to carry the ifaddrs shim b62ccb0f5, story de75c40a8 + 81b631818, verdict key 78c9e1984, bend seed 4bd64332d. When named: B8 runs the IPython execute-and-read-back row, story faerie runs JSGM, B5 re-qualifies OwnTracks + recipe reds, infra re-checks demo-dry.
-- 9bd52317c (building): first with the share-issue stage names (9c4db6a19); its composed store.log line decides B3's composed fix.
+- 9bd52317c READY: /build/candidates/9bd52317c34252028d62db31708516d396716281. Carries 9c4db6a19 (share-issue stage names), b332e565c, 3a943f85e (OwnTracks safeApiTail). Does NOT carry b62ccb0f5, de75c40a8, 81b631818, 78c9e1984, 4bd64332d, 94b8de93c, dd7de9faf, bd9318540 (checked by ancestry). Gate running; the integrator sends the composed store.log stage line to B3 directly. Handed to B5 (OwnTracks + b2/b4/b6 recipe reds, one world at a time).
 - b26630168 (conversion, fresh genesis): /build/candidates/b26630168b63024c9c46311745fa0b25fa09c13f. Runs below are on it.
 - 349e59ef1 READY: /build/candidates/349e59ef1647fb04bd9cb051012d14f6bf86d271 (fresh genesis; the rehearsal candidate). Carries hosted install + pinned read (7007d5068), HackerCMS /var/www hop (efdb8563d), public reader, `delegate observe 0`, FEATURED 27. Gate running (integrator sends the verdict). Handed to B5 (OwnTracks + b2/b4/b6 recipe reds), B8 (IPython strace), japps-rows confirming run, infra demo-dry confirmations.
 
