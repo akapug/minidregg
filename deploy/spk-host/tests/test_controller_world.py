@@ -146,6 +146,57 @@ class ControllerWorldTests(unittest.TestCase):
             with self.assertRaises(ValueError): c.controller_run(r['store'], '/unused', str(path))
             self.assertEqual(execute.call_count, 1)
 
+    def test_worker_registration_input_is_exclusive_and_only_staged_inside_child(self):
+        r = self.worker_record(); requests = self.root / 'requests'; requests.mkdir(mode=0o700)
+        registrations = requests / 'registrations'; registrations.mkdir(mode=0o700)
+        source = self.file('registration-input.json', b'{"native":"registration"}')
+        target = registrations / 'member.json'
+        request = {'program': 'mini', 'args': ['hermes-handoff', '--action', 'registry'],
+                   'inputs': [{'source': str(source), 'destination': 'requests/registrations/member.json'}]}
+        path = self.file('run-registration.json', c.encoded(request))
+        pins = {'providerSha256': '12'*32, 'configSha256': '34'*32}
+        def child(record, argv, setup=None, timeout=None):
+            self.assertEqual(argv[0], str(self.root / 'bin/mini'))
+            self.assertEqual(record['uid'], self.uid)
+            setup()
+            return 0
+        with patch.object(c, 'load', return_value=({}, self.root, r)), patch.object(c, 'checked_units', return_value={'consent': pins}), \
+             patch.object(c, 'worker_manager'), patch.object(c, 'controller_child', side_effect=child) as execute:
+            self.assertFalse(target.exists())
+            self.assertEqual(c.controller_run(r['store'], '/unused', str(path)), 0)
+            self.assertEqual(target.read_bytes(), source.read_bytes())
+            self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
+            with self.assertRaises(FileExistsError): c.controller_run(r['store'], '/unused', str(path))
+            self.assertEqual(target.read_bytes(), source.read_bytes())
+            target.unlink(); registrations.rmdir()
+            with self.assertRaises(FileNotFoundError): c.controller_run(r['store'], '/unused', str(path))
+            outside = self.root / 'outside'; outside.mkdir(mode=0o700)
+            registrations.symlink_to(outside, target_is_directory=True)
+            with self.assertRaises(ValueError): c.controller_run(r['store'], '/unused', str(path))
+            self.assertFalse((outside / 'member.json').exists())
+            registrations.unlink(); registrations.mkdir(mode=0o777); registrations.chmod(0o777)
+            with self.assertRaises(ValueError): c.controller_run(r['store'], '/unused', str(path))
+            self.assertFalse(target.exists())
+
+    def test_worker_registration_input_refuses_other_subtrees_and_duplicate_destinations(self):
+        r = self.worker_record(); source = self.file('registration-source.json', b'{}')
+        request = {'program': 'mini', 'args': ['hermes-handoff', '--action', 'registry']}
+        path = self.file('run-registration.json', c.encoded(request))
+        pins = {'providerSha256': '12'*32, 'configSha256': '34'*32}
+        with patch.object(c, 'load', return_value=({}, self.root, r)), patch.object(c, 'checked_units', return_value={'consent': pins}), \
+             patch.object(c, 'worker_manager'), patch.object(c, 'controller_child') as execute:
+            for destination in ('requests/registrations/../escape.json', 'requests/registrations/nested/member.json',
+                                'requests/other/member.json', 'requests/registrations/member.txt',
+                                '/requests/registrations/member.json', None):
+                request['inputs'] = [{'source': str(source), 'destination': destination}]
+                path.write_bytes(c.encoded(request))
+                with self.subTest(destination=destination), self.assertRaises(ValueError):
+                    c.controller_run(r['store'], '/unused', str(path))
+            request['inputs'] = [{'source': str(source), 'destination': 'requests/registrations/member.json'}] * 2
+            path.write_bytes(c.encoded(request))
+            with self.assertRaises(ValueError): c.controller_run(r['store'], '/unused', str(path))
+            execute.assert_not_called()
+
     def test_worker_room_account_binds_once_without_changing_other_authority(self):
         old = {'task': '12', 'subject': '13', 'room': {'room': 'lab', 'workspace': '/private/workspace', 'account': 'unsummoned'}}
         c.unchanged_worker_tool(old, old)

@@ -926,7 +926,10 @@ def controller_run(store, helper, request_arg):
     require(isinstance(inputs, list) and len(inputs) <= 32, 'worker command input count refused')
     copies = {}
     for entry in inputs:
-        require(isinstance(entry, dict) and set(entry) == {'source', 'destination'} and re.fullmatch(r'requests/[A-Za-z0-9_-]+\.json', entry['destination']), 'worker command input destination refused')
+        require(isinstance(entry, dict) and set(entry) == {'source', 'destination'}
+                and isinstance(entry['destination'], str)
+                and re.fullmatch(r'requests/(?:registrations/)?[A-Za-z0-9_-]+\.json', entry['destination']),
+                'worker command input destination refused')
         require(entry['destination'] not in copies, 'duplicate worker command input')
         copies[entry['destination']] = read_file(canonical(entry['source']), r['operatorUid'], 262144, required_mode=0o600)
     def setup():
