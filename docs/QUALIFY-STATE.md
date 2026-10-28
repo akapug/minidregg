@@ -60,7 +60,8 @@ Present state, rewritten whole. This lane qualifies rehearsal #3. Its board is
     and the fn arms. Unelaborated; the retry's verdict lands in `/srv/lanes/qlr-state/retry.log`.
   - lane/qualify-certify-prefix: statement c71fa04ec (green, audited); implementation 55ef56fc9 (WIP);
     continuation note docs/CERTIFY-PREFIX-STATE.md; check log `/build/lanes/qcp-check.log`.
-  - lane/qualify-doc-contention: CommutingAppend statement dcde47a1e (audited, merge hold lifted);
+  - lane/qualify-doc-contention: CommutingAppend statement dcde47a1e (audited, merge hold lifted;
+    ELABORATES on dregg-ref: lane-check 0 errors; state note a0b45fe8e);
     proofs drafted at 25c84470c, UNELABORATED; continuation note 162e36a15
     (docs/COMMUTING-APPEND-STATE.md). Owed proofs: commutingPrepare, movedRootAccepted,
     twoAppendersOneObservation. Check job: PID file /build/lanes/qualify-doc-contention-check1.pid.
