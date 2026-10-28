@@ -60,7 +60,7 @@ refused a 'room bind names-duplicate nameslab board namesboard' 'lawDenied|law-d
 ok a 'room rename names-rename nameslab board current'
 expect_target a nameslab/current "$TARGET"
 expect_target b nameslab/current "$TARGET"
-refused b 'room resolve nameslab/board' 'cannot inspect|no.*reference'
+refused b 'room resolve nameslab/board' 'cannot (inspect|read) [^ ]*/refs/|no.*reference'
 # Rename again, then repeat the FIRST command. Its exact receipt must be
 # recovered without changing current names or resolving its old spelling.
 ok a 'room rename names-rename-again nameslab current again'
@@ -68,7 +68,7 @@ sha256sum "$SPONSOR_WS/attempts/names-rename/call.bin" >"$D/rename-before.sha256
 ok a 'room rename names-rename nameslab board current'
 sha256sum --check "$D/rename-before.sha256" >/dev/null
 expect_target b nameslab/again "$TARGET"
-refused b 'room resolve nameslab/current' 'cannot inspect|no.*reference'
+refused b 'room resolve nameslab/current' 'cannot (inspect|read) [^ ]*/refs/|no.*reference'
 # A shared binding conveys a name, never a new capability to its target.
 ok a 'room bind names-outside nameslab outside namesoutside'
 refused b 'doc show nameslab/outside' 'grant|scope|capability|authority'
