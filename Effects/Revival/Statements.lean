@@ -132,6 +132,7 @@ def contentSpec : ContentSpec where
   frame := contentFrame
   verb := fun kind _ => DeclaredResourceScalar.ordinaryVerb kind
   view command before after := ContentResource.project before after command
+  commutes := ContentResource.Command.commutes
 
 /-- A content target with the given header. -/
 abbrev contentTarget (ctx : LiveCtx) (version : Nat) (root : Digest)
@@ -144,8 +145,10 @@ abbrev contentTarget (ctx : LiveCtx) (version : Nat) (root : Digest)
 transaction context, content command and loaded content cell:
 
 1. header — the live arm's three header refusals are the generic ones the declaration's
-   `accepts`/`version` determine (`wrongRole`, `unsupportedVersion`, `staleTarget`);
-2. acceptance — with the header passing, the derived executor admits with post `p`
+   `accepts`/`version`/`commutes` determine (`wrongRole`, `unsupportedVersion`, and
+   `staleTarget` exactly for a command that does not commute planned over a moved root);
+2. acceptance — with the header passing (the planned root is the loaded one, or the
+   command commutes, at ANY planned root), the derived executor admits with post `p`
    exactly when the live arm computes `p` AND the live patch validates at the loaded
    store (what `prepareTarget` requires before it builds a candidate);
 3. refusal — a content refusal of the live arm is the declaration's, by name;
@@ -165,24 +168,24 @@ def ContentAgreement (E : ContentSpec) : Prop :=
   (∀ version root, E.accepts ctx.kind = true → version ≠ E.version →
     DeclaredResourceController.computeTarget ctx.snapshot ctx.semantics ctx.ambient ctx.command
       (contentTarget ctx version root command observe epoch roster) pre = .error .unsupportedVersion) ∧
-  (∀ root, E.accepts ctx.kind = true → root ≠ pre.root →
+  (∀ root, E.accepts ctx.kind = true → E.commutes command = false → root ≠ pre.root →
     DeclaredResourceController.computeTarget ctx.snapshot ctx.semantics ctx.ambient ctx.command
       (contentTarget ctx E.version root command observe epoch roster) pre = .error .staleTarget) ∧
-  (E.accepts ctx.kind = true →
+  (∀ root, E.accepts ctx.kind = true → (root = pre.root ∨ E.commutes command = true) →
     (∀ post : Store Hyperdocument.layout,
       E.exec 1 ctx command pre.logical = .ok post ↔
         (DeclaredResourceController.computeTarget ctx.snapshot ctx.semantics ctx.ambient ctx.command
-            (contentTarget ctx E.version pre.root command observe epoch roster) pre = .ok post ∧
+            (contentTarget ctx E.version root command observe epoch roster) pre = .ok post ∧
           Patch.ValidFrom pre.logical
             (DeclaredResourceController.targetPatch ctx.snapshot ctx.semantics ctx.ambient ctx.command
-              (contentTarget ctx E.version pre.root command observe epoch roster) pre))) ∧
+              (contentTarget ctx E.version root command observe epoch roster) pre))) ∧
     (∀ r : ContentResource.Reject,
       DeclaredResourceController.computeTarget ctx.snapshot ctx.semantics ctx.ambient ctx.command
-          (contentTarget ctx E.version pre.root command observe epoch roster) pre = .error (.content r) →
+          (contentTarget ctx E.version root command observe epoch roster) pre = .error (.content r) →
         E.exec 1 ctx command pre.logical = .error (.refused 1 (E.refusalName r))) ∧
     (∀ ps, E.sem ctx command pre.logical = .ok ps →
       DeclaredResourceController.targetPatch ctx.snapshot ctx.semantics ctx.ambient ctx.command
-          (contentTarget ctx E.version pre.root command observe epoch roster) pre =
+          (contentTarget ctx E.version root command observe epoch roster) pre =
         ps ++ E.rotate ctx pre.logical)) ∧
   (∀ version root,
     (∀ a : Address Hyperdocument.layout,
@@ -231,6 +234,20 @@ def contentNarrowed : ContentSpec :=
 refutes a frame that omits a field an action writes (`annotate`). -/
 def ContentTeeth : Prop :=
   ¬ ContentAgreement contentGhost ∧ ¬ contentNarrowed.Complete
+
+/-- The pinned declaration: nothing commutes (the controller before 2026-10-28). -/
+def contentPinned : ContentSpec := { contentSpec with commutes := fun _ => false }
+
+/-- The permissive declaration: everything commutes. -/
+def contentPermissive : ContentSpec := { contentSpec with commutes := fun _ => true }
+
+/-- **Teeth of `commutes`.**  The agreement fixes the declaration's `commutes` from both
+sides: it refutes a declaration under which an append planned over a moved root would be
+refused (the live arm admits it, `Kernel.ContentCommutingAppend`), and one under which
+every command would be admitted over a moved root (the live arm still refuses a command
+that is not append-only). -/
+def ContentCommuteTeeth : Prop :=
+  ¬ ContentAgreement contentPinned ∧ ¬ ContentAgreement contentPermissive
 
 /-- **The live keystone, whole.** -/
 def LiveKeystone : Prop := ContentAgreement contentSpec ∧ ContentComplete
@@ -310,16 +327,24 @@ def hostTargetDispatch (code : Nat) (bytes : List UInt8) (ctx : HostCtx) (cell :
         else .error (.guardFailed code)
 
 /-- The content cell's header, in the live order: role and cell law and shape
-(`wrongRole`), then the schema version, then the expected root. -/
+(`wrongRole`), then the schema version.  The expected root is not the header's: the
+dispatcher's gate refuses a stale plan from `contentFresh` and the declaration's
+`commutes` (`Handler.admits`). -/
 def contentHeader (ctx : HostCtx) (cell : HostCell) : Except DispatchRefusal Unit :=
   if contentSpec.accepts ctx.kind = false ∨
       ¬ CanonicalCellRegistry.CellLaw ctx.deployment ctx.target cell then .error (.wrongRole 1)
   else match cell with
     | ⟨.content, value⟩ =>
       if ctx.version ≠ contentSpec.version then .error (.unsupportedVersion 1)
-      else if ctx.root ≠ value.root then .error (.staleTarget 1)
       else .ok ()
     | _ => .error (.wrongRole 1)
+
+/-- Whether the plan's expected root is the content cell's loaded root (a cell of another
+role is refused by the header before freshness is asked). -/
+def contentFresh (ctx : HostCtx) (cell : HostCell) : Bool :=
+  match cell with
+  | ⟨.content, value⟩ => decide (ctx.root = value.root)
+  | _ => true
 
 /-- **The content handler**: `contentSpec` over the host context, the content header, the
 content cell selected and packed. -/
@@ -329,6 +354,7 @@ def contentHandlerOf (E : ContentSpec) : Handler HostCtx HostCell where
   R := ContentResource.Reject
   spec := E.comap HostCtx.toLiveCtx
   header := contentHeader
+  fresh := contentFresh
   select cell := match cell with
     | ⟨.content, value⟩ => some value.logical
     | _ => none
@@ -358,6 +384,15 @@ command are admitted by the host dispatch (the doc-write fixture is the intended
 inhabitant, owed). -/
 def HostAccepted : Prop :=
   ∃ (op : ContentResource.Command) (ctx : HostCtx) (cell cell' : HostCell),
+    hostTargetDispatch 1 (ContentResource.commandStream.encode op) ctx cell = .ok cell'
+
+/-- **Satisfiable (a moved root).**  A commuting content command whose plan names a root that
+is NOT the cell's (`contentFresh` false) is admitted by the host dispatch: the accepting pole
+of `Kernel.ContentCommutingAppend.CommutingPrepare` (through `PrepareFactors`), over the blinded
+sample cell. -/
+def HostMovedRootAccepted : Prop :=
+  ∃ (op : ContentResource.Command) (ctx : HostCtx) (cell cell' : HostCell),
+    op.commutes = true ∧ contentFresh ctx cell = false ∧
     hostTargetDispatch 1 (ContentResource.commandStream.encode op) ctx cell = .ok cell'
 
 /-! ## §8. The deployed receiver factors through the dispatcher.

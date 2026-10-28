@@ -93,7 +93,12 @@ codec; `R` the refusals it may name.
 * `accepts`/`version` are the role and schema version the live header checks.
 * `verb` is the authority demand (the verb a capability must allow); `view` is what the
   cell's committed law reads (`targetProjection`).  The law itself is the cell's, not the
-  effect's. -/
+  effect's.
+* `commutes` marks the operations whose admission does not pin the whole cell: they are
+  computed at the current cell whatever root the plan observed (an append-only content
+  command, `ContentResource.Command.commutes`).  The dispatcher's freshness refusal is
+  derived from it (`Handler.admits`); no handler states it by hand.  Default: nothing
+  commutes. -/
 structure EffectSpec (Ctx : Type) (S : Substrate) (O R : Type) where
   opStream : StreamCodec O
   refusalName : R → String
@@ -107,6 +112,7 @@ structure EffectSpec (Ctx : Type) (S : Substrate) (O R : Type) where
   frame : O → Finset CellField
   verb : (kind : ResourceKind) → O → Verb kind
   view : O → S.State → S.State → List (String × Int)
+  commutes : O → Bool := fun _ => false
 
 /-- Every refusal the dispatcher can return.  `refused` carries the declaration's own
 name for its refusal; the rest are the dispatcher's, each naming the code. -/
@@ -164,16 +170,19 @@ end EffectSpec
 /-! ## §3. The registry and the one dispatcher. -/
 
 /-- A registered declaration over a common cell universe `Cell`: its substrate, its
-declaration, the role/version/freshness header it checks against the cell (generic per
-controller: for the live controller, `selectTarget`'s role and cell law and
-`computeTarget`'s version and root, in that order), and how its typed state is read from
-and written back to a cell. -/
+declaration, the role/version header it checks against the cell (generic per controller:
+for the live controller, `selectTarget`'s role and cell law and `computeTarget`'s version,
+in that order), whether the plan's observed root is the cell's (`fresh`; for the live
+controller, `computeTarget`'s root comparison), and how its typed state is read from and
+written back to a cell.  The header states no freshness refusal: `admits` derives it from
+`fresh` and the declaration's `commutes`. -/
 structure Handler (Ctx Cell : Type) : Type 1 where
   S : Substrate
   O : Type
   R : Type
   spec : EffectSpec Ctx S O R
   header : Ctx → Cell → Except DispatchRefusal Unit
+  fresh : Ctx → Cell → Bool := fun _ _ => true
   select : Cell → Option S.State
   pack : S.State → Cell
 
@@ -185,11 +194,19 @@ def Handler.Sound {Ctx Cell : Type} (e : Handler Ctx Cell) : Prop :=
   (∀ cell s, e.select cell = some s → e.pack s = cell) ∧
   e.S.Framed
 
-/-- One registered handler fired on a decoded operation and a cell: header, selection,
+/-- The derived gate before selection: the handler's header, then freshness.  A stale
+plan (`fresh` false) is refused `staleTarget` unless its operation commutes. -/
+def Handler.admits {Ctx Cell : Type} (e : Handler Ctx Cell) (code : Nat) (ctx : Ctx) (op : e.O)
+    (cell : Cell) : Except DispatchRefusal Unit :=
+  match e.header ctx cell with
+  | .error r => .error r
+  | .ok () => if e.spec.commutes op || e.fresh ctx cell then .ok () else .error (.staleTarget code)
+
+/-- One registered handler fired on a decoded operation and a cell: the gate, selection,
 the derived executor, the packed post. -/
 def Handler.fire {Ctx Cell : Type} (e : Handler Ctx Cell) (code : Nat) (ctx : Ctx) (op : e.O)
     (cell : Cell) : Except DispatchRefusal Cell :=
-  match e.header ctx cell with
+  match e.admits code ctx op cell with
   | .error r => .error r
   | .ok () =>
     match e.select cell with
@@ -257,11 +274,12 @@ def EngineKeystone (Ctx Cell : Type) : Prop :=
     Dispatches R [] (dispatch R)
 
 /-- **COMPLETENESS KEYSTONE.**  Through a lawful registry, every refusal of a well-encoded
-operation on a packed state whose header passes is one of the entry's own declared names. -/
+operation on a packed state whose gate (header and freshness) passes is one of the entry's
+own declared names. -/
 def CompletenessKeystone (Ctx Cell : Type) : Prop :=
   ∀ (L : LawfulRegistry Ctx Cell) code e, L.entries.lookup code = some e →
     ∀ (op : e.O) (ctx : Ctx) (s : e.S.State) (r : DispatchRefusal),
-      e.header ctx (e.pack s) = .ok () →
+      e.admits code ctx op (e.pack s) = .ok () →
       dispatch L.entries code (e.spec.opStream.encode op) ctx (e.pack s) = .error r →
         ∃ x : e.R, r = .refused code (e.spec.refusalName x)
 
@@ -369,7 +387,7 @@ def dispatchUnframed {Ctx Cell : Type} (R : Registry Ctx Cell) (code : Nat)
     match e.spec.opStream.toLawful.decode bytes with
     | none => .error (.malformed code)
     | some op =>
-      match e.header ctx cell with
+      match e.admits code ctx op cell with
       | .error r => .error r
       | .ok () =>
       match e.select cell with
@@ -422,6 +440,23 @@ def CompletenessTeeth : Prop := ¬ (toyEntry entryBSpec).Lawful
 /-- **Premise inhabitation.**  A lawful registry exists: entry A's. -/
 def CompletenessPremise : Prop :=
   ∃ L : LawfulRegistry Unit ToyStore, L.entries = [(0, toyEntry entryASpec)]
+
+/-! ### The derived freshness gate's ATLAS fields. -/
+
+/-- Entry A on a cell whose plan is stale (`fresh` false), its operations declared
+commuting or not. -/
+def staleToyEntry (commuting : Bool) : Handler Unit ToyStore :=
+  { toyEntry { entryASpec with commutes := fun _ => commuting } with fresh := fun _ _ => false }
+
+/-- **Satisfiable and teeth of the gate.**  On a stale plan, a non-commuting operation is
+refused `staleTarget` by the dispatcher itself, and a commuting one is dispatched exactly as
+on a fresh plan (entry A's `5` lands): staleness bites only where the declaration says the
+operation does not commute. -/
+def FreshnessGate : Prop :=
+  dispatch [(0, staleToyEntry false)] 0 (StreamCodec.nat.encode 5) () toyEmpty =
+    .error (.staleTarget 0) ∧
+  dispatch [(0, staleToyEntry true)] 0 (StreamCodec.nat.encode 5) () toyEmpty =
+    dispatch toyPole 0 (StreamCodec.nat.encode 5) () toyEmpty
 
 /-! ## §6. One dispatch source by construction, and registry extension.
 

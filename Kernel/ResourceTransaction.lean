@@ -778,7 +778,10 @@ def scalarLeg (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Amb
 never a host supplied post. Every branch returns the post store the source
 operation computed at the loaded cell; a scalar or content write then advances
 the cell's blinding ratchet one link at the admission height
-(`StoreCodec.Blinding.patch`, K-HIDE-ROTATE).  A stream append has no blinding. -/
+(`StoreCodec.Blinding.patch`, K-HIDE-ROTATE).  A stream append has no blinding.
+Every payload is refused `staleTarget` when the loaded root is not the root its plan
+names, except a commuting content command (append-only `createAtom`s), which reads
+nothing a concurrent append moves. -/
 def computeTarget (snapshot : AuthoritySnapshot)
     (semantics : Digest) (ambient : Ambient) (command : Command) (target : Target)
     (pre : TargetCell target) : Except Reject target.Outcome := by
@@ -807,7 +810,9 @@ def computeTarget (snapshot : AuthoritySnapshot)
     | content content => exact do
         if kind != .object then throw .wrongRole
         if version != ContentResource.commandVersion then throw .unsupportedVersion
-        if root != pre.root then throw .staleTarget
+        -- An append-only command is computed at the cell it meets: it pins no root
+        -- (`ContentResource.Command.commutes`, `Kernel.ContentCommutingAppend`).
+        if root != pre.root && !content.commutes then throw .staleTarget
         match ContentResource.prepareCell ⟨command.subject, kind, capability⟩
             (contentOperation snapshot semantics command) (ContentResource.documentOf id)
             (contentContext snapshot ambient command) pre content with
