@@ -2,14 +2,14 @@
 
 Read [HANDOFF.md](HANDOFF.md) first, then the plan
 [docs/DEMO-PREFIX-2026-10-26.md](docs/DEMO-PREFIX-2026-10-26.md) and
-[docs/COORDINATION-2026-10-27.md](docs/COORDINATION-2026-10-27.md), the one description of
-how this project is developed (what we optimise, the gates and their verdicts, how a lane
-works, how the orchestrator works, the boxes, the cadence). Read relevant source before
-asserting that older architecture or status text is current.
+[docs/COORDINATION-2026-10-27.md](docs/COORDINATION-2026-10-27.md), which describes how this
+project is developed (what we optimise, the gates and their verdicts, how a lane and the
+orchestrator work, the boxes, the cadence). Read the source before trusting older
+architecture or status text.
 
-- Mini is the New World's construction home. Lean owns semantics and admission;
-  Rust provides the physical client/custody boundary. Do not introduce a Python
-  platform or reimplement semantic decisions in a transport wrapper.
+- Lean owns semantics and admission; Rust provides the physical client and custody
+  boundary. Do not introduce a Python platform or reimplement semantic decisions in a
+  transport wrapper.
 - Existing grants face current rules; policy revision is distinct from revocation.
   Deliberate management lockout is permitted; do not add an owner recovery bypass.
 - One worktree per lane on a `lane/<name>` branch; the integrator merges in

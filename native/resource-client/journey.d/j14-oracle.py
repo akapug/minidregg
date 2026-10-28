@@ -953,6 +953,21 @@ class Journey:
         finally:
             p.terminate();p.wait(timeout=30)
 
+    def stop_qualified_application(self):
+        """Retire the test application only after all paid answer rows settled."""
+        self.fixed('controller-stop')
+        journal=read(self.fixed('controller-journal'))
+        fields=('applicationApiAttempt','dispatchAttempt','dispatchHold','dispatchPending',
+                'foregroundAttempt','parentHold','toolHold','toolPending','pending','settlementDue')
+        if any(journal.get(name) is not None for name in fields):
+            raise ValueError('application teardown retains unsettled controller custody')
+        receipt=self.run('app-stop',[self.bins/'spk-host','grain','stop',self.profile,'9890001'],timeout=2400)
+        value=read(receipt)
+        if (value.get('protocol')!='mini-spk-grain-stop-v1' or value.get('app')!='9890001'
+                or value.get('unit')!=self.application_unit or value.get('activeState') not in ('inactive','failed')):
+            raise ValueError('native application STOP did not identify the stopped test unit')
+        return receipt
+
     def probe(self):
         question='Who wrote Leaves of Grass?';oraclelog=self.root/'provider.oracle.jsonl'
         prior_operation=None;asks=set()
@@ -997,12 +1012,13 @@ class Journey:
         evidence=turn('answered',True)
         self.fixed('controller-stop');self.start_controller()
         turn('controller-restarted',True)
+        stopped=self.stop_qualified_application()
         write(self.root/'result.json',{'protocol':'mini-j14-oracle-result-v1','passed':True,
             'store':self.broker['store'],'controllerUid':self.layout['controllerUid'],'operatorUid':os.getuid(),
             'rows':['same-store-provision','native-grain-create-dispatch','room-refusal','resident-page-grant-state',
                     'native-answer-and-settlement','paid-room-reply','controller-restart-answer'],
             'residentPageEvidence':'HTTP/HTML; rendered browser is covered separately',
-            'answerEvidence':str(evidence),'applicationUnit':self.application_unit,
+            'answerEvidence':str(evidence),'applicationUnit':self.application_unit,'applicationStop':str(stopped),
             'applicationRestart':'covered by the separate shared-data lifetime recovery journey'})
         table=self.root/'j14.tsv';table.write_text('step\tverdict\n'+''.join(row+'\tok\n' for row in read(self.root/'result.json')['rows']))
         print(table)
