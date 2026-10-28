@@ -86,7 +86,11 @@ after that candidate is reported, then run the regen once in the next full build
 Main after 1af366fe9 (in the next full build): rows-ledger 709cd12d/6ee5acb4 (FOUC 12/12 site and app), the one
 birth acceptance 78fe8e63d (native-acceptance.sh and native-share-member.sh source one function), hermes-b
 2aa94b0c, un-effects-rows 8223735f and 4dc6225d (commons still red at publish: over SOURCE_BYTES; the deputy's
-split follows), prepare-refusal-clients f73893fc.
+split follows), prepare-refusal-clients f73893fc; then (main 81bca08c6) un-effects-rows 703128ec (commons split into app and
+scenario modules) and prepare-refusal-clients 25cfb86bd (BEGIN plans name the Store by storeIdentity: the grain-install
+red; spk-host retries a refused install). PRIORITY: the next full build starts from main >= 81bca08c6 the moment
+1af366fe9's chain releases integ8, so the next candidate carries 25cfb86bd (app market, joracle, Oracle v7 world wait on it);
+take L1c's framed_payload follow-up if pushed by then. Rows validator: fresh worlds on that candidate.
 jspk1.sh still speaks to the global /run/mini-spk-broker.sock (old system-broker
 journey; its owner's).
 
