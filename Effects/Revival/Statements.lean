@@ -356,16 +356,20 @@ def HostAccepted : Prop :=
   ∃ (op : ContentResource.Command) (ctx : HostCtx) (cell cell' : HostCell),
     hostTargetDispatch 1 (ContentResource.commandStream.encode op) ctx cell = .ok cell'
 
-/-! ## §8. The bridge to the deployed receiver: `prepareTarget`.
+/-! ## §8. The deployed receiver factors through the dispatcher.
 
 `HostKeystone` is about `hostTargetDispatch`, a wrapper this file writes; its contract alone
-is not the receiver's.  `PrepareBridge` ties the content handler to the controller's own
-per-target preparation, `ResourceTransaction.prepareTarget` (slot read, `selectTarget`,
-`computeTarget`, patch validation, the final-post law, the policy source, audience
-freshness): an accepted preparation's post IS the handler's dispatched post; an accepted
-dispatch is refused by the receiver only by one of its controller-generic checks; and every
-dispatch refusal is the receiver's refusal, by name.  At the migration commit,
-`prepareTarget`'s registered branch calls the dispatcher and this bridge is its gate. -/
+is not the receiver's.  `PrepareFactors` (pass 27) states the controller's own per-target
+preparation, `ResourceTransaction.prepareTarget`, as the content handler's dispatch followed
+by `genericChecks`, which reads only the pre and post cells, the policy source and the
+audience, never the payload or the command.  The bridge's three directions (acceptance,
+acceptance up to generic refusal, refusal by name) are its corollaries, and it is the shape
+`prepareTarget` takes at the migration commit, where this is that commit's gate.
+
+`HostLegacyCensus` is the structural deletion check over the live legacy input type, the
+`Payload` inductive: no payload constructor at a registered code.  It is FALSE today
+(`Payload.content` has tag 1); it becomes provable exactly when the migration removes that
+constructor. -/
 
 /-- The host context of a content target. -/
 def hostCtxOf (ctx : LiveCtx) (deployment : DeclaredResourceController.Deployment)
@@ -373,37 +377,50 @@ def hostCtxOf (ctx : LiveCtx) (deployment : DeclaredResourceController.Deploymen
     (roster : Option ObjectAudienceRoster.Roster) : HostCtx :=
   { ctx with deployment, version, root, observe, epoch, roster }
 
-/-- The receiver's checks after the target computation that are not the effect's: the
-final-post law, the policy source, audience freshness. -/
-def ControllerGeneric : DeclaredResourceController.Reject → Prop
-  | .invalidPost => True
-  | .policyUnavailable => True
-  | .audience _ => True
-  | _ => False
+/-- The receiver's checks after the effect, payload-blind by signature: the final-post law,
+the policy source, audience freshness (`prepareTarget`'s order), each refusal named. -/
+def genericChecks (deployment : DeclaredResourceController.Deployment)
+    (directory : CellRegistry.Directory Nat DeclaredResourceController.Registry)
+    (snapshot : DeclaredResourceController.AuthoritySnapshot) (target : Nat)
+    (epoch : Option Nat) (before after : HostCell) : Except DispatchRefusal HostCell :=
+  if CanonicalCellRegistry.FinalPostLaw deployment target before after then
+    match CanonicalCellRegistry.loadPolicySource snapshot.domain directory
+        (snapshot.authState.policyAddress ⟨target⟩ (snapshot.authState.policyRevision ⟨target⟩)) with
+    | none => .error (ofReject 1 .policyUnavailable)
+    | some source =>
+      match ObjectAudience.checkFresh source.record.audience target epoch with
+      | .error reason => .error (ofReject 1 (.audience reason))
+      | .ok () => .ok after
+  else .error (ofReject 1 .invalidPost)
 
-/-- **THE RECEIVER BRIDGE.** -/
-def PrepareBridge (E : ContentSpec) : Prop :=
+/-- **THE RECEIVER FACTORIZATION.**  For a content target whose slot is present, the
+deployed preparation (its post packed, its refusals named) is the dispatch, then the
+generic checks. -/
+def PrepareFactors (E : ContentSpec) : Prop :=
   ∀ (deployment : DeclaredResourceController.Deployment)
     (directory : CellRegistry.Directory Nat DeclaredResourceController.Registry)
     (ctx : LiveCtx) (command : ContentResource.Command) (version : Nat) (root : Digest)
     (observe : Option CapabilityId) (epoch : Option Nat)
     (roster : Option ObjectAudienceRoster.Roster) (before : HostCell),
     directory.slots ctx.target = .present before →
-    let T := contentTarget ctx version root command observe epoch roster
-    let hctx := hostCtxOf ctx deployment version root observe epoch roster
-    let routed := dispatch [(1, contentHandlerOf E)] 1 (ContentResource.commandStream.encode command)
-      hctx before
-    (∀ prepared, DeclaredResourceController.prepareTarget deployment directory ctx.snapshot
-        ctx.semantics ctx.ambient ctx.command T = .ok prepared →
-      routed = .ok (DeclaredResourceController.packTarget T prepared.candidate.post)) ∧
-    (∀ cell', routed = .ok cell' →
-      (∃ prepared, DeclaredResourceController.prepareTarget deployment directory ctx.snapshot
-          ctx.semantics ctx.ambient ctx.command T = .ok prepared ∧
-        DeclaredResourceController.packTarget T prepared.candidate.post = cell') ∨
-      (∃ r, DeclaredResourceController.prepareTarget deployment directory ctx.snapshot
-          ctx.semantics ctx.ambient ctx.command T = .error r ∧ ControllerGeneric r)) ∧
-    (∀ d, routed = .error d →
-      ∃ r, DeclaredResourceController.prepareTarget deployment directory ctx.snapshot
-          ctx.semantics ctx.ambient ctx.command T = .error r ∧ ofReject 1 r = d)
+    ((DeclaredResourceController.prepareTarget deployment directory ctx.snapshot ctx.semantics
+        ctx.ambient ctx.command (contentTarget ctx version root command observe epoch roster)).map
+        (fun prepared => DeclaredResourceController.packTarget
+          (contentTarget ctx version root command observe epoch roster) prepared.candidate.post)).mapError
+        (ofReject 1) =
+      (dispatch [(1, contentHandlerOf E)] 1 (ContentResource.commandStream.encode command)
+          (hostCtxOf ctx deployment version root observe epoch roster) before) >>=
+        genericChecks deployment directory ctx.snapshot ctx.target epoch before
+
+/-- The live legacy input type's tag: `payloadStream`'s tag octet. -/
+def payloadTag (payload : DeclaredResourceController.Payload) : Nat :=
+  ((DeclaredResourceController.payloadStream.encode payload).headD 0).toNat
+
+/-- **THE LIVE LEGACY CENSUS** (false until the content constructor is deleted). -/
+def HostLegacyCensus : Prop := LegacyDisjoint payloadTag [(1, contentHandler)]
+
+/-- **Census teeth, today**: the content payload still carries code 1, so the census is
+false until the migration deletes it. -/
+def HostLegacyCensusRefutedToday : Prop := ¬ HostLegacyCensus
 
 end Minidregg.Effects.Revival

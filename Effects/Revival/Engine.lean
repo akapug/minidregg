@@ -451,6 +451,28 @@ def OneSource {Ctx Cell : Type} (R : Registry Ctx Cell)
     (d : Nat → List UInt8 → Ctx → Cell → Except DispatchRefusal Cell) : Prop :=
   ∃ legacy, d = composeDispatch R legacy
 
+/-- **The legacy census** (pass 27): the hand arms' own input type has no constructor at a
+registered code.  This is what shows deletion: when a code migrates, the legacy input type
+must lose its constructor before the census is provable.  (`OneSource` below is only its
+extensional shadow: any dispatcher agreeing with `dispatch R` on registered codes satisfies
+it.) -/
+def LegacyDisjoint {P Ctx Cell : Type} (tagOf : P → Nat) (R : Registry Ctx Cell) : Prop :=
+  ∀ p : P, tagOf p ∉ R.map Prod.fst
+
+/-- A toy legacy input type: one payload, at tag 2. -/
+inductive ToyLegacy where
+  | other
+  deriving DecidableEq
+
+def toyLegacyTag : ToyLegacy → Nat
+  | .other => 2
+
+/-- **Census satisfiable**: the toy legacy type has no constructor at the pole's codes. -/
+def LegacyCensusSatisfiable : Prop := LegacyDisjoint toyLegacyTag toyPole
+
+/-- **Census teeth**: a legacy type that still carries a registered code (tag 0) fails it. -/
+def LegacyCensusTeeth : Prop := ¬ LegacyDisjoint (fun (_ : Unit) => 0) toyPole
+
 /-- **One-source satisfiable**: the pole's own dispatcher is one-source (legacy refuses). -/
 def OneSourceSatisfiable : Prop := OneSource toyPole (dispatch toyPole)
 

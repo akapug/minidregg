@@ -338,20 +338,21 @@ its text: `scratchpad/astra/arch.out.md`, final section; it read `c7d983746`, be
 Engine/Statements split).
 1. The module-conversion merge above.
 2. **One dispatch source by construction** (review gap 1).  `noTwin` only proves a supplied
-   legacy list disjoint from the registry.  Stated now (Engine §6): `composeDispatch R legacy`
-   is the host dispatcher's only permitted shape (the legacy arm sees only unregistered
-   codes); `OneSource`, `OneSourceSatisfiable`, `OneSourceTeeth` (proofs owed).  The
-   structural half lands with each migration step: the legacy arm's input type loses the
-   migrated constructor (`Payload` drops `content`), so the old arm cannot typecheck, plus a
-   build census (an elaboration command in the style of `PersistedCodecTagCensus`) asserting
-   that the replaced computation has no production caller outside the declaration.
+   legacy list disjoint from the registry.  Stated (Engine §6, Statements §8; pass 27):
+   `LegacyDisjoint tagOf R` (the hand arms' input type has no constructor at a registered
+   code), with toy satisfiable/teeth, and the live `HostLegacyCensus` over `Payload`, FALSE
+   today (`HostLegacyCensusRefutedToday`: `Payload.content` is tag 1) and provable exactly
+   when the migration deletes that constructor.  `OneSource`/`composeDispatch` stay only as
+   the extensional shadow (any dispatcher agreeing on registered codes satisfies it).
+   Proofs owed: the toy census pair and `HostLegacyCensusRefutedToday` now; the census
+   itself at the migration commit.
 3. **The bridge to the deployed receiver** (gap 2).  `HostKeystone` is about a wrapper this
-   lane wrote.  Stated now (Statements §8): `PrepareBridge E`, against
-   `ResourceTransaction.prepareTarget` itself, final-post law, policy source and audience
-   freshness included (`ControllerGeneric` names those three): an accepted preparation's post
-   IS the dispatched post; an accepted dispatch is refused by the receiver only by a
-   controller-generic check; every dispatch refusal is the receiver's, by name.  Proof owed;
-   it needs `ContentAgreement` and `ContentComplete`.  At the migration commit
+   lane wrote.  Stated (Statements §8; pass 27): `PrepareFactors E`: the deployed
+   `ResourceTransaction.prepareTarget` (post packed, refusals named) equals the content
+   handler's dispatch followed by `genericChecks`, which reads only the pre/post cells, the
+   policy source and the audience, never the payload (its signature shows it).  Acceptance,
+   acceptance up to a generic refusal, and refusal by name are corollaries.  Proof owed; it
+   needs `ContentAgreement` and `ContentComplete`.  At the migration commit
    `prepareTarget`'s registered branch calls `dispatch`, and this is that commit's gate.
 4. **Registry extension** (gap 3).  Stated now (Engine §6): `Extends`, `ExtensionPreserves`
    (every byte string under an old code dispatches exactly as before: decode, header,
@@ -376,7 +377,7 @@ Engine/Statements split).
    rotation: `ContentAccepted`, `HostAccepted`, the ghost halves of `ContentTeeth`/`HostTeeth`.
 8. `ContentAgreement contentSpec`: unfold `computeTarget`'s content arm, then
    `ContentResource.prepareCell_ok_of_run`, `Patch.run_append`, validate, `store_run_validFrom`.
-9. `HostKeystone` and `PrepareBridge` land with the migration commit (§5 step 1), with the
+9. `HostKeystone`, `PrepareFactors` and `HostLegacyCensus` land with the migration commit (§5 step 1), with the
    platform lane (L1).
 
 **Not done, not this lane's:**
