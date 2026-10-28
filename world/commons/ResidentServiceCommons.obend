@@ -903,6 +903,16 @@ def finished0() -> State:
 def reserve0() -> Transition:
   reserve(request(r0()), offer(r0()), sponsor(r0(), true), 80n)
 
+def effectAt(effects: Effects, n: Nat) -> Effect:
+  match effects:
+    case none(_): Effect.nothing()
+    case more(m): effectAtStep(m.head, m.tail, n)
+
+def effectAtStep(head: Effect, tail: Effects, n: Nat) -> Effect:
+  match n:
+    case 0n: head
+    case 1n+q: effectAt(tail, q)
+
 def proposedEffect(t: Transition, n: Nat) -> Effect:
   match t:
     case refused(_): Effect.nothing()

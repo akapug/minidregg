@@ -29,13 +29,13 @@ sum Voters:
   empty: {}
   more: {head: Nat, tail: Voters}
 
-record Commit:
+record SealedVote:
   voter: Nat
   digest: Nat
 
 sum Commits:
   empty: {}
-  more: {head: Commit, tail: Commits}
+  more: {head: SealedVote, tail: Commits}
 
 record Opening:
   voter: Nat
