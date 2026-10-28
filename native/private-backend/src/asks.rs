@@ -223,7 +223,7 @@ impl Asks {
             let x = Field(i as u128 + 1);
             let words: Vec<_> = coefficients
                 .iter()
-                .map(|p| p.iter().rev().fold(Field(0), |z, c| z.mul(x).add(*c)))
+                .map(|p| crate::reconstruction::eval(p, x))
                 .collect();
             commitments.extend(self.h(i as u16 + 1, &words));
             out.push(Send {

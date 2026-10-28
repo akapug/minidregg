@@ -942,10 +942,7 @@ mod tests {
             let tuple = t.triples()[0];
             for (i, v) in [tuple.0, tuple.1, tuple.2].iter().enumerate() {
                 let x = Field(t.holder() as u128 + 1);
-                let at = polys[i]
-                    .iter()
-                    .rev()
-                    .fold(Field(0), |a, k| a.mul(x).add(*k));
+                let at = crate::reconstruction::eval(&polys[i], x);
                 assert_eq!(*v, at, "holder {} component {i}", t.holder());
             }
         }

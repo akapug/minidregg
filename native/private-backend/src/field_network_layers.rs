@@ -524,10 +524,7 @@ pub(crate) mod tests {
         for (h, v) in ps {
             assert_eq!(
                 v[0],
-                poly[0]
-                    .iter()
-                    .rev()
-                    .fold(Field(0), |s, c| s.mul(Field(h as u128 + 1)).add(*c))
+                crate::reconstruction::eval(&poly[0], Field(h as u128 + 1))
             );
         }
         poly[0][0]
