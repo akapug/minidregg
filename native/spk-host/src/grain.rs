@@ -1178,7 +1178,6 @@ fn start_inner(host: &Host, app: &str, prepare_only: bool) -> io::Result<Value> 
     let agents = agent_route::configs(&app_dir, app, &placement, &journal, route_profile)?;
     let mut resident = json!({
         "protocol":"mini-spk-resident-start-v3",
-        "agentRouteProfile":route_profile,
         "journalDir":journal,
         "imageDir":install_config["imageDir"],
         "expectedRawSha256":placement.raw_sha256,
@@ -1221,6 +1220,7 @@ fn start_inner(host: &Host, app: &str, prepare_only: bool) -> io::Result<Value> 
         "entrances":entrances,
         "agents":agents,
     });
+    resident["agentRouteProfile"] = json!(route_profile);
     resident["brokerSocket"] = json!(broker::socket_path(&host.profile.grains_root, host.profile.broker_socket.as_deref())?);
     if let Some(seconds) = host.profile.ws_authority_lease_seconds {
         resident["wsAuthorityLeaseSeconds"] = json!(seconds);
