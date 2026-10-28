@@ -13636,6 +13636,13 @@ impl Runtime {
                 return Err("scoped worker has no durable launch gate".into());
             }
             self.launch_gate(&record.program, unit, "fence")?;
+            // A metered worker's gate records its CPU only when the worker
+            // exits by itself; this stop kills the gate with it. Record the
+            // unit's systemd CPU accounting first, so the resident pays what
+            // the sandbox used rather than the pessimistic wall-time charge.
+            if let Err(error) = record_unit_cpu(&self.config.state_dir, unit) {
+                eprintln!("grain-runtime: worker {unit} CPU not recorded before stop ({error}); the pessimistic charge applies");
+            }
             kill_unit(unit)?;
         }
         for _ in 0..10 {
@@ -17474,6 +17481,25 @@ fn prove_controller_unit(task: &str) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+/// Write `STATE/UNIT.cpu` (`mini-grain-cpu-v1 USEC`, the launch gate's
+/// format) from systemd's CPU accounting of the live unit, unless the gate
+/// already wrote it. Rounded up to the next microsecond.
+fn record_unit_cpu(state_dir: &Path, unit: &str) -> Result<()> {
+    let path = state_dir.join(format!("{unit}.cpu"));
+    if path.try_exists().map_err(|e| e.to_string())? { return Ok(()); }
+    let output = deadline::output(systemd_manager::worker_command(unit)?
+        .args(["show", "-p", "CPUUsageNSec", "--value", &format!("{unit}.service")]), deadline::MANAGER_QUERY)
+        .map_err(|e| deadline::describe("worker CPU accounting", e))?;
+    let text = String::from_utf8(output.stdout).map_err(|e| e.to_string())?;
+    let nsec = text.trim().parse::<u64>().map_err(|_| format!("worker CPU accounting unavailable: {:?}", text.trim()))?;
+    let temporary = path.with_extension("cpu.tmp");
+    let mut file = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temporary)
+        .map_err(|e| format!("cpu record: {e}"))?;
+    file.write_all(format!("mini-grain-cpu-v1 {}\n", nsec.div_ceil(1000)).as_bytes())
+        .and_then(|_| file.sync_all()).map_err(|e| format!("cpu record: {e}"))?;
+    fs::rename(&temporary, &path).map_err(|e| format!("cpu record: {e}"))
 }
 
 fn kill_unit(unit: &str) -> Result<()> {
