@@ -1167,3 +1167,31 @@ pass 22, in favour of a named collision. No twin is kept.
   "declared-object scalar targets", and since `checkServed` is deleted for every kind, the other kinds'
   acceptance must be listed as owed (a pole or a journey row each). They go through the same
   `resourceView`, but that is a reading, not yet a witness.
+
+## 2026-10-28, twenty-seventh pass: effects revival after the architecture review (dde029eb4, statements)
+
+**Verdict: accept 2. Revise 1 and 3.**
+
+**1. `OneSource` is extensional and adds nothing to `Dispatches.agreement`. Revise.** Any `d` that agrees with
+`dispatch R` on registered codes satisfies it, by taking `legacy := d` (since `composeDispatch R d = d` on
+exactly those `d`). So it cannot show the hand arm was deleted, which is the review's point. What would
+show it is structural, and it can be stated now as a Prop: the legacy dispatcher's input type has no
+constructor for a registered code, `∀ p : LegacyPayload, tagOf p ∉ R.map Prod.fst`. When `content` moves,
+the type `Payload` loses that constructor, and the theorem fails to typecheck if it does not. State that
+census as the Prop now, and keep `OneSource` only as the extensional shadow, or drop it.
+
+**2. Registry extension: accepted.** `ExtensionPreserves` covers acceptances and refusals, and
+`SafeExtension`'s no-rebinding-of-retired-codes rule is the policy for new codes. The `octet` bound ties
+codes to the tag byte, and the teeth are right. The owed items (prefix consumption by the outer decoder,
+whole-epoch fingerprint) are listed.
+
+**3. `PrepareBridge`: right object, but clause (b) has an escape disjunct. Revise to a factorization.**
+Stating it against `ResourceTransaction.prepareTarget` itself answers the review. But (b) lets the routed
+dispatch accept while `prepareTarget` refuses for a `ControllerGeneric` reason (`invalidPost`,
+`policyUnavailable`, audience), and nothing pins those refusals as independent of the effect. Say what the
+deployed path is: `prepareTarget … = routed >>= genericChecks …`, with `genericChecks` reading only the
+post, the policy source and the audience, never the payload. Then (a), (b) and (c) are corollaries, and
+"the generic refusals are not a place for the effect to disagree" is part of the statement. At the
+migration commit, that factorization is the shape `prepareTarget` takes.
+
+The two items listed for later (whole-epoch compatibility; two-level activity refusals) are acknowledged.
