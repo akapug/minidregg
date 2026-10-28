@@ -1024,3 +1024,11 @@ Accepted:
 - **(5) Coordinates shown, not judged**, gated at admission (`RootGrantShape`, `BirthWindow`, policy epoch 0,
   `BornLineage`), with the window shift named in the display: accepted.
 - `SwappedPlanRefused`'s two refusals are general and named.
+
+**Addendum, thin-birth 909de2bca: ACCEPT.** `EffectsCollision` is a compared-pair event on exactly the
+two descriptors, and it cannot be proved without an actual cSHAKE collision. Neither theorem now takes a
+hash premise, so the disjunct is no escape hatch. In `DisplayIsCommit` the consented-header premises force
+equal digests, so either `signed = d` (the conjuncts) or the collision holds. `OpenedPinsPublicStatement`
+replaces the uninhabited premises with a statement about every `Opened`. Carrying the invariant as a field
+built at `Opened`'s three construction sites is the right realisation. The re-authoring fixed point is
+labelled as jpriv2 row 19.
