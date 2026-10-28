@@ -323,6 +323,13 @@ PID file `check.pid`, log `check.log`); seconds per file.  The live file (kernel
 dregg-ref, via the concatenation check in `/build/lanes/effects-revival-scratch/` under
 the closure lock (contended by host builds; expect waits).
 
+**Pending merge (module-conversion window).**  The integrator holds `3c98e54d3`
+(ContentProofs) until iter-speed's module conversion lands on main.  When the integrator
+announces it: merge main into this branch, convert `Effects/Revival/ContentProofs.lean`
+and `Effects.lean` (and any Revival file the conversion missed) with
+`scripts/lean-modularize.py`, re-check on hbox (`hcheck.sh Effects.Revival.ContentProofs`),
+push, and send the integrator the sha.
+
 **Proof order (remaining).**
 1. The doc-write fixture inhabitant (`Fixtures/NativeDocWriteFixture*`).  It needs a
    non-empty rotation and serves `ContentAccepted`, `HostAccepted` and the ghost clauses of
