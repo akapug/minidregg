@@ -149,9 +149,7 @@ b26630168 composed red (apps:sheet, grain-share-issue-submit refused undisclosed
 candidate's composed run names the refusal (f2deb6ede). Held (do not land without the owner's sha via the
 coordinator): cx-oracle, cx-store-sweep, cx-app-interface, un-route-latency, oracle-grant-factory past what is on
 main; un-consent-reconnect 02a03960f is dropped (b71898658 stands); un-ns-owner 587c5acbd is superseded;
-un-japps-rows waits for its owner's message. Pending tool work (coordinator): front-load the rust stage's exact
-cargo invocations as `cargo check` with the same features beside the host stage; widen the regen's
-old-spelling scan to string literals in every .lean file (selftest case: a bumped tag inside a theorem literal).
+un-japps-rows waits for its owner's message. Tool work done: rust-check before the host stage (28dc877e8); the regen refuses an old spelling inside a Lean string literal (9e3d67e43).
 
 Hermes is L4c a6c2f758a0dac46fe (10-28; L4b ad81db6d6fd317d3a stopped: older mentions are history). Infra is a298031c78e86d651 (10-28; older mentions of ae95a4eac63b0715e/aed5ecf506cf840af in the table are history). Red routing: lean-audit-c and lean-audit-c-m2 are L1e's successor's (L1e a58f907aef8926430 handed off 10-28 at its cap; the successor starts from docs/PLATFORM-RECEIVER-STATE.md and will message; until then route through the coordinator): its green sha comes from and its reds go to L1e directly; when the module conversion lands on main, tell L1e (it merges the conversion into lean-audit-c and sends a green sha) and L1d's old address; Hermes to L4c (a6c2f758a0dac46fe; L4b ad81db6d6fd317d3a has stopped); L13 a1618140607ac439b; un-stream-continuity reds
 (ApplicationStreamContinuityFresh pole proofs, NativeHostReplay.lean:3816) to the deputy a308118209b4a48ea; all
