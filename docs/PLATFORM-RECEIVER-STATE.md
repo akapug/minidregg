@@ -68,6 +68,38 @@ Nothing on this lane has gone green yet.
   - L1d's: `CompletionCustodianKey.select_pinned`'s split chain; the four Cores' `rcases … split at`;
     `Read.current`'s split.
 
+### Order with the module conversion (agreed with iter-speed, a0fd127abfb9aac75)
+
+1. The module conversion lands on main first.
+2. L1d merges iter-speed's landing sha into lane/lean-audit-c.
+   - Header conflicts are expected in the 7 files whose imports L1d changed: the four
+     completion admissions, ParticipantFactoryProvisioning, NativeHostContext and
+     ResourceBirthPolicyController.
+   - Take L1d's side of the HEADER hunks only and merge body hunks normally.
+   - Then run `python3 scripts/lean-modularize.py <those files> Kernel/CompletionCustodianKey.lean`.
+     Never hand-edit a converted header.
+3. Check each changed file and its direct importers with `scripts/pipeline/lane-check FILE`
+   on a box tree, never with `lake env lean`.
+   - A hidden-body failure: run `scripts/module-hidden-bodies.sh FILE` and add its lines to
+     PER_FILE in lean-modularize.py, then re-convert.
+4. Re-prove green on the merged tree and send that sha to the integrator.
+5. Then put the M2 commits on top and run the same modularize step for
+   Kernel/MeterRefillReceiver.lean and NativeHostReplay.
+   - In the converted NativeHostReplay every `Derived` literal names each defaulted field
+     (`… := none`). That works around Lean 4.30's private-ctor-plus-defaults bug. Rewrite
+     M2's `meterRefill` Derived literal the same way.
+6. M2 lands in one integration build with the integrator's codec-shapes regen, so the
+   StoreEpoch moves once.
+
+The local M2 commits (unpushed):
+- f21407b2e: the protocol.
+- a7f17b12d and ab030d544: the refill family, the registry and K3.
+- e870fd03e: the spec twin retired and the deployed teeth.
+
+The auditor accepted the deployed K1/K2/K3 (pass 21 and its addendum). K3's proof needs
+per-arm work on a box: about 25 arms carry the intent as a structure field with an
+`intentExact`.
+
 ### Done since L1c (all unbuilt)
 
 | sha | what |
