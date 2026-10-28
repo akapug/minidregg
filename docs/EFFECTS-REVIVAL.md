@@ -404,18 +404,18 @@ Engine/Statements split).
    `TwoLevelsSatisfiable` (today's kernel), `TwoLevelsPremise` (an effect-level refusal
    exists), `TwoLevelsTeeth` (the collapsed judgment is refuted).  At step 2 the transfer
    declaration's derived executor, projected to a `YieldCommit`, must satisfy it.
-7. The doc-write fixture inhabitant: `Effects/Revival/ContentFixture.lean` is written
-   (`ContentAccepted`, `HostAccepted`, the ghost halves of `ContentTeeth`/`HostTeeth`, and
-   `HostTeeth`'s twin half).  It reads the fixture's content target as `prepareTarget` does.
-   It is NOT imported yet: `Fixtures.NativeDocWriteFixture` is red (its recorded seed/record
-   frames no longer decode; first evidence 2026-10-28, the integrator treats it as red on
-   main).  Regenerate it from the conversion candidate the integrator names on READY (fresh
-   genesis, moved `StoreEpoch`): run `native/resource-client/doc-write-native-acceptance.py`
-   on dregg-build from that candidate (your own run directory; stop the world's servers),
-   then run `scripts/native-doc-write-fixture/generate.sh` where Lean may run (hbox private
-   tree, merged to that main), then check ContentFixture.
+7. The accepted-branch witnesses, by KERNEL proof on hand-built cells (ContentProofs),
+   superseding the fixture route: `contentAccepted : ContentAccepted` and
+   `hostAccepted : HostAccepted` (a link admitted at a content cell holding only its blinding,
+   through `contentAgreement` and the host dispatch), `contentTeeth : ContentTeeth` (at that
+   blinded cell the live patch carries the rotation, so `contentGhost` disagrees).  Still owed:
+   `HostTeeth` (`Effects/Revival/HostTeethProofs.lean`, in progress).  Its ghost half needs one
+   hash fact (a ratchet step moves the zero blinding), the single compiled evaluation.  The
+   doc-write fixture is red (its recorded frames no longer decode).  Its regeneration is owed
+   to the integrator's umbrellas stage, from the first READY candidate carrying the conversion
+   plus M2, which the integrator names.  It is no longer a witness for this lane.
 8. `ContentAgreement contentSpec`: **PROVED** (`contentAgreement`, ContentProofs, pinned), so
-   `LiveKeystone` holds (`contentAgreement` with `contentComplete`).  Also proved (pass 28
+   `LiveKeystone` holds (`contentAgreement` with `contentComplete`), its poles by item 7.  Also proved (pass 28
    statements): `prefixKeystone`, `prefixSatisfiable`, `prefixTeeth` (EngineProofs),
    `contentPrefixAgreement`, `contentPrefixAccepts`, `contentPrefixTeeth` (ContentProofs),
    `twoLevelsSatisfiable`, `twoLevelsPremise`, `twoLevelsTeeth`

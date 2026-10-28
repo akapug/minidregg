@@ -699,6 +699,152 @@ theorem contentAgreement : ContentAgreement contentSpec := by
       cases space <;> rfl
     cases ctx.kind <;> rfl
 
+/-! ## The live keystone's poles, on hand-built cells (kernel proofs). -/
+
+/-- A complete declaration's executor admits every operation its semantics emits. -/
+theorem exec_ok_of_complete {Ctx : Type} {S : Substrate} {O R : Type} {E : EffectSpec Ctx S O R}
+    (complete : E.Complete) {code : Nat} {ctx : Ctx} {op : O} {s : S.State} {ps : List S.Prim}
+    (emitted : E.sem ctx op s = .ok ps) : ∃ s', E.exec code ctx op s = .ok s' := by
+  obtain ⟨inFrame, runs⟩ := complete ctx op s ps emitted
+  unfold EffectSpec.exec
+  rw [emitted]
+  simp only [if_pos inFrame]
+  cases ran : S.run s (ps ++ E.rotate ctx s) with
+  | none => rw [ran] at runs; cases runs
+  | some s' => exact ⟨s', rfl⟩
+
+/-- The content cell of a store. -/
+abbrev cellOf (s : ContentResource.ContentStore) : ContentResource.ContentCell :=
+  CellState.materialize HyperdocumentCell.contentMaterializer s
+
+/-- A store whose blinding is set (the deployed cells carry one from birth). -/
+def blindedStore : ContentResource.ContentStore :=
+  Store.set (0 : ContentResource.ContentStore) ⟨.blinding, ()⟩ (some (⟨0⟩ : Digest))
+
+/-- The link command's descriptor: its one allocation. -/
+def sampleLinkOps : Patch Hyperdocument.layout :=
+  [.allocate .links sampleLink
+    ⟨ContentResource.documentOf sampleCtx.target, none, .external [] [] [], ⟨0⟩,
+      ⟨sampleCtx.command.subject, sampleCtx.kind, sampleCtx.capability⟩,
+      DeclaredResourceController.contentOperation sampleCtx.snapshot sampleCtx.semantics
+        sampleCtx.command, none⟩]
+
+/-- The link command emits its one allocation at the blinded store too. -/
+theorem sampleLink_emits_blinded_eq :
+    contentSpec.sem sampleCtx sampleLinkCommand blindedStore = .ok sampleLinkOps := by
+  simp [contentSpec, contentSem, sampleLinkCommand, ContentResource.run,
+    ContentResource.step, ContentResource.allocate, Except.map, bind, Except.bind, pure,
+    Except.pure, blindedStore, Store.set, sampleLinkOps]
+  rfl
+
+theorem sampleLink_emits_blinded :
+    ∃ ps, contentSpec.sem sampleCtx sampleLinkCommand blindedStore = .ok ps :=
+  ⟨_, sampleLink_emits_blinded_eq⟩
+
+/-- **The accepted branch, inhabited**: the live arm admits a link at the empty content
+cell (the derived executor admits it, so `contentAgreement`'s clause 2 gives the live arm). -/
+theorem contentAccepted : ContentAccepted := by
+  obtain ⟨ps, emitted⟩ := sampleLink_emits_blinded
+  obtain ⟨post, executed⟩ := exec_ok_of_complete (code := 1) contentComplete emitted
+  obtain ⟨-, -, -, live, -⟩ := contentAgreement sampleCtx sampleLinkCommand (cellOf blindedStore)
+    none none none
+  obtain ⟨accepted, -, -⟩ := live rfl
+  obtain ⟨computed, valid⟩ := (accepted post).1 executed
+  exact ⟨sampleCtx, sampleLinkCommand, cellOf blindedStore, none, none, none, post, rfl,
+    by simp [sampleLinkCommand], computed, valid⟩
+
+/-- **The ghost half of `ContentTeeth`**: at a blinded cell the live patch carries the
+rotation, so the declaration without it disagrees. -/
+theorem contentGhost_disagrees : ¬ ContentAgreement contentGhost := by
+  intro ghost
+  obtain ⟨ps, emitted⟩ := sampleLink_emits_blinded
+  obtain ⟨-, -, -, liveGhost, -⟩ := ghost sampleCtx sampleLinkCommand (cellOf blindedStore)
+    none none none
+  obtain ⟨-, -, -, live, -⟩ := contentAgreement sampleCtx sampleLinkCommand (cellOf blindedStore)
+    none none none
+  have withRotation := (live rfl).2.2 ps emitted
+  have withoutRotation : DeclaredResourceController.targetPatch sampleCtx.snapshot sampleCtx.semantics
+      sampleCtx.ambient sampleCtx.command
+      (contentTarget sampleCtx contentSpec.version (cellOf blindedStore).root sampleLinkCommand none none none)
+      (cellOf blindedStore) = ps ++ [] := (liveGhost rfl).2.2 ps emitted
+  rw [withRotation] at withoutRotation
+  have rotation : HyperdocumentCell.contentBlinding.patch blindedStore sampleCtx.ambient.height ≠ [] := by
+    unfold StoreCodec.Blinding.patch
+    simp [blindedStore, StoreCodec.Blinding.address, HyperdocumentCell.contentBlinding]
+  exact rotation (List.append_cancel_left withoutRotation)
+
+theorem contentTeeth : ContentTeeth := ⟨contentGhost_disagrees, contentNarrowed_incomplete⟩
+
+/-- A valid deployment (three distinct cell ids). -/
+def sampleDeployment : DeclaredResourceController.Deployment := ⟨⟨0⟩, 1, 2, 3⟩
+
+/-- The blinded store holds only its blinding, so its records name no two documents. -/
+theorem blindedStore_support (address : CAddr) (held : address ∈ blindedStore.support) :
+    address = ⟨.blinding, ()⟩ := by
+  by_contra other
+  rw [DFinsupp.mem_support_iff] at held
+  exact held (by
+    change Store.set (0 : ContentResource.ContentStore) ⟨.blinding, ()⟩ (some (⟨0⟩ : Digest)) address = _
+    rw [Store.set_ne _ _ _ _ other]
+    rfl)
+
+theorem blindedCell_law :
+    CanonicalCellRegistry.CellLaw sampleDeployment sampleCtx.target
+      (⟨.content, cellOf blindedStore⟩ : HostCell) := by
+  refine ⟨by decide, ?_⟩
+  intro left inLeft right inRight
+  rw [blindedStore_support left inLeft, blindedStore_support right inRight]
+  exact Or.inr (Or.inr rfl)
+
+/-- The host context of the sample target at the blinded cell. -/
+def sampleHostCtx : HostCtx :=
+  hostCtxOf sampleCtx sampleDeployment contentSpec.version (cellOf blindedStore).root none none none
+
+/-- The host dispatch at the blinded cell: the derived executor's post, packed. -/
+theorem hostDispatch_blinded : ∃ post,
+    EffectSpec.exec contentSpec 1 sampleCtx sampleLinkCommand blindedStore = .ok post ∧
+    hostTargetDispatch 1 (ContentResource.commandStream.encode sampleLinkCommand) sampleHostCtx
+        (⟨.content, cellOf blindedStore⟩ : HostCell) =
+      .ok (DeclaredResourceController.packTarget (hostTarget sampleHostCtx (.content sampleLinkCommand))
+        (CellState.materialize (hostTarget sampleHostCtx (.content sampleLinkCommand)).materializer post)) := by
+  obtain ⟨ps, emitted⟩ := sampleLink_emits_blinded
+  obtain ⟨post, executed⟩ := exec_ok_of_complete (code := 1) contentComplete emitted
+  refine ⟨post, executed, ?_⟩
+  obtain ⟨-, -, -, live, -⟩ := contentAgreement sampleCtx sampleLinkCommand (cellOf blindedStore)
+    none none none
+  obtain ⟨computed, valid⟩ := ((live rfl).1 post).1 executed
+  have decoded : DeclaredResourceController.payloadStream.toLawful.decode
+      (UInt8.ofNat 1 :: ContentResource.commandStream.encode sampleLinkCommand) =
+        some (.content sampleLinkCommand) :=
+    DeclaredResourceController.payloadStream.toLawful.decode_encode (.content sampleLinkCommand)
+  have selected : DeclaredResourceController.selectTarget sampleDeployment
+      (hostTarget sampleHostCtx (.content sampleLinkCommand)) (⟨.content, cellOf blindedStore⟩ : HostCell) =
+        some (cellOf blindedStore) := by
+    simp only [DeclaredResourceController.selectTarget, hostTarget, sampleHostCtx, hostCtxOf]
+    have object : sampleCtx.kind = .object := rfl
+    rw [if_pos object, if_pos blindedCell_law]
+    rfl
+  unfold hostTargetDispatch
+  rw [if_neg (by decide), decoded]
+  simp only
+  rw [show sampleHostCtx.deployment = sampleDeployment from rfl, selected]
+  simp only
+  rw [show DeclaredResourceController.computeTarget sampleHostCtx.snapshot sampleHostCtx.semantics
+      sampleHostCtx.ambient sampleHostCtx.command (hostTarget sampleHostCtx (.content sampleLinkCommand))
+      (cellOf blindedStore) = .ok post from computed]
+  simp only
+  have valid' : Patch.ValidFrom (cellOf blindedStore).logical
+      (DeclaredResourceController.targetPatch sampleHostCtx.snapshot sampleHostCtx.semantics
+        sampleHostCtx.ambient sampleHostCtx.command
+        (hostTarget sampleHostCtx (.content sampleLinkCommand)) (cellOf blindedStore)) := valid
+  exact if_pos valid'
+
+/-- **The host dispatch's accepted branch, inhabited** (kernel proof): the encoded link
+command is admitted at the blinded content cell. -/
+theorem hostAccepted : HostAccepted := by
+  obtain ⟨post, -, dispatched⟩ := hostDispatch_blinded
+  exact ⟨sampleLinkCommand, sampleHostCtx, ⟨.content, cellOf blindedStore⟩, _, dispatched⟩
+
 /-! ## The deployed payload decoder, read as a prefix. -/
 
 theorem contentPrefixAgreement : ContentPrefixAgreement := by
@@ -732,6 +878,9 @@ theorem contentPrefixTeeth : ContentPrefixTeeth := by
 #assert_axioms contentComplete
 #assert_axioms contentNarrowed_incomplete
 #assert_axioms contentAgreement
+#assert_axioms contentAccepted
+#assert_axioms contentTeeth
+#assert_axioms hostAccepted
 #assert_axioms contentPrefixAgreement
 #assert_axioms contentPrefixAccepts
 #assert_axioms contentPrefixTeeth
