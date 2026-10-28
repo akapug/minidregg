@@ -1338,7 +1338,7 @@ mod tests {
             } else if let Some(subject) = line.strip_prefix("story invite tale ") {
                 let invitation = json!({"type":"mini-story-invitation-v1","story":"tale","role":"player","grant":{"recipient":subject}});
                 return Ran { ok: true, stdout: format!("invited {subject} to tale as player; give them this line:\nstory join tale {invitation}\n"), stderr: String::new() };
-            } else if line.starts_with("story join ") && home.join("fail-join").exists() {
+            } else if line.starts_with("story join ") && self.p.root.join("fail-story-join").exists() {
                 return Ran { ok: false, stdout: String::new(), stderr: "refused: the Host was busy".into() };
             }
             Ran { ok: true, stdout: String::new(), stderr: String::new() }
@@ -1448,8 +1448,7 @@ mod tests {
         std::fs::create_dir_all(w.p.config().parent().unwrap()).unwrap();
         std::fs::write(w.p.config(), b"world one").unwrap();
         let r = join("alice", KEY, Route::Free, false);
-        std::fs::create_dir_all(w.p.home("alice")).unwrap();
-        std::fs::write(w.p.home("alice").join("fail-join"), b"").unwrap();
+        std::fs::write(w.p.root.join("fail-story-join"), b"").unwrap();
         submit(&w, &r);
         run(&mut w);
         let count = |w: &Processor<Fake>, prefix: &str| w.ops.calls.borrow().iter().filter(|c| c.starts_with(prefix)).count();
@@ -1460,7 +1459,7 @@ mod tests {
         let handed = std::fs::read_to_string(w.p.home("alice").join("requests/tale-invite.json")).unwrap();
         assert_eq!(serde_json::from_str::<Value>(&handed).unwrap()["grant"]["recipient"], "4100", "the member's own invitation, in HOME/requests");
         // The next run retries the join alone: a second invite would find the member's cell born.
-        std::fs::remove_file(w.p.home("alice").join("fail-join")).unwrap();
+        std::fs::remove_file(w.p.root.join("fail-story-join")).unwrap();
         run(&mut w);
         assert_eq!((count(&w, "box: story invite"), count(&w, "alice: story join")), (1, 2));
         let s = status(&w, r.id());
