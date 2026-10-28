@@ -554,6 +554,39 @@ def validateCore {D A : Type} (config : Config) (seed : DurableReceiver.Seed) (l
   if checked : lawfulCheck directory = true then pure ⟨(directory, authority, pins), checked⟩
   else .error "native cell role or domain law refused"
 
+/-- `validateCore` as compiled: the cell-law check runs once, its verdict shared
+by `validateChecks` and the returned proof (`validateCore` maps it into the
+checks and runs it again for the proof). -/
+def validateCoreFast {D A : Type} (config : Config) (seed : DurableReceiver.Seed) (logStart : Digest)
+    (directory? : Option D) (authority? : Option A)
+    (directoryOf : D → Directory Nat CanonicalCellRegistry.registry)
+    (logicalOf : A → Store.Store CredentialAuthorityState.layout)
+    (lawfulCheck : D → Bool) (platform? : Option PlatformCellLayout.Platform) :
+    Except String {parts : D × A × FactoryPins // lawfulCheck parts.1 = true} :=
+  match directory? with
+  | none => do
+      let _ ← validateChecks config seed logStart none (authority?.map logicalOf) none platform?
+      need "noncanonical native directory" none
+  | some directory =>
+      let lawful := lawfulCheck directory
+      do
+        let pins ← validateChecks config seed logStart (some (directoryOf directory))
+          (authority?.map logicalOf) (some lawful) platform?
+        let authority ← need "complete deployment authority unavailable" authority?
+        if checked : lawful = true then pure ⟨(directory, authority, pins), checked⟩
+        else .error "native cell role or domain law refused"
+
+@[csimp] theorem validateCore_eq_fast : @validateCore = @validateCoreFast := by
+  funext D A config seed logStart directory? authority? directoryOf logicalOf lawfulCheck platform?
+  cases directory? with
+  | none =>
+      simp only [validateCore, validateCoreFast, Option.map_none]
+      cases validateChecks config seed logStart none (authority?.map logicalOf) none platform? <;> rfl
+  | some directory =>
+      simp only [validateCore, validateCoreFast, Option.map_some]
+      cases validateChecks config seed logStart (some (directoryOf directory)) (authority?.map logicalOf)
+        (some (lawfulCheck directory)) platform? <;> cases authority? <;> rfl
+
 /-- `validateCore` over two shapes whose inputs correspond: the same refusal,
 or the same pins. -/
 theorem validateCore_map {D A D' A' : Type} (config : Config) (seed : DurableReceiver.Seed)
