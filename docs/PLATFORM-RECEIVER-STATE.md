@@ -46,27 +46,39 @@ passes 16–21 on lane/audit-platform.
 
 ### Build status (read this first)
 
-Nothing on this lane has gone green yet.
-- dregg-ref: build 3 of e2dae30ee is queued on closure-lock behind the nightly's m7_reference.
-  - PID file /build/lanes/lean-audit-c-build.pid, log /build/lanes/lean-audit-c-build3.log.
-  - The box tree is 138320fbe with the diff to e2dae30ee applied uncommitted. `git fetch` fails
-    there because of object dirs owned by another user; don't chown them.
-- hbox: a build of b7412f32a, the tip, is running. On the coordinator's instruction it was
-  seeded with the warm base's `.lake/packages` only, so our modules build cold.
-  - Tree: /othersys/lanes/lean-audit-c/src (`git archive`, `LANE_SHA`).
+Nothing on this lane has gone green yet. The green candidate before the merge is d95bf65ea
+(b7412f32a plus the build-3 red fixes). The successor starts from the conversion's landing
+sha (see the order below).
+- dregg-ref, build 3 of e2dae30ee: red in two places, both fixed in d95bf65ea.
+  - `enrolObserve` call sites still passed `profile`.
+  - ParticipantFactoryProvisioning lacked an import.
+- dregg-ref, build 4: queued on closure-lock.
+  - PID file /build/lanes/lean-audit-c-build.pid, log /build/lanes/lean-audit-c-build4.log,
+    script /build/lanes/lean-audit-c-build.sh, run as `lanes`.
+  - Box tree /build/lanes/lean-audit-c: 138320fbe plus the diff to e2dae30ee, with d95bf65ea's
+    four fixed files copied in, all uncommitted.
+  - `git fetch` fails there because of object dirs owned by another user; don't chown them.
+    Infra (aed5ecf506cf840af) has the closure.pid permission problem.
+- hbox: a build of d95bf65ea's content.
+  - Tree /othersys/lanes/lean-audit-c/src, from `git archive` of b7412f32a plus the four
+    fixes, with `LANE_SHA`.
   - Script build.sh, PID file build.pid, log build.log, `SWARM_MEM_MAX=40G`.
-  - Targets: build 3's list plus every module L1d touched.
-  - Fix reds forward there with `lake env lean FILE`, then send the integrator the green sha.
-  - Remove /othersys/lanes/lean-audit-c when the lane ends (the README there says so).
-- Not covered by the targets, so `lake env lean` them after a green:
-  - tests/lean/LifetimeGrantSourceAdversary.lean;
-  - the share-issue and lifetime-grant Host/*Authoring files.
-- Likely reds:
-  - L1c's list: PayEnrolReceiver.ambientCurrent_iff's `cases`; the anonymous constructors of the
-    grain Pending, the pay Planned structures and provisioning; the provisioning
-    `let ⟨record, recordExact⟩ ←`; `_root_` payEnrolAmbient.
-  - L1d's: `CompletionCustodianKey.select_pinned`'s split chain; the four Cores' `rcases … split at`;
-    `Read.current`'s split.
+  - Seeded with the warm base's packages only, so our modules build cold.
+  - Remove /othersys/lanes/lean-audit-c when the lane ends.
+- Not covered by the targets: tests/lean/LifetimeGrantSourceAdversary.lean and the
+  share-issue and lifetime-grant Host/*Authoring files.
+- Likely reds still to come:
+  - the anonymous constructors of the grain Pending, the pay Planned structures and provisioning;
+  - `CompletionCustodianKey.select_pinned`'s split chain;
+  - the four Cores' `rcases … split at`.
+
+### Item 5 ruling
+
+The coordinator ruled: `Intent.credit` persists in `IntentRecord` (durable log frame v3,
+`DREGG.DURABLE.IMAGE` v3). It ships with the module conversion's re-genesis, so the
+StoreEpoch moves once, and the codec-shape pins move only through the integrator's regen.
+The auditor accepted the design (pass 21) and the deployed keystones (pass 21 addendum).
+M2 is on lane/lean-audit-c-m2, unbuilt.
 
 ### Order with the module conversion (agreed with iter-speed, a0fd127abfb9aac75)
 
@@ -91,7 +103,7 @@ Nothing on this lane has gone green yet.
 6. M2 lands in one integration build with the integrator's codec-shapes regen, so the
    StoreEpoch moves once.
 
-The local M2 commits (unpushed):
+The M2 commits, on lane/lean-audit-c-m2 (pushed, unbuilt):
 - f21407b2e: the protocol.
 - a7f17b12d and ab030d544: the refill family, the registry and K3.
 - e870fd03e: the spec twin retired and the deployed teeth.
