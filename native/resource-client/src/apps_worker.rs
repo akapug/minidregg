@@ -961,6 +961,12 @@ impl ProcessWorld {
         })
     }
 
+    /// What the worker's own session births need from the world, read from its genesis (never constants):
+    /// the factory and the management enrollment's grants, the platform template and the grain birth tariff.
+    fn world_shape(&self, genesis: &Value) -> Result<WorldShape> {
+        shape_of(genesis, &self.management_key_id, &self.management_subject)
+    }
+
     fn nonce(&self) -> Result<u64> {
         let current = fs::read_to_string(&self.nonce_file).ok().and_then(|t| t.trim().parse::<u64>().ok()).unwrap_or(70_000_000);
         let next = current + 1000;
@@ -1040,13 +1046,14 @@ impl ProcessWorld {
         let (tool, _) = self.query(work, &format!("{name}-tool"), &self.tool_task, &self.tool_capability, nonce + 101, "resource")?;
         let (parent, _) = self.query(work, &format!("{name}-parent"), &self.parent_task, &self.parent_capability, nonce + 102, "resource")?;
         let genesis = read_json(&self.genesis)?;
+        let shape = self.world_shape(&genesis)?;
         let m = &self.management_subject;
         let source = json!({"subject":m,"nonce":(nonce + 100).to_string(),
-            "grants":[{"kind":"object","target":"10","capability":"55"},{"kind":"account","target":m,"capability":"42"},
+            "grants":[{"kind":"object","target":shape.factory,"capability":shape.factory_observe},{"kind":"account","target":m,"capability":shape.spend},
                 {"kind":"object","target":self.tool_task,"capability":self.tool_capability},{"kind":"object","target":self.parent_task,"capability":self.parent_capability}],
-            "applicationSessionGrainBirth":{"tariff":{"base":"2","perBirth":"1"},
-                "applicationSessionBirth":{"genesis":genesis,"template":{"issuer":"5","ownerBudget":"100000","lifetime":"10000"},
-                    "creator":m,"nonce":(nonce + 100).to_string(),"sourceCapabilities":["42"],"funding":[],"feePayer":m,
+            "applicationSessionGrainBirth":{"tariff":shape.tariff,
+                "applicationSessionBirth":{"genesis":genesis,"template":shape.template,
+                    "creator":m,"nonce":(nonce + 100).to_string(),"sourceCapabilities":[shape.spend],"funding":[],"feePayer":m,
                     "session":{"app":app,"session":session.to_string(),"descriptor":(session + 1).to_string(),"participant":m,"kind":kind,
                         "sessionOwnerCapability":cap.to_string(),"sessionControlCapability":(cap + 1).to_string(),
                         "descriptorOwnerCapability":(cap + 2).to_string(),"descriptorControlCapability":(cap + 3).to_string()}},
@@ -1087,6 +1094,26 @@ impl ProcessWorld {
         use sha2::Digest;
         Ok(hex(&sha2::Sha256::digest(fs::read(path).map_err(|e| e.to_string())?)))
     }
+}
+
+/// The genesis facts a worker session birth cites.
+#[derive(Debug, PartialEq)]
+pub(crate) struct WorldShape { pub factory: String, pub factory_observe: String, pub spend: String, pub template: Value, pub tariff: Value }
+
+pub(crate) fn shape_of(genesis: &Value, management_key_id: &str, management_subject: &str) -> Result<WorldShape> {
+    let text = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).map(str::to_owned).ok_or_else(|| format!("worldShapeUnreadable: genesis lacks {k}"));
+    let enrollment = genesis.get("enrollments").and_then(Value::as_array)
+        .and_then(|list| list.iter().find(|e| e.pointer("/key/keyId").and_then(Value::as_str) == Some(management_key_id)))
+        .ok_or_else(|| format!("worldShapeUnreadable: genesis enrolls no key {management_key_id}"))?;
+    if text(enrollment, "accountId")? != management_subject {
+        return Err(format!("worldShapeUnreadable: key {management_key_id} is not the account of management subject {management_subject}"));
+    }
+    let platform = genesis.get("platform").ok_or("worldShapeUnreadable: genesis lacks platform")?;
+    Ok(WorldShape {
+        factory: text(genesis, "factoryId")?, factory_observe: text(enrollment, "factoryObserveCapabilityId")?, spend: text(enrollment, "spendCapabilityId")?,
+        template: json!({"issuer":"5","ownerBudget":text(platform, "ownerBudget")?,"lifetime":text(platform, "lifetime")?}),
+        tariff: platform.get("grainBirthTariff").cloned().ok_or("worldShapeUnreadable: genesis lacks platform.grainBirthTariff")?,
+    })
 }
 
 /// The session, descriptor and ticket resource ids of one share, derived from the world's nonce counter
@@ -1174,7 +1201,7 @@ impl World for ProcessWorld {
                 "ceiling":{"basis":role_basis(&self.role_basis, &schema),"added":[],"removed":[],"roleSchemaRoot":schema["root"],"roleVersion":schema["version"]},
                 "issueNonce":(base + 500).to_string(),"notAfter":"1000000000"},
                 "issuer":m,"appDelegateCapability":appcap,"ticketOwnerCapability":tcap.to_string(),"ticketControlCapability":(tcap + 1).to_string()},
-                "payer":m,"funding":[],"sourceCapabilities":["42"],
+                "payer":m,"funding":[],"sourceCapabilities":[self.world_shape(&read_json(&self.genesis)?)?.spend],
                 "tool":{"task":self.tool_task,"capability":self.tool_capability,"observeCapability":self.tool_capability},
                 "parent":{"task":self.parent_task,"capability":self.parent_capability,"observeCapability":self.parent_capability}});
             write_json(&t.join("request.json"), &request)?;
@@ -1367,6 +1394,17 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn world_shape_is_read_from_the_genesis_not_the_workroom_constants() {
+        let genesis = |factory: &str, fobs: &str, spend: &str, life: &str| json!({"factoryId":factory,"platform":{"ownerBudget":"100000","lifetime":life,"grainBirthTariff":{"base":"2","perBirth":"1"}},
+            "enrollments":[{"accountId":"7","spendCapabilityId":"41","factoryObserveCapabilityId":"54","key":{"keyId":"7007"}},{"accountId":"8","spendCapabilityId":spend,"factoryObserveCapabilityId":fobs,"key":{"keyId":"8008"}}]});
+        let workroom = super::shape_of(&genesis("10", "55", "42", "10000"), "8008", "8").unwrap();
+        assert_eq!((workroom.factory.as_str(), workroom.factory_observe.as_str(), workroom.spend.as_str()), ("10", "55", "42"));
+        let demo = super::shape_of(&genesis("900", "7777", "6006", "200000"), "8008", "8").unwrap();
+        assert_eq!((demo.factory.as_str(), demo.factory_observe.as_str(), demo.spend.as_str(), demo.template["lifetime"].as_str()), ("900", "7777", "6006", Some("200000")));
+        assert!(super::shape_of(&genesis("10", "55", "42", "10000"), "9999", "8").unwrap_err().starts_with("worldShapeUnreadable"));
+    }
 
     #[test]
     fn share_ids_are_injective_clear_of_namespace_ids_and_never_overflow() {
