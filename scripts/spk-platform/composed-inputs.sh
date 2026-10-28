@@ -91,7 +91,11 @@ store=$("$host" "$config" profile | jq -er '.storeTag | select(test("^[0-9a-f]{1
 grains=/var/lib/mini-spk-worlds/$store
 [[ ! -e $grains ]] || refuse "a grain world for store $store already exists at $grains"
 mkdir -m 700 -p "$units" "$out/bin" "$out/evidence"
-for binary in spk-host mini-spk-broker mini-spk-volume-helper; do install -m 755 "$cand/bin/$binary" "$out/bin/$binary"; done
+for binary in mini-spk-broker mini-spk-volume-helper; do install -m 755 "$cand/bin/$binary" "$out/bin/$binary"; done
+# The runtime the broker runs is the manifest's spkHost, the one the grain profile pins
+# (same-store-profile.py), at its path and digest; a private copy would be a second spelling.
+spk_host=$(jq -er .spkHost "$out/manifest.json") spk_host_sha=$(jq -er .sha256.spkHost "$out/manifest.json")
+[[ $(sha256sum "$spk_host" | cut -d ' ' -f1) == "$spk_host_sha" ]] || refuse "the manifest's spkHost $spk_host differs from its digest"
 install -m 755 "$repo/deploy/spk-host/spk-ingest" "$out/bin/spk-ingest"
 runid=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
 helper=/usr/local/libexec/mini-spk-volume-helper-$runid
@@ -103,7 +107,7 @@ printf 'ROOT SETUP BEGIN store=%s\n' "$store" | tee -a "$out/root-setup.log"
 sudo -n -- "$repo/deploy/spk-host/install-user-world" install "$out/bin/mini-spk-volume-helper" "$helper" "$store" "$deployment" "$hostid" "$op_uid" "$start" 16 >>"$out/root-setup.log" 2>&1
 printf 'ROOT SETUP store=%s helper=%s\n' "$store" "$helper" | tee -a "$out/root-setup.log"
 registry=/etc/mini-spk-volumes/$store.json
-jq -n --slurpfile registry "$registry" --arg binary "$out/bin/spk-host" --arg sha "$(sha256sum "$out/bin/spk-host" | cut -d ' ' -f1)" --arg ingest "$out/bin/spk-ingest" --arg op "$op_name" \
+jq -n --slurpfile registry "$registry" --arg binary "$spk_host" --arg sha "$spk_host_sha" --arg ingest "$out/bin/spk-ingest" --arg op "$op_name" \
   --arg bwrap "$bwrap" --arg bwrapSha "$(sha256sum "$bwrap" | cut -d ' ' -f1)" '
   $registry[0] as $r | {protocol:"mini-spk-broker-config-v3",store:$r.store,grainsRoot:$r.grainsRoot,spkRoot:($r.grainsRoot+"/spk"),brokerSocket:($r.grainsRoot+"/runtime-"+$r.store+"/broker.sock"),operatorUser:$op,unitPrefix:"mini",spkHost:$binary,spkHostSha256:$sha,bwrap:$bwrap,bwrapSha256:$bwrapSha,ingestHelper:$ingest,volumeHelper:$r.helper,appUids:$r.appUids,residentHomeReadOnlyPaths:[]}' >"$grains/broker/config.json"
 chmod 600 "$grains/broker/config.json"
