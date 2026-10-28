@@ -57,7 +57,9 @@ the newest built main that passed the gate; each is reported in one line, and in
 | full | 0ce313917 | CANDIDATE `/build/candidates/0ce31391790a7e2ed9f83eb1b8bb85d6556a0de3` 01:56 (host 231 s, consent 90 s, rust 61 s, pack 9 s; tests green; 23 binaries incl. mini-private-compute). enrol-resume PASS. Gate: tour 51/51 PASS; composed FAIL, a dregg-infra red (render-authorized-keys.sh called `mini enrollment-view` without the v2 Host pin; fixed by infra at dregg-infra 026d132). Composed rerun against that edge: `integ4/composed-rerun.sh TIP EDGE_REV` (pid file integ4/composed-rerun.pid; verdict line in integ8/COMMANDS.log; keep the run root short: a long one overflows the resident codec socket's SUN_LEN) |
 | 0ce31391 composed rerun | edge 026d132 | FAIL 02:22: world up, rooms/churn/documents pass; apps input refused at scripts/spk-platform/same-store-profile.py:29 "broker must belong to selected grains root" (the Python harness still allowed only the global /run socket or <grains>/broker.sock; spk-host has required <grains>/runtime-<store>/broker.sock since 5d23a2394). Fixed bea8928a5 (ws-continuity-fixture.broker_endpoint, the one spelling). The composed run takes its scripts from the candidate's source.tar, so the fix is proven only by the next candidate's gate |
 | full | 1af366fe9 | `integ4/main-full.sh` started 02:25 (main-full.pid 3433976; the launcher subshell 3433959 is its parent; build.pid, then gate.pid + enrol-resume.pid under integ8); tests stage green 02:26; host stage from 02:26:38. Carries the regen tool, rust-check, effects-revival, hermes-b b740e6f0, grain-bare-prepare 746b182d, abuse-caps, snipe-unconfigured, red-jserve-envelope ffe1623f, rows-ledger 0a05ab6b and the broker fix |
-| follow-on | main tip at chain end | `integ4/main-follow.sh` (main-follow.pid) waits for main-full.pid to exit, moves integ8/{native-out,consent-out,artifacts,fixtures} into integ8/prev-out, then runs main-full.sh at the tip of main then (>= dcb90f3bc: prepare-refusal-clients 7b3564733, framed_payload names its step; its two spk-host tests are the tests stage set `L1c`) |
+| 1af366fe9 result | — | host clean 02:59 (1995 s); consent rc=1 03:04: census, 37 structural moves plus DREGG/CLOCK/v5 owner-less (430e3fe96's twin deletion; the census counted owners by literal only, nine more pins were already fingerprint 7). Fixed f8c17f0f5 (a registry-constant reference is ownership) |
+| bd37686c0 | — | follow-on host stage rc=1 in 3 s: registry check, literal op 68 at native/spk-host/src/lifecycle_v3_native.rs:728 (7b3564733's test). Fixed f1ecba539 |
+| A9 | f8c17f0f5 | `integ4/regen-A9.sh` (pid file integ4/regen-A9.pid) from 03:08: host, regen (bumps the 37 moved and the ten newly owned identities), consent; diff in integ8/regen-A9.patch. Next: commit it to main, launch `integ4/main-full.sh <tip>` after moving integ8/{native-out,consent-out,artifacts,fixtures} aside |
 
 A3's tree (main 8103b29a4) holds everything since aa9366f8: pd-host-rate, oracle-lifetime-grant, oracle-grant-factory,
 lean-audit-c, un-effects 2acd8acf (effect Plan; its codec pins re-emit with this regen), un-pb-twins 134535c2,
@@ -75,25 +77,12 @@ elaboration of the fix pending NativeHostReplay.olean). L1c (lean-audit-c a281e5
 constructors with pricedAt, drops e7958d3b9's arms on merge; unbuilt, not to merge until its warm-tree build
 elaborates) seeds its dregg-ref tree from the integ8 copy; tell it when the copy lands.
 
-Next steps: when 1af366fe9's build reaches READY, its chain runs the gate (gate-cut3.sh, EDGE default
-dregg-infra-026d132) and enrol-resume itself; report "candidate <sha> at <path>: gate <verdict>, reds by name" to
-the coordinator and the sha + path to L4b (ad81db6d6fd317d3a); tell the rows validator (aeee8349c191e8506, through
-the coordinator) the candidate. If the build reds, name it at once (file:line, owner) and fix forward. Pending
-lands: lean-audit-c (88d6808fd+) only on L1c's warm-tree green sha. Transitive bumps through registry constants: closed by ruling (no). Nesting already propagates through the
-regen's round loop, and both hand-bump stops were spelling forms the tool now handles. The one planned re-pin is
-the module conversion's census change (option A, structure-not-name for compiler auxiliaries): iter-speed's
-successor (a0fd127abfb9aac75) lands it after the next candidate, and it moves the StoreEpoch once; land it only
-after that candidate is reported, then run the regen once in the next full build.
-Main after 1af366fe9 (in the next full build): rows-ledger 709cd12d/6ee5acb4 (FOUC 12/12 site and app), the one
-birth acceptance 78fe8e63d (native-acceptance.sh and native-share-member.sh source one function), hermes-b
-2aa94b0c, un-effects-rows 8223735f and 4dc6225d (commons still red at publish: over SOURCE_BYTES; the deputy's
-split follows), prepare-refusal-clients f73893fc; then (main 81bca08c6) un-effects-rows 703128ec (commons split into app and
-scenario modules) and prepare-refusal-clients 25cfb86bd (BEGIN plans name the Store by storeIdentity: the grain-install
-red; spk-host retries a refused install). PRIORITY: the next full build starts from main >= 81bca08c6 the moment
-1af366fe9's chain releases integ8, so the next candidate carries 25cfb86bd (app market, joracle, Oracle v7 world wait on it);
-take L1c's framed_payload follow-up if pushed by then. Rows validator: fresh worlds on that candidate.
-jspk1.sh still speaks to the global /run/mini-spk-broker.sock (old system-broker
-journey; its owner's).
+Next steps: A9 → regen patch onto main → full build at main's tip (it carries 25cfb86bd, custody-b's
+delegated consent, hermes-b 5422506f, the world/ pack 1b870fbdd). On READY the chain runs gate + enrol-resume;
+report "candidate <sha> at <path>: gate <verdict>, reds by name" to the coordinator, and the sha + path to the rows
+validator (aeee8349c191e8506, the app tables wait on 25cfb86bd) and L4b (ad81db6d6fd317d3a). Pending lands:
+lean-audit-c only on L1c's warm-tree green sha; iter-speed successor's census re-pin (a0fd127abfb9aac75) only
+after that candidate is reported. Transitive bumps through registry constants: closed by ruling (no).
 
 Red routing: lean-audit-c reds go to L1c (acf52d65283ef4ebc) directly; Hermes to L4b (ad81db6d6fd317d3a); L13 a1618140607ac439b; un-stream-continuity reds
 (ApplicationStreamContinuityFresh pole proofs, NativeHostReplay.lean:3816) to the deputy a308118209b4a48ea; all
