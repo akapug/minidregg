@@ -139,9 +139,12 @@ theorem v1_frame_refuses_new_profile (descriptor : Descriptor)
     decodeCanonical (codec.encode descriptor) = none := by
   simp [decodeCanonical, codec.decode_encode, newProfile]
 
-/-- The exact byte grammar shared with `native/signed-api-path`: each interior
-segment is nonempty ASCII `[A-Za-z0-9._~-]`, excluding `.` and `..`. This
-does not decode percent escapes, normalize slashes, or interpret URL syntax. -/
+/-- The exact byte grammar shared with `native/signed-api-path`: each segment
+is nonempty ASCII `[A-Za-z0-9._~-]`, excluding `.` and `..`, and the last one
+may or may not be followed by `/`. Sandstorm's bridge forms a request line as
+`apiPath ++ path` with nothing between, so a prefix such as `/pub` is legal
+there (OwnTracks signs it). This does not decode percent escapes, normalize
+slashes, or interpret URL syntax. -/
 def safeApiByte (byte : UInt8) : Bool :=
   let n := byte.toNat
   decide ((48 ≤ n ∧ n ≤ 57) ∨ (65 ≤ n ∧ n ≤ 90) ∨
@@ -150,18 +153,20 @@ def safeApiByte (byte : UInt8) : Bool :=
 def safeApiSegment (reversed : List UInt8) : Bool :=
   !reversed.isEmpty && reversed != [46] && reversed != [46, 46]
 
-/-- Parse literal segments up to and including the required final slash.
-The accumulator is reversed so recursion is structural on the input bytes. -/
+/-- Parse literal segments; the final segment may end the input without a
+slash. The accumulator is reversed so recursion is structural on the input
+bytes. -/
 def safeApiTail (reversed : List UInt8) : List UInt8 → Bool
-  | [] => false
+  | [] => safeApiSegment reversed
   | byte :: rest =>
       if byte == 47 then
         safeApiSegment reversed && (rest.isEmpty || safeApiTail [] rest)
       else
         safeApiByte byte && safeApiTail (byte :: reversed) rest
 
-/-- Signed API prefix profile: `/` or a literal slash-terminated path of at
-most 256 bytes. Empty means no API and is deliberately not a prefix. -/
+/-- Signed API prefix profile: `/` or a literal path of safe segments, the
+last optionally slash-terminated, of at most 256 bytes. Empty means no API
+and is deliberately not a prefix. -/
 def validApiPrefix (path : List UInt8) : Bool :=
   decide (path.length ≤ 256) &&
   (path == [47] ||
@@ -185,6 +190,17 @@ theorem validApiPrefix_ambiguous_refused :
     validApiPrefix [47, 97, 112, 105, 47, 37, 50, 101, 47] = false ∧
     validApiPrefix [47, 97, 112, 105, 92, 47] = false ∧
     validApiPrefix [47, 97, 112, 105, 63, 47] = false := by decide
+
+/-- A prefix with no trailing slash is admitted: `/pub` (OwnTracks), `/api`; a
+trailing empty segment, a dot segment and a lone `/` followed by nothing
+useful are not. -/
+theorem validApiPrefix_no_trailing_slash :
+    validApiPrefix [47, 112, 117, 98] = true ∧
+    validApiPrefix [47, 97, 112, 105, 47, 118, 49] = true ∧
+    validApiPrefix [47, 112, 117, 98, 47, 47] = false ∧
+    validApiPrefix [47, 97, 112, 105, 47, 46] = false ∧
+    validApiPrefix [47, 97, 112, 105, 47, 46, 46] = false ∧
+    validApiPrefix [47, 97, 112, 105, 37, 50, 101] = false := by decide
 
 theorem validApiPrefix_empty : validApiPrefix [] = false := by decide
 
