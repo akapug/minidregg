@@ -7,9 +7,9 @@ The static/adapter tests do not substitute for that run.
 
 Run on persvati as the operator of an already configured **isolated** SPK broker.
 The broker must authorize the supplied grains root, candidate binaries, operator,
-UID pool and resident units. The script neither starts nor replaces the global
-`/run/mini-spk-broker.sock` service. Coordinate that socket with the retained
-browser fixture before running; no public or retained fixture should be changed.
+UID pool and resident units. Its socket is the Store's own,
+`<grainsRoot>/runtime-<store>/broker.sock` (spk-host refuses any other); the script
+neither starts nor replaces it. No public or retained fixture should be changed.
 No provider is invoked. No source or native build is performed.
 
 Create a private input JSON with explicit immutable pins (illustrative paths):

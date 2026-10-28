@@ -29,7 +29,7 @@ import hashlib, json, os, re, signal, socket, struct, subprocess, sys, time
 D = os.environ["D"]; MINI = os.environ["MINI"]; HOST = os.environ["HOST"]
 CONFIG = os.environ["CONFIG"]; SOCKET = os.environ["SOCKET"]
 SPONSOR = os.environ["SPONSOR_WS"]; WORLD = os.environ["JOURNEY_WORLD"]
-TAG = b"DREGG/NATIVE-HOST/OUTCOME/v7"
+TAG = b"DREGG/NATIVE-HOST/OUTCOME/v8"
 rows = []; failed = []
 
 def server_pid():

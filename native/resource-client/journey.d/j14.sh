@@ -129,6 +129,12 @@ PURSE_T=9870003 USER_FEE=5 POOL_FEE=7 POOL_IN=100000 POOL_OUT=200000 MODEL=mini-
 jq -n --arg p "$PURSE_T" --arg m "$MODEL" --arg f "$USER_FEE" --arg pf "$POOL_FEE" --arg pi "$POOL_IN" --arg po "$POOL_OUT" '[{providerResourceId:($p|tonumber),
   tariff:{version:"1",model:$m,routes:{user:{perOp:$f},pool:{perOp:$pf,inputMicroPerMillion:$pi,outputMicroPerMillion:$po},
   homelab:{perOp:"3",inputMicroPerMillion:"0",outputMicroPerMillion:"0"}}}}]' >"$JOURNEY_STEP_DIR/provider-services.json"
+# J14_AWAIT funds alice J14_AWAIT_FUNDING (two Tally births escrow seven
+# envelope prices each); the sponsor that provisions her holds it plus every
+# other provision with room to spare (the default sponsor holds 100000).
+SPONSOR_BALANCE=100000
+[ -z "$J14_AWAIT" ] || SPONSOR_BALANCE=$(( ${J14_AWAIT_FUNDING:-200000000} + 1000000 ))
+NEWPARTICIPANT_SPONSOR_BALANCE=$SPONSOR_BALANCE \
 NEWPARTICIPANT_SERVE=serve-operator NEWPARTICIPANT_PROVIDER_SERVICES=$JOURNEY_STEP_DIR/provider-services.json \
   sh "$REPO/native/resource-client/newparticipant-acceptance.sh" "$HOST" "$MINI" "${STORE:?}" "${VERIFIER:?}" \
   "$JOURNEY_STEP_DIR/world" "$JOURNEY_D/world.sock" >"$JOURNEY_STEP_DIR/world-bootstrap.out" 2>"$JOURNEY_STEP_DIR/world-bootstrap.err" \
@@ -311,7 +317,17 @@ RCFG=$SD/resident.json
 paid_turns() { "$MINI" credit --action ledger --dir "$WS/alice" --account lab-till --topic hermes 2>/dev/null |
   jq --arg h "${HS:-}" --arg p "$PRICE" '[.entries[] | select(.subject == $h and .amount == $p)] | length'; }
 resident_completed() { jq -r '.completed // 0' "$RSTATE/resident.json" 2>/dev/null || echo 0; }
+# The box certifies the World's head on a timer (mini-certify.timer); a node
+# runs at most the tail bound (256) heights past its last certified head, and a
+# J14 run with tools and awaits passes it. The operator certifies before each
+# resident pass, as the timer would.
+certify_world() { # STEP
+  operator "$1" "CERTIFY: the operator certifies the World's head (the box's mini-certify timer)" \
+    "$MINI" checkpoint --action certify --workspace "$SPONSOR_WS" \
+      --control "$(jq -r .factoryControllerCapability "$JOURNEY_WORLD/genesis.json")"
+}
 hermes() { # STEP WHAT: one resident pass that runs exactly one more prompt (or the dismissal)
+  certify_world "$1"
   local next=$(( $(resident_completed) + 1 ))
   jq -n --arg c "$G/controller.json" --arg i "$RINBOX" --arg s "$RSTATE" --argjson m "$next" \
     '{type:"mini-hermes-room-resident-v1",controller:$c,inbox:$i,state:$s,maxPrompts:$m,intervalSeconds:5}' >"$RCFG"

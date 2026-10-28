@@ -212,7 +212,7 @@ def enter(path):
     c=load(path);m,artifacts=validate(c)
     root=absolute(c['root']);f.protected_parent(root.parent)
     # Validate native Store/profile provenance before creating any app or member.
-    state,profile,profile_value=f.discover_profile(root,absolute(c['miniConfig']),absolute(c['grainsRoot']),artifacts,c.get('brokerSocket','/run/mini-spk-broker.sock'),absolute(c['profileResult']),absolute(c['initStoreResult']))
+    state,profile,profile_value=f.discover_profile(root,absolute(c['miniConfig']),absolute(c['grainsRoot']),artifacts,c.get('brokerSocket'),absolute(c['profileResult']),absolute(c['initStoreResult']))
     require(profile_value['miniOperatorSocket']==c['privateSocket'],'profile points at a different private Store owner')
     if c.get('lifecycleDelegation') is not None:require(c['lifecycleDelegation']['manager']==profile_value['managementSubject'],'lifecycle delegated manager differs from native profile')
     elif c['authority']['owner']!=profile_value['managementSubject']:raise RuntimeError('member-owned hosting requires explicit lifecycleDelegation before app birth')
@@ -228,7 +228,7 @@ def enter(path):
     save(staging/'source-inputs.json',{str(path):sha(path) for path in [HERE/'same-store-app.py',HERE/'ws-continuity-fixture.py',Path(f.step_ledger.__file__).resolve()]})
     value={'schema':f.SCHEMA,'root':str(root),'app':c['application']['app'],'application':c['application'],
         'authority':c['authority'],'keys':c['keys'],'artifacts':artifacts,'state':str(state),'profilePath':str(profile),
-        'grainsRoot':c['grainsRoot'],'brokerSocket':c.get('brokerSocket','/run/mini-spk-broker.sock'),'candidateSource':m['sourceCommit'],
+        'grainsRoot':c['grainsRoot'],'brokerSocket':str(f.broker_endpoint(absolute(c['grainsRoot']))),'candidateSource':m['sourceCommit'],
         'attachment':{k:c[k] for k in ['workspace','miniConfig','miniConfigSha256','publicSocket','privateSocket','genesis','profileResult','initStoreResult']},
         'delegates':c['delegates'],'leaseSeconds':profile_value.get('wsAuthorityLeaseSeconds',120)}
     save(staging/'fixture.json',value)

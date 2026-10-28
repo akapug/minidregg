@@ -193,13 +193,13 @@ pub(crate) fn rpc(socket: &Path, b: &[u8]) -> Result<Vec<u8>> {
 /// so the authority lock frees for a reopen. Fault that must turn this red: remove
 /// the wake connect and drop hangs in join, so the kill9 and Cluster::open reopen
 /// tests time out.
-#[cfg(test)]
+#[cfg(any(test, feature = "demo"))]
 pub(crate) struct AnchorHandle {
     sock: std::path::PathBuf,
     stop: std::sync::Arc<AtomicBool>,
     task: Option<std::thread::JoinHandle<()>>,
 }
-#[cfg(test)]
+#[cfg(any(test, feature = "demo"))]
 impl AnchorHandle {
     /// Serve the authority kept under `root`/authority on `root`/anchor.sock. A
     /// socket file left by a killed predecessor is removed first.
@@ -221,7 +221,7 @@ impl AnchorHandle {
         &self.sock
     }
 }
-#[cfg(test)]
+#[cfg(any(test, feature = "demo"))]
 impl Drop for AnchorHandle {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::SeqCst);

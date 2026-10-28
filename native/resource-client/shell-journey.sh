@@ -258,7 +258,8 @@ provision() {
     "$SHELL_MINI" workspace --action provision --dir "$R/sponsor" --name "$2" --holder "$3" \
       --funding 1000 --account-predicate "$RUN/permit-all.json" --factory-ref factory
   op "$1" "DELIVER (OPERATOR step 6): the birth context into $2's HOME/provision/" \
-    install -D -m 0600 "$R/sponsor/provisions/$2/birth-context.json" "$RUN/homes/$2/provision/birth-context.json"
+    bash -c 'install -d -m 0700 "$2" && install -m 0600 "$1" "$2/birth-context.json"' deliver \
+      "$R/sponsor/provisions/$2/birth-context.json" "$RUN/homes/$2/provision"
 }
 printf '%s\n' '{"type":"all","predicates":[]}' >"$RUN/permit-all.json"
 

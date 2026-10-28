@@ -24,6 +24,7 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 2; }
 mkdir -m 700 "$EVIDENCE"
 EVIDENCE=$(CDPATH='' cd -- "$EVIDENCE" && pwd)
 shasum -a 256 "$0" "$REPO/scripts/grain-birth/native-share-member.sh" \
+  "$REPO/scripts/grain-birth/birth-acceptance.sh" \
   "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY" \
   >"$EVIDENCE/input-sha256.txt"
 
