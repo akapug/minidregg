@@ -254,14 +254,21 @@ Run on a worktree at the candidate's commit, one `swarm-build`, PID file. Eviden
 | focused harness checks | generated operator/genesis JSON; allocation guard | `python3 -B scripts/test-oracle-agent-lifetime-journey.py HarnessTests.test_complete_grain_store_configuration_before_bootstrap HarnessTests.test_actual_factory_allocation_guard` | none | codex | 5 focused checks PASS on dregg-ref at ce27ff402 (5.422 s); native qualification remains below |
 | lifetime-grant fixtures | the three-capability grant; ordinary template refuses it | `lake env lean tests/lean/LifetimeGrantObserverAdversary.lean`, `...LifetimeGrantSourceAdversary.lean`, `Host/NativeLifecycleConsent.lean`, then `scripts/codec-shapes-regen.py` (integrator's, central build) | none | codex / integrator | per-file exit0 on c77ef2f9 epoch; source adversary not rerun |
 | joracle | the oracle lands as a grain via the market; one bounded question answered on its origin; stopped | `MINI_IMPORT_PROFILE=operator-appliance-v1` WORLD, then `joracle.sh --box WORLD.env OUT RUNTIME.spk DATA_SOURCE_DIR INVENTORY.json` (dataset 14.01 GiB, inventory `32bb3cf1...`) | WORLD | oracle-grain lane | result in the lane report only; not on record here |
-| Oracle v7 fresh world | a fresh Store qualified through agent calls (grant issue, dispatch, answer), authority refusals, browser use, restart and exact retry; old stopped Stores preserved | `scripts/oracle-shared-data-journey.sh BASE_BIN OWN_BIN NEW_RUN_ROOT SIGNED_RUNTIME_SPK DATA_SOURCE INVENTORY_JSON` with the inputs below; candidate includes oracle-grant-factory + oracle-lifetime-grant (genesis v8, outcome v7) | genesis | codex | not run |
+| Oracle v7 fresh world | a fresh Store qualified through agent calls (grant issue, dispatch, answer), authority refusals, browser use, restart and exact retry; old stopped Stores preserved | `scripts/oracle-shared-data-journey.sh BASE_BIN OWN_BIN NEW_RUN_ROOT SIGNED_RUNTIME_SPK DATA_SOURCE INVENTORY_JSON` with the inputs below; candidate includes oracle-grant-factory + oracle-lifetime-grant (genesis v8, outcome v7) | genesis | codex | 28 Oct: Store `a64d135a102a1951` passed both installs, data publication/share, native session birth (acceptedCount 43), lifetime grant (50), and START (53). Stopped enrollment exposed a v3 reply decoder mismatch; fixed in `b81a38663`. Same-Store recovery underway; downstream agent/browser/restart checks remain open. |
+| Hermes Oracle composition | the room's own Hermes task discovers and invokes Oracle, obeys its grant, and answers after restart | `J14_ORACLE=1` with the inputs in `deploy/hermes/README.md` | J14's own Store and tasks | codex | 28 Oct: existing world continuing after a transport endpoint config-pin failure. Native resident initialization/enrollment repair `733cc4649` passed 10 enrollment tests and 1 initialization test; composed native result remains open. |
 
 ### Oracle appliance
 
 Owner: `lane/oracle-grant-factory` (provisioning), with the integrated
-`lane/oracle-lifetime-grant` repair. The five focused configuration checks now pass on
-dregg-ref; native/grant and hosted qualification remain. Use the newest coherent main build and its
-resource wrapper. Record actual outcomes here or link the validator run.
+`lane/oracle-lifetime-grant` repair. Native session birth and lifetime grant now pass;
+the complete hosted qualification remains open. The active run is retained at
+`/build/lanes/oracle-v7-q3-20261028/oracle-run`, using coherent candidate
+`aae3e2e372b045dd43493183144db08212d51659` with recorded runtime overlays.
+The exact-Host STOP prerequisite passed all 11 lifecycle phases and all four
+negative controls; its copied-Store benchmark is
+`/build/lanes/oracle-v7-q-20261028/stop-copy3/probe/benchmark.json`.
+Use a coherent build and its resource wrapper for a new run. Preserve failed
+runs and their admission receipts when continuing an existing Store.
 
 - Elaborate `tests/lean/LifetimeGrantObserverAdversary.lean`,
   `tests/lean/LifetimeGrantSourceAdversary.lean`, and direct importer
