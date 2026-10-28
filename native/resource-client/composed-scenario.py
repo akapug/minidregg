@@ -7,7 +7,7 @@
   composed-scenario.py settle SPEC STEP absent|confirmed EVIDENCE REASON
   composed-scenario.py spec WORLD.json STATE N OP [--residents-binding B]
                             [--app-world-inputs PLATFORM SELECTION]
-                            [--documents-binding D]
+                            [--documents-binding D] [--room-owner NAME]
                                             print a spec over the first N inventory members:
                                             one shared room of all N, churn on the last,
                                             documents in the room, every phase declared;
@@ -47,8 +47,10 @@ private output directory, one per kind; the two kinds may share one binding file
 Connector binding: {"input": "/provision-input.json", "journeyInput": "/journey-input.json"}.
 An app can instead bind {"worldInputs":{"platformInputs":"/platform-inputs.json",
 "selection":"/selection.json"}}; selection participants are WORLD inventory names.
-Then connector {"app":"APP-KEY"} derives attach, connector, and journey inputs
-through same-store-inputs.py after each retained predecessor result.
+Then connector {"app":"APP-KEY"} first runs connector-authority.py (the connector's
+own task cell and the owner's delegated document grant, under the selection's
+names), then derives attach, connector, and journey inputs through
+same-store-inputs.py after each retained predecessor result.
 The journey input comes from same-store-inputs.py journey after provisioning;
 a connector passes only after exact publication and independent byte readback.
 
@@ -92,6 +94,7 @@ ADAPTERS = {"apps": SPK / "same-store-app.py", "connector": SPK / "app-document-
             "ordinary": SCRIPTS / "docuverse-same-store.py",
             "connectorJourney": SPK / "app-document-journey.py",
             "worldInputs": SPK / "same-store-inputs.py",
+            "connectorAuthority": SPK / "connector-authority.py",
             "resident": HERE.parent.parent / "testing/journeys/same-world-resident.py"}
 NAME = re.compile(r"[A-Za-z][A-Za-z0-9-]{0,63}")
 KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
@@ -804,6 +807,17 @@ class Scenario:
                 app = value["app"]
                 app_input = read(self.derived_input("attach", app))
                 attached = str(Path(app_input["root"]) / "attachment-result.json")
+                # The connector's own held task cell and the owner's delegated document grant,
+                # under the selection's names, before provisioning reads them. Its proposal is
+                # the document name, so the owner keeps the alias connector-source-<document>
+                # (the resident binding's shared document reference).
+                inputs = self.spec["apps"][app]["worldInputs"]
+                document = read(inputs["selection"]).get("connector", {}).get("document")
+                require(isinstance(document, str), "selection names no connector document")
+                self.adapter("connector:authority", [sys.executable, str(ADAPTERS["connectorAuthority"]),
+                    "--platform-inputs", inputs["platformInputs"], "--selection", inputs["selection"],
+                    "--world-inventory", self.p["worldPath"], "--root", str(self.root / "connector-authority"),
+                    "--proposal-id", document], reentrant=True)
                 provision_input = self.derived_input("connector", app, attached)
             else:
                 provision_input = value["input"]
@@ -927,18 +941,24 @@ def status(spec):
             "lanesPending": {k: v["pending"] for k, v in state.items() if k.startswith("lane:") and v.get("pending")}}
 
 
-def generate(world_path, state, count, op, residents=None, app_inputs=None, documents=None):
-    """A spec over the first COUNT inventory members, every phase declared."""
+def generate(world_path, state, count, op, residents=None, app_inputs=None, documents=None, room_owner=None):
+    """A spec over the first COUNT inventory members, every phase declared.
+
+    The shared room's owner is ROOM_OWNER (an inventory name in the population), else the first
+    member. Composed inputs name the app owner: the resident's founder must control the room
+    (`chat adopt`) and the connector reads the owner's own room notes reference."""
     world = read(world_path)
     members, _ = inventory(world)
     names = list(members)
     require(2 <= count <= len(names), f"N must be 2..{len(names)} (the inventory's member count)")
     population = names[:count]
+    room_owner = population[0] if room_owner is None else room_owner
+    require(room_owner in population, f"room owner {room_owner} is not among the first {count} inventory members")
     spec = {"type": "mini-composed-scenario-v1", "world": str(Path(world_path).resolve()),
             "inventorySha256": inventory_sha(world), "state": str(Path(state).resolve()),
             "operationPrefix": op, "population": population, "phases": list(PHASES),
             "concurrency": min(count, 4),
-            "rooms": {"shared": {"name": f"{op}-room", "owner": population[0], "members": "population"}},
+            "rooms": {"shared": {"name": f"{op}-room", "owner": room_owner, "members": "population"}},
             "churn": {"rooms": {"shared": {"member": population[-1]}}},
             "documents": {"rooms": ["shared"]},
             "restart": {"world": "restart"} if residents is None else {"binding": residents}}
@@ -982,6 +1002,7 @@ def main(argv=None):
     parser.add_argument("--residents-binding")
     parser.add_argument("--app-world-inputs", nargs=2)
     parser.add_argument("--documents-binding")
+    parser.add_argument("--room-owner")
     parsed = parser.parse_args(argv)
     words = parsed.words
     os.umask(0o077)
@@ -991,7 +1012,7 @@ def main(argv=None):
         if len(words) != 5 or not re.fullmatch(r"[0-9]+", words[3]):
             parser.error("spec WORLD.json STATE N OP")
         print(json.dumps(generate(words[1], words[2], int(words[3]), words[4], parsed.residents_binding,
-                                  parsed.app_world_inputs, parsed.documents_binding), indent=2))
+                                  parsed.app_world_inputs, parsed.documents_binding, parsed.room_owner), indent=2))
         return 0
     spec = read(words[1])
     if words[0] == "gate":
