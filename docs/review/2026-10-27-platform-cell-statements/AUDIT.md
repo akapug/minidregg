@@ -990,3 +990,45 @@ shape and not keystones, pointing to K2/K3**, exactly as pass 18 did for `Births
 the teeth onto the deployed type**: `IsEmpty (AcceptedRefill …)` when the marker is spent (replay) and
 when the sponsor is not the platform cell's controller (forgery). K3's own statement already refutes a
 non-refill arm carrying credit.
+
+## 2026-10-28, twenty-second pass: thin-consent birth (lane/thin-birth 7410dd6d9, statement text)
+
+**Verdict: REVISE, two statements. The rest is accepted.**
+
+1. **`EffectsBinds` as a premise: change it to the compared-pair collision disjunct.** As a hypothesis,
+   `effectsDigest signed = effectsDigest d → signed = d` is supplied by the caller, and its inhabitation
+   pole `∀ d, EffectsBinds d d` is the trivial case (the conclusion is `d = d`). The case the teeth
+   need is the other one: in `SwapAfterConsentRefused` the premises `signed ≠ d'` and
+   `EffectsBinds signed d'` together just say "their digests differ", and nothing inhabits that. Use
+   the pattern already accepted for `PinCollision`/`ArgumentCollision`: drop the premise, and conclude
+   `… ∨ EffectsCollision signed d`, with `EffectsCollision := signed ≠ d ∧ effectsDigest signed =
+   effectsDigest d`. Both theorems then stand unconditionally, and the collision is a named event on
+   exactly the two descriptors compared. Stating it over descriptors rather than bytes is fine, because
+   `sourceEncoding` is canonical (the plan check already pins `encode finalized = finalBytes`).
+2. **`HonestPlanAccepted`'s pins premises: require the lemma.** `opened.pins.federation =
+   config.federation` and `opened.pins.policyId = ⟨factoryId⟩` are premises no theorem inhabits. That
+   makes the satisfiable pole conditional on unproved facts, which is the shape the satisfiable field
+   exists to rule out. `validateLoaded` builds `Opened` from `parts.pins` after `validateChecks`. Prove
+   `Opened.pins_federation`/`pins_policyId` from that construction (or the checked parts' exactness), and
+   drop the premises.
+
+Accepted:
+- **(2) Conjuncts 3 to 7** are true of every `PreparedBirth`, and they gain their force from conjunct 2
+  (`encode (userPart d) = shown.draft`) and conjunct 4 (auxiliary creates are the kernel's). That is the
+  `delegate_display_is_commit` pattern, and it is fine as stated. A one-line corollary with `userPart d`
+  rewritten to `decode shown.draft` would make "commit = f(shown, kernel-owned, pre)" literal; it is
+  optional.
+- **(3) `author` as a Host-instantiated parameter**, with Host-side completeness witnessed by the journey
+  row: accepted, provided the label says the re-authoring fixed point is a row, not a theorem.
+  Soundness of display-is-commit does not depend on `author` being correct.
+- **(5) Coordinates shown, not judged**, gated at admission (`RootGrantShape`, `BirthWindow`, policy epoch 0,
+  `BornLineage`), with the window shift named in the display: accepted.
+- `SwappedPlanRefused`'s two refusals are general and named.
+
+**Addendum, thin-birth 909de2bca: ACCEPT.** `EffectsCollision` is a compared-pair event on exactly the
+two descriptors, and it cannot be proved without an actual cSHAKE collision. Neither theorem now takes a
+hash premise, so the disjunct is no escape hatch. In `DisplayIsCommit` the consented-header premises force
+equal digests, so either `signed = d` (the conjuncts) or the collision holds. `OpenedPinsPublicStatement`
+replaces the uninhabited premises with a statement about every `Opened`. Carrying the invariant as a field
+built at `Opened`'s three construction sites is the right realisation. The re-authoring fixed point is
+labelled as jpriv2 row 19.
