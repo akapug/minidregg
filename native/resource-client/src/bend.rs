@@ -182,6 +182,16 @@ fn ending(error: String) -> Result<()> {
     }
 }
 
+/// The Host-free refusal for an object name that is not here: nothing is submitted.
+fn no_object_refusal(name: &str) -> String {
+    format!("refused: no object named {name}: make one with `create {name} content open`")
+}
+
+fn absent_object(root: &Path, name: &str) -> Option<String> {
+    let file = root.join("refs").join(format!("{}.json", workspace::ref_file(name)));
+    (!name.contains('/') && !file.exists()).then(|| no_object_refusal(name))
+}
+
 /// The two shell lines that recover a turn whose answer was not read.
 fn recovery(name: &str) -> String {
     format!("`bend lookup {name}` asks the Host for the decided outcome of the retained ingress (absence never submits); \
@@ -227,6 +237,13 @@ impl Bend {
         let capability = reference.get("operationCapability").or_else(|| reference.get("observeCapability"))
             .and_then(Value::as_str).ok_or_else(|| format!("bend: account reference {name} names no capability"))?;
         Ok((field(&reference, "target")?.to_owned(), capability.to_owned()))
+    }
+
+    /// The refusal for an object name this workspace has no reference to (`None` when it has one, or
+    /// the name is a shared `room/name`, which resolves through the room): the member makes the cell
+    /// first with the shell verb that makes a content cell they own; `bend` never makes one.
+    fn no_object(&self, name: &str) -> Option<String> {
+        absent_object(&self.ws.root, name)
     }
 
     /// The content resource REF: (object cell, its operation capability).
@@ -429,6 +446,9 @@ fn run_bend(bend: &Bend, mut args: Args) -> Result<()> {
     let lose = lose_flag(&mut args)?;
     args.finish()?;
     name_ok(&name)?;
+    if let Some(refusal) = bend.no_object(&object_ref) {
+        return ending(refusal);
+    }
     let deposit: Option<u128> = deposit
         .map(|d| if mini_sdk::decimal::is_canonical_max(&d, 30) { d.parse().map_err(|_| "bend: --deposit is too large".to_owned()) } else { Err("bend: --deposit must be a canonical decimal".to_owned()) })
         .transpose()?;
@@ -509,6 +529,9 @@ fn finish_run(bend: &Bend, name: &str, meta: &Value, transaction: &str, lead: &s
 fn show(bend: &Bend, mut args: Args) -> Result<()> {
     let object_ref = text(&mut args, "object")?;
     args.finish()?;
+    if let Some(refusal) = bend.no_object(&object_ref) {
+        return ending(refusal);
+    }
     let (object, _) = bend.object(&object_ref)?;
     let known: Option<Value> = fs::read(bend.ws.root.join("bend").join("objects").join(format!("{}.json", workspace::ref_file(&object_ref))))
         .ok().and_then(|b| serde_json::from_slice(&b).ok());
@@ -706,6 +729,26 @@ mod tests {
         assert!(none.get("slot").is_none());
         assert_eq!(answer_name("5551"), answer_name("5551"));
         assert!(answer_name("5551").len() <= 64 && name_ok(&answer_name("5551")).is_ok());
+    }
+
+    #[test]
+    fn an_absent_object_is_refused_by_name_with_the_verb_that_makes_it() {
+        let text = no_object_refusal("fresh");
+        assert!(text.starts_with("refused: no object named fresh: make one with `create fresh content open`"), "{text}");
+        let _ = take_command_ending();
+        assert!(ending(text).is_ok());
+        assert_eq!(take_command_ending().unwrap().render().0, 3);
+    }
+
+    #[test]
+    fn only_a_reference_this_workspace_holds_is_an_object() {
+        let root = std::env::temp_dir().join(format!("mini-bend-absent-{}", std::process::id()));
+        fs::create_dir_all(root.join("refs")).unwrap();
+        assert!(absent_object(&root, "fresh").is_some());
+        fs::write(root.join("refs").join(format!("{}.json", workspace::ref_file("fresh"))), b"{}").unwrap();
+        assert!(absent_object(&root, "fresh").is_none());
+        assert!(absent_object(&root, "room/shared").is_none(), "a shared name resolves through its room");
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

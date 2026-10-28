@@ -144,7 +144,9 @@ else
   if [ -f "$src" ]; then
     stage "$BOX" Tally.obend <"$src"
     { as "$BOX" "bend lookup tally" && grep -qi admitted <<<"$OUT"; } || as "$BOX" "bend publish tally @Tally.obend --entry tally" 600
-    if [ "$RC" = 0 ] && as "$BOX" "bend run tally lobby-tally" 600; then ok_ "bend tally published and run on lobby-tally"
+    # the object cell first: the shell verb that makes a member-owned content cell (bend never makes one)
+    if [ "$RC" = 0 ] && { as "$BOX" "refs" && grep -qw lobby-tally <<<"$OUT" || as "$BOX" "create lobby-tally content open"; } \
+       && as "$BOX" "bend run tally lobby-tally" 600; then ok_ "bend tally published and run on lobby-tally"
     else fail_ "bend: $(errtail_)"; fi
   else fail_ "bend: Tally.obend not found (TALLY_SRC)"; fi
 fi

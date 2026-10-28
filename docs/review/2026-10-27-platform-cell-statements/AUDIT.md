@@ -1100,3 +1100,70 @@ first.
 Either form meets law 2 only if the module is built by the merge gate with its pin checked, so a broken
 witness turns the gate red. An executed script does not count. `neutral-birth.lean` stays as the
 end-to-end run.
+
+## 2026-10-28, twenty-fifth pass: JDISCLOSE scalar oracle and installed-law explanation (lane/red-jdisclose-scalar, statements)
+
+**Verdict: REVISE A, accept B with one transfer lemma.**
+
+**A. Revise.**
+1. **The `none` branch keeps the oracle open.** `scalarScopeCheck` returns `true` when the authority cell
+   holds no such capability, so `prepareCell`'s guards still run before admission refuses
+   `capabilityRejected`, and `guardRejected` versus the later refusal is an equality oracle for a
+   requester with *no* grant at all. "Observation-phase authority precedes prepare" is a claim about the
+   plan channel, and no statement here proves it. Close it fail-safe: `none => .error .capabilityRejected`,
+   refused before any guard. That is the same name admission would give, only earlier. Then
+   `computeTarget_scalar_unnamed_refused` has a sibling for the `none` case, equally quantified over every
+   `pre`.
+2. **The teeth cover guards only. State the non-interference.**
+   `computeTarget_scalar_unnamed_refused` shows that a guard on an unnamed field refuses independently of
+   values. But if `prepareCell` reads any other field (a cross-field invariant, a balance check, an
+   existence test outside `guardKeys`), a fully named action can still refuse differently on unnamed
+   values. The property the row needs: when `scalarScopeCheck = true`, the *error* `computeTarget …
+   pre` returns is a function of the named fields alone, that is, `pre` and `pre'` agreeing on
+   `NamedBy stored…fields` give the same refusal. `computeTarget_scalar_named_as_before` is the accepting
+   pole, not a confinement statement.
+
+**B. Accepted.** Dropping the neutral guard in `explained` is display-only (the decision is unchanged).
+`owner_told_value_installed` is the satisfiable witness. `narrowed_hides_uncovered_installed` (4242 and 5
+both give `none`) is the right teeth, but it is a closed instance (law 9 permits it as a witness). Add
+`narrowed_installed_le : narrowed fs (Pred.all [(neutralComponent law).guarded]) old new = some r →
+narrowed fs law old new = some r` (the installed law tells nothing the raw law does not). The existing
+general non-leak results for raw laws then carry over to every installed law, and the known coverage limit
+(installed hides more) is consistent with it.
+
+**Addendum, JDISCLOSE owner's reply: A lands, A2 is owed, the B lemma is withdrawn.**
+- *A1 taken:* an unheld capability is refused `capabilityRejected` before any guard, with
+  `computeTarget_scalar_unheld_refused` over every `pre`. Accepted.
+- *A2:* my confinement as stated is false by design. `staleTarget` compares the requester's
+  `expectedTargetRoot` with the whole-cell root, which is the one bit `RefusalReason`'s header already
+  concedes. The owner's alternative ("equal roots and agreement on named fields give the same refusal")
+  would be near-vacuous, because equal roots pin the whole cell up to a collision. The non-vacuous form
+  to record as owed: `computeTarget … pre = .error e → e = .staleTarget ∨ e = f (namedPart pre)
+  declaration command` for one `f` fixed across `pre`. That covers the remaining checks (`preLaw`,
+  `admissionCheck`, `FieldClosure`, `postLaw`). Not blocking: A closes the measured oracle, and A2 is owed,
+  not claimed.
+- *B:* `narrowed_installed_le` is false (the installed leaf path differs) and unnecessary, because
+  `narrowed_congr` already quantifies over every law, installed ones included. Withdrawn.
+
+## 2026-10-28, twenty-sixth pass: thin consent over salted openings (lane/thin-birth, invocation arm, statements)
+
+**Verdict: ACCEPT, with one strengthening of the keystone.** The replacement removes the defect JP2 row 22
+measured: re-encoding a blinded cell can never reproduce its signed root, because salts derive from a key
+the Host never serves. It also removes `RootBinds`, the caller-supplied carrier of the kind refused in
+pass 22, in favour of a named collision. No twin is kept.
+
+- **(a) The sealed exclusion: strengthen it, do not just exclude.** As stated, the keystone says nothing at
+  `SealedIn` addresses, so a Host that seals more leaves those commits unconstrained by the claim. The
+  owner's own argument (patch ops carry explicit before values, so a member patch cannot write an address
+  it was not shown) proves something stronger, and that is what should be stated: for an address that is
+  `SealedIn` and not `KernelOwned`, `prepared.post address = prepared.pre.logical address`. What the member
+  did not see is left exactly as it was. Then "a Host can narrow what is shown but cannot change what
+  commits" is a theorem, not prose.
+- **(b) The collision disjunct is shaped correctly.** It is a compared-pair event at both layers of the
+  commitment, at the actual pre-state, not an arbitrary one: equal list roots over different leaves
+  (length differences included), or equal leaves over different openings at one position. Neither layer
+  can be inhabited without a hash collision.
+- **(c) The satisfiable pole at declared-object scope is accepted as the first scope.** The label must say
+  "declared-object scalar targets", and since `checkServed` is deleted for every kind, the other kinds'
+  acceptance must be listed as owed (a pole or a journey row each). They go through the same
+  `resourceView`, but that is a reading, not yet a witness.

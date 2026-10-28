@@ -33,6 +33,16 @@
 #   tour-step          POST /tour/4 (`can` through the tour's form) lands an outcome under the step   -> outcome
 #   export-*           POST /export, ready, download (attachment, streamed), deleted on the box, untar: the
 #                      document's text and the manifest's height and world root equal the live page's  -> PASS
+#   hermes-tools-*     /room/ROOM/resident on a room this member founds: what Hermes may do (hermes/tools bits
+#                      1/2/4/8, hermes/compute), the founder's grant form; grant files+oracle (admitted, 9), revoke
+#                      the oracle (admitted, 1); the same form on a document is refused, never admitted
+#   bend-*             /bend lists this workspace's programs and reads any activity; /bend/await draws the shell's
+#                      `bend await` (phase, slot, decider, deadline); an answer to a slot this member does not
+#                      decide, through the derived `bend answer` form, is refused
+#   story-page-*       /story shows the invitation where the door hands one (HOME/requests/NAME-invite.json) with
+#                      the derived `story join` form filled in; the front page says it waits; an invitation
+#                      addressed to someone else has no form and its join is refused; story-join posts the
+#                      /story page's own form; after it the story is held as player
 #   tour-chromium      jtour.mjs: login, /tour, step 4 (`can DOC`) through the pane, a terminal prompt (needs Playwright) -> answered, elapsed
 #   logout             POST /logout clears the cookie; the old cookie no longer opens /term   -> 303; 401
 #   public-reader      GET / without a session answers (the public body, or a named refusal) -> 200|502, "public reader"
@@ -265,6 +275,39 @@ if [ -n "${SPONSOR_WS:-}" ] && [ -f "$SPONSOR_WS/workspace.json" ]; then
   else decl_rc=1; fi
   row private-room "$([ "$priv_rc" = 0 ] && [ "${decl_rc:-1}" = 0 ] && jq -e '.type == "minidregg-signed-room-recipient-v3"' "${HOMEDIR:-$R/home}/requests/decl.json" >/dev/null 2>&1 && echo 1 || echo 0)" "room new $PRIV --private rc=$priv_rc; declaration rc=${decl_rc:-1} $(tail -1 "$R/shell.err" 2>/dev/null | cut -c1-100) $(tail -1 "$R/decl.err" 2>/dev/null | cut -c1-100)"
 fi
+headline() { grep -o 'class="headline">[^<]*' <<<"$1" | head -1 | cut -c18-160; }
+# What Hermes may do in a room (the room's hermes/tools and hermes/compute, docs/HERMES-TOOLS-2026-10-27.md
+# §3, §5): this member founds a room; its resident page draws the grant and gives the founder the form;
+# each change is the `tariff ROOM set` leaf's outcome.
+HT="ht$(od -An -N3 -tu4 /dev/urandom | tr -d ' ' | cut -c1-6)"
+page=$(req POST /room/new --data-urlencode "csrf=$CSRF" --data-urlencode "name=$HT" --data-urlencode "law=open")
+ht_new=$(headline "$page")
+page=$(req GET "/room/$HT/resident")
+row hermes-tools-none "$([ "$(st)" = 200 ] && grep -q 'data-hermes-tools="0"' <<<"$page" && grep -q "action=\"/room/$HT/hermes-tools\"" <<<"$page" && echo 1 || echo 0)" "$(st) room new: $ht_new; $(grep -o 'data-hermes-tools="[0-9]*"' <<<"$page" | head -1)"
+page=$(req POST "/room/$HT/hermes-tools" --data-urlencode "csrf=$CSRF" --data-urlencode "tool1=on" --data-urlencode "tool8=on" --data-urlencode "compute=0" --data-urlencode "was-tools=0" --data-urlencode "was-compute=0")
+ht_grant=$(headline "$page")
+page2=$(req GET "/room/$HT/resident")
+row hermes-tools-grant "$(grep -q 'outcome admitted' <<<"$page" && grep -q "tariff $HT set hermes/tools 9" <<<"$page" && grep -q 'data-hermes-tools="9"' <<<"$page2" && grep -q 'data-tool="oracle" data-granted="true"' <<<"$page2" && echo 1 || echo 0)" "$ht_grant; then $(grep -o 'data-hermes-tools="[0-9]*"' <<<"$page2" | head -1)"
+page=$(req POST "/room/$HT/hermes-tools" --data-urlencode "csrf=$CSRF" --data-urlencode "tool1=on" --data-urlencode "compute=0" --data-urlencode "was-tools=9" --data-urlencode "was-compute=0")
+ht_revoke=$(headline "$page")
+page2=$(req GET "/room/$HT/resident")
+row hermes-tools-revoke "$(grep -q 'outcome admitted' <<<"$page" && grep -q 'data-hermes-tools="1"' <<<"$page2" && grep -q 'data-tool="oracle" data-granted="false"' <<<"$page2" && grep -q 'data-tool="files" data-granted="true"' <<<"$page2" && echo 1 || echo 0)" "$ht_revoke; then $(grep -o 'data-hermes-tools="[0-9]*"' <<<"$page2" | head -1)"
+# A document is not a room: the same grant on it is refused (by the client or the Host), never admitted.
+page=$(req POST "/room/$DOC/hermes-tools" --data-urlencode "csrf=$CSRF" --data-urlencode "tool8=on" --data-urlencode "was-tools=0" --data-urlencode "was-compute=0")
+row hermes-tools-refused "$(grep -qE 'outcome (refused|error)' <<<"$page" && ! grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$(st) $(headline "$page")"
+# Programs (/bend): the workspace's bend registry and any activity read through `bend await`; an answer
+# to a slot this member does not decide (here: a slot no program opened) is refused through the
+# derived `bend answer` form.
+page=$(req GET /bend)
+row bend-programs "$([ "$(st)" = 200 ] && grep -q 'action="/bend/await"' <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -c 'data-object=' <<<"$page") programs"
+HT_CELL=$(jq -r '.target // empty' "$WS/refs/$HT.json" 2>/dev/null)
+page=$(req GET "/bend/await?object=${HT_CELL:-1}&transaction=1")
+row bend-await-read "$({ [ "$(st)" = 200 ] && grep -q 'data-phase="none"' <<<"$page"; } || { [ "$(st)" = 403 ] && grep -qE 'outcome (refused|error)' <<<"$page"; } && echo 1 || echo 0)" "$(st) object ${HT_CELL:-1}: $(grep -o 'data-phase="[^"]*"' <<<"$page" | head -1) $(headline "$page")"
+vb=$(req GET /verb/bend)
+a=$(tr -d '\n' <<<"$vb" | awk -v lit="<code>bend answer</code>" 'BEGIN{RS="</form>"} index($0, lit) {match($0,/name="alt" value="[0-9]+"/); print substr($0,RSTART+18,RLENGTH-19); exit}')
+set -- $(tr -d '\n' <<<"$vb" | awk -v lit="<code>bend answer</code>" 'BEGIN{RS="</form>"} index($0, lit) {while (match($0,/name="a[0-9]+"/)) {print substr($0,RSTART+6,RLENGTH-7); $0=substr($0,RSTART+RLENGTH)}; exit}' | tr '\n' ' ')
+page=$(req POST /verb/bend --data-urlencode "csrf=$CSRF" --data-urlencode "alt=${a:-6}" --data-urlencode "${1:-a2}=1" --data-urlencode "${2:-a3}={\"reply\": {\"tag\": \"natural\", \"value\": \"7\"}}")
+row bend-answer-refused "$(grep -q 'outcome refused' <<<"$page" && echo 1 || echo 0)" "$(st) alt=${a:-?} $(headline "$page")"
 # Parity (docs/DEMO-EXPERIENCE-2026-10-27.md §1a): every verb the shell's `help` lists has a form at
 # /verb/NAME in the body; a verb with no face is red by name.
 help=$("$MINI" shell --socket "$SOCKET" --workspace "$WS" --home "${HOMEDIR:-$R/home}" --host "$HOST" --config "$CONFIG" --line help 2>/dev/null)
@@ -350,7 +393,6 @@ row tour-can-any "$(grep -q 'outcome answered' <<<"$page" && grep -q 'law versio
 # A tour form's alternative index and its field names, by the form's literals (its <h2><code>).
 alt_of() { tr -d '\n' <<<"$1" | awk -v lit="<code>$2</code>" 'BEGIN{RS="</form>"} index($0, lit) {match($0,/name="alt" value="[0-9]+"/); print substr($0,RSTART+18,RLENGTH-19); exit}'; }
 fields_of() { tr -d '\n' <<<"$1" | awk -v lit="<code>$2</code>" 'BEGIN{RS="</form>"} index($0, lit) {while (match($0,/name="a[0-9]+"/)) {print substr($0,RSTART+6,RLENGTH-7); $0=substr($0,RSTART+RLENGTH)}; exit}' | tr '\n' ' '; }
-headline() { grep -o 'class="headline">[^<]*' <<<"$1" | head -1 | cut -c18-160; }
 tour=$(req GET /tour)
 # Door 12, "changes the rules" (DEMO-EXPERIENCE A7): a law on the member's own document that
 # refuses their append but admits installs (so it stays changeable). `law check` first (a read:
@@ -400,9 +442,43 @@ a=$(alt_of "$tour" "story invite"); set -- $(fields_of "$tour" "story invite"); 
 page=$(req POST /tour/11 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=story" --data-urlencode "alt=${a:-0}" --data-urlencode "$F_NAME=$TALE" --data-urlencode "$F_SUBJ=$SUBJECT" --data-urlencode "submit=on")
 INVITE=$(pre_of <<<"$page" | sed -n "s/^story join $TALE //p" | head -1)
 row story-invite "$(grep -q 'outcome admitted' <<<"$page" && [ -n "$INVITE" ] && echo 1 || echo 0)" "$(st) $(headline "$page") invitation=$(cut -c1-60 <<<"$INVITE")"
-a=$(alt_of "$tour" "story join"); set -- $(fields_of "$tour" "story join"); F_NAME=${1:-a2}; F_INV=${2:-a3}
-page=$(req POST /tour/11 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=story" --data-urlencode "alt=${a:-0}" --data-urlencode "$F_NAME=$TALE" --data-urlencode "$F_INV=$INVITE")
-row story-join "$(grep -q 'outcome answered' <<<"$page" && grep -q 'joined' <<<"$page" && echo 1 || echo 0)" "$(st) $(headline "$page") $(pre_of <<<"$page" | head -1 | cut -c1-100)"
+# Stories (/story): the invitation where the door hands one (HOME/requests/NAME-invite.json) is shown
+# with the derived `story join` form filled in (the member founded the tale, so it holds it as author
+# and the player's invitation still waits); the front page says it waits. An invitation addressed to
+# someone else is listed without a form, and its join is refused by the shell.
+HM=${HOMEDIR:-$R/home}; mkdir -p "$HM/requests"
+[ -n "$INVITE" ] && printf '%s\n' "$INVITE" >"$HM/requests/$TALE-invite.json"
+[ -n "$INVITE" ] && jq -c '.grant.recipient = "1"' <<<"$INVITE" >"$HM/requests/$TALE-other.json" 2>/dev/null
+page=$(req GET /story); printf '%s' "$page" >"$R/story.html"
+row story-page-invited "$([ "$(st)" = 200 ] && grep -q "data-story=\"$TALE\" data-file=\"$TALE-invite.json\" data-to-me=\"true\"" <<<"$page" && grep -q "value=\"@$TALE-invite.json\"" <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -o 'data-story="[^"]*" data-file="[^"]*" data-to-me="[a-z]*"' <<<"$page" | tr '\n' ' ' | cut -c1-200)"
+front=$(req GET /)
+row story-front-notice "$(grep -q 'data-invited="[1-9]' <<<"$front" && grep -q "<code>$TALE</code>" <<<"$front" && echo 1 || echo 0)" "$(st) $(grep -o 'data-invited="[0-9]*"' <<<"$front" | head -1)"
+# The /story page's form for one invitation, its fields as the page filled them (name=value lines).
+story_form() { python3 -I - "$R/story.html" "$1" <<'PY'
+import sys, re, html
+page, mark = open(sys.argv[1]).read(), sys.argv[2]
+for art in page.split("</article>"):
+    art = art[art.rfind("<article"):]
+    if mark in art:
+        m = re.search(r"<form[^>]*>(.*?)</form>", art, re.S)
+        for tag in re.findall(r"<(?:input|textarea)[^>]*>", m.group(1) if m else ""):
+            n, v = re.search(r'name="([^"]*)"', tag), re.search(r'value="([^"]*)"', tag)
+            if n and 'type="checkbox"' not in tag:
+                print(n.group(1) + "=" + html.unescape(v.group(1) if v else ""))
+        break
+PY
+}
+other_form=$(story_form "data-file=\"$TALE-other.json\"")
+o_alt=$(story_form "data-file=\"$TALE-invite.json\"" | sed -n 's/^alt=//p')
+page=$(req POST /verb/story --data-urlencode "csrf=$CSRF" --data-urlencode "alt=${o_alt:-3}" --data-urlencode "a2=$TALE" --data-urlencode "a3=@$TALE-other.json")
+row story-join-refused "$([ -z "$other_form" ] && grep -q "data-file=\"$TALE-other.json\" data-to-me=\"false\"" "$R/story.html" && grep -qE 'outcome (refused|error)' <<<"$page" && grep -q 'not addressed to you' <<<"$page" && echo 1 || echo 0)" "$(st) form for another's invitation: ${other_form:-none}; $(headline "$page")"
+rm -f "$HM/requests/$TALE-other.json"
+# The join, through the /story page's own filled form (the place the stranger's invitation is shown).
+args=(); while IFS= read -r kv; do [ -n "$kv" ] && args+=(--data-urlencode "$kv"); done < <(story_form "data-file=\"$TALE-invite.json\"")
+page=$(req POST /verb/story --data-urlencode "csrf=$CSRF" "${args[@]}")
+row story-join "$(grep -q 'outcome answered' <<<"$page" && grep -q 'joined' <<<"$page" && echo 1 || echo 0)" "$(st) fields=${#args[@]} $(headline "$page") $(pre_of <<<"$page" | head -1 | cut -c1-100)"
+page=$(req GET /story)
+row story-page-joined "$(grep -q "<tr data-story=\"$TALE\"><td><code>$TALE</code>" <<<"$page" && ! grep -q "data-file=\"$TALE-invite.json\"" <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -o "<tr data-story=\"$TALE\">.\{0,120\}" <<<"$page" | head -1 | sed 's/<[^>]*>/ /g')"
 page=$(req POST /tour/11 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=go" --data-urlencode "alt=0" --data-urlencode "a1=north")
 row story-move "$(grep -q 'outcome admitted' <<<"$page" && grep -q 'anteroom' <<<"$page" && echo 1 || echo 0)" "$(st) $(headline "$page") $(pre_of <<<"$page" | head -1 | cut -c1-100)"
 page=$(req POST /tour/11 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=go" --data-urlencode "alt=0" --data-urlencode "a1=north")

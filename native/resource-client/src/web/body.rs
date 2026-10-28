@@ -216,6 +216,15 @@ fn get(site: &Site, parts: &[&str], target: &str) -> Page {
                 let next = if site.front.read_only { "<a href=\"/join\">Join</a>, then subscribe from your workspace" } else { "<a href=\"/subscribe\">Subscribe</a>" };
                 page.body.push_str(&format!("<section><h2>Subscribers</h2><p>{summary} {next}.</p></section>\n"));
             }
+            // An invitation to a story the member does not play yet (the door hands the built-in
+            // tale's): said first, with where to join it.
+            if !site.front.read_only {
+                let waiting = stories::waiting(site);
+                if !waiting.is_empty() {
+                    let names: Vec<String> = waiting.iter().map(|i| format!("<code>{}</code>", escape(&i.story))).collect();
+                    page.body.insert_str(0, &format!("<section class=\"notice\" data-invited=\"{}\"><h2>You are invited to play</h2><p>An invitation to {} waits in your requests: <a href=\"/story#invitations\">join it</a>.</p></section>\n", waiting.len(), names.join(", ")));
+                }
+            }
             if !site.front.read_only && now_secs() >= EXPORT_NOTICE_FROM {
                 page.body.insert_str(0, "<section class=\"notice\"><h2>This demo ends on 11 November</h2><p>Take your world with you: <a href=\"/export\">Export my world</a> hands you one archive of your documents, attempts, rooms and keys' public half, with the world root it was read at.</p></section>\n");
             }
@@ -237,6 +246,13 @@ fn get(site: &Site, parts: &[&str], target: &str) -> Page {
         ["grain"] => apps::grains(site),
         ["grain", n] => apps::grain(site, n),
         ["grain", n, "pane"] => apps::pane(site, n),
+        ["bend"] => programs::index(site),
+        ["bend", "await"] => match (query(target, "object"), query(target, "transaction")) {
+            (Some(object), Some(transaction)) => programs::awaits(site, object.trim(), transaction.trim()),
+            _ => simple(400, "Programs", "give an object cell and a birth transaction"),
+        },
+        ["bend", "await", object, transaction] => programs::awaits(site, object, transaction),
+        ["story"] => stories::page(site),
         ["verb"] => verbs::index(site),
         ["verb", name] => verbs::page(site, name, target),
         ["verb", name, "dry"] => verbs::dry(site, name),
@@ -810,6 +826,34 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
             act(site, &format!("Room {name}"), vec![format!("room new {} --law {}", quote(&name), quote(&field("law")))], "", &[("rooms", "/room")])
         }
         ["room", name, "say"] => act(site, &format!("Say in {name}"), vec![format!("say --in {} {}", quote(name), quote(&field("text")))], "", &[("the room", &format!("/room/{name}"))]),
+        // The founder's grant to the room's resident: the ticked tools summed to the bitmask, each
+        // changed field one `tariff ROOM set FIELD N` line assembled by the verb's own grammar.
+        ["room", name, "hermes-tools"] => {
+            let bits: u64 = resident::TOOLS.iter().filter(|(bit, _, _)| field(&format!("tool{bit}")) == "on").map(|(bit, _, _)| bit).sum();
+            let compute = field("compute");
+            let compute = if compute.is_empty() { "0".to_owned() } else { compute };
+            if !compute.bytes().all(|b| b.is_ascii_digit()) || compute.len() > 9 {
+                return simple(400, "What Hermes may do", "the compute block is a whole number of seconds (0: the operator's default)");
+            }
+            let compute = compute.trim_start_matches('0').to_owned();
+            let compute = if compute.is_empty() { "0".to_owned() } else { compute };
+            let bits = bits.to_string();
+            let mut lines = Vec::new();
+            for (field_name, value, was) in [("hermes/tools", &bits, field("was-tools")), ("hermes/compute", &compute, field("was-compute"))] {
+                if *value == was {
+                    continue;
+                }
+                match verbs::assemble_named(site, "tariff", "tariff", &[("ROOM", name), ("set", "set"), (field_name, field_name), ("N", value)]) {
+                    Ok((mut assembled, _, _, _)) => lines.append(&mut assembled),
+                    Err(page) => return page,
+                }
+            }
+            let back = format!("/room/{name}/resident#hermes-tools");
+            if lines.is_empty() {
+                return outcome_page("What Hermes may do", "answered", "Nothing changed: the room already grants exactly that.", "", &[("what Hermes may do here", &back)]);
+            }
+            act(site, &format!("What Hermes may do in {name}"), lines, "", &[("what Hermes may do here", &back)])
+        }
         ["room", name, "summon"] => {
             let budget = field("budget");
             let mut line = format!("summon {} as {}", quote(name), quote(&field("role")));
@@ -1273,8 +1317,14 @@ fn outcome_parts(ending: &Ending, next: &[(&str, &str)], transition: bool, paste
         links.push_str(&report_link(&headline, next));
     }
     let detail = ending.text();
+    // A refusal by a name the table explains says what it means, inside the same partial.
+    let explained: String = if matches!(class, "refused" | "error") {
+        refusals_in(&detail).iter().map(|(name, meaning, _)| format!("<p class=\"note\" data-refusal=\"{}\">{}</p>", escape(name), escape(meaning))).collect()
+    } else {
+        String::new()
+    };
     format!(
-        "<div class=\"outcome {class}\" role=\"status\" aria-live=\"polite\" aria-atomic=\"true\"><p class=\"headline\">{}</p>{}{}{}</div>\n",
+        "<div class=\"outcome {class}\" role=\"status\" aria-live=\"polite\" aria-atomic=\"true\"><p class=\"headline\">{}</p>{}{explained}{}{}</div>\n",
         headline_html(&headline),
         if detail.trim().is_empty() { String::new() } else { format!("<pre>{}</pre>", escape(detail.trim())) },
         paste,
@@ -1300,6 +1350,43 @@ fn report_link(headline: &str, next: &[(&str, &str)]) -> String {
         query.push_str(&format!("&from={}", pct(id)));
     }
     format!("<a class=\"report\" href=\"/verb/feedback?{}\">Report a problem</a> ", escape(&query))
+}
+
+/// Refusals a member meets by name whose name alone does not say what happened or who can change
+/// it: the name, what it means, and (with the room it happened in) where the fix is. One table, so
+/// an outcome partial and a resident's reply explain a name the same way.
+pub(super) const EXPLAINED: &[(&str, &str, Option<&str>)] = &[
+    ("oracle-not-granted", "Hermes may not ask the Oracle in this room: the room's hermes/tools field lacks bit 8. Only the room's founder grants it, under what Hermes may do here.", Some("/room/{room}/resident#hermes-tools")),
+    ("oracle-not-configured", "This box's operator has bound no Oracle route for this Hermes, so no room grant reaches the Oracle.", None),
+    ("await-not-in-room", "Hermes answers only an await a member announced in this room (a say of await OBJECT TRANSACTION).", None),
+    ("notDecider", "Only the slot's decider may answer it; the kernel refused an answer signed by anyone else (bend await names the decider).", None),
+    ("member-day-ceiling", "Your share of the house Hermes's model calls for today is spent; it refills when the day turns.", None),
+    ("member-total-ceiling", "Your share of the house Hermes's model calls until the plan's weekly reset is spent.", None),
+];
+
+/// The named refusals `text` carries, in table order.
+pub(super) fn refusals_in(text: &str) -> Vec<&'static (&'static str, &'static str, Option<&'static str>)> {
+    EXPLAINED
+        .iter()
+        .filter(|(name, _, _)| {
+            text.match_indices(name).any(|(at, _)| {
+                let before = text[..at].chars().next_back();
+                let after = text[at + name.len()..].chars().next();
+                let word = |c: Option<char>| c.is_some_and(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+                !word(before) && !word(after)
+            })
+        })
+        .collect()
+}
+
+/// A named refusal said whole: the name as the clause, what it means, the fix when the room is
+/// known (under `base`, the face's link prefix).
+pub(super) fn explained_refusal(name: &str, meaning: &str, fix: Option<&str>, room: Option<&str>, base: &str) -> String {
+    let fix = match (fix, room) {
+        (Some(href), Some(room)) => format!("<p class=\"next\"><a href=\"{}\">where this is granted</a></p>", url(&format!("{base}{}", href.replace("{room}", room)))),
+        _ => String::new(),
+    };
+    format!("<div class=\"outcome refused\" data-refusal=\"{0}\"><p class=\"headline\">refused: <mark class=\"clause\">{0}</mark></p><p>{1}</p>{fix}</div>", escape(name), escape(meaning))
 }
 
 /// A refusal is the clause, highlighted: `refused: law-denied: field 2 monotone (before 2, after 1)`
@@ -1531,6 +1618,15 @@ mod tests {
 
     /// A refusal, an error and an undecided attempt each offer the derived feedback form with the
     /// clause and the attempt id (the receipt the page links); an admitted write offers none.
+    #[test]
+    fn a_named_refusal_in_an_outcome_is_explained_in_the_same_partial() {
+        let refused = Ending { code: 3, stdout: String::new(), stderr: "refused: kernel: notDecider\n".into() };
+        let html = outcome_of(&refused, &[], true);
+        assert!(html.contains("outcome refused") && html.contains("data-refusal=\"notDecider\"") && html.contains("Only the slot"), "{html}");
+        let ok = Ending { code: 0, stdout: "notDecider is a word in this text".into(), stderr: String::new() };
+        assert!(!outcome_of(&ok, &[], false).contains("data-refusal"), "an answer is never explained as a refusal");
+    }
+
     #[test]
     fn a_failed_outcome_offers_a_prefilled_report_link() {
         let refused = Ending { code: 3, stdout: String::new(), stderr: "refused: law-denied: field 2 monotone (before 2, after 1)\n".into() };

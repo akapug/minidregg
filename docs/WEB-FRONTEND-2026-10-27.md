@@ -158,7 +158,7 @@ the door; the patch in `deploy/web-frontend/door.patch` adds the login record an
 line. The infra lane installs `deploy/web-frontend/INSTALL.md` and retargets Caddy's `handle` to the
 gateway (the fallback `handle` and the `/` snapshot route go).
 
-## 6. State (2026-10-27)
+## 6. State (2026-10-28)
 
 **The grammar (A0) is done.** Every verb of the four tables is data in `shell_grammar.rs` (69
 verbs, 203 leaves); the shell parses through `parse`/`parse_line`; `help`, `usage_of` and Tab
@@ -224,6 +224,37 @@ about 4 min (nineteen transitions, about 5–12 s each); the export of 169 refer
 (385 MB). The tail bound (L = 256) is reached without the operator's checkpoint timer: the box
 runner certifies every 30 s when the uncertified tail is at least 64, as the box's timer does.
 These are numbers, not a gate.
+
+**Faces for the 10-28 member verbs** (lane/web-parity `6d0f878a`, on main at `0d7af4da`). Each goes
+through the derived path: a place's page embeds the real grammar forms with what the place knows filled
+in (`verbs::form_for_filled`, prefill keys as `/verb/NAME?key=` uses), and a computed control speaks the
+verb's grammar through the one assembler (`verbs::assemble_named`); every answer is the one outcome
+partial.
+
+| face | where | what it draws and does |
+|---|---|---|
+| Programs | `/bend`, `/bend/await/O/T` (`web/programs.rs`; rail) | the workspace's bend registry (`bend/objects/*.json`); any activity read by the shell's `bend await` as phase, slot, decider, deadline, declared state; the slot's decider gets the `bend answer` form with SLOT filled, anyone else is told the answer is refused `notDecider` |
+| What Hermes may do here | `/room/R/resident#hermes-tools` (`web/resident.rs`) | the room's `hermes/tools` bits (files 1, terminal 2, python 4, oracle 8) and `hermes/compute` from the room's own signed view; the founder (roster field 2000) gets checkboxes whose sum becomes `tariff R set hermes/tools N` (and `hermes/compute N`), one line per changed field; others see who sets it |
+| Explained refusals | `body::EXPLAINED` | `oracle-not-granted` (links to the grant), `oracle-not-configured`, `await-not-in-room`, `notDecider`, `member-day-ceiling`, `member-total-ceiling`: said with their meaning in any outcome partial and under a resident's reply |
+| Stories | `/story` (`web/stories.rs`; rail), the member's front page, the door's status page | invitations in `HOME/requests` (where the door hands the tale's) with `story join NAME @FILE` filled; an invitation to someone else listed without a form; stories held (`HOME/story`) with enter and invite; the front page's "You are invited to play" notice; the door's status says joined / invited / stopped (with the processor's reason) and links to `/story` |
+| Thin-birth display | none | no web face shows a consent display (thin or not), so `thin-display.json` has none; the receipt page could show it beside the anchor (the file is in the attempt directory) if one is wanted |
+
+Not drawn, and why: the operator's sandbox ceiling (`controller.json` `sandbox`, 0600 under the
+resident's user) is not readable by a member's body; the page says the effective set is ceiling ∩
+grant and that the ceiling is not in the room's read. Publishing it would take an operator-side file
+(like `/etc/mini/providers.json`), not a Host read.
+
+Rows: JWF `hermes-tools-{none,grant,revoke,refused}`, `bend-{programs,await-read,answer-refused}`,
+`story-page-{invited,joined}`, `story-front-notice`, `story-join-refused`; `story-join` now posts the
+`/story` page's own filled form. J14_ORACLE checks bob's resident page explains `oracle-not-granted`
+and shows the Oracle bit before and after the founder's grant. **Verified** (dregg-build, the J0-J8 world on candidate 76758dba6's Host with
+this lane's `mini`, `mini-web`, `mini-web-spawn` at `588855a7`, `/build/lanes/web-parity/tour.sh`): JWF **62/62 PASS**,
+every new row included; the first run (57/5) found the unrostered-room form and a row-helper slice, both
+fixed in `588855a7`. Mac: the filtered unit tests (faces, red-team over the new routes, door status) and
+`check-fouc --only app` 12/12. **Not run:** the J14_ORACLE web checks (they need the Oracle
+route fragment and upstream Hermes; whoever runs J14_ORACLE runs them) and `bend answer` admitted from
+the web (the template world pins no Objective invocation policy, so no program opens a slot there; the
+admitted answer stands on the card's unit test and J14_AWAIT's shell rows).
 
 **What waits on others.** L4: the resident page names its route once the room records it (a room
 fact such as `hermes/route`; today the room cell has no such field); the Join button takes the

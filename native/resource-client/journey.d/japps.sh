@@ -226,14 +226,16 @@ if [ "$mode" = --box ]; then
       state=$(jq -er .stateRoot "$(jq -er .profilePath "$run/evidence/profile-result.json")")
       # The tour's step 7: a second browser session on the running Simple Todos grain co-edits.
       app_b=$(jq -er '.applicationGrainBirth.applicationBirth.application.app' "$run/evidence/b-app-source.json")
-      if jenv $J share-b2 enroll-b2 register-b2 get-b2 >"$W/coedit-world.out" 2>"$W/coedit-world.err"; then
+      if jenv $J share-bs enroll-bs register-bs get-bs >"$W/coedit-world.out" 2>"$W/coedit-world.err"; then
         co=$(python3 "$REPO/scripts/spk-platform/ddp-coedit.py" "$state/apps/$app_b/routes/owner-web" "$state/apps/$app_b/routes/guest2-web" 2>&1 | tail -1)
       else co="second session: $(tail -1 "$W/coedit-world.err")"; fi
       row "a second browser session co-edits Simple Todos (B sees A's todo over DDP)" "$(jq -e .ok <<<"$co" >/dev/null 2>&1 && echo 1 || echo 0)" "$(cut -c1-160 <<<"$co")"
       # The publishing origin: restart the stopped Hacker Slides grain and read its /var/www
       # through the resident's www.sock (the socket the front reaches through the connector).
       app_a_dir=$state/apps/$app_a
-      if jenv $J start-a >"$W/www-world.out" 2>"$W/www-world.err"; then
+      # The restart moved the app to a new serving generation, so the owner session is re-enrolled
+      # (enroll-a2 renews it) before the write: the first enrollment names the old generation.
+      if jenv $J start-a enroll-a2 >"$W/www-world.out" 2>"$W/www-world.err"; then
         www=$(curl -sS --max-time 120 --unix-socket "$app_a_dir/www.sock" -H 'Host: grain.test' -o "$W/www-index.body" -D - http://grain.test/ 2>&1 | head -1 | tr -d '\r')
         post=$(curl -sS --max-time 30 --unix-socket "$app_a_dir/www.sock" -X POST -o /dev/null -w '%{http_code}' http://grain.test/ 2>&1)
         esc=$(curl -sS --max-time 30 --unix-socket "$app_a_dir/www.sock" -o /dev/null -w '%{http_code}' --path-as-is 'http://grain.test/../g2/resident.json' 2>&1)

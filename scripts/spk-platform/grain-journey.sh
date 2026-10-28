@@ -32,6 +32,13 @@ HOST=${GRAIN_HOST:-$BIN/minidregg-host}
 GRAINS_ROOT=${GRAINS_ROOT:?store-specific grains root required}
 # Explicit native CLI/profile pin; never a native environment-selected endpoint.
 BROKER_SOCKET=${BROKER_SOCKET:?store-specific broker socket required}
+# Every resident `mini` starts (consent, codec) keeps its socket, lock and PID file in the world's
+# own anchor directory, never in the operator's shared $HOME: worlds share no state, and
+# stop-residents.sh stops a world's residents from these PID files alone. Short on purpose:
+# a Unix socket path is bounded.
+MINI_CONSENT_ANCHOR_DIR=${MINI_CONSENT_ANCHOR_DIR:-$RUN/a}
+mkdir -p -m 700 "$MINI_CONSENT_ANCHOR_DIR"
+export MINI_CONSENT_ANCHOR_DIR
 MINI=$BIN/mini
 SPK_HOST=$BIN/spk-host
 STORE=$RUN/store
@@ -589,7 +596,11 @@ enroll() (
       --dir "$EV/$label-close-g$gen-attempt" >"$EV/$label-close-g$gen.stdout"
     confirmed "$EV/$label-close-g$gen-attempt/outcome.json"
   fi
-  count=$(jq -er .receipt.acceptedCount "$EV/$label-ticket-$ticket/issue/receipt-anchor.json")
+  # The share issued the ticket under the label this enrollment carries (a repeat enrolls under
+  # the base label a; the second session shares and enrolls as b2).
+  anchor=$EV/$label-ticket-$ticket/issue/receipt-anchor.json
+  [ -s "$anchor" ] || fail "enroll $label: the ticket's issue receipt anchor is missing: $anchor"
+  count=$(jq -er .receipt.acceptedCount "$anchor") || fail "enroll $label: $anchor has no acceptedCount"
   jq -n --argjson basis "$ROLE_BASIS" --arg index "$((count - 1))" --arg ticket "$ticket" --arg pkg "$((app + 1))" \
     --arg dcap "$((cap + 2))" --arg scap "$cap" --arg mcap "$pkgcap" \
     --arg schema "$schema" --arg version "$version" --arg nonce "$((nonce + 3))" '
@@ -602,7 +613,9 @@ enroll() (
   if [ ! -e "$N/seal.json" ]; then
     rm -rf "$N"
     "$MINI" session-enrollment-plan --host "$HOST" --config "$CONFIG" \
-      --operator-socket "$OSOCK" --request "$N-request.json" --dir "$N" >"$N-plan.stdout"
+      --operator-socket "$OSOCK" --request "$N-request.json" --dir "$N" >"$N-plan.stdout" ||
+      fail "enroll $label: session-enrollment-plan was refused (see its stderr); no plan was written"
+    [ -s "$N/plan.bin" ] || fail "enroll $label: session-enrollment-plan wrote no plan.bin"
     approve "$N/plan-inspected.json" headerHex "$N-approval.json" "$(jq -nc \
       --arg r "$(sha "$N/request.bin")" --arg p "$(sha "$N/plan.bin")" \
       --arg i "$(sha "$N/plan-inspected.json")" '
@@ -873,20 +886,20 @@ run_phase() {
         step "$phase" "$SPK_HOST" grain install "$PROFILE" "$EV/$letter-app-author/source.json" \
           "$EV/$letter-app-attempt/outcome.json" "$spk" --class "$class"
       fi ;;
-    # A trailing 2 (share-b2, enroll-b2, get-b2) is a second browser session on the
-    # same grain: session ${P}50, ticket ${P}30, capabilities 3${i}51.. (ticket
+    # A trailing s (share-bs, enroll-bs, register-bs, get-bs) is a second browser session on the
+    # same grain (a trailing digit is a repeat after a restart: enroll-a2, get-a2): session ${P}50, ticket ${P}30, capabilities 3${i}51.. (ticket
     # 3${i}81..), route guest2-KIND, nonces from base + 6000.
-    share) if [ "$n" = 2 ]; then
+    share) if [ "$n" = s ]; then
         step "$phase" share "${letter}2" "$app" "${P}50" "${P}30" "3${i}51" $((base + 6000)) "$kind" "guest2-$kind"
       else step "$phase" share "$letter" "$app" "${P}10" "${P}20" "3${i}11" $((base + 2000)) "$kind"; fi ;;
-    enroll) if [ "$n" = 2 ]; then
+    enroll) if [ "$n" = s ]; then
         step "$phase" enroll "${letter}2" "$app" "${P}50" "${P}30" "3${i}51" $((base + 7000))
       else step "$phase" enroll "$letter" "$app" "${P}10" "${P}20" "3${i}11" \
         $((base + 2000 + ${n:-1} * 1000)); fi ;;
     start|stop|status|supervise) step "$phase" "$SPK_HOST" grain "$verb" "$PROFILE" "$app" ;;
-    register) [ "$n" = 2 ] || fail "register applies to a second session (register-X2)"
+    register) [ "$n" = s ] || fail "register applies to a second session (register-Xs)"
       step "$phase" register "${letter}2" "$app" "guest2-$kind" ;;
-    get) if [ "$n" = 2 ]; then step "$phase" http_get "$phase-body" "$app" "$getp" "$kind" "guest2-$kind"
+    get) if [ "$n" = s ]; then step "$phase" http_get "$phase-body" "$app" "$getp" "$kind" "guest2-$kind"
       else step "$phase" http_get "$phase-body" "$app" "$getp" "$kind"; fi ;;
     post) step "$phase" http_post "$phase-body" "$app" "$kind" "$postp" "$postb" "$postt" "$postm" ;;
     poll) step "$phase" http_get "$phase-body" "$app" "$pollp" "$kind" ;;
