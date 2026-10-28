@@ -193,7 +193,8 @@ ok J12 bob "submit l1"
 ok J12 alice "doc show paper --json"
 check J12 "blame: line 1 created by alice, line 2 created by bob" blame_ok "$OUT"
 ok J12 alice "doc links index"
-check J12 "index links to paper (the Host's link index)" grep -q "^link .* -> document paper relation 0 " "$OUT"
+check J12 "index links to paper (the Host's link index)" \
+  grep -qE "^link [0-9]+ -> document paper \(target [0-9]+\) relation 0 " "$OUT"
 ok J12 alice "read index"
 check J12 "index's link record was created by bob" \
   jq -e --arg b "$B" '[.cell.entries[] | select(.type == "link") | .createdBy.subject] == [$b]' "$OUT"
