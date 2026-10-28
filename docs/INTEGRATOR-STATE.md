@@ -50,7 +50,9 @@ the newest built main that passed the gate; each is reported in one line, and in
 | 14 A5 | cacefcba8 | host rc=1 at 21:58 (41 s): only Kernel.NativeHostReplay:3823 (extendExact: exactCandidate sets headTag since e0916a53f, advance does not; #guard_msgs 4827/4829 follow). Fixed by the deputy, a8eb2c50e (post image = successor up to its head tag; FnSelectedHistoricalStep's admitted_record gains ∃ headTag; reds there go to the deputy) |
 | 14 A6 | a8eb2c50e | host rc=1 at 22:09 (294 s): only Host.Main:2048 (claimOf: the intent subject is a SubjectId; the rate table is keyed by Nat); fixed 43023f83f |
 | 14 A7 | 969929026 | host stage CLEAN at 22:22 (534 s). Regen: A7 rc=2 (seed v5), A7b rc=1 (seed proofs), A7c rc=2 (ADMITTED-INPUT-CONTEXT trailing byte, bumped by hand), A7d rc=2 (DREGG/CLOCK: literal twin in ClockCell vs the registry constant), A7e rc=0 at 23:50 (938 s, peak 20.2 GB, 638 pins). Its diff is main da4a7645e (integ8/regen-A7e.patch); the tool changes are held on local branch integration/regen-tool 21077e063 for after the candidate |
-| full | da4a7645e | `integ4/main-full.sh da4a7645e` (pid file integ4/main-full.pid; build.pid, then gate.pid + enrol-resume.pid under integ8) started 23:53 |
+| full | da4a7645e | `integ4/main-full.sh da4a7645e` (pid file integ4/main-full.pid; build.pid, then gate.pid + enrol-resume.pid under integ8) started 23:53: host clean 00:24:47 (1670 s); consent rc=1 at 00:28 (PersistedCodecTagCensus: the platform install receiver's six identities unregistered). Fixed fbb66b069 |
+| A8 | fbb66b069 | host clean 01:02 (1842 s); regen rc=0 (644 pins, six additions, integ8/regen-A8.patch) → main 1e976af0f; consent rc=65 only because the host artifacts predate the new pins (companion check: PersistedCodecShapes.lean) |
+| full | 1e976af0f | `integ4/main-full.sh` started 01:07 (main-full.pid 3307367; build.pid, then gate.pid + enrol-resume.pid under integ8). Before relaunching any build, move integ8/{native-out,consent-out,artifacts,fixtures} aside (the host stage refuses existing outputs, rc=73) |
 
 A3's tree (main 8103b29a4) holds everything since aa9366f8: pd-host-rate, oracle-lifetime-grant, oracle-grant-factory,
 lean-audit-c, un-effects 2acd8acf (effect Plan; its codec pins re-emit with this regen), un-pb-twins 134535c2,
@@ -68,15 +70,14 @@ elaboration of the fix pending NativeHostReplay.olean). L1c (lean-audit-c a281e5
 constructors with pricedAt, drops e7958d3b9's arms on merge; unbuilt, not to merge until its warm-tree build
 elaborates) seeds its dregg-ref tree from the integ8 copy; tell it when the copy lands.
 
-Next steps: the full build of da4a7645e passed its host stage at 00:24:47 (1670 s); the tree was named to infra,
-the coordinator and L1c (L1c waits for the dregg-ref copy, then builds lean-audit-c d4e192f35 there and sends a green sha).
-When the build ends: run `swarm-build lake lean Effects/Revival/Statements.lean` in integ8/src and send the errors verbatim
-to effects-revival (a83b7949ba401cca5) unless it says dregg-ref got there first. When the candidate exists: report
-"candidate <sha> at <path>: gate <verdict>, reds by name" to the coordinator and L4b (ad81db6d6fd317d3a; J14_TOOLS +
-J14_AWAIT); then push integration/regen-tool 21077e063 to main (the next build checks ClockCell's import), and start
-the next full build from main (06b32d86d+: effects-revival docs, oracle-appliance da016ed24, red-pq-mailbox,
-red-mini-web-devflow, red-discord-session (their filtered tests green on the Mac), audit-platform 260fceae).
-welcome-hermes is still to come.
+Next steps: the full build of 1e976af0f is running. When the build ends: run `swarm-build lake lean
+Effects/Revival/Statements.lean` (lane/effects-revival, on main) in integ8/src and send the errors verbatim to
+effects-revival (a83b7949ba401cca5). When the candidate exists: report "candidate <sha> at <path>: gate <verdict>, reds
+by name" to the coordinator and L4b (ad81db6d6fd317d3a; J14_TOOLS + J14_AWAIT); then land local branch
+integration/regen-tool 32646f241 on main (the regen learns the trailing-byte version form and transitive bumps;
+ClockCell uses the registry constant; one spelling per identity; the next build checks it), and start the next full
+build from main. Every lane tip named so far is on main (hermes, hermes-b, abuse-caps, snipe-unconfigured,
+effects-revival, redteam) except lean-audit-c d4e192f35, which waits for L1c's warm-tree green sha.
 
 Red routing: lean-audit-c reds go to L1c (acf52d65283ef4ebc) directly; Hermes to L4b (ad81db6d6fd317d3a); L13 a1618140607ac439b; un-stream-continuity reds
 (ApplicationStreamContinuityFresh pole proofs, NativeHostReplay.lean:3816) to the deputy a308118209b4a48ea; all
