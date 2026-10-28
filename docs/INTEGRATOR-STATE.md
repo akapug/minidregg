@@ -138,6 +138,8 @@ gates main and fixes reds itself.
 
 - Held for the conversion: lane/thin-birth 9509996a0 (b00bc41ff + docs; ad0906325ab57d1c3; continuation docs/THIN-BIRTH-2026-10-28.md §11; checkOpened, the re-encoding twin deleted; JP2 71/71 and THIN on e89fe7b8b with its consent binary). Tell it when the conversion is on main; it merges and re-converts, then sends a sha.
 - Held for the conversion window (touches .lean, Effects.lean imports it): lane/effects-revival e2a326481 (a83b7949ba401cca5; ContentProofs.lean). Land after the conversion, through a box build.
+- Not held, nothing coming: lane/un-ns-owner 587c5acbd is the superseded work-in-progress branch; its clean
+  form lane/un-ns-owner-clean (3a8109059, box-elaborated, plus e80f56422 and cf3c5d433) is on main (coordinator 10-28).
 - Module-conversion window: from iter-speed's (a0fd127abfb9aac75) "re-deriving now" until it sends its sha, no .lean or lakefile.toml change lands on main; Rust, shell and docs continue.
 - Row requirements: a row asserting behaviour newer than the oldest candidate a harness may judge gets a line in scripts/gates/row-requires.tsv in the same commit (5 JWF rows → 588855a71, 9b36d6d37).
 - Pay weights stay at 19.3 GB in the seat table (coordinator 10-28: never lower a weight to a kill-time peak); a
