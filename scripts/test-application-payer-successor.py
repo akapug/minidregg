@@ -169,7 +169,8 @@ class PayerSuccessorTests(unittest.TestCase):
     def test_every_native_work_family_and_resident_queue_blocks_repair(self):
         status = M.read(self.request["controllerStatus"])
         journal = M.read(self.request["controllerJournal"])
-        for field in ("birthPending", "birthOperation", "workspaceBirth", "residentDelivery", "residentCompletion", "promptWitness"):
+        for field in ("birthPending", "birthOperation", "workspaceBirth", "residentDelivery", "residentCompletion", "promptWitness",
+                      "providerSettlement", "providerRetryGate", "hermesSession"):
             with self.subTest(field=field), self.assertRaisesRegex(ValueError, "unsettled custody"):
                 M.check_settled(status, dict(journal, **{field: {}}), self.registration)
         journal["binding"]["config"]["toolTask"] = {"room": {"room": "lab"}}
@@ -184,6 +185,19 @@ class PayerSuccessorTests(unittest.TestCase):
         wrong = exported([]); wrong["files"]["journal.json"]["sha256"] = "0" * 64
         with self.assertRaisesRegex(ValueError, "digest differs"):
             M.check_settled(status, journal, self.registration, wrong)
+
+    def test_latest_historical_uncertainty_remains_custody(self):
+        status = M.read(self.request["controllerStatus"])
+        journal = M.read(self.request["controllerJournal"])
+        for family, field in (("workspaceResolutions", "resolution"), ("foregroundHistory", "phase"), ("applicationApiHistory", "phase")):
+            rows = [{"operationId": 17, field: "uncertain"}]
+            with self.assertRaisesRegex(ValueError, "unresolved historical"):
+                M.check_settled(status, dict(journal, **{family: rows}), self.registration)
+            rows.append({"operationId": 17, field: "audited"})
+            M.check_settled(status, dict(journal, **{family: rows}), self.registration)
+            rows.append({"operationId": 18, field: "uncertain"})
+            with self.assertRaisesRegex(ValueError, "unresolved historical"):
+                M.check_settled(status, dict(journal, **{family: rows}), self.registration)
 
     def test_retained_source_and_native_receipt_cannot_change_on_resume(self):
         repair = self.repair()

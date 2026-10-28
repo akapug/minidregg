@@ -98,10 +98,19 @@ def check_settled(status, journal, registration, evidence=None):
     fields = ("applicationApiAttempt", "dispatchAttempt", "dispatchHold", "dispatchPending",
               "foregroundAttempt", "parentHold", "toolHold", "toolPending", "pending", "settlementDue",
               "providerAttempt", "providerHold", "providerPending", "child", "roomAttempt", "workspaceAttempt",
-              "birthPending", "birthOperation", "workspaceBirth", "residentDelivery", "residentCompletion", "promptWitness")
+              "birthPending", "birthOperation", "workspaceBirth", "residentDelivery", "residentCompletion", "promptWitness",
+              "providerSettlement", "providerRetryGate", "hermesSession")
     require(all(journal.get(k) is None for k in fields) and journal.get("unresolvedExternal") == []
-            and not journal.get("hardReconnectPending") and journal.get("connection") != "fenced",
+            and not journal.get("hardReconnectPending") and journal.get("connection") not in ("fenced", "hard"),
             "controller retains unsettled custody")
+    for family, field in (("workspaceResolutions", "resolution"), ("foregroundHistory", "phase"),
+                          ("applicationApiHistory", "phase")):
+        seen = set()
+        for entry in reversed(journal.get(family, [])):
+            operation = entry["operationId"]
+            if operation not in seen:
+                require(entry[field] != "uncertain", "controller retains unresolved historical work: " + family)
+                seen.add(operation)
     if evidence is not None:
         require(evidence.get("protocol") == "mini-spk-controller-evidence-v1" and evidence.get("store") == layout["store"],
                 "controller evidence belongs to another Store")

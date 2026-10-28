@@ -183,3 +183,70 @@ fn resident_selector_requires_real_private_direct_child_and_holds_its_lock() {
     assert!(quiescent(&Journal::fresh(json!({})), guard.evidence()).is_err());
     drop(guard); drop(rt); fs::remove_dir_all(root).unwrap();
 }
+
+
+#[test]
+fn consumed_terminal_origin_allows_enrollment_without_erasing_history() {
+    let (mut rt, root, _) = prompt_outcome::tests::audited_fixture();
+    let state=rt.config.state_dir.join("resident");directory(&state).unwrap();
+    write_new(&state.join("resident.lock"),b"").unwrap();
+    let origin=serde_json::to_value(rt.journal.resident_prompt_origin.as_ref().unwrap()).unwrap();
+    let resident=json!({"completed":1,"pending":null,"lastInput":null,"lastCompletion":{
+        "type":"prompt-complete","outcome":"failed","residentOrigin":origin},"returnPending":false});
+    atomic_json(&state.join("resident.json"),&resident).unwrap();
+    let requests=json!({"binding":{},"pending":[],"selected":null,"lastAuthor":null});
+    atomic_json(&state.join("requests.json"),&requests).unwrap();
+    let guard=quiescence::ResidentGuard::acquire(&rt.config,Some(&state)).unwrap();
+    assert!(consumed_origin(&rt.journal,&rt.config,&guard).is_err(),"undecided is not terminal");
+    drop(guard);rt.reconcile_prompt_audited("67").unwrap();
+    let before=serde_json::to_value(&rt.journal).unwrap();
+    let guard=quiescence::ResidentGuard::acquire(&rt.config,Some(&state)).unwrap();
+    let proof=consumed_origin(&rt.journal,&rt.config,&guard).unwrap().unwrap();
+    quiescent_with_origin(&rt.journal,guard.evidence(),Some(&proof)).unwrap();
+    assert!(quiescent(&rt.journal,guard.evidence()).is_err(),"origin alone is not permission");
+    assert_eq!(proof.0["origin"],origin);
+    assert_eq!(proof.0["promptEvidence"]["outcome"]["state"],"refused");
+    assert!(proof.0["promptEvidence"]["resolution"].is_object());
+    let mut target=rt.config.clone();target.tool_task.as_mut().unwrap().agent_api_host_sha256=Some("d".repeat(64));
+    let (after,_)=successor(&before,&target,&rt.config_path).unwrap();
+    let mut without_binding=after.clone();without_binding["binding"]=before["binding"].clone();
+    assert_eq!(without_binding,before);assert_eq!(after["residentPromptOrigin"],origin);
+    guard.assert_unchanged().unwrap();drop(guard);
+    for (field,value) in [("pending",json!({"uncertain":true})),("returnPending",json!(true)),("completed",json!(0)),
+        ("lastCompletion",json!({"type":"prompt-complete","outcome":"failed","residentOrigin":{
+            "promptOperationId":68,"residentPromptId":"a".repeat(64),"promptSha256":"b".repeat(64),"sessionId":null}}))] {
+        let mut changed=resident.clone();changed[field]=value;atomic_json(&state.join("resident.json"),&changed).unwrap();
+        let guard=quiescence::ResidentGuard::acquire(&rt.config,Some(&state)).unwrap();
+        assert!(consumed_origin(&rt.journal,&rt.config,&guard).is_err(),"{field}");
+    }
+    atomic_json(&state.join("resident.json"),&resident).unwrap();
+    let mut queued=requests.clone();queued["pending"]=json!([{"identity":{},"entry":{}}]);
+    atomic_json(&state.join("requests.json"),&queued).unwrap();
+    let guard=quiescence::ResidentGuard::acquire(&rt.config,Some(&state)).unwrap();
+    assert!(consumed_origin(&rt.journal,&rt.config,&guard).is_err());drop(guard);
+    atomic_json(&state.join("requests.json"),&requests).unwrap();
+    let guard=quiescence::ResidentGuard::acquire(&rt.config,Some(&state)).unwrap();
+    let mut other:Journal=serde_json::from_value(before.clone()).unwrap();
+    other.resident_prompt_origin.as_mut().unwrap().session_id=Some("foreign-session".into());
+    assert!(consumed_origin(&other,&rt.config,&guard).is_err());
+    assert_eq!(serde_json::to_value(&rt.journal).unwrap(),before);
+    drop(guard);drop(rt);fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+#[ignore="requires the retained post-drain q2 capture; reads data only"]
+fn consumed_terminal_origin_accepts_retained_native_capture() {
+    let file=std::env::var_os("MINI_ENROLLMENT_CONSUMED_CAPTURE").expect("capture path required");
+    let capture:Value=serde_json::from_slice(&fs::read(file).unwrap()).unwrap();
+    let journal:Journal=serde_json::from_value(capture["journal"].clone()).unwrap();
+    let record:prompt_outcome::Record=serde_json::from_value(capture["resolution"]["record"].clone()).unwrap();
+    record.validate().unwrap();
+    assert_eq!(capture["resolution"]["originalSha256"],sha256_bytes(capture["original"].as_str().unwrap().as_bytes()).unwrap());
+    validate_consumed_frame(journal.resident_prompt_origin.as_ref().unwrap(),capture["resident"].as_str().unwrap().as_bytes(),&record).unwrap();
+    let request:Value=serde_json::from_str(capture["requests"].as_str().unwrap()).unwrap();
+    assert_eq!(request["pending"],json!([]));assert!(request["selected"].is_null());assert!(request["maintenancePending"].is_null());
+    let evidence=quiescence::ResidentEvidence::Stopped{prompt_pending:false,return_pending:false,
+        queued_requests:false,started_request:false,maintenance_pending:false};
+    let proof=ConsumedOriginProof(json!({"origin":journal.resident_prompt_origin}));
+    quiescent_with_origin(&journal,evidence,Some(&proof)).unwrap();
+}
