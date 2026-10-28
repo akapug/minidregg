@@ -32,7 +32,7 @@ enrol-resume PASS.
 Row-harness fixes this run produced (lane/rows-ledger, all merged or routed to the integrator):
 7dfe4a3c4 (m4 provision folder 0700), b627478ec (native-share-member.sh worker-bare refused at prepare),
 0a05ab6ba (journey classifiers match OUTCOME/v8), 709cd12d0 (acceptance.sh consent provider beside the
-wrapper Host), 6ee5acb4c (check-fouc site pages), 96fc2701d (demo/kernel rows pass GRAIN_RUNTIME).
+wrapper Host), 6ee5acb4c (check-fouc site pages), 96fc2701d (demo/kernel rows pass GRAIN_RUNTIME), the jnames.sh missing-reference pattern.
 
 | group | row | result on 0ce31391 | owner of the red |
 |---|---|---|---|
@@ -41,10 +41,15 @@ wrapper Host), 6ee5acb4c (check-fouc site pages), 96fc2701d (demo/kernel rows pa
 | journey rows | jserve | PASS with custody-b beb108d5f (253 refusals named); red on the candidate's own driver (envelope v1) | custody-b |
 | journey rows | jpay | JPAY1-4 PASS; JPAY6 FAIL `query parent-witness-tool-pre: request refused ... (phase observation)` | L1 / pay |
 | journey rows | rooms | J5 red was the v7 classifier; J5 8/8 and JPRIV1 229 PASS on the fixed tree | |
-| journey rows | m6grain | FAIL at the grain store (same worker-bare contract; rerun after b627478ec owed) | L1c / L13 |
+| journey rows | m6grain | FAIL: with b627478ec the store phase passes; then `install-a` hits the grain-install red | L1c (25cfb86bd) |
 | journey rows | objective, hostupgrade, m7, exchange | UNCONFIGURED: no lean env; no previous candidate set; no M7 reference; fn is out | |
 | journey rows | births, perf | UNCONFIGURED (box not quiet; timing rows belong on dregg-build) | |
-| demo steps | J0-J8, J12X, KC, KT, K10, KIX, K10C, K12C/T/M/R/I/H, JPRIV1, JFEEDBACK | PASS | |
+| demo steps | J0-J8, J12X, KC, KT, K10, KIX, K10C, K12C/T/M/R/I/H, JPRIV1, JFEEDBACK, J12W, THIN, JDV (143), M5, JNAMES, JPAYE1 (14/14), JPAYE2 (38/38), JPAYE3 (27/27), JRLANE, JGATE, JESC, JFLEETIN, JSLK, JAUDIT (11/11) | PASS (the 5000 s demo budget starves the tail; tail steps run with `--only`) | |
+| demo steps | JP2 | FAIL 20/60: the remote shell's `create` is refused "thin consent signs invocations and delegations only; a birth (create) ... needs the full consent provider" | L2 shell / thin consent |
+| demo steps | JPD | FAIL row 3 `doc protect pd-paper`: `inspect object-audience ... is a session frame, not a codec frame (phase op 8)` | L2 shell |
+| demo steps | JDISCLOSE | FAIL: invocation refused `DeclaredResourceController.Reject.scalar (undeclaredField 2)` | declared-resource owner (same family as acceptance.sh `unsupportedVersion`) |
+| demo steps | JCHAT | 3/69 differ: the Discord mirror rows need `mini-discord-mirror` and `fake-discord` in one dir (the set has no fake-discord) | input |
+| demo steps | M6, JR17 | UNCONFIGURED: M6 runs as the operator uid; JR17's key rows need /etc/mini/keys-client.json | |
 | demo steps | J17 | FAIL: after a decided `bookRefused` pay, the next `pay lab week` says "a previous pay of this request was recorded but never submitted" | L1c prepare-refusal clients / pay |
 | demo steps | WEB | FAIL 4/38: extra `unavailable` in transclusion placeholders (3 rows); `board-fields` 403 | L12 web |
 | demo steps | JLI | FAIL: `law export show jli-room/notes` refused as a malformed reference name | L2 shell |
