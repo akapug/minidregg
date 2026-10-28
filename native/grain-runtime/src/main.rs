@@ -2626,11 +2626,13 @@ fn inspected_pre_submit_refusal(config: &Config, attempt: &Path) -> Result<Optio
         }
     }
     let frame = read_bounded(&frame_path, 12_102_761)?;
+    // A prepare refusal is decided before any append, so the Host answers it under NO_RECORD
+    // (c5e268ebd); HOST_OUTCOME (255) carries only undecided answers and is never a refusal here.
     if frame.len() < 2
-        || frame[0] != 255
+        || frame[0] != mini_sdk::host_operations::RESPONSE_NO_RECORD
         || sha256_file(&frame_path)? != digest_field("frameSha256")?
     {
-        return Err("prepare refusal frame differs from retained op-255 reply".into());
+        return Err("prepare refusal frame differs from the retained NO_RECORD reply".into());
     }
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -19238,7 +19240,7 @@ mod tests {
         )
         .unwrap();
         let frame = attempt.join("pre-submit-refusal.frame");
-        fs::write(&frame, b"\xffcanonical outcome bytes").unwrap();
+        fs::write(&frame, [&[mini_sdk::host_operations::RESPONSE_NO_RECORD][..], b"canonical outcome bytes"].concat()).unwrap();
         let marker = attempt.join("pre-submit-refusal.json");
         fs::write(
             &marker,

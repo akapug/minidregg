@@ -10,17 +10,15 @@ Linux cargo runs on dregg-build in worktree `/build/lanes/custody-b`, with targe
 
 ## Now
 
-Genesis writers on cut 14 (dregg-ref):
-- **green**: `acceptance.sh`, `selected-release-acceptance.sh`, `application-acceptance.sh`, and grain-runtime
-  `PROVIDER_BOOTSTRAP=1 BOOTSTRAP_ONLY=1`.
+Genesis writers on cut 14 (dregg-ref, run 6 at f79044d79):
+- **green**: `acceptance.sh`, `application-acceptance.sh`, `selected-release-acceptance.sh`, grain-runtime
+  plain, and grain-runtime `PROVIDER_BOOTSTRAP=1 BOOTSTRAP_ONLY=1`.
 - **authority-acceptance.sh**: asserts the prepare-refusal contract (exit 3, pre-submit-refusal.json, a
-  NO_RECORD frame decoded as law-denied), so it needs lane/prepare-refusal-clients f73893fce (now on main).
-  It is green on the first candidate that carries that commit.
-- **grain-runtime plain**: in progress. Fixed so far: the controller unit's user fixture selection, the
-  worker launcher materialized with the candidate's launch gate, the runtime's automatic post-breaker
-  settlement, and the worker Hermes MCP-timeout profile. Run `x5` is checking the last of these.
+  NO_RECORD frame decoded as law-denied), which needs f73893fce (on main). It goes green on the first
+  candidate that carries that commit; cut 14's mini exits 1 there.
 - **fn-e1e2 setup-mini**: out of scope (fn).
 - **jserve**: PASS on cut 14 with beb108d5f (validator, hbox).
+- Not yet run: the profiled grain bootstrap, JPAY2, JPAY6 and the jpay6 extractors.
 
 Causes found (each fixed at the cause; no assertion weakened):
 - content targets carried schemaVersion "1"; `journey.d/lib/wire.sh` reads `ContentResource.commandVersion`
@@ -28,7 +26,12 @@ Causes found (each fixed at the cause; no assertion weakened):
 - Store images used the legacy `read-to`; `journey.d/lib/evidence.sh` holds the one `durable_image` (head
   plus log, read under `profile`'s storeAnchorIdentity; the checkpoint cache is excluded). It also holds a
   portable `sha256`. The four `durable_image` copies are deleted.
-- grain's clock-subject capabilities 71-74 collided with the birth's 71/72/73 (`authorityBatch`).
+- grain's clock-subject capabilities 71-74 collided with the birth's 71/72/73 (`authorityBatch`). grain plain
+  also lacked: the controller unit's user manager selection, a launcher with the candidate's launch gate,
+  the worker's Hermes MCP-timeout profile, and a declared field 0 on the publication target. It also
+  asserted the old operator-directed reconcile, where the runtime now settles by itself.
+- grain-runtime itself recognised prepare and query refusals only under 255. 629aff40f moves both to
+  NO_RECORD, and host-operations.py check now refuses that form (`x[0] == marker`, `.first() == Some(&m)`).
 - plan-time refusals (law 10, c5e268ebd NO_RECORD) replaced submitted ones in authority, application
   (`no-grant`) and jserve. Marker bytes come from protocol/host-operations.json (`response_marker`).
 
@@ -41,8 +44,7 @@ Split-tenancy signing (coordinator's top priority; working in infra's demo-dry o
   merged by infra with fixes forward 66ed7fb and 1c4a79d); rows S2b-S2e are in jsplit-tenancy.sh.
 
 Owed:
-- A rerun of the six writers on the first candidate after 1af366fe9.
-- grain plain to green.
+- A rerun of the six writers on the first candidate after 1af366fe9 (authority goes green there).
 - The web body fix confirmed in demo-dry (infra reruns the seed).
 
 ## Earlier work by custody-drivers (shas)

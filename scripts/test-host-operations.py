@@ -182,6 +182,18 @@ class GateTests(unittest.TestCase):
         self.edit(binding["path"], named, f"{binding['constant']}: u8 = {entry['code']};")
         self.rejects("literal Host operation bytes")
 
+    def test_reply_marker_compared_by_index_or_first_refuses(self):
+        # The form grain-runtime's prepare-refusal check used (`frame[0] != 255`), which hid a stale
+        # marker after c5e268ebd moved decided refusals to NO_RECORD.
+        path = "native/grain-runtime/src/main.rs"
+        self.edit(path, "frame[0] != mini_sdk::host_operations::RESPONSE_NO_RECORD", "frame[0] != 255")
+        self.rejects("literal Host operation bytes")
+
+    def test_reply_marker_compared_through_first_refuses(self):
+        path = "native/resource-client/src/transport.rs"
+        self.edit(path, "Some(&mini_sdk::host_operations::RESPONSE_NEVER_FORWARDED)", "Some(&254)")
+        self.rejects("literal Host operation bytes")
+
     def test_generated_constant_reference_is_checked(self):
         binding, entry, named = self.bound_constant()
         self.edit(binding["path"], named, f"{binding['constant']}: u8 = crate::host_operations::{entry['symbol']};")
