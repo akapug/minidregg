@@ -574,8 +574,14 @@ if [ -n "$CONTROLLER_UNIT" ]; then
       echo "controller unit is already in use: $CONTROLLER_UNIT ($current_state)" >&2
       exit 1 ;;
   esac
+  # An unregistered test controller selects its managers explicitly: the user manager for the
+  # controller and its workers, under its exact canonical unit (native/grain-runtime/SYSTEMD-MANAGERS.md;
+  # without them the runtime refuses "managed proof requires root registration or explicit user
+  # fixture selection").
   systemd-run --user --wait --pipe --collect --unit="${CONTROLLER_UNIT%.service}" \
     --description="$CONTROLLER_MARKER" \
+    --setenv=MINI_GRAIN_CONTROLLER_MANAGER=user --setenv=MINI_GRAIN_WORKER_MANAGER=user \
+    --setenv="MINI_GRAIN_CONTROLLER_UNIT=$CONTROLLER_UNIT" \
     --property=KillMode=control-group --property=RuntimeMaxSec=1800s \
     "$GRAIN" serve "$EVIDENCE/runtime-config.json" \
     >"$EVIDENCE/grain-service.stdout" 2>"$EVIDENCE/grain-service.stderr" &

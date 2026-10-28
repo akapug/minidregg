@@ -214,16 +214,34 @@ cat >"$EVIDENCE/alice-denied-intent.json" <<EOF
     "value":"1"}]}}]}}},
  "grants":[{"kind":"object","target":"600","capability":"61"}]}
 EOF
-if "$MINI" submit --host "$HOST" --config "$CONFIG" \
+# The installed law is judged at plan time, on the signed observation (law 10:
+# `NativeHost.invokeRefusal`), so the Host refuses at PREPARE, before anything is signed for
+# submission, and names the law: a NO_RECORD (253) frame the client keeps as
+# pre-submit-refusal.frame (model: scripts/grain-birth/birth-acceptance.sh, worker bare birth).
+status=0
+"$MINI" submit --host "$HOST" --config "$CONFIG" \
   --intent "$EVIDENCE/alice-denied-intent.json" --key "$EVIDENCE/alice.key" \
   --dir "$EVIDENCE/alice-denied-attempt" >"$EVIDENCE/alice-denied.stdout" \
-  2>"$EVIDENCE/alice-denied.stderr"; then
-  echo "Alice mutation unexpectedly passed the installed rule" >&2
-  exit 1
-fi
-test -s "$EVIDENCE/alice-denied-attempt/call.bin"
-refusal "$EVIDENCE/alice-denied-attempt/outcome.json"
-test -f "$EVIDENCE/alice-denied-attempt/signed-observation.bin"
+  2>"$EVIDENCE/alice-denied.stderr" || status=$?
+[ "$status" -eq 3 ] || {
+  echo "Alice mutation: expected a prepare refusal (exit 3), got exit $status" >&2; exit 1; }
+AD="$EVIDENCE/alice-denied-attempt"
+test -f "$AD/signed-observation.bin"
+test ! -e "$AD/plan.bin"
+test ! -e "$AD/call.bin"
+test ! -e "$AD/outcome.json"
+jq -e '.type == "minidregg-pre-submit-refusal-v1" and .stage == "prepare" and
+  .operation == 1' "$AD/pre-submit-refusal.json" >/dev/null
+[ "$(head -c 1 "$AD/pre-submit-refusal.frame" | od -An -tu1 | tr -d ' ')" = 253 ] || {
+  echo "Alice mutation: prepare refusal is not a NO_RECORD (253) frame" >&2; exit 1; }
+tail -c +2 "$AD/pre-submit-refusal.frame" >"$AD/prepare-refusal.bin"
+"$HOST" "$CONFIG" inspect outcome "$AD/prepare-refusal.bin" "$AD/prepare-refusal.json" \
+  >"$AD/prepare-refusal.inspect.out" 2>&1
+# Decoded by the Host itself: law-denied by the installed rule, whose only write clause is subject 8's.
+jq -e '.type == "refused" and .reason == "law-denied" and .effect == "no-record" and
+  (.leaf | type == "object") and
+  (.explain | type == "string" and contains("verb == write") and contains("subject == 8"))' \
+  "$AD/prepare-refusal.json" >/dev/null
 query_resource alice-after-denial 7 61 "$EVIDENCE/alice.key" 30008
 test "$(challenge_decimal "$EVIDENCE/alice-after-denial/challenge.json" worldRoot)" = "$BEFORE_DENIAL"
 test "$(challenge_decimal "$EVIDENCE/alice-after-denial/challenge.json" height)" = 12

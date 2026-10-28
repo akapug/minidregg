@@ -350,7 +350,13 @@ EOF
 "$MINI" query --host "$HOST" --config "$CONFIG" \
   --intent "$EVIDENCE/query-content-final.json" --key "$EVIDENCE/alice.key" --view resource \
   --dir "$EVIDENCE/query-content-final" >"$EVIDENCE/query-content-final.stdout"
-jq -e '[.cell.entries[].type] | sort == ["atom", "document", "element"]' \
+# The element tree (Kernel/ContentResource): document order is the tree's walk, so the created
+# atom is placed as an atom element under the document's root container.
+jq -e '([.cell.entries[].type] | sort == ["atom", "document", "element", "element"]) and
+  ([.cell.entries[] | select(.type == "element" and .id == "1001" and .parent == null and
+     .body == {type: "container", children: ["7001"]})] | length == 1) and
+  ([.cell.entries[] | select(.type == "element" and .id == "7001" and .parent == "1001" and
+     .body == {type: "atom", atom: "7001"})] | length == 1)' \
   "$EVIDENCE/query-content-final/view.json" >/dev/null
 jq -e '[.cell.entries[] | select(.type == "atom" and .id == "7001" and .payload == "68656c6c6f")] | length == 1' \
   "$EVIDENCE/query-content-final/view.json" >/dev/null
