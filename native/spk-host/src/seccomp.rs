@@ -18,8 +18,6 @@ const BPF_LD_W_ABS: u16 = 0x20;
 const BPF_JMP_JEQ_K: u16 = 0x15;
 const BPF_JMP_JGE_K: u16 = 0x35;
 const BPF_JMP_JSET_K: u16 = 0x45;
-const BPF_JMP_JA: u16 = 0x05;
-const BPF_ALU_AND_K: u16 = 0x54;
 const BPF_RET_K: u16 = 0x06;
 
 /// `struct seccomp_data` offsets: nr, arch, then u64 args from byte 16. Little-endian only.
@@ -166,19 +164,6 @@ enum Action {
         values: Vec<u32>,
         otherwise: u32,
     },
-    /// Allowed iff ANY clause holds; a clause holds iff EVERY term in it holds. A term compares
-    /// the low 32 bits of one argument, optionally masked first, with a list of values.
-    AllowWhen {
-        clauses: Vec<Vec<Term>>,
-        otherwise: u32,
-    },
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct Term {
-    arg: u8,
-    mask: Option<u32>,
-    values: Vec<u32>,
 }
 
 /// A parsed policy: ordered (syscall number, action) rules and the default errno.
@@ -265,38 +250,6 @@ impl Policy {
                     let action = Action::AllowArg { arg, test, values, otherwise: errno(code)? };
                     push(name, action, &mut rules)?;
                 }
-                ["allow-when", name, rest @ ..] => {
-                    // allow-when NAME TERM [and TERM]... [or TERM [and TERM]...]... else ERRNO
-                    // TERM = ARG [masked MASK] in VALUE...
-                    let [body @ .., "else", code] = rest else {
-                        return Err(bad());
-                    };
-                    let mut clauses = Vec::new();
-                    for clause in body.split(|w| *w == "or") {
-                        let mut terms = Vec::new();
-                        for term in clause.split(|w| *w == "and") {
-                            let (arg, mask, values) = match term {
-                                [arg, "masked", mask, "in", values @ ..] => (arg, Some(number(mask)?), values),
-                                [arg, "in", values @ ..] => (arg, None, values),
-                                _ => return Err(bad()),
-                            };
-                            let arg: u8 = arg.parse().map_err(|_| bad())?;
-                            if arg > 5 || values.is_empty() || values.len() > 16 {
-                                return Err(bad());
-                            }
-                            let values = values.iter().map(|v| number(v)).collect::<io::Result<_>>()?;
-                            terms.push(Term { arg, mask, values });
-                        }
-                        if terms.len() > 4 {
-                            return Err(bad());
-                        }
-                        clauses.push(terms);
-                    }
-                    if clauses.len() > 4 {
-                        return Err(bad());
-                    }
-                    push(name, Action::AllowWhen { clauses, otherwise: errno(code)? }, &mut rules)?;
-                }
                 _ => return Err(bad()),
             }
         }
@@ -359,38 +312,6 @@ impl Policy {
                         }
                     }
                 }
-                Action::AllowWhen { clauses, otherwise } => {
-                    // JEQ nr (jf patched to skip the block), then per clause per term:
-                    // LD arg [AND mask] JEQ value... (a match jumps to the next term) JA fail;
-                    // the last term of a clause ends in RET ALLOW, and a failed term jumps to
-                    // the next clause (the last clause's to the refusal). Every path ends in RET.
-                    let head = program.0.len();
-                    program.jump(BPF_JMP_JEQ_K, *nr, 0, 0);
-                    for clause in clauses {
-                        let mut fails = Vec::new();
-                        for term in clause {
-                            program.load(offset_arg_low(term.arg));
-                            if let Some(mask) = term.mask {
-                                program.alu_and(mask);
-                            }
-                            for (i, value) in term.values.iter().enumerate() {
-                                let to_pass = (term.values.len() - i) as u8;
-                                program.jump(BPF_JMP_JEQ_K, *value, to_pass, 0);
-                            }
-                            fails.push(program.0.len());
-                            program.jump_always(0);
-                        }
-                        program.ret(SECCOMP_RET_ALLOW);
-                        let next = program.0.len();
-                        for at in fails {
-                            program.0[at].k = (next - at - 1) as u32;
-                        }
-                    }
-                    program.ret(SECCOMP_RET_ERRNO | otherwise);
-                    let skip = program.0.len() - head - 1;
-                    program.0[head].jf = u8::try_from(skip)
-                        .map_err(|_| invalid("allow-when block exceeds a conditional jump".into()))?;
-                }
             }
         }
         program.ret(SECCOMP_RET_ERRNO | self.default_errno);
@@ -432,12 +353,6 @@ impl Program {
     }
     fn ret(&mut self, k: u32) {
         self.0.push(Insn { code: BPF_RET_K, jt: 0, jf: 0, k });
-    }
-    fn alu_and(&mut self, k: u32) {
-        self.0.push(Insn { code: BPF_ALU_AND_K, jt: 0, jf: 0, k });
-    }
-    fn jump_always(&mut self, k: u32) {
-        self.0.push(Insn { code: BPF_JMP_JA, jt: 0, jf: 0, k });
     }
 }
 
@@ -511,8 +426,6 @@ mod tests {
                     acc = u32::from_ne_bytes(data[at..at + 4].try_into().unwrap());
                 }
                 BPF_RET_K => return insn.k,
-                BPF_ALU_AND_K => acc &= insn.k,
-                BPF_JMP_JA => pc += insn.k as usize,
                 code => {
                     let taken = match code {
                         BPF_JMP_JEQ_K => acc == insn.k,
@@ -601,10 +514,6 @@ mod tests {
         for family in [libc::AF_NETLINK, libc::AF_PACKET, libc::AF_VSOCK, libc::AF_BLUETOOTH] {
             assert_eq!(verdict(libc::SYS_socket, [family as u64, 1, 0, 0, 0, 0]), afno);
         }
-        for family in [libc::AF_PACKET, libc::AF_VSOCK, libc::AF_BLUETOOTH] {
-            // Raw, datagram and protocol 0, the netlink-route shape: only netlink may use it.
-            assert_eq!(verdict(libc::SYS_socket, [family as u64, 3, 0, 0, 0, 0]), afno);
-        }
         assert_eq!(verdict(libc::SYS_ioctl, [0, libc::FIONREAD, 0, 0, 0, 0]), SECCOMP_RET_ALLOW);
         assert_eq!(verdict(libc::SYS_ioctl, [0, libc::TIOCSTI, 0, 0, 0, 0]), EPERM);
         // The kernel truncates the request to 32 bits; so does the filter.
@@ -613,50 +522,6 @@ mod tests {
         assert_eq!(verdict(libc::SYS_personality, [0, 0, 0, 0, 0, 0]), SECCOMP_RET_ALLOW);
         assert_eq!(verdict(libc::SYS_personality, [0xffff_ffff, 0, 0, 0, 0, 0]), SECCOMP_RET_ALLOW);
         assert_eq!(verdict(libc::SYS_personality, [0x0040000, 0, 0, 0, 0, 0]), EPERM);
-    }
-
-    /// The one netlink shape the policy allows: socket(AF_NETLINK, SOCK_RAW|SOCK_DGRAM [|flags],
-    /// NETLINK_ROUTE). Anything else on AF_NETLINK keeps the family refusal.
-    #[test]
-    fn netlink_is_allowed_for_route_raw_or_dgram_only() {
-        let afno = SECCOMP_RET_ERRNO | libc::EAFNOSUPPORT as u32;
-        let family = libc::AF_NETLINK as u64;
-        let flags = (libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK) as u64;
-        for ty in [libc::SOCK_RAW as u64, libc::SOCK_DGRAM as u64] {
-            assert_eq!(verdict(libc::SYS_socket, [family, ty, 0, 0, 0, 0]), SECCOMP_RET_ALLOW, "type {ty}");
-            assert_eq!(verdict(libc::SYS_socket, [family, ty | flags, 0, 0, 0, 0]), SECCOMP_RET_ALLOW);
-        }
-        for protocol in [
-            libc::NETLINK_USERSOCK, libc::NETLINK_FIREWALL, libc::NETLINK_SOCK_DIAG,
-            libc::NETLINK_NFLOG, libc::NETLINK_XFRM, libc::NETLINK_SELINUX, libc::NETLINK_ISCSI,
-            libc::NETLINK_AUDIT, libc::NETLINK_FIB_LOOKUP, libc::NETLINK_CONNECTOR,
-            libc::NETLINK_NETFILTER, libc::NETLINK_IP6_FW, libc::NETLINK_DNRTMSG,
-            libc::NETLINK_KOBJECT_UEVENT, libc::NETLINK_GENERIC, libc::NETLINK_SCSITRANSPORT,
-            libc::NETLINK_ECRYPTFS, libc::NETLINK_RDMA, libc::NETLINK_CRYPTO,
-        ] {
-            assert_eq!(
-                verdict(libc::SYS_socket, [family, libc::SOCK_RAW as u64, protocol as u64, 0, 0, 0]),
-                afno,
-                "protocol {protocol}"
-            );
-        }
-        // Not raw or datagram (stream, seqpacket, rdm, packet): refused whatever the protocol.
-        for ty in [libc::SOCK_STREAM, libc::SOCK_SEQPACKET, libc::SOCK_RDM, 10] {
-            assert_eq!(verdict(libc::SYS_socket, [family, ty as u64, 0, 0, 0, 0]), afno, "type {ty}");
-        }
-    }
-
-    #[test]
-    fn allow_when_grammar_is_refused_when_malformed() {
-        for text in [
-            "default ENOSYS\nallow-when socket 0 in else EAFNOSUPPORT",
-            "default ENOSYS\nallow-when socket 6 in 1 else EAFNOSUPPORT",
-            "default ENOSYS\nallow-when socket 0 in 1 and else EAFNOSUPPORT",
-            "default ENOSYS\nallow-when socket 0 masked in 1 else EAFNOSUPPORT",
-            "default ENOSYS\nallow-when socket 0 in 1",
-        ] {
-            assert!(Policy::parse(text).is_err(), "{text}");
-        }
     }
 
     #[test]
