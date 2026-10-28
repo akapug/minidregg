@@ -1,6 +1,6 @@
 """RSS is an explicit data feed, never an HTML scraping fallback."""
 from unittest import TestCase, main
-from binding import Refusal, rss_decode
+from binding import Refusal, rss_decode, decode_http
 
 class RSSFeed(TestCase):
     def test_video_feed_metadata_and_binary_enclosure(self):
@@ -24,6 +24,12 @@ class RSSFeed(TestCase):
         for raw in samples:
             with self.assertRaises(Refusal):
                 rss_decode(raw, 10)
+
+    def test_http_decoder_dispatches_declared_rss(self):
+        declaration = {'limits': {'replyBytes': 4096, 'snapshotDocuments': 10}}
+        op = {'write': False, 'binding': {'decode': 'rss', 'status': [200]}}
+        self.assertEqual(decode_http(declaration, op,
+            (200, {'content-type': 'text/xml'}, b'<rss version="2.0"><channel/></rss>')), [])
 
     def test_item_limit_checked_before_emitting_feed(self):
         raw = b'<rss version="2.0"><channel><item><guid>one</guid></item><item><guid>two</guid></item></channel></rss>'

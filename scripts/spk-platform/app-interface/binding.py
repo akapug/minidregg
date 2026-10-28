@@ -327,6 +327,8 @@ def decode_http(d, op, response):
             return {'contentBase64': base64.b64encode(body).decode()}
         if mode == 'status':
             return {'status': status}
+        if mode == 'rss':
+            return rss_decode(body, d['limits']['snapshotDocuments'])
         if mode in ('dav-multistatus', 'caldav-multistatus'):
             return dav_decode(body, calendar=mode == 'caldav-multistatus')
         raise Refusal('binding-decoder-unsupported')
