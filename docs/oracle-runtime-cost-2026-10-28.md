@@ -63,8 +63,8 @@ Source: `Host/ApplicationAgentLifetimeGrantInspection.lean`,
 
 ## Sharing independent verification across controllers
 
-The next target is one consent-owned verification basis for compatible callers.
-Compatibility requires the same full `NativeHost.Config`: deployment, federation,
+The delegated service already shares one independently verified basis across
+connections from its configured controller UID. Further sharing requires the same full `NativeHost.Config`: deployment, federation,
 profile/template/tariff, genesis and seed pins, Store transport and checkpoint
 key, and stable signature semantics. A shared Store path alone is insufficient.
 Per-caller consent settings also retain provider-route schedules, lifecycle
@@ -73,16 +73,28 @@ management and Objective adapter pins; requests still name their own signer.
 The current delegated proxy already shares one independently admitted frontier
 across connections, but authenticates exactly one controller UID. Its handshake
 pins the provider image, exact settings bytes and peer identity. The deployed
-service unit is named per Store. It cannot serve dozens of distinct controller
-UIDs merely by broadening the peer allowlist.
+service unit is named per Store. The installer allocates one `mini-c-STORE`
+UID/home and stages one controller configuration (or one worker task). That
+controller already holds distinct native parent, tool, provider and dispatch
+subjects and launches sandboxed workers under the same trusted UID. Many native
+principals or application routes therefore do not imply many consent processes.
+The app-market worker likewise serves many members/apps through one configured
+world/profile. The capacity unit to measure is the Store/controller allocation.
+
+Separate Hermes room instances use `mini-h-INSTANCE` UIDs and may point at the
+same Node host configuration. Those distinct OS trust domains, rather than the
+number of native subjects inside one controller, are where cross-UID sharing
+could remove duplicate verification. Their actual configuration/binding equality
+must be established before choosing a pool.
 
 A shared service must keep authenticated caller channels and each caller's held
 anchor/prefix check, while reusing an immutable basis admitted by consent itself.
 Rollback, rewritten-prefix and failed-suffix observations must retain their
 refusal/poisoning behavior. A serving Host's claimed verification is not a
-replacement for independent consent. The bounded follow-up is to separate the
-shared source basis from per-caller settings and held-frontier state, with
-receiving-path checks for that isolation; it is not implemented by this change.
+replacement for independent consent. The bounded follow-up is to map actual Store/controller allocations and measure
+per-Store RSS first. Where compatible independent instances duplicate a basis,
+separate that shared source basis from per-caller settings and held-frontier
+state, with receiving-path checks for isolation. This change adds no new pool.
 
 Source: `Kernel.ConsentAnchor.Basis`, `Host.ClientConsentCore.Settings.config`,
 `native/resource-client/src/consent_proxy.rs` (`Selection`, `Worker`, `serve`),
