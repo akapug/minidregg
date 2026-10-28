@@ -7,3 +7,4 @@ import Effects.Revival.Statements  -- the widened declaration (Substrate, Effect
 import Effects.Revival.EngineProofs  -- the engine and completeness keystones PROVED, with every satisfiable/teeth/premise witness of the two-entry pole (kernel-free closure)
 import Effects.Revival.ContentProofs  -- ContentComplete PROVED: every content command writes only its declared fields (contentActionFrame, per action), never the blinding, and its descriptor plus the rotation replays
 import Effects.Revival.ActivityStatements  -- an activity effect refuses at two levels, STATED (TwoLevels on any yield judgment; today's commitYield the satisfiable pole, the collapsed judgment the teeth); migration step 2's gate
+import Effects.Revival.ActivityProofs  -- the two refusal levels PROVED of today's commitYield, with the premise inhabitant (a transfer to the purse, refused `reserved`) and the collapsed judgment refuted

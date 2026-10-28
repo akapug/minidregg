@@ -414,8 +414,12 @@ Engine/Statements split).
    on dregg-build from that candidate (your own run directory; stop the world's servers),
    then run `scripts/native-doc-write-fixture/generate.sh` where Lean may run (hbox private
    tree, merged to that main), then check ContentFixture.
-8. `ContentAgreement contentSpec`: unfold `computeTarget`'s content arm, then
-   `ContentResource.prepareCell_ok_of_run`, `Patch.run_append`, validate, `store_run_validFrom`.
+8. `ContentAgreement contentSpec`: **PROVED** (`contentAgreement`, ContentProofs, pinned), so
+   `LiveKeystone` holds (`contentAgreement` with `contentComplete`).  Also proved (pass 28
+   statements): `prefixKeystone`, `prefixSatisfiable`, `prefixTeeth` (EngineProofs),
+   `contentPrefixAgreement`, `contentPrefixAccepts`, `contentPrefixTeeth` (ContentProofs),
+   `twoLevelsSatisfiable`, `twoLevelsPremise`, `twoLevelsTeeth`
+   (`Effects/Revival/ActivityProofs.lean`, imported by Effects.lean).
 9. `HostKeystone`, `PrepareFactors` and `HostLegacyCensus` land with the migration commit (§5 step 1), with the
    platform lane (L1).
 

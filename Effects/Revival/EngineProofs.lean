@@ -331,8 +331,65 @@ theorem extensionTeeth : ExtensionTeeth := by
   · have retired := safe.2 1 (by simp)
     simp [toyPole, List.lookup] at retired
 
+/-! ## Step 5: prefix consumption. -/
+
+theorem uint8_toNat_ofNat_small {n : Nat} (small : n < 256) : (UInt8.ofNat n).toNat = n := by
+  simp only [UInt8.toNat_ofNat']
+  exact Nat.mod_eq_of_lt small
+
+theorem readPrefix_consumes {Ctx Cell : Type} (R : Registry Ctx Cell) :
+    ConsumesPrefix R (readPrefix R) where
+  consume code e found small op suffix := by
+    simp [readPrefix, uint8_toNat_ofNat_small small, found, StreamCodec.decodePrefix_encode]
+  refuse tag rest missing := by
+    simp [readPrefix, missing]
+  canonical bytes code opBytes suffix read := by
+    rcases bytes with _ | ⟨tag, rest⟩
+    · cases read
+    · simp only [readPrefix] at read
+      cases found : R.lookup tag.toNat with
+      | none => simp [found] at read
+      | some e =>
+        simp only [found] at read
+        cases decoded : e.spec.opStream.decodePrefix rest with
+        | none => simp [decoded] at read
+        | some pair =>
+          obtain ⟨op, after⟩ := pair
+          simp only [decoded, Option.map_some, Option.some.injEq, Prod.mk.injEq] at read
+          obtain ⟨rfl, rfl, rfl⟩ := read
+          refine ⟨e, found, UInt8.toNat_lt tag, ⟨op, rfl⟩, ?_⟩
+          rw [StreamCodec.encode_decodePrefix _ _ _ _ decoded, UInt8.ofNat_toNat]
+
+theorem prefixKeystone (Ctx Cell : Type) : PrefixKeystone Ctx Cell := by
+  refine ⟨readPrefix_consumes, ?_⟩
+  intro R R' ext code present small rest
+  cases found : R.lookup code with
+  | none => exact absurd found present
+  | some e =>
+    simp only [readPrefix, uint8_toNat_ofNat_small small, found, ext code e found]
+
+theorem prefixSatisfiable : PrefixSatisfiable :=
+  ⟨readPrefix_consumes toyPole,
+    (readPrefix_consumes toyPole).consume 0 (toyEntry entryASpec) rfl (by decide) (5 : Nat) [7]⟩
+
+theorem prefixTeeth : PrefixTeeth := by
+  refine ⟨fun consumes => ?_, fun consumes => ?_, ?_⟩
+  · have read := consumes.consume 0 (toyEntry entryASpec) rfl (by decide) (5 : Nat) [7]
+    simp [readWhole, toyPole, toyEntry, entryASpec, StreamCodec.toLawful,
+      StreamCodec.decodePrefix_encode] at read
+  · have read := consumes.refuse 2 (StreamCodec.nat.encode 5) (by simp [toyPole])
+    simp [readFailOpen, readPrefix, toyPole, toyEntry, entryASpec, List.lookup] at read
+    rw [show StreamCodec.nat.encode 5 = StreamCodec.nat.encode 5 ++ [] from
+      (List.append_nil _).symm, StreamCodec.decodePrefix_encode] at read
+    cases read
+  · simp [readPrefix, toyRebindPole, toyPole, toyEntry, entryASpec, entryBSpec, StreamCodec.nat,
+      StreamCodec.bool, StreamCodec.decodeNatPrefix, List.lookup]
+
 /-! ## Axiom pins. -/
 
+#assert_axioms prefixKeystone
+#assert_axioms prefixSatisfiable
+#assert_axioms prefixTeeth
 #assert_axioms legacyCensusSatisfiable
 #assert_axioms legacyCensusTeeth
 #assert_axioms oneSourceSatisfiable
