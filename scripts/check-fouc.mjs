@@ -151,7 +151,7 @@ async function startSite() {
   await waitFor(async () => (await get(port, "/index.html")).status === 200, "the site server");
   const css = await get(port, "/site.css");
   if (!/^text\/css/.test(css.headers["content-type"] || "")) throw new Error(`site.css served as ${css.headers["content-type"]}`);
-  return fs.readdirSync(path.join(ROOT, "website")).filter((f) => f.endsWith(".html") && !/http-equiv="refresh"/.test(fs.readFileSync(path.join(ROOT, "website", f), "utf8"))).sort() // a redirect page paints nothing to compare.map((f) => ({ name: `site ${f}`, url: `http://127.0.0.1:${port}/${f}`, cookies: false, chrome: "header" }));
+  return fs.readdirSync(path.join(ROOT, "website")).filter((f) => f.endsWith(".html") && !/http-equiv="refresh"/.test(fs.readFileSync(path.join(ROOT, "website", f), "utf8"))).sort() /* a redirect page paints nothing to compare */.map((f) => ({ name: `site ${f}`, url: `http://127.0.0.1:${port}/${f}`, cookies: false, chrome: "header" }));
 }
 
 // ---------------------------------------------------------------- the filmstrip
