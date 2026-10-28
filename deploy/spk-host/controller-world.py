@@ -1262,7 +1262,7 @@ def stage(store, helper, bundle_arg, bins_arg, upstream_arg, public_arg, worker=
     return {**r, 'stage': str(base / 'stage.json'), **({'consent': consent_record(base, r, pending)} if has_consent(r) else {})}
 
 
-def checked_units(base, r, partial=False, consent_upgrade_hashes=(), runtime_upgrade_hashes=(), proxy_upgrade_hashes=(), socket_upgrade_hashes=()):
+def checked_units(base, r, partial=False, consent_upgrade_hashes=(), runtime_upgrade_hashes=(), proxy_upgrade_hashes=(), socket_upgrade_hashes=(), mini_upgrade_hashes=()):
     stage_path = base / 'stage.json'
     if partial and not stage_path.exists():
         stage_path = base / 'stage-pending.json'
@@ -1288,7 +1288,8 @@ def checked_units(base, r, partial=False, consent_upgrade_hashes=(), runtime_upg
         if partial and not (base / 'bin' / n).exists() and not (base / 'bin' / n).is_symlink():
             continue
         digest = sha(read_file(base / 'bin' / n, 0, 256 * 1024 * 1024, True))
-        require(digest == stage['binaries'][n] or (n == 'grain-runtime' and digest in runtime_upgrade_hashes),
+        require(digest == stage['binaries'][n] or (n == 'grain-runtime' and digest in runtime_upgrade_hashes)
+                or (n == 'mini' and digest in mini_upgrade_hashes),
                 'controller binary changed')
     if stage.get('worker') and not partial:
         for name, digest in stage['worker']['binaries'].items():
@@ -1433,30 +1434,36 @@ def consent_storage_upgrade(store, helper):
 
 
 def runtime_upgrade(store, helper, source_arg):
+    return controller_binary_upgrade(store, helper, source_arg, 'grain-runtime')
+
+
+def controller_binary_upgrade(store, helper, source_arg, binary_name):
+    require(binary_name in ('grain-runtime', 'mini'), 'controller binary upgrade name refused')
+    label = 'runtime' if binary_name == 'grain-runtime' else 'mini'
     _, base, r = load(store, helper)
     stopped_controller_units(r)
     source = read_file(canonical(source_arg), r['operatorUid'], 256 * 1024 * 1024, executable=True)
     source_sha = sha(source)
-    intent_path = base / ('runtime-upgrade-' + source_sha + '.json')
-    root_binary, home_binary = base / 'bin/grain-runtime', Path(r['home']) / 'bin/grain-runtime'
+    intent_path = base / (label + '-upgrade-' + source_sha + '.json')
+    root_binary, home_binary = base / 'bin' / binary_name, Path(r['home']) / 'bin' / binary_name
     stage_path = base / 'stage.json'
     def archive(digest, kind):
         require(isinstance(digest, str) and re.fullmatch('[0-9a-f]{64}', digest), 'runtime upgrade digest malformed')
-        return base / 'configs' / ('runtime-upgrade-' + digest + '.' + kind)
+        return base / 'configs' / (label + '-upgrade-' + digest + '.' + kind)
     if not intent_path.exists() and not intent_path.is_symlink():
         stage = checked_units(base, r)
         old = read_file(root_binary, 0, 256 * 1024 * 1024, executable=True, required_mode=0o755)
-        require(sha(old) == stage['binaries']['grain-runtime'] and
+        require(sha(old) == stage['binaries'][binary_name] and
                 read_file(home_binary, r['uid'], 256 * 1024 * 1024, executable=True, required_mode=0o500) == old,
                 'controller runtime copies differ from retained stage')
         if old == source:
-            return {'store': store, 'alreadyConfigured': True, 'runtimeSha256': source_sha}
+            return {'store': store, 'alreadyConfigured': True, label + 'Sha256': source_sha}
         old_stage = read_file(stage_path, 0, 65536, required_mode=0o600)
         require(strict_json(old_stage) == stage, 'stage changed before runtime upgrade')
-        stage['binaries']['grain-runtime'] = source_sha
+        stage['binaries'][binary_name] = source_sha
         new_stage = encoded(stage)
         require(len(new_stage) <= 65536, 'runtime upgrade stage exceeds bound')
-        intent = {'protocol': 'mini-spk-controller-runtime-upgrade-v1', 'store': store,
+        intent = {'protocol': 'mini-spk-controller-' + label + '-upgrade-v1', 'store': store,
                   'oldBinarySha256': sha(old), 'newBinarySha256': source_sha,
                   'oldStageSha256': sha(old_stage), 'newStageSha256': sha(new_stage)}
         for raw, kind in ((old, 'binary'), (source, 'binary'), (old_stage, 'stage'), (new_stage, 'stage')):
@@ -1465,7 +1472,7 @@ def runtime_upgrade(store, helper, source_arg):
         publish_exact(intent_path, encoded(intent))
     intent = strict_json(read_file(intent_path, 0, 4096, required_mode=0o600))
     require(set(intent) == {'protocol', 'store', 'oldBinarySha256', 'newBinarySha256', 'oldStageSha256', 'newStageSha256'}
-            and intent['protocol'] == 'mini-spk-controller-runtime-upgrade-v1' and intent['store'] == store
+            and intent['protocol'] == 'mini-spk-controller-' + label + '-upgrade-v1' and intent['store'] == store
             and intent['newBinarySha256'] == source_sha, 'runtime upgrade intent differs')
     archives = {}
     for key, kind in (('oldBinary', 'binary'), ('newBinary', 'binary'), ('oldStage', 'stage'), ('newStage', 'stage')):
@@ -1473,26 +1480,108 @@ def runtime_upgrade(store, helper, source_arg):
         archives[key] = read_file(archive(digest, kind), 0, 256 * 1024 * 1024 if kind == 'binary' else 65536, required_mode=0o600)
         require(sha(archives[key]) == digest, 'runtime upgrade archived hash differs')
     expected = strict_json(archives['oldStage'])
-    require(expected['binaries']['grain-runtime'] == intent['oldBinarySha256'], 'runtime upgrade original pin differs')
-    expected['binaries']['grain-runtime'] = source_sha
+    require(expected['binaries'][binary_name] == intent['oldBinarySha256'], 'runtime upgrade original pin differs')
+    expected['binaries'][binary_name] = source_sha
     require(expected == strict_json(archives['newStage']) and archives['newBinary'] == source,
             'runtime upgrade exceeds exact binary change')
     require(sha(read_file(stage_path, 0, 65536, required_mode=0o600)) in
             (intent['oldStageSha256'], intent['newStageSha256']), 'stage is outside runtime upgrade')
     allowed = (intent['oldBinarySha256'], source_sha)
-    checked_units(base, r, runtime_upgrade_hashes=allowed)
+    checked_units(base, r, **{label + '_upgrade_hashes': allowed})
     for path, owner, mode in ((root_binary, 0, 0o755), (home_binary, r['uid'], 0o500)):
         require(sha(read_file(path, owner, 256 * 1024 * 1024, executable=True, required_mode=mode)) in allowed,
                 'runtime copy is outside exact upgrade')
     for path, owner, group, mode in ((root_binary, 0, 0, 0o755), (home_binary, r['uid'], r['gid'], 0o500)):
-        temporary = path.with_name('.grain-runtime-' + source_sha + '-next')
+        temporary = path.with_name('.' + binary_name + '-' + source_sha + '-next')
         publish_exact(temporary, source, owner, group, mode, 256 * 1024 * 1024)
         os.replace(temporary, path)
         sync_directory(path.parent)
     replace_root_record(stage_path, archives['newStage'], 0o600)
     checked_units(base, r)
-    return {'store': store, 'runtimeUpgrade': str(intent_path), 'runtimeSha256': source_sha,
-            'previousRuntimeSha256': intent['oldBinarySha256'], 'stageSha256': intent['newStageSha256']}
+    return {'store': store, label + 'Upgrade': str(intent_path), label + 'Sha256': source_sha,
+            'previous' + label.title() + 'Sha256': intent['oldBinarySha256'], 'stageSha256': intent['newStageSha256']}
+
+
+def checked_consent_memory(mib):
+    require(type(mib) is int and 256 <= mib <= 16384 and mib % 256 == 0,
+            'consent memory must be 256 through 16384 MiB in 256 MiB steps')
+    return mib
+
+
+def consent_memory_transition(stage, service, service_name, mib):
+    mib = checked_consent_memory(mib)
+    matches = list(re.finditer(rb'^MemoryMax=[0-9]+[MG]$', service, re.MULTILINE))
+    require(len(matches) == 1, 'consent service memory setting differs')
+    match = matches[0]
+    new_service = service[:match.start()] + f'MemoryMax={mib}M'.encode() + service[match.end():]
+    changed = strict_json(encoded(stage))
+    changed['consentMemoryMiB'] = mib
+    changed['consentMemoryRevision'] = 'consent-memory-' + str(mib) + '-' + sha(encoded(stage))
+    changed['units'][service_name] = sha(new_service)
+    return changed, new_service
+
+
+def consent_memory_upgrade(store, helper, mib_arg):
+    """Change an operator resource limit with all native authority pins intact."""
+    require(re.fullmatch('[1-9][0-9]{2,4}', mib_arg), 'consent memory argument malformed')
+    mib = checked_consent_memory(int(mib_arg))
+    _, base, r = load(store, helper)
+    require(has_consent(r), 'consent memory revision requires version-2 provisioning')
+    stopped_controller_units(r)
+    stage_path = base / 'stage.json'
+    current = strict_json(read_file(stage_path, 0, 65536, required_mode=0o600))
+    prefix = (current.get('consentMemoryRevision') if current.get('consentMemoryMiB') == mib
+              else 'consent-memory-' + str(mib) + '-' + sha(encoded(current)))
+    require(isinstance(prefix, str) and re.fullmatch('consent-memory-' + str(mib) + '-[0-9a-f]{64}', prefix),
+            'consent memory revision malformed')
+    intent_path = base / (prefix + '.json')
+    unit = r['units'][4]; unit_path = UNITS / unit
+    if current.get('consentMemoryMiB') == mib:
+        checked_units(base, r)
+        service = read_file(unit_path, 0, 16384, required_mode=0o644)
+        require(re.findall(rb'^MemoryMax=.*$', service, re.MULTILINE) == [f'MemoryMax={mib}M'.encode()],
+                'recorded consent memory differs from unit')
+        # Other exact upgrades may have followed this resource revision. Do not
+        # replay an old stage over their pins; the current verified unit suffices.
+        run(['/usr/bin/systemctl', 'daemon-reload'])
+        return {'store': store, 'consentMemoryUpgrade': str(intent_path), 'memoryMiB': mib,
+                'stageSha256': sha(encoded(current)), 'nativeOperationSubmitted': False, 'alreadyConfigured': True}
+    def archive(digest, kind):
+        require(isinstance(digest, str) and re.fullmatch('[0-9a-f]{64}', digest), 'consent memory archive hash malformed')
+        return base / 'configs' / (prefix + '-' + digest + '.' + kind)
+    if not intent_path.exists() and not intent_path.is_symlink():
+        stage = checked_units(base, r)
+        old_stage = read_file(stage_path, 0, 65536, required_mode=0o600)
+        require(strict_json(old_stage) == stage, 'consent memory stage changed')
+        old_unit = read_file(unit_path, 0, 16384, required_mode=0o644)
+        next_stage, next_unit = consent_memory_transition(stage, old_unit, unit, mib)
+        intent = {'protocol': 'mini-controller-consent-memory-v1', 'store': store, 'memoryMiB': mib}
+        for name, kind, raw in (('oldStage', 'stage', old_stage), ('newStage', 'stage', encoded(next_stage)),
+                                ('oldUnit', 'service', old_unit), ('newUnit', 'service', next_unit)):
+            intent[name + 'Sha256'] = sha(raw)
+            publish_exact(archive(sha(raw), kind), raw)
+        publish_exact(intent_path, encoded(intent))
+    intent = strict_json(read_file(intent_path, 0, 4096, required_mode=0o600))
+    require(set(intent) == {'protocol', 'store', 'memoryMiB', 'oldStageSha256', 'newStageSha256', 'oldUnitSha256', 'newUnitSha256'}
+            and intent['protocol'] == 'mini-controller-consent-memory-v1' and intent['store'] == store
+            and intent['memoryMiB'] == mib, 'consent memory intent differs')
+    kept = {}
+    for name, kind in (('oldStage', 'stage'), ('newStage', 'stage'), ('oldUnit', 'service'), ('newUnit', 'service')):
+        digest = intent[name + 'Sha256']
+        kept[name] = read_file(archive(digest, kind), 0, 65536, required_mode=0o600)
+        require(sha(kept[name]) == digest, 'consent memory archived bytes differ')
+    expected_stage, expected_unit = consent_memory_transition(strict_json(kept['oldStage']), kept['oldUnit'], unit, mib)
+    require(expected_stage['consentMemoryRevision'] == prefix and encoded(expected_stage) == kept['newStage']
+            and expected_unit == kept['newUnit'], 'consent memory change exceeds resource setting')
+    require(sha(read_file(stage_path, 0, 65536, required_mode=0o600)) in
+            (intent['oldStageSha256'], intent['newStageSha256']), 'stage is outside consent memory revision')
+    checked_units(base, r, consent_upgrade_hashes=(intent['oldUnitSha256'], intent['newUnitSha256']))
+    replace_root_record(unit_path, kept['newUnit'], 0o644)
+    replace_root_record(stage_path, kept['newStage'], 0o600)
+    run(['/usr/bin/systemctl', 'daemon-reload'])
+    checked_units(base, r)
+    return {'store': store, 'consentMemoryUpgrade': str(intent_path), 'memoryMiB': mib,
+            'stageSha256': intent['newStageSha256'], 'nativeOperationSubmitted': False}
 
 
 def status_proxy_transition(stage, r, base, service, sock, digest):
@@ -2364,6 +2453,8 @@ def main(args):
             result = upgrade_public_listener(store,helper,*extra)
         elif action == 'controller-consent-storage' and not extra: result = consent_storage_upgrade(store, helper)
         elif action == 'controller-runtime-upgrade' and len(extra) == 1: result = runtime_upgrade(store, helper, extra[0])
+        elif action == 'controller-mini-upgrade' and len(extra) == 1: result = controller_binary_upgrade(store, helper, extra[0], 'mini')
+        elif action == 'controller-consent-memory' and len(extra) == 1: result = consent_memory_upgrade(store, helper, extra[0])
         elif action == 'controller-status-proxy-upgrade' and len(extra) == 1: result = status_proxy_upgrade(store, helper, extra[0])
         elif action == 'controller-operator-endpoint' and len(extra) == 1: result = operator_endpoint_upgrade(store, helper, extra[0])
         elif action == 'controller-enroll' and len(extra) == 1:

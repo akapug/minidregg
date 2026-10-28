@@ -1217,6 +1217,57 @@ class ControllerWorldTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'controller unit changed'):
                     c.status_proxy_upgrade(r['store'], '/unused', str(source))
 
+    def test_mini_upgrade_keeps_consent_and_config_pins_and_resumes_exact_publication(self):
+        with self.storage_upgrade_fixture('mini-upgrade') as (base,r,units,raw,_):
+            home = Path(r['home']); (home/'bin').mkdir(mode=0o700)
+            old = (base/'bin/mini').read_bytes()
+            (home/'bin/mini').write_bytes(old); (home/'bin/mini').chmod(0o500)
+            source = self.file('mini-upgrade-source', b'qualified successor Mini', 0o700)
+            original = c.replace_root_record
+            def interrupt(*args):
+                original(*args)
+                raise OSError('interrupted stage publication')
+            with patch.object(c, 'replace_root_record', side_effect=interrupt), self.assertRaises(OSError):
+                c.controller_binary_upgrade(r['store'], '/unused', str(source), 'mini')
+            result = c.controller_binary_upgrade(r['store'], '/unused', str(source), 'mini')
+            self.assertEqual(result['miniSha256'], c.sha(source.read_bytes()))
+            self.assertEqual((home/'bin/mini').read_bytes(), source.read_bytes())
+            old_stage = json.loads(raw); new_stage = c.checked_units(base, r)
+            expected = json.loads(raw); expected['binaries']['mini'] = result['miniSha256']
+            self.assertEqual(new_stage, expected)
+            self.assertEqual(new_stage['consent'], old_stage['consent'])
+            self.assertEqual(c.consent_record(base, r, new_stage)['transportSha256'], result['miniSha256'])
+            self.assertEqual((base/'configs'/('mini-upgrade-'+c.sha(old)+'.binary')).read_bytes(), old)
+            (base/'bin/mini').write_bytes(b'foreign')
+            with self.assertRaisesRegex(ValueError, 'controller binary changed'):
+                c.controller_binary_upgrade(r['store'], '/unused', str(source), 'mini')
+
+    def test_consent_memory_revision_is_stopped_resumable_and_changes_no_authority(self):
+        with self.storage_upgrade_fixture('memory') as (base,r,units,raw,_):
+            original = c.replace_root_record; count = [0]
+            def interrupt(*args):
+                original(*args); count[0] += 1
+                if count[0] == 1: raise OSError('interrupted resource publication')
+            with patch.object(c, 'replace_root_record', side_effect=interrupt), self.assertRaises(OSError):
+                c.consent_memory_upgrade(r['store'], '/unused', '4096')
+            result = c.consent_memory_upgrade(r['store'], '/unused', '4096')
+            self.assertFalse(result['nativeOperationSubmitted'])
+            current = c.checked_units(base, r); before = json.loads(raw)
+            self.assertEqual(current['consent'], before['consent'])
+            self.assertEqual(current['binaries'], before['binaries'])
+            for unit in r['units'][:4]: self.assertEqual(current['units'][unit], before['units'][unit])
+            self.assertIn(b'\nMemoryMax=4096M\n', (units/r['units'][4]).read_bytes())
+            self.assertTrue(c.consent_memory_upgrade(r['store'], '/unused', '4096')['alreadyConfigured'])
+            # Distinct revisions can raise or lower a stopped operator limit.
+            c.consent_memory_upgrade(r['store'], '/unused', '8192')
+            c.consent_memory_upgrade(r['store'], '/unused', '4096')
+            self.assertIn(b'\nMemoryMax=4096M\n', (units/r['units'][4]).read_bytes())
+            for bad in ('0', 'true', '4096\nExecStart=/foreign', '999999', '4097'):
+                with self.assertRaises(ValueError): c.consent_memory_upgrade(r['store'], '/unused', bad)
+            with patch.object(c, 'stopped_controller_units', side_effect=ValueError('not stopped')):
+                with self.assertRaisesRegex(ValueError, 'not stopped'):
+                    c.consent_memory_upgrade(r['store'], '/unused', '4096')
+
     def test_status_proxy_transition_refuses_extra_or_reordered_listeners(self):
         with self.storage_upgrade_fixture('status-layout') as (base,r,units,raw,_):
             r['workerTask'] = '9870001'
