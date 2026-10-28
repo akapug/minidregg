@@ -42,37 +42,7 @@ write_HedgeDocRT() {
   echo "0 operation acked but /$note/download never showed the text (last $got)"
 }
 
-# Wekan (12.65): Meteor app; Sandstorm login is the DDP `login` method with {sandstorm:true}
-# (models/users.js sandstorm handler), then client-allowed collection inserts
-# (/boards/insert, /swimlanes/insert, /lists/insert, /cards/insert) and the `board` publication.
-# The 2026-10-27 run never reached it: the install is refused by name ("SPK exceeds decoded bound").
-write_Wekan() {
-  local res; res=$(python3 -I "$rt_py" wekan "$dir" "featured card by a resident" 2>&1 | tail -1)
-  [[ $res == *'"ok": true'* ]] && echo "1 DDP login+inserts, card read back from the board subscription: ${res:0:120}" || echo "0 DDP: ${res:0:200}"
-}
-
-# Gogs 0.11.34: reverse-proxy (Sandstorm header) login; forms carry `_csrf` and are bound to the
-# session cookies Gogs sets (i_like_gogits, _csrf), so this recipe uses jreq (featured-qualify.sh), a cookie jar on top of
-# the route token. Create: POST /repo/create (routers/repo/repo.go CreatePost: user_id, repo_name,
-# auto_init). File: POST /<owner>/<repo>/_new/master/ (routers/repo/editor.go NewFilePost:
-# tree_path, content, commit_summary, commit_choice=direct). Read: GET /<owner>/<repo>/raw/master/<file>.
-# `git push` needs streamed request bodies, which the bridge does not serve yet: waiting on streamed bodies.
-write_Gogs() {
-  jar=""
-  jreq GET /repo/create; local form=$JS
-  local csrf uid; csrf=$(grep -o 'name="_csrf" value="[^"]*"' "$body" | head -1 | sed 's/.*value="//; s/"//')
-  uid=$(grep -o 'name="user_id" value="[0-9]*"' "$body" | head -1 | sed 's/.*value="//; s/"//')
-  [[ $form == 200 && -n $csrf && -n $uid ]] || { echo "0 GET /repo/create $form, _csrf '${csrf:-}', user_id '${uid:-}'"; return; }
-  jreq POST /repo/create --data-urlencode "_csrf=$csrf" --data-urlencode "user_id=$uid" \
-    --data-urlencode repo_name=featured --data-urlencode 'description=made by a resident' --data-urlencode auto_init=on \
-    --data-urlencode readme=Default; local made=$JS
-  local repo; repo=$(grep -i '^location:' "$body.headers" | tr -d '\r' | awk '{print $2}'); repo=${repo#https://grain.test}
-  [[ $made =~ ^30 && -n $repo ]] || { echo "0 POST /repo/create $made (app output names the cause)"; return; }
-  jreq GET "$repo/_new/master/"; local ed=$JS
-  csrf=$(grep -o 'name="_csrf" value="[^"]*"' "$body" | head -1 | sed 's/.*value="//; s/"//')
-  [[ $ed == 200 && -n $csrf ]] || { echo "0 GET $repo/_new/master/ $ed, _csrf '${csrf:-}'"; return; }
-  jreq POST "$repo/_new/master/" --data-urlencode "_csrf=$csrf" --data-urlencode tree_path=featured.txt \
-    --data-urlencode 'content=filed by a resident' --data-urlencode 'commit_summary=resident' --data-urlencode commit_choice=direct; local save=$JS
-  jreq GET "$repo/raw/master/featured.txt"; local got=$JS
-  [[ $save =~ ^30 && $got == 200 ]] && grep -q 'filed by a resident' "$body" && echo "1 POST /repo/create $made -> $repo; _new save $save; raw $got"
-}
+# The typed declarations own Wekan/Gogs methods, authentication and read-back.
+# These rows exercise the same source that emits their Hermes schemas.
+write_Wekan() { typed_app_row wekan; }
+write_Gogs() { typed_app_row gogs; }

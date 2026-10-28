@@ -1,0 +1,1958 @@
+{
+  "fetchedAt": "2026-10-28",
+  "indexUrl": "https://app-index.sandstorm.io/apps/index.json",
+  "indexSha256": "b321865fa74ec921c0d53ad54e6fc02d66af32d051c074910e6fef32af350038",
+  "apps": [
+    {
+      "metadata": {
+        "appId": "h37dm17aa89yrd8zuqpdn36p6zntumtv08fjpu8a8zrte7q1cn60",
+        "name": "Etherpad",
+        "version": "1.8.18-1",
+        "packageId": "aee0806c9547d1f53c1ccef38ac195ba",
+        "imageId": "cf1503366d38dfcdb06c650bc5ec95df.svg",
+        "webLink": "https://etherpad.org/",
+        "codeLink": "https://github.com/sandstorm-org/etherpad-lite-sandstorm",
+        "isOpenSource": true,
+        "categories": [
+          "Office",
+          "Productivity"
+        ],
+        "author": {
+          "name": "Jacob Weisz",
+          "keybaseUsername": "ocdtrekkie",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/657958edabb0f10bc5cf32785b0e1f05_360_360.jpg",
+          "githubUsername": "ocdtrekkie",
+          "hackernewsUsername": "ocdtrekkie",
+          "redditUsername": "ocdtrekkie"
+        },
+        "shortDescription": "Document editor",
+        "upstreamAuthor": "Etherpad Foundation",
+        "createdAt": "2023-12-04T06:41:59Z",
+        "versionNumber": 29
+      },
+      "details": {
+        "license": "Apache License v2"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/h37dm17aa89yrd8zuqpdn36p6zntumtv08fjpu8a8zrte7q1cn60.json",
+      "rawBytes": 63980792,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "bytes": 896,
+        "sha256": "4517ab0cb28dc0022ea1a29b9f14266e2fc20d892a1b697aa0d392aff3d2709a",
+        "source": "2026-10-27 scout extracted/etherpad.bridgecfg",
+        "fields": {
+          "apiPath": null,
+          "saveIdentityCaps": true,
+          "expectAppHooks": false
+        },
+        "verification": "config bytes inspected; signed intake verdict comes only from spk-host import, not this catalogue"
+      },
+      "category": "documents",
+      "agentWork": "Compose and revise collaborative documents",
+      "protocol": "HTTP API/socket.io",
+      "risk": "API credentials and package API exposure must be qualified",
+      "batches": [],
+      "evidence": "Historical japps write PASS; 76758dba6 japps co-edit/lifecycle PASS",
+      "protocolEvidence": "package recipe/source",
+      "metadataDocumentSha256": "8d7f98d57b496e6ce8cd34cfff77fc05a437261793a071ae0fc244b89a9872b5"
+    },
+    {
+      "metadata": {
+        "appId": "a0n6hwm32zjsrzes8gnjg734dh6jwt7x83xdgytspe761pe2asw0",
+        "name": "EtherCalc",
+        "version": "2020.12.28.1+sandstorm1",
+        "packageId": "9b3b76152e7d8db9f54dba7455ea9239",
+        "imageId": "e7d61977615dcb34b1fd706bd795deff.svg",
+        "webLink": "http://ethercalc.net/",
+        "codeLink": "https://github.com/sandstorm-org/ethercalc-sandstorm",
+        "isOpenSource": true,
+        "categories": [
+          "Office",
+          "Productivity"
+        ],
+        "author": {
+          "name": "Jacob Weisz",
+          "keybaseUsername": "ocdtrekkie",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/657958edabb0f10bc5cf32785b0e1f05_360_360.jpg",
+          "githubUsername": "ocdtrekkie",
+          "hackernewsUsername": "ocdtrekkie",
+          "redditUsername": "ocdtrekkie"
+        },
+        "shortDescription": "Multi-user Spreadsheet",
+        "upstreamAuthor": "Audrey Tang",
+        "createdAt": "2026-10-09T04:50:21Z",
+        "versionNumber": 202012283
+      },
+      "details": {
+        "license": "Common Public Attribution License"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/a0n6hwm32zjsrzes8gnjg734dh6jwt7x83xdgytspe761pe2asw0.json",
+      "rawBytes": 36875996,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "bytes": 456,
+        "sha256": "aaa50a70250cc2e514c90cfa590e4a4051c6fe1c3e799256eb9193ca71ceb411",
+        "source": "2026-10-27 scout extracted/ethercalc.bridgecfg",
+        "fields": {
+          "apiPath": null,
+          "saveIdentityCaps": false,
+          "expectAppHooks": false
+        },
+        "verification": "config bytes inspected; signed intake verdict comes only from spk-host import, not this catalogue"
+      },
+      "category": "spreadsheets",
+      "agentWork": "Read ranges, compute and update tabular data",
+      "protocol": "HTTP SocialCalc/CSV",
+      "risk": "Snapshot commands need revision discipline",
+      "batches": [],
+      "evidence": "76758dba6: lifecycle + write PASS",
+      "protocolEvidence": "package recipe/source",
+      "metadataDocumentSha256": "b56d79cc04b596195136dd55ebf495cff35ec4a95f135d85fcbd181388766230"
+    },
+    {
+      "metadata": {
+        "appId": "4uda6a9yfxk4v3x2mpxjdn2md9y54tj104091480qjr8h758u4dh",
+        "name": "HedgeDoc",
+        "version": "1.9.8",
+        "packageId": "ff642cdb65178a6a2dff96ca15dd7028",
+        "imageId": "9f946380a61f76720cfa1f8c34e6484f.png",
+        "webLink": "http://hedgedoc.org",
+        "codeLink": "http://github.com/zenhack/sandstorm-hedgedoc",
+        "isOpenSource": true,
+        "categories": [
+          "Office"
+        ],
+        "author": {
+          "name": "Ian Denhardt",
+          "keybaseUsername": "isd",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/806a0ae1399d0e77b42f0839281ef005_360_360.jpg",
+          "githubUsername": "zenhack",
+          "twitterUsername": "zenhack_net",
+          "hackernewsUsername": "zenhack"
+        },
+        "shortDescription": "Markdown editor",
+        "upstreamAuthor": "HedgeDoc App Team",
+        "createdAt": "2023-08-30T06:40:25Z",
+        "versionNumber": 8
+      },
+      "details": {
+        "license": "GNU AGPL v3"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/4uda6a9yfxk4v3x2mpxjdn2md9y54tj104091480qjr8h758u4dh.json",
+      "rawBytes": 72901556,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "bytes": 16,
+        "sha256": "d65298bdd50e3d9f712e372139097f0339c638b2502c882858b8c12f3d04496b",
+        "source": "2026-10-27 scout extracted/hedgedoc.bridgecfg",
+        "fields": {
+          "apiPath": null,
+          "saveIdentityCaps": false,
+          "expectAppHooks": false
+        },
+        "verification": "config bytes inspected; signed intake verdict comes only from spk-host import, not this catalogue"
+      },
+      "category": "notes",
+      "agentWork": "Edit markdown with collaborative revisions",
+      "protocol": "socket.io OT + HTTP download",
+      "risk": "Broken HTTP body parser: missing iconv-lite/encodings; socket close in newest row",
+      "batches": [
+        "rt.tsv"
+      ],
+      "evidence": "76758dba6 featured and e89fe7b8b RT: lifecycle PASS; socket.io close frame on write",
+      "protocolEvidence": "package recipe/source",
+      "metadataDocumentSha256": "14f16e42ae1542d3e1d145563cdccf2ce152e4aee4f3262369f6d7db385dc193"
+    },
+    {
+      "metadata": {
+        "appId": "svwrpwnd3c380d1f99ge7g0qnjdq6y785c36s7qtqryxwkmn20qh",
+        "name": "Permanote",
+        "version": "0.1.4",
+        "packageId": "4ecae843006080d7e5191c498a062fa1",
+        "imageId": "82a9437ddd65615847b74040bbc60d49.png",
+        "webLink": "https://github.com/keybits/permanote",
+        "codeLink": "https://github.com/keybits/permanote",
+        "isOpenSource": true,
+        "categories": [
+          "Productivity"
+        ],
+        "author": {
+          "name": "Tom Atkins",
+          "keybaseUsername": "keybits",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/3642bf4ccff3c5944fb10890f3560505_200_200_square_200.jpeg",
+          "githubUsername": "keybits",
+          "twitterUsername": "keybits",
+          "hackernewsUsername": "keybits"
+        },
+        "shortDescription": "Note-taking",
+        "createdAt": "2016-02-26T19:23:26Z",
+        "versionNumber": 5
+      },
+      "details": {
+        "license": "MIT License"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/svwrpwnd3c380d1f99ge7g0qnjdq6y785c36s7qtqryxwkmn20qh.json",
+      "rawBytes": 8339740,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "bytes": 16,
+        "sha256": "d65298bdd50e3d9f712e372139097f0339c638b2502c882858b8c12f3d04496b",
+        "source": "2026-10-27 scout extracted/permanote.bridgecfg",
+        "fields": {
+          "apiPath": null,
+          "saveIdentityCaps": false,
+          "expectAppHooks": false
+        },
+        "verification": "config bytes inspected; signed intake verdict comes only from spk-host import, not this catalogue"
+      },
+      "category": "notes",
+      "agentWork": "Store and retrieve markdown notebooks",
+      "protocol": "HTTP file API",
+      "risk": "Old 2016 package; qualify paths",
+      "batches": [
+        "b1.tsv"
+      ],
+      "evidence": "76758dba6 B1: lifecycle + recipe write PASS",
+      "protocolEvidence": "package recipe/source",
+      "metadataDocumentSha256": "1581b44da32f3b3313118b05f4c958e933846dfb919739e3563bd3138137935b"
+    },
+    {
+      "metadata": {
+        "appId": "nx3dqcmz2sjjz939vkg4847vvxrzqsatqfjrt3ea50z3jac5kv7h",
+        "name": "DokuWiki",
+        "version": "2020-07-29~2020-08-31\n",
+        "packageId": "dda6d7e22e8e2566bdc804d8e3f9165f",
+        "imageId": "88a5145485a1ba450fada965c4fc7eca.png",
+        "webLink": "http://dokuwiki.org",
+        "codeLink": "https://github.com/johnbintz/dokuwiki-sandstorm",
+        "isOpenSource": true,
+        "categories": [
+          "Web Publishing",
+          "Productivity"
+        ],
+        "author": {
+          "name": "John Bintz",
+          "keybaseUsername": "johnbintz",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/69b2a2524df5cf8d97886cd6ff267705_360_360.jpg",
+          "githubUsername": "johnbintz"
+        },
+        "shortDescription": "Wiki",
+        "upstreamAuthor": "DokuWiki Team",
+        "createdAt": "2020-09-05T23:15:55Z",
+        "versionNumber": 10
+      },
+      "details": {
+        "license": "GNU GPL v2"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/nx3dqcmz2sjjz939vkg4847vvxrzqsatqfjrt3ea50z3jac5kv7h.json",
+      "rawBytes": 31211028,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "bytes": 1160,
+        "sha256": "1a40b15ad3facfe6c806145bc1b30e49fa560ac98ecbc8981f4f00d349f5d405",
+        "source": "2026-10-27 scout extracted/dokuwiki.bridgecfg",
+        "fields": {
+          "apiPath": null,
+          "saveIdentityCaps": false,
+          "expectAppHooks": false
+        },
+        "verification": "config bytes inspected; signed intake verdict comes only from spk-host import, not this catalogue"
+      },
+      "category": "wiki",
+      "agentWork": "Write linked pages and inspect revisions",
+      "protocol": "HTTP raw export/form save; optional XML-RPC",
+      "risk": "Form recipe proven; XML-RPC enablement unproven",
+      "batches": [],
+      "evidence": "76758dba6: lifecycle + write PASS",
+      "protocolEvidence": "package recipe/source",
+      "metadataDocumentSha256": "0af35a7b45faf648ded4399e3cdc626c1d827de5549820f18d269c091275533e"
+    },
+    {
+      "metadata": {
+        "appId": "p04q48xd2kgkystkrda5n77kdns6u569wnactgh904tf7s3vev70",
+        "name": "MediaWiki",
+        "version": "1.37.4\n",
+        "packageId": "16bcca05d59606b908681c07b202752a",
+        "imageId": "56b8d5103614152b8031d1abdc8d8a8e.svg",
+        "webLink": "https://www.mediawiki.org",
+        "codeLink": "https://github.com/zenhack/mediawiki-sandstorm",
+        "isOpenSource": true,
+        "categories": [
+          "Productivity"
+        ],
+        "author": {
+          "name": "Ian Denhardt",
+          "keybaseUsername": "isd",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/806a0ae1399d0e77b42f0839281ef005_360_360.jpg",
+          "githubUsername": "zenhack",
+          "twitterUsername": "zenhack_net",
+          "hackernewsUsername": "zenhack"
+        },
+        "shortDescription": "Wiki",
+        "upstreamAuthor": "MediaWiki Contributors",
+        "createdAt": "2022-08-12T15:05:01Z",
+        "versionNumber": 2
+      },
+      "details": {
+        "license": "GNU GPL v2"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/p04q48xd2kgkystkrda5n77kdns6u569wnactgh904tf7s3vev70.json",
+      "rawBytes": 74388876,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "packageSha256": "16bcca05d59606b908681c07b202752a51e29ecbbcafcd2b43aa2c7de5e4cc15",
+        "decodedBytes": 380171264,
+        "source": "2026-10-28 package root inspection; SHA256 prefix matches packageId, signature not reverified here",
+        "bytes": 400,
+        "sha256": "6393b6100bfd9a6344ab750102f728d1a5b1b1598ff2ff6a96e4825f2e565ac3",
+        "fields": {
+          "apiPath": "",
+          "saveIdentityCaps": false,
+          "expectAppHooks": false,
+          "permissions": [
+            "sysop"
+          ]
+        }
+      },
+      "category": "wiki/search",
+      "agentWork": "Query pages, categories and edit with revision tokens",
+      "protocol": "Action API HTTP JSON",
+      "risk": "Use 1.37.4 port, not the older duplicate",
+      "batches": [
+        "b8.tsv"
+      ],
+      "evidence": "No live row recorded in ROWS-OWED section 0; recipes are not proof",
+      "protocolEvidence": "package recipe/source",
+      "metadataDocumentSha256": "1df5b7d1cbcb3a274582ca6251c166411af2f7ecf9ce0f1fff599c5827fc98c5"
+    },
+    {
+      "metadata": {
+        "appId": "m86q05rdvj14yvn78ghaxynqz7u2svw6rnttptxx49g1785cdv1h",
+        "name": "Wekan",
+        "version": "12.65~2026-10-25",
+        "packageId": "2a2c05041cb4285da884d114e4820298",
+        "imageId": "d3d1298952c6a75ed05f67d739705b95.svg",
+        "webLink": "https://wekan.github.io",
+        "codeLink": "https://github.com/wekan/wekan",
+        "isOpenSource": true,
+        "categories": [
+          "Productivity",
+          "Office"
+        ],
+        "author": {
+          "name": "Wekan Team",
+          "keybaseUsername": "wekan",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/95c4d1e1a12731699ddf81600641b905_360_360.png",
+          "githubUsername": "xet7",
+          "twitterUsername": "wekanapp",
+          "hackernewsUsername": "xet7",
+          "redditUsername": "xet7"
+        },
+        "shortDescription": "Kanban board",
+        "createdAt": "2026-10-25T23:01:39Z",
+        "versionNumber": 1265
+      },
+      "details": {
+        "license": "MIT License"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/m86q05rdvj14yvn78ghaxynqz7u2svw6rnttptxx49g1785cdv1h.json",
+      "rawBytes": 181572612,
+      "importProfile": "market-large-v1",
+      "bridge": {
+        "status": "present",
+        "packageSha256": "2a2c05041cb4285da884d114e4820298aeb1866ee0696bcf90cb71e43c56e0c5",
+        "decodedBytes": 888075880,
+        "source": "2026-10-28 package root inspection; SHA256 prefix matches packageId, signature not reverified here",
+        "bytes": 2400,
+        "sha256": "9d71f37cf00b84f018d4838d1fda58a70c8dd04ef284b03b5470f827b53fc56d",
+        "fields": {
+          "apiPath": "/",
+          "saveIdentityCaps": true,
+          "expectAppHooks": false,
+          "permissions": [
+            "participate",
+            "configure"
+          ]
+        }
+      },
+      "category": "tasks/project management",
+      "agentWork": "Manage related boards, lists, swimlanes, cards and members",
+      "protocol": "Meteor DDP + Sandstorm rendezvous",
+      "risk": "REST enablement not assumed; large decoded package; old recipe has wrong login",
+      "batches": [
+        "rt.tsv"
+      ],
+      "evidence": "e89fe7b8b RT: lifecycle PASS; old DDP loginRefused (Unrecognized options for login request)",
+      "protocolEvidence": "package recipe/source",
+      "metadataDocumentSha256": "741baf3341dcc77ca5d51697b75f572827692ab38140c47e1e62c2a52e673778"
+    },
+    {
+      "metadata": {
+        "appId": "6ee9j59rp4mepat8pz2pt1sq97xmname4kvhzh4m3uzwrvf1hu10",
+        "name": "Yet Another TODO",
+        "version": "0.1.2",
+        "packageId": "346bff4bc867afd54320af244dc64e9c",
+        "imageId": "487093ffc561c3f7d98768d7147093f0.png",
+        "webLink": "https://github.com/zenhack/yata",
+        "codeLink": "https://github.com/zenhack/yata",
+        "isOpenSource": true,
+        "categories": [
+          "Productivity"
+        ],
+        "author": {
+          "name": "Ian Denhardt",
+          "keybaseUsername": "isd",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/806a0ae1399d0e77b42f0839281ef005_360_360.jpg",
+          "githubUsername": "zenhack",
+          "twitterUsername": "zenhack_net",
+          "hackernewsUsername": "zenhack"
+        },
+        "shortDescription": "TODO Lists",
+        "createdAt": "2020-07-13T19:55:46Z",
+        "versionNumber": 8
+      },
+      "details": {
+        "license": "Apache License v2"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/6ee9j59rp4mepat8pz2pt1sq97xmname4kvhzh4m3uzwrvf1hu10.json",
+      "rawBytes": 11344976,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "bytes": 16,
+        "sha256": "d65298bdd50e3d9f712e372139097f0339c638b2502c882858b8c12f3d04496b",
+        "source": "2026-10-27 scout extracted/yata.bridgecfg",
+        "fields": {
+          "apiPath": null,
+          "saveIdentityCaps": false,
+          "expectAppHooks": false
+        },
+        "verification": "config bytes inspected; signed intake verdict comes only from spk-host import, not this catalogue"
+      },
+      "category": "tasks",
+      "agentWork": "Create and complete ordered tasks",
+      "protocol": "HTTP form POST /todos/new; HTML read-back today",
+      "risk": "No JSON read API proven; needs packaged-source extraction or upstream data endpoint before a semantic adapter can qualify",
+      "batches": [
+        "b2.tsv"
+      ],
+      "evidence": "e89fe7b8b B2: lifecycle + form write/read-back PASS (not a native adapter)",
+      "protocolEvidence": "package recipe/source",
+      "metadataDocumentSha256": "3d8ea4feb86d868ba9caceead64a61e816897f51a053d7024feca54b06b3aa0c"
+    },
+    {
+      "metadata": {
+        "appId": "sfs5m16cjy4rxeqe3vfvqef4397szm5k6yxkmrj391u4sprpk6fh",
+        "name": "OrgTodo",
+        "version": "0.1.7",
+        "packageId": "727e6323ee98810826f91b15530e74f4",
+        "imageId": "217df2f7d362ed26a04ddc4ea7409ee5.svg",
+        "webLink": "https://fixermark.com/orgtodo/index.html",
+        "codeLink": "https://github.com/fixermark/orgtodo",
+        "isOpenSource": true,
+        "categories": [
+          "Productivity"
+        ],
+        "shortDescription": "Org-compatible todos",
+        "createdAt": "2026-08-04T05:17:29Z",
+        "versionNumber": 24
+      },
+      "details": {
+        "license": "MIT License"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/sfs5m16cjy4rxeqe3vfvqef4397szm5k6yxkmrj391u4sprpk6fh.json",
+      "rawBytes": 56777732,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "bytes": 16,
+        "sha256": "d65298bdd50e3d9f712e372139097f0339c638b2502c882858b8c12f3d04496b",
+        "source": "2026-10-27 scout extracted/orgtodo.bridgecfg",
+        "fields": {
+          "apiPath": null,
+          "saveIdentityCaps": false,
+          "expectAppHooks": false
+        },
+        "verification": "config bytes inspected; signed intake verdict comes only from spk-host import, not this catalogue"
+      },
+      "category": "project management",
+      "agentWork": "Edit structured Org projects and task dependencies",
+      "protocol": "HTTP text JSON /tasks/:id, GET /tasks; Org payload",
+      "risk": "Old manifest >1 MiB refusal fixed by 16 MiB importer bound, rerun owed; POST /tasks uses missing DB columns; use sync upsert /tasks/:id",
+      "batches": [
+        "b2.tsv"
+      ],
+      "evidence": "e89fe7b8b B2/fixups: install timeout; not a typed-operation verdict",
+      "protocolEvidence": "package recipe/source",
+      "metadataDocumentSha256": "a731da2e900c587c71ec2063879ac4b6b0d8472e3fc75590632eab8d2aa56947"
+    },
+    {
+      "metadata": {
+        "appId": "nut9xv0zcc4x92udcu9mwrp661xps9ecdtjaffnev34yn2ussvz0",
+        "name": "Prioritize",
+        "version": "0.5",
+        "packageId": "345bcc7b66577c64b514b56fd7731455",
+        "imageId": "7d5fbe4f25053a3672e8a41d0998f5e2.svg",
+        "webLink": "https://github.com/zenhack/prioritize",
+        "codeLink": "https://github.com/zenhack/prioritize",
+        "isOpenSource": true,
+        "categories": [
+          "Productivity"
+        ],
+        "author": {
+          "name": "Ian Denhardt",
+          "keybaseUsername": "isd",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/806a0ae1399d0e77b42f0839281ef005_360_360.jpg",
+          "githubUsername": "zenhack",
+          "twitterUsername": "zenhack_net",
+          "hackernewsUsername": "zenhack"
+        },
+        "shortDescription": "Prioritize tasks",
+        "createdAt": "2022-10-08T05:47:15Z",
+        "versionNumber": 17
+      },
+      "details": {
+        "license": "Apache License v2"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/nut9xv0zcc4x92udcu9mwrp661xps9ecdtjaffnev34yn2ussvz0.json",
+      "rawBytes": 13037952,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "bytes": 16,
+        "sha256": "d65298bdd50e3d9f712e372139097f0339c638b2502c882858b8c12f3d04496b",
+        "source": "2026-10-27 scout extracted/prioritize.bridgecfg",
+        "fields": {
+          "apiPath": null,
+          "saveIdentityCaps": false,
+          "expectAppHooks": false
+        },
+        "verification": "config bytes inspected; signed intake verdict comes only from spk-host import, not this catalogue"
+      },
+      "category": "planning",
+      "agentWork": "Schedule periodic tasks and list overdue work",
+      "protocol": "HTTP application data (endpoint contract unqualified)",
+      "risk": "Old 0.5 port; period/last-completed data model; inspect before choosing JSON or forms",
+      "batches": [],
+      "evidence": "No live row recorded in ROWS-OWED section 0; recipes are not proof",
+      "protocolEvidence": "upstream family/metadata; packaged endpoint unqualified",
+      "metadataDocumentSha256": "e0fb232158564ef150d3770734e57673c842a4e6a018a3941a3cb7795d1c8c71"
+    },
+    {
+      "metadata": {
+        "appId": "8aspz4sfjnp8u89000mh2v1xrdyx97ytn8hq71mdzv4p4d8n0n3h",
+        "name": "Davros",
+        "version": "0.33.4",
+        "packageId": "15bf92664a1b14a784bf737e502e13b7",
+        "imageId": "4fa22f8ed233afeeba39ac525ce58202.png",
+        "webLink": "https://github.com/mnutt/davros/",
+        "codeLink": "https://github.com/mnutt/davros/",
+        "isOpenSource": true,
+        "categories": [
+          "Productivity",
+          "Media"
+        ],
+        "author": {
+          "name": "Michael Nutt",
+          "keybaseUsername": "mnutt",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/6e84f777f31128a100f9fc0ecb63a705_360_360.jpeg",
+          "githubUsername": "mnutt"
+        },
+        "shortDescription": "File storage",
+        "createdAt": "2026-10-25T22:39:14Z",
+        "versionNumber": 334
+      },
+      "details": {
+        "license": "Apache License v2"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/8aspz4sfjnp8u89000mh2v1xrdyx97ytn8hq71mdzv4p4d8n0n3h.json",
+      "rawBytes": 63160880,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "bytes": 424,
+        "sha256": "a308ae459838b0ea155018a0fc5ad672c51cbaaefab95b74b397db886d72250d",
+        "source": "2026-10-27 scout extracted/davros.bridgecfg",
+        "fields": {
+          "apiPath": null,
+          "saveIdentityCaps": false,
+          "expectAppHooks": false
+        },
+        "verification": "config bytes inspected; signed intake verdict comes only from spk-host import, not this catalogue"
+      },
+      "category": "files",
+      "agentWork": "Upload bytes, enumerate and move directories",
+      "protocol": "WebDAV + HTTP API",
+      "risk": "Newest lifecycle passes, PUT read-back fails without detail",
+      "batches": [],
+      "evidence": "76758dba6: lifecycle PASS; write FAIL (see risk)",
+      "protocolEvidence": "package recipe/source",
+      "metadataDocumentSha256": "98991bd0536b92cbef462b8d309397b9bdeb4b3ba2d6424cb094267752d9d324"
+    },
+    {
+      "metadata": {
+        "appId": "nn7axgy3y8kvd0m1mtk3cwca34t916p5d7m4j1j2e874nuz3t8y0",
+        "name": "FileDrop",
+        "version": "1.0.6",
+        "packageId": "d13f67230d0a4f9a63fc2c0bba87fc52",
+        "imageId": "a72eacab0bc4cadf86f41813a5d5fd6f.svg",
+        "webLink": "https://github.com/zombiezen/filedrop/",
+        "codeLink": "https://github.com/zombiezen/filedrop/",
+        "isOpenSource": true,
+        "categories": [
+          "Productivity"
+        ],
+        "author": {
+          "name": "Ross Light",
+          "keybaseUsername": "zombiezen",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/018152f86be5657665ea98ebdc8e9f05_360_360_square_360.jpeg"
+        },
+        "shortDescription": "File sharing",
+        "createdAt": "2016-06-30T04:07:27Z",
+        "versionNumber": 7
+      },
+      "details": {
+        "license": "Apache License v2"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/nn7axgy3y8kvd0m1mtk3cwca34t916p5d7m4j1j2e874nuz3t8y0.json",
+      "rawBytes": 4363136,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "bytes": 512,
+        "sha256": "3225bf0215184d008d0801236ec5a92622e0d321eef485b4a14c47eed062a94e",
+        "source": "2026-10-27 scout extracted/filedrop.bridgecfg",
+        "fields": {
+          "apiPath": null,
+          "saveIdentityCaps": false,
+          "expectAppHooks": false
+        },
+        "verification": "config bytes inspected; signed intake verdict comes only from spk-host import, not this catalogue"
+      },
+      "category": "files/inbox",
+      "agentWork": "Receive and enumerate uploaded artifacts",
+      "protocol": "HTTP PUT/GET /file/<name>; JSON GET /file/",
+      "risk": "Raw binary API with signed write permission; no multipart needed",
+      "batches": [
+        "b5.tsv"
+      ],
+      "evidence": "No live row recorded in ROWS-OWED section 0; recipes are not proof",
+      "protocolEvidence": "package recipe/source",
+      "metadataDocumentSha256": "04fa96934a5cd13a37c3c0564141b78a3c9905e87e73dd2463162297763d7d05"
+    },
+    {
+      "metadata": {
+        "appId": "8kr4rvyrggvzfvc160htzdt4u5rfvjc2dgdn27n5pt66mxa40m1h",
+        "name": "Radicale",
+        "version": "1.1.1+v14",
+        "packageId": "4b137047cf1bdf5832397c3abc75efd6",
+        "imageId": "96e7b9605cc9035c8282ec5a94e6c44c.svg",
+        "webLink": "http://radicale.org",
+        "codeLink": "https://github.com/synchrone/sandstorm-radicale",
+        "isOpenSource": true,
+        "categories": [
+          "Productivity"
+        ],
+        "author": {
+          "name": "Aleksandr Bogdanov",
+          "keybaseUsername": "synchrone",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/0312ee8d5f77ebb1cfdde8286be47805_360_360_square_360.png",
+          "githubUsername": "synchrone",
+          "twitterUsername": "synchrone"
+        },
+        "shortDescription": "Calendars and Contacts",
+        "upstreamAuthor": "Kozea",
+        "createdAt": "2016-08-19T14:17:23Z",
+        "versionNumber": 14
+      },
+      "details": {
+        "license": "GNU GPL v3"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/8kr4rvyrggvzfvc160htzdt4u5rfvjc2dgdn27n5pt66mxa40m1h.json",
+      "rawBytes": 21658732,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "bytes": 640,
+        "sha256": "33b3ecb87fd517888c3e79125e5f529c6d561105c2b6772cbe97f25e3059feb8",
+        "source": "2026-10-27 scout extracted/radicale.bridgecfg",
+        "fields": {
+          "apiPath": null,
+          "saveIdentityCaps": false,
+          "expectAppHooks": false
+        },
+        "verification": "config bytes inspected; signed intake verdict comes only from spk-host import, not this catalogue"
+      },
+      "category": "calendar/contacts",
+      "agentWork": "Query and edit events and address books",
+      "protocol": "CalDAV/CardDAV XML + iCalendar/vCard",
+      "risk": "Old 1.1.1 port; REPORT and member auth qualification owed",
+      "batches": [],
+      "evidence": "No live row recorded in ROWS-OWED section 0; recipes are not proof",
+      "protocolEvidence": "upstream family/metadata; packaged endpoint unqualified",
+      "metadataDocumentSha256": "d686e3f89dd7c0124729c9bc23cda39f95871a398370270b72c31466151e4171"
+    },
+    {
+      "metadata": {
+        "appId": "f5z8uwz7ynf89c286f9d5tse5dwjknv32nyd78qzsyema3zf9m8h",
+        "name": "SandCal",
+        "version": "0.9.3",
+        "packageId": "a84130b27030f06f981e78b06c499030",
+        "imageId": "e381b88ea2bc298d5836c63a9a5e1231.svg",
+        "webLink": "http://github.com/zenhack/sandcal",
+        "codeLink": "http://github.com/zenhack/sandcal",
+        "isOpenSource": true,
+        "categories": [
+          "Productivity"
+        ],
+        "author": {
+          "name": "Ian Denhardt",
+          "keybaseUsername": "isd",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/806a0ae1399d0e77b42f0839281ef005_360_360.jpg",
+          "githubUsername": "zenhack",
+          "twitterUsername": "zenhack_net",
+          "hackernewsUsername": "zenhack"
+        },
+        "shortDescription": "Calendar",
+        "createdAt": "2022-11-13T05:38:01Z",
+        "versionNumber": 14
+      },
+      "details": {
+        "license": "Apache License v2"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/f5z8uwz7ynf89c286f9d5tse5dwjknv32nyd78qzsyema3zf9m8h.json",
+      "rawBytes": 16409540,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "bytes": 584,
+        "sha256": "6c809fe093f16297e611d829ca725a481c987e87c6abd97f0e32ccd65d9e9fa6",
+        "source": "2026-10-27 scout extracted/sandcal.bridgecfg",
+        "fields": {
+          "apiPath": null,
+          "saveIdentityCaps": false,
+          "expectAppHooks": false
+        },
+        "verification": "config bytes inspected; signed intake verdict comes only from spk-host import, not this catalogue"
+      },
+      "category": "calendar",
+      "agentWork": "Import events and export calendars",
+      "protocol": "HTTP ICS import/export",
+      "risk": "No CalDAV endpoint: previous catalogue claim was wrong",
+      "batches": [
+        "b2.tsv"
+      ],
+      "evidence": "e89fe7b8b B2: install refused: SPK staging remains after unit success",
+      "protocolEvidence": "package recipe/source",
+      "metadataDocumentSha256": "3c933a1274990a3b7858fae3e0324d9cde158c371c329d9b1d6e2638f40e7b53"
+    },
+    {
+      "metadata": {
+        "appId": "d9ygf47xrtnw12j92cyt6cu8ut75esx01u4q3kcrn8415w9qzzgh",
+        "name": "Gogs",
+        "version": "0.11.34-fix1",
+        "packageId": "aede44cf19129337aae68b6993324574",
+        "imageId": "5a936e7bdf8bcf3b4ab300fe6bfafdc6.png",
+        "webLink": "http://gogs.io",
+        "codeLink": "https://github.com/cem/gogs-sandstorm",
+        "isOpenSource": true,
+        "categories": [
+          "DevTools"
+        ],
+        "author": {
+          "name": "Cem Kocagil",
+          "keybaseUsername": "cko",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/5d345c4e597ffcabf07ae463be7c4b05_360_360_square_360.png",
+          "githubUsername": "cem"
+        },
+        "shortDescription": "Git server and interface",
+        "upstreamAuthor": "Gogs Authors",
+        "createdAt": "2018-03-14T23:26:16Z",
+        "versionNumber": 5
+      },
+      "details": {
+        "license": "MIT License"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/d9ygf47xrtnw12j92cyt6cu8ut75esx01u4q3kcrn8415w9qzzgh.json",
+      "rawBytes": 15155356,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "bytes": 16,
+        "sha256": "d65298bdd50e3d9f712e372139097f0339c638b2502c882858b8c12f3d04496b",
+        "source": "2026-10-27 scout extracted/gogs.bridgecfg",
+        "fields": {
+          "apiPath": null,
+          "saveIdentityCaps": false,
+          "expectAppHooks": false
+        },
+        "verification": "config bytes inspected; signed intake verdict comes only from spk-host import, not this catalogue"
+      },
+      "category": "code/git",
+      "agentWork": "Create repositories, query issues, post comments, exchange commits",
+      "protocol": "REST /api/v1 + git smart HTTP",
+      "risk": "0.11.34 port; REST authentication must be qualified; old HTML row passed",
+      "batches": [
+        "rt.tsv"
+      ],
+      "evidence": "e89fe7b8b RT: lifecycle + HTML/form recipe write PASS; native REST row not implied",
+      "protocolEvidence": "package recipe/source",
+      "metadataDocumentSha256": "14b639169fa2f11373fd27c94a6aa51e0c54927368d141fcbe53e4701f486973"
+    },
+    {
+      "metadata": {
+        "appId": "61gh7gnns305cknp20v2ekvdex48g4d3rv6wghuzk6huzx5qmp7h",
+        "name": "Mercurial",
+        "version": "3.8.4",
+        "packageId": "5a34f1e1e3c9daff67ce2a04b1d96d26",
+        "imageId": "7f422182be2d23c08d953f6b5ce572a7.svg",
+        "webLink": "https://www.mercurial-scm.org/",
+        "codeLink": "https://bitbucket.org/zombiezen/mercurial",
+        "isOpenSource": true,
+        "categories": [
+          "DevTools"
+        ],
+        "author": {
+          "name": "Ross Light",
+          "keybaseUsername": "zombiezen",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/018152f86be5657665ea98ebdc8e9f05_360_360_square_360.jpeg"
+        },
+        "shortDescription": "Mercurial hosting",
+        "upstreamAuthor": "Matt Mackall",
+        "createdAt": "2016-07-23T22:58:53Z",
+        "versionNumber": 2
+      },
+      "details": {
+        "license": "GNU GPL v2"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/61gh7gnns305cknp20v2ekvdex48g4d3rv6wghuzk6huzx5qmp7h.json",
+      "rawBytes": 41309256,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "bytes": 1184,
+        "sha256": "40b44cfd1ddf961d459addaf747a7eb5e5e627775d009f709e3d2375763be4b6",
+        "source": "2026-10-27 scout extracted/mercurial.bridgecfg",
+        "fields": {
+          "apiPath": null,
+          "saveIdentityCaps": false,
+          "expectAppHooks": false
+        },
+        "verification": "config bytes inspected; signed intake verdict comes only from spk-host import, not this catalogue"
+      },
+      "category": "code/versioning",
+      "agentWork": "Push source changes and inspect revision files",
+      "protocol": "hg wire HTTP",
+      "risk": "Lifecycle and push/read-back pass on 76758dba6",
+      "batches": [
+        "b8.tsv"
+      ],
+      "evidence": "76758dba6: lifecycle + hg write/read-back PASS",
+      "protocolEvidence": "package recipe/source",
+      "metadataDocumentSha256": "f35b81c24827e756467782260db033107b3a6ed28007afc1427f272a4fbd1f05"
+    },
+    {
+      "metadata": {
+        "appId": "c6rk81r4qk6dm3k04x1kxmyccqewhh4npuxeyg1xrpfypn2ddy0h",
+        "name": "sntfy",
+        "version": "v2.28.0-sandstorm-18",
+        "packageId": "bc424d5fd3cf60977cacdac328adfbee",
+        "imageId": "2e33aa09016ede97b3e3698c4b2fea18.png",
+        "webLink": "https://ntfy.sh",
+        "codeLink": "https://github.com/orblivion/ntfy",
+        "isOpenSource": true,
+        "categories": [
+          "Other"
+        ],
+        "author": {
+          "name": "Daniel Krol",
+          "keybaseUsername": "ill_llogic",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/f80984846a202644f186000892364e05_360_360.jpg",
+          "githubUsername": "orblivion",
+          "twitterUsername": "orblivion"
+        },
+        "shortDescription": "Push notifications",
+        "upstreamAuthor": "Philipp C. Heckel",
+        "createdAt": "2026-09-11T04:10:28Z",
+        "versionNumber": 18
+      },
+      "details": {
+        "license": "Apache License v2"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/c6rk81r4qk6dm3k04x1kxmyccqewhh4npuxeyg1xrpfypn2ddy0h.json",
+      "rawBytes": 17379772,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "bytes": 648,
+        "sha256": "1a5fb4c75adda3647c6f9bfc3101190084ac82e21412bfd1fd4fb093a16938ee",
+        "source": "2026-10-27 scout extracted/sntfy.bridgecfg",
+        "fields": {
+          "apiPath": null,
+          "saveIdentityCaps": false,
+          "expectAppHooks": false
+        },
+        "verification": "config bytes inspected; signed intake verdict comes only from spk-host import, not this catalogue"
+      },
+      "category": "notifications",
+      "agentWork": "Publish and poll job/event notifications",
+      "protocol": "HTTP JSON + streaming",
+      "risk": "Newest lifecycle page GET fails; API role needs separate test",
+      "batches": [],
+      "evidence": "76758dba6: lifecycle FAIL at page GET",
+      "protocolEvidence": "package recipe/source",
+      "metadataDocumentSha256": "6cfd628290a00e847e53d457cd316236b5238331a9514755bcd5f47db09b63e6"
+    },
+    {
+      "metadata": {
+        "appId": "vfnwptfn02ty21w715snyyczw0nqxkv3jvawcah10c6z7hj1hnu0",
+        "name": "Rocket.Chat",
+        "version": "0.53.0-develop",
+        "packageId": "5198a2ec87bcc4b29e787b77079ba590",
+        "imageId": "1a2cca1a21b5000e717807090c9b1177.svg",
+        "webLink": "https://rocket.chat",
+        "codeLink": "https://github.com/RocketChat/Rocket.Chat",
+        "isOpenSource": true,
+        "categories": [
+          "Communications",
+          "Productivity",
+          "Office",
+          "Social",
+          "DevTools"
+        ],
+        "author": {
+          "name": "Gabriel Engel",
+          "keybaseUsername": "gabrielengel",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/050e1d8aa3d2b2bae83d9fa3241f1405_360_360_square_360.jpeg",
+          "githubUsername": "engelgabriel",
+          "twitterUsername": "gabriel_engel",
+          "hackernewsUsername": "engelgabriel",
+          "redditUsername": "gabriel_engel"
+        },
+        "shortDescription": "Chat app",
+        "upstreamAuthor": "Rocket.Chat",
+        "createdAt": "2017-02-22T00:22:36Z",
+        "versionNumber": 57
+      },
+      "details": {
+        "license": "MIT License"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/vfnwptfn02ty21w715snyyczw0nqxkv3jvawcah10c6z7hj1hnu0.json",
+      "rawBytes": 75414056,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "packageSha256": "5198a2ec87bcc4b29e787b77079ba590fbbc31bcb2959b9e078affee46e1b0c4",
+        "decodedBytes": 348972160,
+        "source": "2026-10-28 package root inspection; SHA256 prefix matches packageId, signature not reverified here",
+        "bytes": 280,
+        "sha256": "ea85f2e5ddda6daa03649342a43f48fc31ea2661f08ba7a02fe3bf08fbde4b90",
+        "fields": {
+          "apiPath": "",
+          "saveIdentityCaps": true,
+          "expectAppHooks": false,
+          "permissions": []
+        }
+      },
+      "category": "chat/messaging",
+      "agentWork": "Read channels, send messages and follow discussions",
+      "protocol": "REST + Meteor DDP",
+      "risk": "Stale 0.53-dev port; auth and modern API assumptions need audit",
+      "batches": [],
+      "evidence": "No live row recorded in ROWS-OWED section 0; recipes are not proof",
+      "protocolEvidence": "upstream family/metadata; packaged endpoint unqualified",
+      "metadataDocumentSha256": "999da0c8e95351fb00de01ee272cb8f9bea54f22b521d5f66c7210133fbca5e3"
+    },
+    {
+      "metadata": {
+        "appId": "yp9xt15y8s0rsuntnhgnr510qpcvm2tatd9mn1gzwr2au8h2n4p0",
+        "name": "Simple Chat",
+        "version": "0.6.1",
+        "packageId": "91ae6a99735aabe28fe283995b6f5173",
+        "imageId": "577be291760a967674551fb163085b96.svg",
+        "webLink": "https://github.com/wholezero/simple-chat",
+        "codeLink": "https://github.com/wholezero/simple-chat",
+        "isOpenSource": false,
+        "categories": [
+          "Communications",
+          "Productivity"
+        ],
+        "author": {
+          "name": "Steven Dee",
+          "keybaseUsername": "mrdomino",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/4c830e3f7cf8adeba39ea5e7553dce05_360_360.jpg",
+          "githubUsername": "mrdomino",
+          "hackernewsUsername": "mrdomino_",
+          "redditUsername": "mrdomino_"
+        },
+        "shortDescription": "Really simple chat",
+        "createdAt": "2018-10-17T00:24:59Z",
+        "versionNumber": 13
+      },
+      "details": {},
+      "metadataUrl": "https://app-index.sandstorm.io/apps/yp9xt15y8s0rsuntnhgnr510qpcvm2tatd9mn1gzwr2au8h2n4p0.json",
+      "rawBytes": 303376,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "direct-capnp",
+        "note": "Direct WebSession; no HTTP bridge required; B7 lifecycle and text API row pass"
+      },
+      "category": "chat/messaging",
+      "agentWork": "Append messages and read a room log",
+      "protocol": "Direct Capnp WebSession; text HTTP /chats and /topic",
+      "risk": "Small append-only conversation model; no modern channel/search API",
+      "batches": [
+        "b7.tsv"
+      ],
+      "evidence": "76758dba6 B7: lifecycle + POST /chats, PUT /topic, text GET read-back PASS (d6243efa8 row report)",
+      "protocolEvidence": "package recipe/source",
+      "metadataDocumentSha256": "58f9cc8cc92b64bd13ce9c7ec5ed8e6b7173149b842da9e41afa9f13825bbbe0"
+    },
+    {
+      "metadata": {
+        "appId": "ztxnreej8a0pqn97ccfhuckswjkrmsaavn85n5sgzk30tv2k4y9h",
+        "name": "SandForms",
+        "version": "0.4.0",
+        "packageId": "f53e839658cba5d1783670890eeb8352",
+        "imageId": "a39ba230ebafc8fad3ee3c88c79b757d.svg",
+        "webLink": "https://github.com/sandforms/sandforms",
+        "codeLink": "https://github.com/sandforms/sandforms",
+        "isOpenSource": true,
+        "categories": [
+          "Office",
+          "Productivity"
+        ],
+        "author": {
+          "name": "Jack Singleton",
+          "keybaseUsername": "jacksingleton",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/e4cb075f0102ee99424c8ddb51f39605_360_360_square_360.jpeg",
+          "githubUsername": "jacksingleton",
+          "twitterUsername": "jackssingleton"
+        },
+        "shortDescription": "Form App",
+        "createdAt": "2016-12-31T08:35:10Z",
+        "versionNumber": 5
+      },
+      "details": {
+        "license": "Apache License v2"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/ztxnreej8a0pqn97ccfhuckswjkrmsaavn85n5sgzk30tv2k4y9h.json",
+      "rawBytes": 24920024,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "bytes": 152,
+        "sha256": "7460c82e5041092c965620080ff7883d55609b92f086172ff82b192a3d8e6a59",
+        "source": "2026-10-27 scout extracted/sandforms.bridgecfg",
+        "fields": {
+          "apiPath": null,
+          "saveIdentityCaps": false,
+          "expectAppHooks": false
+        },
+        "verification": "config bytes inspected; signed intake verdict comes only from spk-host import, not this catalogue"
+      },
+      "category": "forms/surveys",
+      "agentWork": "Declare questions, submit responses, query answers",
+      "protocol": "Meteor DDP",
+      "risk": "Rendezvous login; write recipe exists, latest table queued",
+      "batches": [
+        "b6.tsv"
+      ],
+      "evidence": "e89fe7b8b B6: lifecycle + DDP recipe write PASS",
+      "protocolEvidence": "package recipe/source",
+      "metadataDocumentSha256": "dfb14d74d7ebd94501c7378a3d2cb4029f5e5509f2193d91a4dee8e341e051fd"
+    },
+    {
+      "metadata": {
+        "appId": "uawacvvx9f9ncex1sqj8njwpujf8s9fkmg7wmp55hg6xetrd45w0",
+        "name": "Datasette",
+        "version": "0.63\n",
+        "packageId": "547714ee1f01bae653fe9276d6d30ce9",
+        "imageId": "f2ca48fa4a1982315b090b8715b7b177.svg",
+        "webLink": "https://datasette.io",
+        "codeLink": "https://github.com/ocdtrekkie/datasette-sandstorm",
+        "isOpenSource": true,
+        "categories": [
+          "Science"
+        ],
+        "author": {
+          "name": "Jacob Weisz",
+          "keybaseUsername": "ocdtrekkie",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/657958edabb0f10bc5cf32785b0e1f05_360_360.jpg",
+          "githubUsername": "ocdtrekkie",
+          "hackernewsUsername": "ocdtrekkie",
+          "redditUsername": "ocdtrekkie"
+        },
+        "shortDescription": "Data explorer",
+        "upstreamAuthor": "Simon Willison",
+        "createdAt": "2022-10-28T06:59:24Z",
+        "versionNumber": 2
+      },
+      "details": {
+        "license": "Apache License v2"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/uawacvvx9f9ncex1sqj8njwpujf8s9fkmg7wmp55hg6xetrd45w0.json",
+      "rawBytes": 72513408,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "bytes": 872,
+        "sha256": "a41977a97c72381f7b1e83b9e5f0ccd5255d3243a13585fd8e721a42a14c3e0b",
+        "source": "2026-10-27 scout extracted/datasette.bridgecfg",
+        "fields": {
+          "apiPath": null,
+          "saveIdentityCaps": false,
+          "expectAppHooks": false
+        },
+        "verification": "config bytes inspected; signed intake verdict comes only from spk-host import, not this catalogue"
+      },
+      "category": "SQL/data/search",
+      "agentWork": "Query SQLite tables and export result rows",
+      "protocol": "HTTP SQL-to-JSON",
+      "risk": "0.63 has no HTTP write API; recorded read is not typed-write acceptance",
+      "batches": [],
+      "evidence": "76758dba6: lifecycle + recorded READ PASS; no write",
+      "protocolEvidence": "package recipe/source",
+      "metadataDocumentSha256": "5e587ca1b95a394734f95c5cea3676c266a310711f3d50625ae0436c47315311"
+    },
+    {
+      "metadata": {
+        "appId": "rprqf3t2h3vd3swfkhwk076qrennh9msreyjv70g7sgw5hkdxjph",
+        "name": "IPython Notebook",
+        "version": "4.2.2",
+        "packageId": "57dedad4b0275606c24bdb13d995b218",
+        "imageId": "38d04f43084a8b3eeeaf994554a3318c.png",
+        "webLink": "https://ipython.org/",
+        "codeLink": "https://github.com/jparyani/ipython",
+        "isOpenSource": true,
+        "categories": [
+          "DevTools",
+          "Science"
+        ],
+        "author": {
+          "name": "Jason Paryani",
+          "keybaseUsername": "jparyani",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/dcf86966b6d23437b4dfc0b1097a9805_360_360_square_360.png",
+          "githubUsername": "jparyani"
+        },
+        "shortDescription": "Computation environment",
+        "upstreamAuthor": "IPython Team",
+        "createdAt": "2016-08-03T23:12:29Z",
+        "versionNumber": 24
+      },
+      "details": {
+        "license": "BSD 3-Clause"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/rprqf3t2h3vd3swfkhwk076qrennh9msreyjv70g7sgw5hkdxjph.json",
+      "rawBytes": 186523508,
+      "importProfile": "standard-v1: 177.9 MiB raw / 636.7 MiB decoded; batch uses market-large-v1 conservatively",
+      "bridge": {
+        "status": "present",
+        "packageSha256": "57dedad4b0275606c24bdb13d995b2180df75c893c8909f34a36b6989d8c2820",
+        "decodedBytes": 667619128,
+        "source": "2026-10-28 package root inspection; SHA256 prefix matches packageId, signature not reverified here",
+        "bytes": 16,
+        "sha256": "d65298bdd50e3d9f712e372139097f0339c638b2502c882858b8c12f3d04496b",
+        "fields": {
+          "apiPath": "",
+          "saveIdentityCaps": false,
+          "expectAppHooks": false,
+          "permissions": []
+        }
+      },
+      "category": "notebooks/compute",
+      "agentWork": "Create notebooks, execute cells and inspect outputs",
+      "protocol": "Jupyter REST + kernel WebSocket",
+      "risk": "Large import; lifecycle passes, execution websocket closes",
+      "batches": [
+        "b8.tsv"
+      ],
+      "evidence": "76758dba6: lifecycle PASS; kernel WebSocket write FAIL",
+      "protocolEvidence": "package recipe/source",
+      "metadataDocumentSha256": "a522c2b086edd3e76bdebed90575a42e14df603ba37331efa4815eb0e339d6d0"
+    },
+    {
+      "metadata": {
+        "appId": "upcmp5j10r4x8j7kdfram8xx41ujvqjw0hq8ed2y72hky552znk0",
+        "name": "Linksholder",
+        "version": "2017.03.10.0",
+        "packageId": "d11845a484a0a03767676c3c31c032e6",
+        "imageId": "507239f8bb5e011a529fc9303dda3310.png",
+        "webLink": "https://github.com/PDIS/ethercalc/tree/sandstorm-linksholder",
+        "codeLink": "https://github.com/PDIS/ethercalc/tree/sandstorm-linksholder",
+        "isOpenSource": true,
+        "categories": [
+          "Office",
+          "Productivity"
+        ],
+        "author": {
+          "name": "Romulus Urakagi Tsai",
+          "keybaseUsername": "urakagi",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/cd689abde96349cc6fbdfb47e0cc0105_360_360_square_360.jpeg",
+          "twitterUsername": "romulussais"
+        },
+        "shortDescription": "Organizing Web Links",
+        "upstreamAuthor": "Audrey Tang (EtherCalc) & ETBlue (Hackfoldr)",
+        "createdAt": "2017-03-18T19:33:59Z",
+        "versionNumber": 201703100
+      },
+      "details": {
+        "license": "Common Public Attribution License"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/upcmp5j10r4x8j7kdfram8xx41ujvqjw0hq8ed2y72hky552znk0.json",
+      "rawBytes": 15874544,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "packageSha256": "d11845a484a0a03767676c3c31c032e69e647718062e227a513a6ab71901c8df",
+        "decodedBytes": 67341832,
+        "source": "2026-10-28 package root inspection; SHA256 prefix matches packageId, signature not reverified here",
+        "bytes": 456,
+        "sha256": "aaa50a70250cc2e514c90cfa590e4a4051c6fe1c3e799256eb9193ca71ceb411",
+        "fields": {
+          "apiPath": "",
+          "saveIdentityCaps": false,
+          "expectAppHooks": false,
+          "permissions": [
+            "modify"
+          ]
+        }
+      },
+      "category": "bookmarks",
+      "agentWork": "Maintain a structured bookmark catalogue",
+      "protocol": "EtherCalc-derived HTTP data",
+      "risk": "Old port; confirm schema from package",
+      "batches": [],
+      "evidence": "No live row recorded in ROWS-OWED section 0; recipes are not proof",
+      "protocolEvidence": "upstream family/metadata; packaged endpoint unqualified",
+      "metadataDocumentSha256": "9b33783e8dfbdd883f255665829d8c45868733ff0d9b20a2cd616a3eead39376"
+    },
+    {
+      "metadata": {
+        "appId": "zj20q6pwy456cmq0k57n1mtqqtky664dfqnhsmf3t36khch5geph",
+        "name": "Tiny Tiny RSS",
+        "version": "2021-12-31.2\n",
+        "packageId": "ac6dfded255f6ea86172fb62064772fc",
+        "imageId": "a13bfe49a7745411a92296ecbea56a58.png",
+        "webLink": "https://tt-rss.org",
+        "codeLink": "https://github.com/zenhack/ttrss-sandstorm",
+        "isOpenSource": true,
+        "categories": [
+          "Media"
+        ],
+        "author": {
+          "name": "Ian Denhardt",
+          "keybaseUsername": "isd",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/806a0ae1399d0e77b42f0839281ef005_360_360.jpg",
+          "githubUsername": "zenhack",
+          "twitterUsername": "zenhack_net",
+          "hackernewsUsername": "zenhack"
+        },
+        "shortDescription": "Feed reader",
+        "upstreamAuthor": "TinyTinyRSS Team",
+        "createdAt": "2022-12-27T19:30:51Z",
+        "versionNumber": 26
+      },
+      "details": {
+        "license": "GNU GPL v3"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/zj20q6pwy456cmq0k57n1mtqqtky664dfqnhsmf3t36khch5geph.json",
+      "rawBytes": 67902024,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "bytes": 48,
+        "sha256": "ee258f91a6f214337b4f18b93bfe22a211eebbef130e34483de7ca2349d57768",
+        "source": "2026-10-27 scout extracted/ttrss.bridgecfg",
+        "fields": {
+          "apiPath": null,
+          "saveIdentityCaps": false,
+          "expectAppHooks": true
+        },
+        "verification": "config bytes inspected; signed intake verdict comes only from spk-host import, not this catalogue"
+      },
+      "category": "feeds/RSS",
+      "agentWork": "Query feeds, mark read and import subscriptions",
+      "protocol": "HTTP JSON /api",
+      "risk": "External fetch needs powerbox/network grant; no ambient egress",
+      "batches": [],
+      "evidence": "No live row recorded in ROWS-OWED section 0; recipes are not proof",
+      "protocolEvidence": "upstream family/metadata; packaged endpoint unqualified",
+      "metadataDocumentSha256": "155f46193632332953b824c66c886e1cb107016bcf596cc196876cbf1cb53697"
+    },
+    {
+      "metadata": {
+        "appId": "rhtntjye2n7p71vrcq0ae4f6n9nr139fdk4n884tw55k40vy4uph",
+        "name": "WBO",
+        "version": "1.20",
+        "packageId": "ac72e0d103d7f5c21e79dc74fc616b33",
+        "imageId": "9c616be3fc84c9a50f9a98759b2cf1e1.svg",
+        "webLink": "https://wbo.ophir.dev",
+        "codeLink": "https://github.com/ocdtrekkie/whitebophir-sandstorm",
+        "isOpenSource": true,
+        "categories": [
+          "Graphics"
+        ],
+        "author": {
+          "name": "Jacob Weisz",
+          "keybaseUsername": "ocdtrekkie",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/657958edabb0f10bc5cf32785b0e1f05_360_360.jpg",
+          "githubUsername": "ocdtrekkie",
+          "hackernewsUsername": "ocdtrekkie",
+          "redditUsername": "ocdtrekkie"
+        },
+        "shortDescription": "whiteboard",
+        "upstreamAuthor": "Ophir Lojkine",
+        "createdAt": "2023-10-28T00:25:38Z",
+        "versionNumber": 1
+      },
+      "details": {
+        "license": "GNU AGPL v3"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/rhtntjye2n7p71vrcq0ae4f6n9nr139fdk4n884tw55k40vy4uph.json",
+      "rawBytes": 33566968,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "bytes": 16,
+        "sha256": "d65298bdd50e3d9f712e372139097f0339c638b2502c882858b8c12f3d04496b",
+        "source": "2026-10-27 scout extracted/wbo.bridgecfg",
+        "fields": {
+          "apiPath": null,
+          "saveIdentityCaps": false,
+          "expectAppHooks": false
+        },
+        "verification": "config bytes inspected; signed intake verdict comes only from spk-host import, not this catalogue"
+      },
+      "category": "diagrams/whiteboard",
+      "agentWork": "Create shapes and inspect saved boards",
+      "protocol": "socket.io events + HTTP board JSON",
+      "risk": "Lifecycle passed historically; write not proven in latest rows",
+      "batches": [
+        "rt.tsv"
+      ],
+      "evidence": "e89fe7b8b RT: lifecycle PASS; recipe write FAIL without detail",
+      "protocolEvidence": "package recipe/source",
+      "metadataDocumentSha256": "e9e837e6150d25cbb87b51497dab815437837f2e10025742973bf50cf83c8c62"
+    },
+    {
+      "metadata": {
+        "appId": "1gda5n8p8zsc0r9pcana2yjgtvsq169068k4ve8mk68z4x9fvzuh",
+        "name": "EtherDraw",
+        "version": "0.2",
+        "packageId": "71ebb1517a10002e8f5a631009743235",
+        "imageId": "a7f8dac0aada17072f3d34652c8759d9.svg",
+        "webLink": "http://draw.etherpad.org/",
+        "codeLink": "https://github.com/ocdtrekkie/draw",
+        "isOpenSource": true,
+        "categories": [
+          "Graphics"
+        ],
+        "author": {
+          "name": "Jacob Weisz",
+          "keybaseUsername": "ocdtrekkie",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/657958edabb0f10bc5cf32785b0e1f05_360_360.jpg",
+          "githubUsername": "ocdtrekkie",
+          "hackernewsUsername": "ocdtrekkie",
+          "redditUsername": "ocdtrekkie"
+        },
+        "shortDescription": "Whiteboard",
+        "upstreamAuthor": "Etherpad Foundation",
+        "createdAt": "2016-09-07T02:13:00Z",
+        "versionNumber": 3
+      },
+      "details": {
+        "license": "Apache License v2"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/1gda5n8p8zsc0r9pcana2yjgtvsq169068k4ve8mk68z4x9fvzuh.json",
+      "rawBytes": 8939932,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "bytes": 16,
+        "sha256": "d65298bdd50e3d9f712e372139097f0339c638b2502c882858b8c12f3d04496b",
+        "source": "2026-10-27 scout extracted/etherdraw.bridgecfg",
+        "fields": {
+          "apiPath": null,
+          "saveIdentityCaps": false,
+          "expectAppHooks": false
+        },
+        "verification": "config bytes inspected; signed intake verdict comes only from spk-host import, not this catalogue"
+      },
+      "category": "diagrams",
+      "agentWork": "Draw structured strokes in shared rooms",
+      "protocol": "socket.io",
+      "risk": "Old 0.2 package; recipe exists",
+      "batches": [
+        "b3.tsv"
+      ],
+      "evidence": "No live row recorded in ROWS-OWED section 0; recipes are not proof",
+      "protocolEvidence": "package recipe/source",
+      "metadataDocumentSha256": "20de82ba88f7517ba5d3b49f643120bde89eb6dcbf89b3561cbc4b21a46326f3"
+    },
+    {
+      "metadata": {
+        "appId": "w544a46cjwtje73rfearjvszwa3nhjtxjanu5s83qkdutx6k0nz0",
+        "name": "Scrumblr",
+        "version": "0.5",
+        "packageId": "cf6ae092f937e7000b875cbb97d17907",
+        "imageId": "30c1e9f83d88ab51d271eaddd8a7ab05.png",
+        "webLink": "http://scrumblr.ca/",
+        "codeLink": "https://github.com/ocdtrekkie/scrumblr",
+        "isOpenSource": true,
+        "categories": [
+          "Productivity"
+        ],
+        "author": {
+          "name": "Jacob Weisz",
+          "keybaseUsername": "ocdtrekkie",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/657958edabb0f10bc5cf32785b0e1f05_360_360.jpg",
+          "githubUsername": "ocdtrekkie",
+          "hackernewsUsername": "ocdtrekkie",
+          "redditUsername": "ocdtrekkie"
+        },
+        "shortDescription": "Simple kanban board",
+        "upstreamAuthor": "Ali Asaria",
+        "createdAt": "2017-01-18T04:22:16Z",
+        "versionNumber": 6
+      },
+      "details": {
+        "license": "GNU GPL v3"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/w544a46cjwtje73rfearjvszwa3nhjtxjanu5s83qkdutx6k0nz0.json",
+      "rawBytes": 6621948,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "bytes": 16,
+        "sha256": "d65298bdd50e3d9f712e372139097f0339c638b2502c882858b8c12f3d04496b",
+        "source": "2026-10-27 scout extracted/scrumblr.bridgecfg",
+        "fields": {
+          "apiPath": null,
+          "saveIdentityCaps": false,
+          "expectAppHooks": false
+        },
+        "verification": "config bytes inspected; signed intake verdict comes only from spk-host import, not this catalogue"
+      },
+      "category": "kanban/whiteboard",
+      "agentWork": "Arrange sticky cards on a spatial board",
+      "protocol": "socket.io + Redis",
+      "risk": "Old package; recipe exists",
+      "batches": [
+        "b3.tsv"
+      ],
+      "evidence": "No live row recorded in ROWS-OWED section 0; recipes are not proof",
+      "protocolEvidence": "package recipe/source",
+      "metadataDocumentSha256": "4572f8d8b76dba110181a0754e50cfbaafca411079151fd985aad25be26b0ea6"
+    },
+    {
+      "metadata": {
+        "appId": "70xjeuj6t85v3s9a3up583q97wu044mnt8aekf3pqs41e3ct2v70",
+        "name": "Tube",
+        "version": "1.1.13",
+        "packageId": "cbba85a45618c184f304d90ccce303a9",
+        "imageId": "98f79ed1a59b118c35076aee53621439.svg",
+        "webLink": "https://git.mills.io/prologic/tube",
+        "codeLink": "https://git.mills.io/prologic/tube",
+        "isOpenSource": true,
+        "categories": [
+          "Media"
+        ],
+        "author": {
+          "name": "Jacob Weisz",
+          "keybaseUsername": "ocdtrekkie",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/657958edabb0f10bc5cf32785b0e1f05_360_360.jpg",
+          "githubUsername": "ocdtrekkie",
+          "hackernewsUsername": "ocdtrekkie",
+          "redditUsername": "ocdtrekkie"
+        },
+        "shortDescription": "Simple video sharing",
+        "upstreamAuthor": "James Mills",
+        "createdAt": "2022-10-01T05:39:15Z",
+        "versionNumber": 1
+      },
+      "details": {
+        "license": "MIT License"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/70xjeuj6t85v3s9a3up583q97wu044mnt8aekf3pqs41e3ct2v70.json",
+      "rawBytes": 79227048,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "packageSha256": "cbba85a45618c184f304d90ccce303a983ccb56b247cc1ab90b0b86c86ce0245",
+        "decodedBytes": 260134544,
+        "source": "2026-10-28 package root inspection; SHA256 prefix matches packageId, signature not reverified here",
+        "bytes": 888,
+        "sha256": "b033a01e5bf8aeb473fa42a2e6eccd78bb0ee46140b940bcb9ef30fa7caf5f3d",
+        "fields": {
+          "apiPath": "",
+          "saveIdentityCaps": false,
+          "expectAppHooks": false,
+          "permissions": [
+            "admin",
+            "upload"
+          ]
+        }
+      },
+      "category": "media/video",
+      "agentWork": "Upload, index and retrieve video artifacts",
+      "protocol": "HTTP multipart + media GET",
+      "risk": "Binary size bounds; streaming required beyond prototype limit",
+      "batches": [
+        "b5.tsv"
+      ],
+      "evidence": "No live row recorded in ROWS-OWED section 0; recipes are not proof",
+      "protocolEvidence": "package recipe/source",
+      "metadataDocumentSha256": "2284500d22f0b100d6dc7638623456803fa1fe6f0adc8366ee5e3d446677ce79"
+    },
+    {
+      "metadata": {
+        "appId": "wfg1r0qra2ewyvns05r0rddqttt57qxurz3nz5z95rjnm63et7e0",
+        "name": "Groove Basin",
+        "version": "2016.06.25 (1.5.1+)",
+        "packageId": "209d45cd3983bbab7ea52695c723fffe",
+        "imageId": "52faa48ea3e30e8a4963f0be03f0dbfb.png",
+        "webLink": "http://groovebasin.com",
+        "codeLink": "https://github.com/dwrensha/groovebasin",
+        "isOpenSource": true,
+        "categories": [
+          "Media"
+        ],
+        "author": {
+          "name": "David Renshaw",
+          "keybaseUsername": "dwrensha",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/d27b0cefb64d32ca83a59a21a9c27f05_360_360.jpg"
+        },
+        "shortDescription": "Music player",
+        "upstreamAuthor": "Andrew Kelley",
+        "createdAt": "2016-06-26T02:27:19Z",
+        "versionNumber": 9
+      },
+      "details": {
+        "license": "MIT License"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/wfg1r0qra2ewyvns05r0rddqttt57qxurz3nz5z95rjnm63et7e0.json",
+      "rawBytes": 17646696,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "bytes": 1312,
+        "sha256": "a0593abb0090349ec887acc46031c8c0ecf2e6addbdbb248420be1a1edb5e72c",
+        "source": "2026-10-27 scout extracted/groovebasin.bridgecfg",
+        "fields": {
+          "apiPath": null,
+          "saveIdentityCaps": false,
+          "expectAppHooks": false
+        },
+        "verification": "config bytes inspected; signed intake verdict comes only from spk-host import, not this catalogue"
+      },
+      "category": "media/audio",
+      "agentWork": "Upload audio and manage queues/playlists",
+      "protocol": "HTTP + WebSocket JSON",
+      "risk": "Bundled media processes; recipe exists",
+      "batches": [
+        "b5.tsv"
+      ],
+      "evidence": "No live row recorded in ROWS-OWED section 0; recipes are not proof",
+      "protocolEvidence": "package recipe/source",
+      "metadataDocumentSha256": "9f24bbed80e2fd63567b635980f289c0fcdee793505dda6361dee060390715e2"
+    },
+    {
+      "metadata": {
+        "appId": "5uh349d0kky2zp5whrh2znahn27gwha876xze3864n0fu9e5220h",
+        "name": "Kiwix",
+        "version": "0.1.0",
+        "packageId": "eace6915b227131cf0ed2b1a0db2e86b",
+        "imageId": "1a479c441262f14033d8a76b9776d5b1.png",
+        "webLink": "https://kiwix.org/",
+        "codeLink": "https://github.com/orblivion/KiwixSandstorm",
+        "isOpenSource": true,
+        "categories": [
+          "Media"
+        ],
+        "author": {
+          "name": "Daniel Krol",
+          "keybaseUsername": "ill_llogic",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/f80984846a202644f186000892364e05_360_360.jpg",
+          "githubUsername": "orblivion",
+          "twitterUsername": "orblivion"
+        },
+        "shortDescription": "Local Wikipedia & more",
+        "upstreamAuthor": "Kiwix (kiwix.org)",
+        "createdAt": "2019-11-29T18:48:00Z",
+        "versionNumber": 15
+      },
+      "details": {
+        "license": "GNU GPL v3"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/5uh349d0kky2zp5whrh2znahn27gwha876xze3864n0fu9e5220h.json",
+      "rawBytes": 40638984,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "packageSha256": "eace6915b227131cf0ed2b1a0db2e86b325f2416a28ec71a747b9f5bb00461f7",
+        "decodedBytes": 181186896,
+        "source": "2026-10-28 package root inspection; SHA256 prefix matches packageId, signature not reverified here",
+        "bytes": 600,
+        "sha256": "e28de6cd66322f761ec83d0c895352022c24ba99058851924815ffb48fe9c8f9",
+        "fields": {
+          "apiPath": "",
+          "saveIdentityCaps": false,
+          "expectAppHooks": false,
+          "permissions": [
+            "uploader"
+          ]
+        }
+      },
+      "category": "knowledge/search",
+      "agentWork": "Import ZIM collections and query offline reference material",
+      "protocol": "HTTP upload + search/read",
+      "risk": "No document-level write; acceptance must use archive import",
+      "batches": [
+        "b5.tsv"
+      ],
+      "evidence": "No live row recorded in ROWS-OWED section 0; recipes are not proof",
+      "protocolEvidence": "package recipe/source",
+      "metadataDocumentSha256": "4ba10abaa1ed0d1e1e7db1507d36edbb0a7a4daff6c951ba65351870631d7266"
+    },
+    {
+      "metadata": {
+        "appId": "aax9j672p6z8n7nyupzvj2nmumeqd4upa0f7mgu8gprwmy53x04h",
+        "name": "WordPress",
+        "version": "v2023.03.02 (4.9.8)",
+        "packageId": "d6955e8f377ac431db17fd01855b3ce5",
+        "imageId": "10dae81ab82bb35ff9f21437ec7bd254.svg",
+        "webLink": "https://wordpress.org/",
+        "codeLink": "https://github.com/sandstormports/wordpress-sandstorm",
+        "isOpenSource": true,
+        "categories": [
+          "Web Publishing"
+        ],
+        "author": {
+          "name": "Jacob Weisz",
+          "keybaseUsername": "ocdtrekkie",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/657958edabb0f10bc5cf32785b0e1f05_360_360.jpg",
+          "githubUsername": "ocdtrekkie",
+          "hackernewsUsername": "ocdtrekkie",
+          "redditUsername": "ocdtrekkie"
+        },
+        "shortDescription": "Content management",
+        "upstreamAuthor": "WordPress Project",
+        "createdAt": "2023-04-09T03:33:18Z",
+        "versionNumber": 19
+      },
+      "details": {
+        "license": "GNU GPL v2"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/aax9j672p6z8n7nyupzvj2nmumeqd4upa0f7mgu8gprwmy53x04h.json",
+      "rawBytes": 46887336,
+      "importProfile": "market-large-v1 provisionally (batch class L; decoded size not measured here)",
+      "bridge": {
+        "status": "present",
+        "bytes": 1536,
+        "sha256": "d54a7782a00053b79f05233e582547bf37e92dbe1408bc50fe85ec317feaf2f5",
+        "source": "2026-10-27 scout extracted/wordpress.bridgecfg",
+        "fields": {
+          "apiPath": null,
+          "saveIdentityCaps": false,
+          "expectAppHooks": false
+        },
+        "verification": "config bytes inspected; signed intake verdict comes only from spk-host import, not this catalogue"
+      },
+      "category": "publishing",
+      "agentWork": "Draft posts, query taxonomies and publish content",
+      "protocol": "HTTP REST /wp-json + form fallback",
+      "risk": "Packaged API/auth version must be audited; historical lifecycle only",
+      "batches": [
+        "b4.tsv"
+      ],
+      "evidence": "e89fe7b8b B4: lifecycle PASS; post-new.php 303, no REST nonce",
+      "protocolEvidence": "package recipe/source",
+      "metadataDocumentSha256": "6917631987c902ac5fccd3100bd509dac8d32da0f29f2777665636c8710caea1"
+    },
+    {
+      "metadata": {
+        "appId": "ksyud8q9h7rx9u001jn38216xe75a200avh7tg267wss6pq9zfkh",
+        "name": "Hugo",
+        "version": "0.104.2~2022-10-04\n",
+        "packageId": "7df1f202df51679cc84ed85e03d6d6c7",
+        "imageId": "cbae34e6c6389bea88bc5d06a6699516.png",
+        "webLink": "https://gohugo.io",
+        "codeLink": "https://github.com/johnbintz/hugo-sandstorm",
+        "isOpenSource": true,
+        "categories": [
+          "Web Publishing"
+        ],
+        "author": {
+          "name": "John Bintz",
+          "keybaseUsername": "johnbintz",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/69b2a2524df5cf8d97886cd6ff267705_360_360.jpg",
+          "githubUsername": "johnbintz"
+        },
+        "shortDescription": "static website generator",
+        "upstreamAuthor": "Hugo Team",
+        "createdAt": "2022-10-08T05:46:44Z",
+        "versionNumber": 48
+      },
+      "details": {
+        "license": "Apache License v2"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/ksyud8q9h7rx9u001jn38216xe75a200avh7tg267wss6pq9zfkh.json",
+      "rawBytes": 59987440,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "bytes": 16,
+        "sha256": "d65298bdd50e3d9f712e372139097f0339c638b2502c882858b8c12f3d04496b",
+        "source": "2026-10-27 scout extracted/hugo.bridgecfg",
+        "fields": {
+          "apiPath": null,
+          "saveIdentityCaps": false,
+          "expectAppHooks": false
+        },
+        "verification": "config bytes inspected; signed intake verdict comes only from spk-host import, not this catalogue"
+      },
+      "category": "publishing",
+      "agentWork": "Write source pages and build a static knowledge site",
+      "protocol": "HTTP file edit + publishing socket",
+      "risk": "Recipe exists; write not proven",
+      "batches": [
+        "b4.tsv"
+      ],
+      "evidence": "e89fe7b8b B4: lifecycle + recipe write PASS",
+      "protocolEvidence": "package recipe/source",
+      "metadataDocumentSha256": "488b61a1ce2e603ca8b4993a19890ba6f808e4365809eeea8337e63394a95f93"
+    },
+    {
+      "metadata": {
+        "appId": "8x12h6p0x0nrzk73hfq6zh2jxtgyzzcty7qsatkg7jfg2mzw5n90",
+        "name": "Hledger Web",
+        "version": "1.31",
+        "packageId": "23321185cf7dd1ae7a74e5b7deb6caba",
+        "imageId": "ce7a8e93f99843da5b7acfec978ba35e.svg",
+        "webLink": "https://hledger.org",
+        "codeLink": "https://github.com/simonmichael/hledger",
+        "isOpenSource": true,
+        "categories": [
+          "Office",
+          "Productivity"
+        ],
+        "author": {
+          "name": "Jacob Weisz",
+          "keybaseUsername": "ocdtrekkie",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/657958edabb0f10bc5cf32785b0e1f05_360_360.jpg",
+          "githubUsername": "ocdtrekkie",
+          "hackernewsUsername": "ocdtrekkie",
+          "redditUsername": "ocdtrekkie"
+        },
+        "shortDescription": "Web-based Accounting",
+        "upstreamAuthor": "HLedger Team",
+        "createdAt": "2023-10-24T13:08:31Z",
+        "versionNumber": 5
+      },
+      "details": {
+        "license": "GNU GPL v3"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/8x12h6p0x0nrzk73hfq6zh2jxtgyzzcty7qsatkg7jfg2mzw5n90.json",
+      "rawBytes": 19366328,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "bytes": 1112,
+        "sha256": "38dcc32769490aecf5414e414236996df5a50552a2ae5868051c726052e56108",
+        "source": "2026-10-27 scout extracted/hledger.bridgecfg",
+        "fields": {
+          "apiPath": null,
+          "saveIdentityCaps": false,
+          "expectAppHooks": false
+        },
+        "verification": "config bytes inspected; signed intake verdict comes only from spk-host import, not this catalogue"
+      },
+      "category": "finance/data",
+      "agentWork": "Post balanced journal transactions and query accounts",
+      "protocol": "HTTP JSON PUT /add",
+      "risk": "Newest lifecycle passes; write lacks detail",
+      "batches": [],
+      "evidence": "76758dba6: lifecycle PASS; write FAIL (see risk)",
+      "protocolEvidence": "package recipe/source",
+      "metadataDocumentSha256": "d272a2ed6f1ba80108f11239b102f1048567de6a03683ba5f20276cd4b5e6849"
+    },
+    {
+      "metadata": {
+        "appId": "vfdve0w8ms2fh5te77evwh9nk1w1jj4thfsuspszzx9kaakrz5ch",
+        "name": "ExpenseOwl",
+        "version": "3.15",
+        "packageId": "07a8207b2d04738817b842953a84790e",
+        "imageId": "1ccd6e5d0890d9a2477d5116e3a705cf.png",
+        "webLink": "https://github.com/ocdtrekkie/ExpenseOwl",
+        "codeLink": "https://github.com/ocdtrekkie/ExpenseOwl",
+        "isOpenSource": true,
+        "categories": [
+          "Office",
+          "Productivity"
+        ],
+        "author": {
+          "name": "Jacob Weisz",
+          "keybaseUsername": "ocdtrekkie",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/657958edabb0f10bc5cf32785b0e1f05_360_360.jpg",
+          "githubUsername": "ocdtrekkie",
+          "hackernewsUsername": "ocdtrekkie",
+          "redditUsername": "ocdtrekkie"
+        },
+        "shortDescription": "Simple expense tracker",
+        "upstreamAuthor": "Tanishq Rupaal",
+        "createdAt": "2025-03-13T05:31:49Z",
+        "versionNumber": 2
+      },
+      "details": {
+        "license": "MIT License"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/vfdve0w8ms2fh5te77evwh9nk1w1jj4thfsuspszzx9kaakrz5ch.json",
+      "rawBytes": 14140084,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "bytes": 56,
+        "sha256": "d1b3b6293fad84c897a5a2b2747b1f53d54320fdad58537e40ab871aea2650f4",
+        "source": "2026-10-27 scout extracted/expenseowl.bridgecfg",
+        "fields": {
+          "apiPath": null,
+          "saveIdentityCaps": false,
+          "expectAppHooks": false
+        },
+        "verification": "config bytes inspected; signed intake verdict comes only from spk-host import, not this catalogue"
+      },
+      "category": "finance",
+      "agentWork": "Record categorized expenses and query reports",
+      "protocol": "HTTP JSON",
+      "risk": "Small Go model; historical lifecycle, write recipe",
+      "batches": [
+        "b2.tsv"
+      ],
+      "evidence": "e89fe7b8b B2: lifecycle PASS; POST /expense 405",
+      "protocolEvidence": "package recipe/source",
+      "metadataDocumentSha256": "1461cc7aa5d11f9631f717eccaaf6733e4e8659ac8be1d3a43c28ee35a0043b9"
+    },
+    {
+      "metadata": {
+        "appId": "4mfserfc04wtcevvgn0jw27hvwfntmt8j468y3ma55kj8d5tj9kh",
+        "name": "Hummingbird",
+        "version": "0.4.1",
+        "packageId": "9365130605f1998f3d4aea205d8768ae",
+        "imageId": "904af0f878a603bd59c7dd70dc969d16.png",
+        "webLink": "https://github.com/mnutt/hummingbird",
+        "codeLink": "https://github.com/mnutt/hummingbird",
+        "isOpenSource": true,
+        "categories": [
+          "DevTools"
+        ],
+        "author": {
+          "name": "Michael Nutt",
+          "keybaseUsername": "mnutt",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/6e84f777f31128a100f9fc0ecb63a705_360_360.jpeg",
+          "githubUsername": "mnutt"
+        },
+        "shortDescription": "Real-time web tracker",
+        "createdAt": "2026-02-07T03:57:27Z",
+        "versionNumber": 410
+      },
+      "details": {
+        "license": "MIT License"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/4mfserfc04wtcevvgn0jw27hvwfntmt8j468y3ma55kj8d5tj9kh.json",
+      "rawBytes": 82510512,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "packageSha256": "9365130605f1998f3d4aea205d8768aed68c8c4b87d4720e82f899eefc51f5cd",
+        "decodedBytes": 356599936,
+        "source": "2026-10-28 package root inspection; SHA256 prefix matches packageId, signature not reverified here",
+        "bytes": 768,
+        "sha256": "4c63fd2276c7cbc08d8cd872a7beceb12f3e7d05bb20c1f44269e6b301c218cb",
+        "fields": {
+          "apiPath": "/tracking_pixel/",
+          "saveIdentityCaps": false,
+          "expectAppHooks": false,
+          "permissions": [
+            "tracker",
+            "view-data"
+          ]
+        }
+      },
+      "category": "analytics",
+      "agentWork": "Record site visits and query audience metrics",
+      "protocol": "HTTP tracking beacon + metrics endpoint (read endpoint unverified)",
+      "risk": "Not an uptime monitor; read-back endpoint unverified; signed permissions tracker and view-data",
+      "batches": [
+        "b6.tsv"
+      ],
+      "evidence": "e89fe7b8b B6: lifecycle page GET failed; allAccess owner role rerun owed",
+      "protocolEvidence": "package recipe/source",
+      "metadataDocumentSha256": "af8ee43a93c80d49840c5b7789459da634e1d11255997ceb063c784f035c49f4"
+    },
+    {
+      "metadata": {
+        "appId": "1d3umpx9ug1jv5stepvqfrucx3yr8n2a4gd7y5cud2vsq6mmj8uh",
+        "name": "Swagger Editor",
+        "version": "2.10.4",
+        "packageId": "c6dbeddce8a6269990e832675cf8753d",
+        "imageId": "077afecb19dfa30c360bc95f0e925b2c.png",
+        "webLink": "http://swagger.io/",
+        "codeLink": "https://github.com/pgrm/swagger-editor-sandstorm",
+        "isOpenSource": true,
+        "categories": [
+          "DevTools"
+        ],
+        "author": {
+          "name": "Peter Grman",
+          "keybaseUsername": "pgrm",
+          "picture": "https://s3.amazonaws.com/keybase_processed_uploads/fc72e2dedb81129ea7c3c639d34f6305_360_360_square_360.jpeg",
+          "githubUsername": "pgrm",
+          "twitterUsername": "grmanp"
+        },
+        "shortDescription": "define REST APIs",
+        "upstreamAuthor": "Swagger API",
+        "createdAt": "2016-10-26T00:22:55Z",
+        "versionNumber": 19
+      },
+      "details": {
+        "license": "Apache License v2"
+      },
+      "metadataUrl": "https://app-index.sandstorm.io/apps/1d3umpx9ug1jv5stepvqfrucx3yr8n2a4gd7y5cud2vsq6mmj8uh.json",
+      "rawBytes": 19600128,
+      "importProfile": "standard-v1 (decoded size still checked at import)",
+      "bridge": {
+        "status": "present",
+        "packageSha256": "c6dbeddce8a6269990e832675cf8753d6e7dc92b5bc45506263f17b947995b26",
+        "decodedBytes": 80506496,
+        "source": "2026-10-28 package root inspection; SHA256 prefix matches packageId, signature not reverified here",
+        "bytes": 16,
+        "sha256": "d65298bdd50e3d9f712e372139097f0339c638b2502c882858b8c12f3d04496b",
+        "fields": {
+          "apiPath": "",
+          "saveIdentityCaps": false,
+          "expectAppHooks": false,
+          "permissions": []
+        }
+      },
+      "category": "API design",
+      "agentWork": "Edit OpenAPI documents as typed artifacts",
+      "protocol": "HTTP PUT/GET /editor/spec",
+      "risk": "Recipe is server file write, not browser localStorage",
+      "batches": [
+        "b3.tsv"
+      ],
+      "evidence": "No live row recorded in ROWS-OWED section 0; recipes are not proof",
+      "protocolEvidence": "package recipe/source",
+      "metadataDocumentSha256": "71eb4780f4b60b89451967659c9a780ac69e70aa4925a011ab5ea039095bb0f5"
+    }
+  ],
+  "scope": "36 curated candidates, not a claim of 36 qualified integrations; metadata and package inspection are discovery evidence only",
+  "priorEvidenceRevision": "d41798c650843a14ab7df078ecd9e681e9490794"
+}

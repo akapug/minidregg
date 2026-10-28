@@ -44,10 +44,3 @@ write_SandCal() {
 # JSON {name, category, amount, date}}), and GET /expenses lists JSON. The method is PUT in this build; the run on
 # e89fe7b8b answered POST /expense 405 (the handler allows only PUT), with GET /expenses 200 and [] left.
 # Amount stays positive (an earlier negative amount left the list empty).
-write_ExpenseOwl() {
-  local p; p=$(req PUT /expense -H 'Content-Type: application/json' \
-    -d '{"name":"featured by a resident","category":"Other","amount":3.5,"date":"2026-10-27T12:00:00Z"}')
-  local g; g=$(req GET /expenses)
-  [[ $p =~ ^20 && $g == 200 ]] && grep -q 'featured by a resident' "$body" && echo "1 PUT /expense $p; GET /expenses $g" \
-    || echo "0 PUT /expense $p, GET /expenses $g: expense not in the list"
-}

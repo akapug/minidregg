@@ -6,9 +6,7 @@
 # SandForms (Meteor 1.2.1, DDP): source from the package's own source maps (/prompts/prompts.js:
 # Meteor.methods 'Prompts.create'(text, required) inserts a prompt, publication "prompts" is public).
 # The page body (get-j) is an empty Meteor shell, so the write is a DDP method over the owner route.
-write_SandForms() {
-  python3 -I "$(dirname "${BASH_SOURCE[0]}")/b6-ddp-prompt.py" "$dir" "featured question $(date +%s)" 2>&1 | tail -1
-}
+
 
 # OwnTracks (mnutt/owntracks-recorder, ot-recorder --http-port, per the package's start script):
 # the Recorder's HTTP mode takes a location JSON on POST /pub with the user and device as the

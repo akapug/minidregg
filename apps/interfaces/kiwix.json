@@ -1,0 +1,186 @@
+{
+  "format": "mini-app-interface-v1",
+  "name": "kiwix",
+  "interfaceVersion": 1,
+  "appId": "5uh349d0kky2zp5whrh2znahn27gwha876xze3864n0fu9e5220h",
+  "packageId": "eace6915b227131cf0ed2b1a0db2e86b",
+  "appVersion": "0.1.0",
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 1048576,
+    "replyBytes": 4194304,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "operations": {
+    "library.upload": {
+      "description": "Import one bounded ZIM archive into an empty library; a completed library cannot be overwritten.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "contentBase64": {
+            "type": "string",
+            "contentEncoding": "base64",
+            "maxLength": 1398104
+          },
+          "contentRange": {
+            "type": "string",
+            "pattern": "^bytes [0-9]+-[0-9]+/[0-9]+$"
+          }
+        },
+        "required": [
+          "contentBase64",
+          "contentRange"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "files": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                "type": {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                "size": {
+                  "type": "integer"
+                },
+                "total_size": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "name",
+                "size",
+                "total_size"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "additionalProperties": false
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "POST",
+        "path": [
+          "upload"
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ],
+        "multipart": [
+          {
+            "name": "contentRange",
+            "text": {
+              "arg": "contentRange"
+            }
+          },
+          {
+            "name": "file",
+            "filename": "library.zim",
+            "contentType": "application/octet-stream",
+            "base64": {
+              "arg": "contentBase64"
+            }
+          }
+        ],
+        "acceptedContentTypes": [
+          "text/html"
+        ]
+      }
+    },
+    "article.get": {
+      "description": "Read a finite article resource from the imported library.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "format": "relative-path",
+            "maxLength": 1024
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string",
+        "maxLength": 4194304
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "kiwix/",
+          {
+            "arg": "path",
+            "encoding": "path"
+          }
+        ],
+        "decode": "text",
+        "status": [
+          200
+        ]
+      }
+    }
+  },
+  "qualification": [
+    {
+      "id": "upload",
+      "op": "library.upload",
+      "args": {
+        "contentBase64": "WklNBAUAAAA3vL+CFF8uTVMjEHr/maCTCAAAAAEAAABmAAAAAAAAAKYAAAAAAAAAdwIAAAAAAABQAAAAAAAAAAAAAAD/////fwIAAAAAAAB0ZXh0L2h0bWwAdGV4dC9wbGFpbgAAxgAAAAAAAADdAAAAAAAAAPYAAAAAAAAADwEAAAAAAAAlAQAAAAAAAEIBAAAAAAAAXAEAAAAAAAB3AQAAAAAAAAAAAAABAAAAAgAAAAMAAAAEAAAABQAAAAYAAAAHAAAAAAAAQQAAAAAAAAAAAAAAAEhlbGxvAAABAABNAAAAAAAAAAABAAAAQ291bnRlcgAAAQAATQAAAAAAAAAAAgAAAENyZWF0b3IAAAEAAE0AAAAAAAAAAAMAAABEYXRlAAABAABNAAAAAAAAAAAEAAAARGVzY3JpcHRpb24AAAEAAE0AAAAAAAAAAAUAAABMYW5ndWFnZQAAAQAATQAAAAAAAAAABgAAAFB1Ymxpc2hlcgAAAQAATQAAAAAAAAAABwAAAFRpdGxlAAABJAAAAI0AAACYAAAAoAAAAKoAAADVAAAA2AAAAOAAAADoAAAAPGh0bWw+PGhlYWQ+PHRpdGxlPkhlbGxvPC90aXRsZT48L2hlYWQ+PGJvZHk+PGgxPkhlbGxvPC9oMT48cD5NaW5pIG5hdGl2ZSB0eXBlZCBsaWJyYXJ5PC9wPjwvYm9keT48L2h0bWw+dGV4dC9odG1sPTFmZWF0dXJlZDIwMjYtMTAtMjhBIG9uZS1hcnRpY2xlIGxpYnJhcnkgd3JpdHRlbiBieSBhIHJlc2lkZW50ZW5nZmVhdHVyZWRGZWF0dXJlZI4BAAAAAAAAStdBkjImCqu8Jhkcjczeew==",
+        "contentRange": "bytes 0-654/655"
+      }
+    },
+    {
+      "id": "article",
+      "op": "article.get",
+      "args": {
+        "path": "A/Hello"
+      },
+      "assert": [
+        {
+          "path": [],
+          "containsText": "Mini native typed library"
+        }
+      ],
+      "await": {
+        "attempts": 20,
+        "intervalSeconds": 3,
+        "retryStatuses": [
+          502,
+          503
+        ]
+      }
+    }
+  ],
+  "auth": {
+    "kind": "member-session"
+  },
+  "sources": [
+    "package:eace6915b227131cf0ed2b1a0db2e86b/zim_uploader/uploader/app.py",
+    "https://github.com/orblivion/KiwixSandstorm/blob/master/package/zim_uploader/uploader/app.py",
+    "scripts/spk-platform/market-writes/b5-mkzim.py"
+  ],
+  "$defs": {}
+}

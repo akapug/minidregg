@@ -1,0 +1,10 @@
+{
+  "source": "hbox:/tank/lanes/cx-app-interface/qualification/interface-gogs-2136395-16335/requests.jsonl",
+  "candidate": "e89fe7b8ba8c477d1538ed6ee1f0e7aeac70c97f",
+  "packageId": "aede44cf19129337aae68b6993324574",
+  "operation": "repo.create",
+  "recording": "2026-10-28; response body verbatim; response headers projected to content-type",
+  "status": 500,
+  "headers": {"content-type": "text/html; charset=utf-8"},
+  "body": "{\"message\":\"initRepository: prepareRepoCommit: getRepoInitFile[]: Asset conf/readme not found\",\"url\":\"https://github.com/gogits/go-gogs-client/wiki\"}"
+}

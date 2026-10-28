@@ -29,19 +29,7 @@ write_FileDrop() {
 # (one article, 650 bytes). LIMIT: the page's own uploader chunks at 10 MiB (main.js maxChunkSize), over
 # the 8 MiB request bound, so real ZIMs through the page need the above-8-MiB body (APP-MARKET 2b);
 # this recipe sends the one small chunk. nginx's client_max_body_size is 50M and the Flask limit 15 MiB.
-write_Kiwix() {
-  local zim="$out/bodies/featured.zim" n
-  n=$(python3 -I "$b5_here/b5-mkzim.py" "$zim" 'served by a resident') || { echo "0 b5-mkzim.py failed"; return; }
-  local up; up=$(req POST /upload -F "contentRange=bytes 0-$((n - 1))/$n" -F "file=@$zim;filename=featured.zim;type=application/octet-stream")
-  [[ $up == 200 ]] && ! grep -q '"error"' "$body" || { echo "0 POST /upload $up: $(head -c 160 "$body" | tr -d '\n')"; return; }
-  local i got=000
-  for i in $(seq 1 40); do
-    got=$(req GET /kiwix/A/Hello)
-    [[ $got == 200 ]] && grep -q 'served by a resident' "$body" && { echo "1 POST /upload $up (ZIM $n bytes); kiwix-serve GET /kiwix/A/Hello $got (poll $i)"; return; }
-    sleep 3
-  done
-  echo "0 upload $up accepted but GET /kiwix/A/Hello stayed $got (kiwix-serve did not serve the ZIM)"
-}
+
 
 # Groove Basin 2016.06.25 (dwrensha/groovebasin as packaged: lib/server.js, lib/player_server.js,
 # lib/web_socket_api_client.js, config.json, start.sh). HTTP authorisation is the `token` COOKIE of a
@@ -70,21 +58,3 @@ write_GrooveBasin() {
 # is over the 8 MiB request bound (APP-MARKET 2b: the above-8-MiB body codec is not built); playback of
 # /v/<id>.mp4 uses Range reads, fine for this clip.
 # Run evidence (76758dba6): the upload was accepted (200) and the library had the video at once.
-write_Tube() {
-  local clip="$out/bodies/featured-by-a-resident.mp4"
-  python3 -I "$b5_here/b5-tube-clip.py" "$clip" || { echo "0 b5-tube-clip.py failed"; return; }
-  local up; up=$(req POST /upload -F "video_title=featured by a resident" -F "video_description=uploaded by a resident" \
-    -F "video_file=@$clip;filename=featured-by-a-resident.mp4;type=video/mp4")
-  [[ $up =~ ^(200|302|303)$ ]] || { echo "0 POST /upload $up: $(head -c 160 "$body" | tr -d '\n')"; return; }
-  local i got=000 loc
-  for i in $(seq 1 30); do
-    got=$(req GET /)
-    if [[ $got == 303 ]]; then  # with a video in the library, GET / redirects to /v/<random id>
-      loc=$(grep -i '^location:' "$body.headers" | tr -d '\r' | awk '{print $2}'); loc=${loc%\?}
-      got=$(req GET "$loc")
-    fi
-    [[ $got == 200 ]] && grep -qE 'featured-by-a-resident|featured by a resident' "$body" && { echo "1 POST /upload $up; GET / -> ${loc:-/} $got shows it (poll $i)"; return; }
-    sleep 3
-  done
-  echo "0 POST /upload $up but GET / ${loc:-} $got never showed the video"
-}
