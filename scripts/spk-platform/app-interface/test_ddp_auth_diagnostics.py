@@ -1,5 +1,8 @@
 """Safe, correlated evidence for the two-leg Meteor authentication handshake."""
 import json
+import io
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -66,6 +69,35 @@ class AuthDiagnostics(unittest.TestCase):
                                    {'msg': 'updated', 'methods': [method['id']]}])
         channel.send = send
         self.assertEqual(ddp.authenticate(auth, request), 'member-a')
+
+    def test_credential_endpoint_response_never_enters_request_journal(self):
+        from row import Route
+        class Reply:
+            status = 200
+            def read(self, limit):
+                return b'{"token":"server-secret","meteorId":"member-a"}'
+            def getheaders(self):
+                return [('Content-Type', 'application/json')]
+            def getheader(self, name, default=''):
+                return 'application/json'
+        class HTTP:
+            def __init__(self, *args): pass
+            def request(self, *args, **kwargs): pass
+            def getresponse(self): return Reply()
+            def close(self): pass
+        with tempfile.TemporaryDirectory() as directory:
+            route_path = Path(directory)
+            (route_path / 'browser.token').write_text('route-secret')
+            declaration = {'auth': {'kind': 'credential-resume', 'credentialsPath': '/.sandstorm-credentials'},
+                           'limits': {'seconds': 1, 'replyBytes': 1024}}
+            journal = io.StringIO()
+            route = Route(route_path, declaration, journal)
+            with patch('row.UnixHTTP', HTTP):
+                status, _, body = route.http({'method': 'GET', 'path': '.sandstorm-credentials',
+                                               'query': '', 'headers': {}, 'body': b''})
+            self.assertEqual(status, 200)
+            self.assertIn(b'server-secret', body)
+            self.assertEqual(journal.getvalue(), '')
 
 
 if __name__ == '__main__':

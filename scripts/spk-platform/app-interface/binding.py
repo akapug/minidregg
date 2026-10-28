@@ -55,6 +55,10 @@ def check_declaration(d):
         b = op['binding']
         if b['protocol'] == 'http' and sum(k in b for k in ('json', 'text', 'base64', 'form', 'multipart')) > 1:
             raise Refusal('declaration-invalid', 'ambiguous HTTP body')
+        if b.get('decode') == 'json-string-fragment' and (not op.get('internal') or op['write']):
+            raise Refusal('declaration-invalid', 'auth fragment must be an internal read')
+        if any(name not in SAFE_RESPONSE_HEADERS for name in b.get('responseHeaders', {}).values()):
+            raise Refusal('declaration-invalid', 'response header forbidden')
     # Relations may only read. Reject cycles before a row can dispatch anything.
     def visit(name, ancestors):
         if name not in d['operations'] or name in ancestors:
@@ -328,7 +332,29 @@ def rss_decode(body, limit):
         raise Refusal('rss-response-invalid') from None
 
 
+SAFE_RESPONSE_HEADERS = frozenset({'etag', 'last-modified', 'content-type', 'content-length',
+                                   'x-sandstorm-app-data-version'})
+
+
 def decode_http(d, op, response):
+    projection = op['binding'].get('responseHeaders')
+    if projection is not None and any(name not in SAFE_RESPONSE_HEADERS for name in projection.values()):
+        raise Refusal('binding-response-header-forbidden')
+    value = decode_http_body(d, op, response)
+    if projection is None:
+        return value
+    headers = {}
+    for field, name in projection.items():
+        header = response[1].get(name)
+        if header is None:
+            raise Refusal('app-response-header-missing', name)
+        if not isinstance(header, str) or len(header) > 4096 or any(ord(c) < 32 or ord(c) == 127 for c in header):
+            raise Refusal('app-response-header-invalid', name)
+        headers[field] = header
+    return {'body': value, 'headers': headers}
+
+
+def decode_http_body(d, op, response):
     status, headers, body = response
     if len(body) > d['limits']['replyBytes']:
         raise Refusal('reply-over-bound')
@@ -347,6 +373,20 @@ def decode_http(d, op, response):
             return body.decode('utf-8')
         if mode == 'json-lines':
             return [json.loads(line) for line in body.decode('utf-8').splitlines() if line.strip()]
+        if mode == 'json-string-fragment':
+            fragment = op['binding'].get('fragment', {})
+            prefix, suffix = fragment.get('prefix'), fragment.get('suffix')
+            if not op.get('internal') or op['write'] or not isinstance(prefix, str) or not isinstance(suffix, str) or not (1 <= len(prefix) <= 256 and 1 <= len(suffix) <= 64):
+                raise Refusal('binding-auth-fragment-invalid')
+            text = body.decode('utf-8')
+            if text.count(prefix) != 1:
+                raise Refusal('app-auth-fragment-invalid')
+            fragment_text = text.split(prefix, 1)[1]
+            value, end = json.JSONDecoder().raw_decode(fragment_text)
+            if not isinstance(value, str) or not fragment_text[end:].lstrip().startswith(suffix):
+                raise Refusal('app-auth-fragment-invalid')
+            value.encode('utf-8')
+            return value
         if mode == 'base64':
             return {'contentBase64': base64.b64encode(body).decode()}
         if mode == 'status':
@@ -425,7 +465,7 @@ class Engine:
             raise cls('dispatch-uncertain' if op['write'] else 'transport-closed') from e
         except Refusal as e:
             # A malformed success reply is not evidence that a mutation did not occur.
-            if op['write'] and e.name in ('output-schema', 'app-json-invalid', 'app-content-type', 'reply-over-bound'):
+            if op['write'] and e.name in ('output-schema', 'app-json-invalid', 'app-content-type', 'reply-over-bound', 'app-response-header-missing', 'app-response-header-invalid'):
                 raise Uncertain('reply-uninterpretable', e.name) from e
             raise
 
