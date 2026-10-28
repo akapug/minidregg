@@ -1,0 +1,16 @@
+# Row (or row group) -> the product commit that introduced the behaviour it asserts.
+# The harness comes from main at gate time and the product from the candidate (gate harness rule, 10-28): a row
+# whose required commit is not an ancestor of the candidate's commit is SKIPPED-NOT-IN-CANDIDATE (named, never
+# PASS, never FAIL) by scripts/gates/row-requires.py. Columns: ROW-GLOB <TAB> COMMIT <TAB> WHY. Globs match a
+# journey step id (journey.sh) or a hook row name (TOUR.tsv). Add a line in the same commit that adds a row
+# asserting behaviour newer than the oldest candidate a harness may judge.
+hermes-tools-*	0d7af4da91f3d45dc001ae3ec86b8c5ce47459c5	web-parity: the room resident page's Hermes tools grant form
+bend-programs	0d7af4da91f3d45dc001ae3ec86b8c5ce47459c5	web-parity: /bend lists the workspace's programs
+bend-await-read	0d7af4da91f3d45dc001ae3ec86b8c5ce47459c5	web-parity: /bend/await draws the shell's bend await
+story-page-*	0d7af4da91f3d45dc001ae3ec86b8c5ce47459c5	web-parity: /story shows the door's invitation with the derived join form
+story-front-notice	0d7af4da91f3d45dc001ae3ec86b8c5ce47459c5	web-parity: the front page says an invitation waits
+story-join-refused	0d7af4da91f3d45dc001ae3ec86b8c5ce47459c5	web-parity: an invitation addressed to someone else has no form
+story-join	0d7af4da91f3d45dc001ae3ec86b8c5ce47459c5	web-parity: story-join posts the /story page's own form
+story-move	0d7af4da91f3d45dc001ae3ec86b8c5ce47459c5	web-parity: follows the page-form join (the row predates it; its join does not)
+story-refused	0d7af4da91f3d45dc001ae3ec86b8c5ce47459c5	web-parity: follows the page-form join (the row predates it; its join does not)
+JP2	eda65ced87871db5e4a60a924698ac0d2a2abb8a	thin-birth: the friend's thin birth (Kernel.NativeThinBirth) and the swapped-plan refusal

@@ -538,6 +538,17 @@ run_step() {
     result_json "$(frontier)"
     return
   fi
+  # PRODUCT_COMMIT (the candidate's commit, set by the runner when the harness is main's): a step whose behaviour
+  # the candidate does not carry is SKIPPED-NOT-IN-CANDIDATE, named with the commit it needs (scripts/gates/row-requires.tsv).
+  local needs
+  if [ -n "${PRODUCT_COMMIT:-}" ] && ! needs=$(python3 "$HERE/../../scripts/gates/row-requires.py" check "$id"); then
+    [ -n "$needs" ] || { echo "journey: row-requires could not judge $id against $PRODUCT_COMMIT" >&2; exit 2; }
+    STATUS[$id]=SKIPPED-NOT-IN-CANDIDATE; WALL[$id]=0.000; ART[$id]=""; DET[$id]="$needs"
+    printf '%s\t%s\t%s\t%s\t%s\n' "$id" SKIPPED-NOT-IN-CANDIDATE 0.000 "" "$needs" >>"$TSV"
+    echo "STEP $id SKIPPED-NOT-IN-CANDIDATE ($needs)" >&2
+    result_json "$(frontier)"
+    return
+  fi
   local failed_deps=""
   for dep in "$@"; do
     if [ "${STATUS[$dep]:-}" != PASS ] && [ "$JOURNEY_KEEP_GOING" = 1 ] && [ "$dep" != J0 ] && [ "${STATUS[$dep]:-}" != SKIPPED ]; then
