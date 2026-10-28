@@ -210,3 +210,38 @@ when the arm lands.
   `protocol/host-operations.json`), mini-sdk `thin_birth_intent`/`thin_birth_plan`, the workspace
   birth path. JP2 rows: row 19 thin birth, lifecycle restored, swapped-plan row.
 * Owed: the Host consent modules' build on the box, then JP2 on a candidate world.
+
+### Continuation: the thin write path (JP2 row 22, candidate e89fe7b8b), 2026-10-28
+
+* **Cause.** `NativeThinConsent.checkServed` re-encodes the served store and compares its root
+  with the signed root. The Host never serves a cell's blinding entry
+  (`narrowPacked_erases_blinding`), and the salts derive from it, so every thin write to a blinded
+  cell (every declared cell the friend creates) is refused `servedRootMismatch`. Thin birth is
+  fine; the invocation arm's law was wrong.
+* **Audited.** AUDIT.md §26 on lane/audit-platform: ACCEPT with the strengthening applied. The
+  statements are in `Kernel/NativeThinConsent.lean`, "Served views over salted openings":
+  `checkOpened`, `OpeningCollision`, `SealedIn`, `OpenedDisplayIsCommitStatement` (with
+  sealed ⇒ post = pre), `OpenedViewRefusedStatement`, `HonestScalarViewAcceptedStatement`
+  (declared-object scalar scope; the other kinds are owed, a pole or row each).
+* **Proved (per file on dregg-ref, `#assert_axioms` clean):** `opened_display_is_commit`
+  and `target_rootOf`, `run_congr_at`, `untouched_of_both_valid`, `checkOpened_ok`,
+  `shown_agrees`, `memberPatch_pre_independent`. One tightening after the audit:
+  `checkOpened` refuses a pre-reading payload (world, kind definition: `patchReadsPre`) over an
+  opening that seals anything (`unsupportedPayload`). The keystone needs it because those member
+  patches read the pre-state. Tell the auditor.
+* **Owed, in order:**
+  1. Prove `OpenedViewRefusedStatement` (`simp [checkOpened, ...]` on the hypotheses).
+  2. Prove `HonestScalarViewAcceptedStatement`. Needs: `servedOpening` of the encoded
+     `resourceView` (codec `decode_encode` plus `openingView` at `.declaredObject`), `root_opens`,
+     `cellCodec.decode (PackedCell.bytes p) = some p`, `selectDeclared` returning the narrowed
+     payload, and `entries W (DFinsupp.filter v s) = (entries W s).filter (v ∘ fst)` (via
+     `entries_fromEntries_of_pairwise`) against `StoreHiding.openedEntries_eq_filterMap`.
+  3. Implementation: `displayTarget` calls `checkOpened deployment command target view`. Delete
+     `servedBytes`, `checkServed`, `RootBinds`, `honest_binds`, `mismatch_refused` and the old
+     `thin_display_is_commit` (no twin). `Display.post`'s root becomes `Option`, present only when
+     the opening seals nothing; `Host.ClientConsentCore.displayJson` prints it only then
+     (`jthin-consent.sh` reads `postRoot` for world instances, which seal nothing).
+  4. Rebuild `Host.ClientConsentCore Host.ClientConsentSession` on dregg-ref
+     (`/build/lanes/thin-birth-scratch/build.sh` as `lanes`). Rerun JP2 on a candidate (hbox
+     `/tank/dregg-build/rows-e89fe7b8/demo-only-jp2.sh` pattern, with lane/rows-ledger 49c70a937's
+     harness fix).
