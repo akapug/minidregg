@@ -108,10 +108,16 @@ pub(crate) fn codec_resident(executable:PathBuf,settings:PathBuf)->Result<()> {
 
 fn read(path:&Path)->Result<Vec<u8>> { crate::fsio::read_bounded_or_empty(path, CAP) }
 
-/// Consent 220 (thin: 230) for the retained intent at `intent` and the signer's public `key`;
+/// Consent 220 (thin: 230; a thin birth: 234, with the member's retained source) for the retained intent at `intent` and the signer's public `key`;
 /// the retained bytes the provider confirmed.
 pub(crate) fn intent(host:&Path,config:&Path,intent:&Path,key:&[u8])->Result<Vec<u8>> {
     let bytes=read(intent)?;
+    if thin_mode() {
+        if let Some(source)=thin_birth_source()? {
+            with_consent(host,config,|c|c.thin_birth_intent(&bytes,key,&source))?;
+            return Ok(bytes);
+        }
+    }
     with_consent(host,config,|c|c.intent(&bytes,key,thin_mode()))?;
     Ok(bytes)
 }
@@ -122,7 +128,10 @@ pub(crate) fn observation(host:&Path,config:&Path,intent:&Path,signature:&Path,c
 }
 /// Consent 222 (thin: 232): the plan headers the intent permits `key` to sign.
 pub(crate) fn plan(host:&Path,config:&Path,intent:&Path,plan:&Path,key:&[u8])->Result<Vec<Vec<u8>>> {
-    if thin_mode() { return thin_plan(host,config,intent,plan,key); }
+    if thin_mode() {
+        if let Some(source)=thin_birth_source()? { return thin_birth_plan(host,config,intent,plan,key,&source); }
+        return thin_plan(host,config,intent,plan,key);
+    }
     let (intent,plan)=(read(intent)?,read(plan)?);
     with_consent(host,config,|c|c.plan(&intent,key,&plan))
 }
@@ -140,6 +149,30 @@ static THIN_VIEWS: std::sync::Mutex<Option<Vec<PathBuf>>> = std::sync::Mutex::ne
 pub(crate) fn set_thin_views(views:Vec<PathBuf>)->Result<()> {
     *THIN_VIEWS.lock().map_err(|_|"thin view slot poisoned")?=Some(views);
     Ok(())
+}
+
+static THIN_BIRTH_SOURCE: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+
+/// Thin birth consent (frames 234/235, `Kernel.NativeThinBirth`): the member's own retained
+/// birth source, which the provider re-authors at the coordinates the Host's draft carries.
+pub(crate) fn set_thin_birth_source(source:Option<PathBuf>)->Result<()> {
+    *THIN_BIRTH_SOURCE.lock().map_err(|_|"thin birth source slot poisoned")?=source;
+    Ok(())
+}
+
+fn thin_birth_source()->Result<Option<Vec<u8>>> {
+    let path=THIN_BIRTH_SOURCE.lock().map_err(|_|"thin birth source slot poisoned")?.clone();
+    path.map(|path|read(&path)).transpose()
+}
+
+fn thin_birth_plan(host:&Path,config:&Path,intent:&Path,plan:&Path,key:&[u8],source:&[u8])->Result<Vec<Vec<u8>>> {
+    let (intent_bytes,plan_bytes)=(read(intent)?,read(plan)?);
+    let (display,headers)=with_consent(host,config,|c|c.thin_birth_plan(&intent_bytes,key,&plan_bytes,source))?;
+    if let Some(directory)=plan.parent() {
+        write_json_new(&directory.join("thin-display.json"),&display)?;
+    }
+    eprintln!("thin consent shows: {}",display);
+    Ok(headers)
 }
 
 fn thin_plan(host:&Path,config:&Path,intent:&Path,plan:&Path,key:&[u8])->Result<Vec<Vec<u8>>> {

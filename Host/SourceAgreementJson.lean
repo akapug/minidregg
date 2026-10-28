@@ -1485,10 +1485,20 @@ private def birthRootCapability {kind : ResourceKind}
   { NativeHostGenesis.rootCapability profile source kind identifier owner target verbs with
     notBefore := height, notAfter := height + profile.template.lifetime }
 
+/-- The two authority projections a loaded birth's grants read. Loaded authoring takes them from
+the verified authority image (`ofAuthority`); thin consent re-authors at the coordinates a
+proposed draft carries (`Host.ThinBirthConsent`). -/
+structure BirthEpochs where
+  issuerEpoch : IssuerId → Epoch
+  policyEpoch : PolicyId → Epoch
+
+def BirthEpochs.ofAuthority (authority : AuthState) : BirthEpochs :=
+  ⟨authority.issuerEpoch, authority.policyEpoch⟩
+
 private def birthRootCapabilityAt {kind : ResourceKind}
     (profile : CanonicalRuntimeProfile.Profile NativeHostProfile.Field)
     (source : NativeHostGenesis.Config) (height : Nat)
-    (authority : Option AuthState) (identifier : CapabilityId)
+    (authority : Option BirthEpochs) (identifier : CapabilityId)
     (owner : SubjectId) (target : Nat) (verbs : Finset (Verb kind)) : Capability kind :=
   let grant := birthRootCapability profile source height identifier owner target verbs
   match authority with
@@ -1517,7 +1527,7 @@ private def withBlinding (path : String) (blinding : Option Nat)
 private def birthParts (path : String)
     (profile : CanonicalRuntimeProfile.Profile NativeHostProfile.Field)
     (source : NativeHostGenesis.Config) (height : Nat) (json : Lean.Json)
-    (authority : Option AuthState := none)
+    (authority : Option BirthEpochs := none)
     (providerRoutes : List (Nat × ProviderMetering.Schedule) := [])
     (lineage : Option (CapabilityId → Option (Finset CapabilityId)) := none) : Result BirthParts := do
   let raw ← object path json
@@ -1668,7 +1678,7 @@ private def birth (path : String) (json : Lean.Json)
     (grainBirthTariff : Option NativeHost.GrainBirthTariffPin := none)
     (deployed : Option NativeHost.Config := none)
     (currentHeight : Option Nat := none)
-    (authority : Option AuthState := none)
+    (authority : Option BirthEpochs := none)
     (providerRoutes : List (Nat × ProviderMetering.Schedule) := [])
     (lineage : Option (CapabilityId → Option (Finset CapabilityId)) := none) : Result Draft := do
   let raw ← object path json
@@ -2217,8 +2227,12 @@ private def decoded {α : Type} (path : String) (codec : IndexedProgram.LawfulCo
   | some value => pure value
   | none => failAt path "noncanonical or wrong-family binary input"
 
-def birthCurrent (path : String) (json : Lean.Json)
-    (deployed : NativeHost.Config) (height : Nat) (authority : AuthState)
+/-- An ordinary resource birth with the Store-read inputs as data: the authoring height, the two
+epoch projections and the placement lineage (the loaded image's in `birthCurrent`; in thin
+consent, the coordinates a proposed draft carries, `Host.ThinBirthConsent`). The supplied genesis
+is checked against the pinned seed before it is used for immutable deployment coordinates. -/
+def birthAt (path : String) (json : Lean.Json)
+    (deployed : NativeHost.Config) (height : Nat) (epochs : BirthEpochs)
     (lineage : CapabilityId → Option (Finset CapabilityId)) :
     Result Draft := do
   let raw ← object path json
@@ -2227,7 +2241,14 @@ def birthCurrent (path : String) (json : Lean.Json)
     (fun reason => s!"{path}.genesis: refused: {repr reason}")
   unless NativeHost.seedIdentity built.seed == deployed.expectedSeed do
     throw s!"{path}.genesis: differs from the pinned seed"
-  birth path json none (some deployed) (some height) (some authority) [] (some lineage)
+  birth path json none (some deployed) (some height) (some epochs) [] (some lineage)
+
+/-- `birthAt` at a verifier-loaded image's height, authority epochs and lineage. -/
+def birthCurrent (path : String) (json : Lean.Json)
+    (deployed : NativeHost.Config) (height : Nat) (authority : AuthState)
+    (lineage : CapabilityId → Option (Finset CapabilityId)) :
+    Result Draft :=
+  birthAt path json deployed height (.ofAuthority authority) lineage
 
 def subjectKeyStatusJson (subject : Nat) (status : SubjectKeyRotation.Status) : Lean.Json := .mkObj
   [("type", "subject-key-status-v1"),

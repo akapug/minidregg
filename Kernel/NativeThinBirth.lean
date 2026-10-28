@@ -73,8 +73,8 @@ structure BirthCoordinates where
   deriving DecidableEq, Repr
 
 /-- The coordinates a draft carries, read off its grants: the first grant's window start and
-issuer epoch, every grant's (policy id, policy epoch), and for every room birth the owner
-grant's ancestors (grants are `[owner, control]` per birth, in birth order). A draft whose
+issuer epoch, every grant's (policy id, policy epoch), and for every room birth with a lineage
+the owner grant's ancestors (grants are `[owner, control]` per birth, in birth order). A draft whose
 grants disagree with each other on a coordinate re-authors to different bytes and is refused. -/
 def coordinatesOf (descriptor : Descriptor Registry) : BirthCoordinates where
   height := (descriptor.grants.head?.map fun grant => grant.capability.head.notBefore).getD 0
@@ -85,7 +85,8 @@ def coordinatesOf (descriptor : Descriptor Registry) : BirthCoordinates where
     let item ← descriptor.births[position]?
     let placement ← item.placement
     let owner ← descriptor.grants[2 * position]?
-    pure (placement.value, (owner.capability.head.ancestors.image CapabilityId.value).sort (· ≤ ·))
+    let ancestors := (owner.capability.head.ancestors.image CapabilityId.value).sort (· ≤ ·)
+    if ancestors.isEmpty then none else pure (placement.value, ancestors)
 
 /-! ## The member's derivation of every branch request -/
 
@@ -201,13 +202,13 @@ structure BirthDisplay where
   finalized : List UInt8
   deriving DecidableEq, Repr
 
-/-- **Thin birth consent.** `author` is the deployed authoring of the member's own source at
-given coordinates (instantiated once, in `Host`): the whole intent (subject, nonce, observe
-grants, the draft's descriptor bytes and source capabilities) must be the authored one. Returns
-the headers to sign and the display. -/
-def checkBirthThin (pins : PublicPins) (author : BirthCoordinates → Option NativeObservationCodec.Intent)
-    (wanted : NativeObservationCodec.Intent) (planBytes : List UInt8) :
-    Except Refusal (List (List UInt8) × BirthDisplay) :=
+/-- **The authoring check alone** (thin birth intent consent, before any plan exists): the
+intent is an ordinary birth whose draft is a canonical descriptor without auxiliary creates, and
+the deployed authoring of the member's source at the draft's own coordinates is exactly this
+intent. Returns the draft bytes, source capabilities and decoded draft. -/
+def checkBirthIntentThin (author : BirthCoordinates → Option NativeObservationCodec.Intent)
+    (wanted : NativeObservationCodec.Intent) :
+    Except Refusal (List UInt8 × List CapabilityId × Descriptor Registry) :=
   match wanted.purpose with
   | .prepare (.birth draftBytes capabilities) =>
     if (GrainResourceBirthHostCodec.sourceCodec.decode draftBytes).isSome then
@@ -217,32 +218,43 @@ def checkBirthThin (pins : PublicPins) (author : BirthCoordinates → Option Nat
     | none => .error .birthMalformed
     | some draft =>
       if draft.auxiliaryCreates.isEmpty then
-        if author (coordinatesOf draft) = some wanted then
-          match NativeHostCodec.signingPlanCodec.decode planBytes with
-          | none => .error .planMalformed
-          | some plan =>
-            match plan.finalizedDraft with
-            | .birth finalBytes finalCapabilities =>
-              if plan.domain = pins.domain ∧ plan.semantics = pins.semantics ∧
-                  finalCapabilities = capabilities then
-                match CanonicalCellRegistry.sourceEncoding.codec.decode finalBytes with
-                | none => .error .planMalformed
-                | some finalized =>
-                  if CanonicalCellRegistry.sourceEncoding.codec.encode finalized = finalBytes then
-                    if CanonicalCellRegistry.sourceEncoding.codec.encode (userPart finalized) =
-                        draftBytes then
-                      match checkSlots finalized.authorityNullifier 0 plan.slots
-                          (birthSlotPlan pins finalized) with
-                      | .error refusal => .error refusal
-                      | .ok () => .ok (plan.slots.map NativeHostCodec.SigningSlot.header,
-                          ⟨draftBytes, capabilities, coordinatesOf draft, finalBytes⟩)
-                    else .error .birthSourceChanged
-                  else .error .planMalformed
-              else .error .planCoordinates
-            | _ => .error .planCoordinates
+        if author (coordinatesOf draft) = some wanted then .ok (draftBytes, capabilities, draft)
         else .error .draftNotAuthored
       else .error .birthMalformed
   | _ => .error (.birthRoute "not a birth intent")
+
+/-- **Thin birth consent.** `author` is the deployed authoring of the member's own source at
+given coordinates (instantiated once, in `Host`): the whole intent (subject, nonce, observe
+grants, the draft's descriptor bytes and source capabilities) must be the authored one. Returns
+the headers to sign and the display. -/
+def checkBirthThin (pins : PublicPins) (author : BirthCoordinates → Option NativeObservationCodec.Intent)
+    (wanted : NativeObservationCodec.Intent) (planBytes : List UInt8) :
+    Except Refusal (List (List UInt8) × BirthDisplay) :=
+  match checkBirthIntentThin author wanted with
+  | .error refusal => .error refusal
+  | .ok (draftBytes, capabilities, draft) =>
+    match NativeHostCodec.signingPlanCodec.decode planBytes with
+    | none => .error .planMalformed
+    | some plan =>
+      match plan.finalizedDraft with
+      | .birth finalBytes finalCapabilities =>
+        if plan.domain = pins.domain ∧ plan.semantics = pins.semantics ∧
+            finalCapabilities = capabilities then
+          match CanonicalCellRegistry.sourceEncoding.codec.decode finalBytes with
+          | none => .error .planMalformed
+          | some finalized =>
+            if CanonicalCellRegistry.sourceEncoding.codec.encode finalized = finalBytes then
+              if CanonicalCellRegistry.sourceEncoding.codec.encode (userPart finalized) =
+                  draftBytes then
+                match checkSlots finalized.authorityNullifier 0 plan.slots
+                    (birthSlotPlan pins finalized) with
+                | .error refusal => .error refusal
+                | .ok () => .ok (plan.slots.map NativeHostCodec.SigningSlot.header,
+                    ⟨draftBytes, capabilities, coordinatesOf draft, finalBytes⟩)
+              else .error .birthSourceChanged
+            else .error .planMalformed
+        else .error .planCoordinates
+      | _ => .error .planCoordinates
 
 /-! ## The named collision -/
 
@@ -471,6 +483,30 @@ theorem admitted_message {snapshot : CredentialAuthorityDomain.Snapshot} {nullif
   rw [admitted.headerExact]
   rfl
 
+/-- What an accepted thin birth intent consists of. -/
+theorem checkBirthIntentThin_ok {author : BirthCoordinates → Option NativeObservationCodec.Intent}
+    {wanted : NativeObservationCodec.Intent} {draftBytes : List UInt8}
+    {capabilities : List CapabilityId} {draft : Descriptor Registry}
+    (checked : checkBirthIntentThin author wanted = .ok (draftBytes, capabilities, draft)) :
+    wanted.purpose = .prepare (.birth draftBytes capabilities) ∧
+      author (coordinatesOf draft) = some wanted := by
+  unfold checkBirthIntentThin at checked
+  split at checked
+  · rename_i bytes caps purpose
+    split at checked
+    · cases checked
+    split at checked
+    · cases checked
+    split at checked
+    · split at checked
+      · rename_i authored
+        simp only [Except.ok.injEq, Prod.mk.injEq] at checked
+        obtain ⟨rfl, rfl, rfl⟩ := checked
+        exact ⟨purpose, authored⟩
+      · cases checked
+    · cases checked
+  · cases checked
+
 /-- What an accepted thin birth consists of. -/
 theorem checkBirthThin_ok {deployed : PublicPins}
     {author : BirthCoordinates → Option NativeObservationCodec.Intent}
@@ -491,41 +527,31 @@ theorem checkBirthThin_ok {deployed : PublicPins}
       headers = plan.slots.map NativeHostCodec.SigningSlot.header := by
   unfold checkBirthThin at checked
   split at checked
-  · rename_i draftBytes capabilities purpose
+  · cases checked
+  rename_i draftBytes capabilities draft intentOk
+  obtain ⟨purpose, authored⟩ := checkBirthIntentThin_ok intentOk
+  split at checked
+  · cases checked
+  rename_i plan decodedPlan
+  split at checked
+  · rename_i finalBytes finalCapabilities finalizedDraft
     split at checked
-    · cases checked
-    split at checked
-    · cases checked
-    rename_i draft decodedDraft
-    split at checked
-    · split at checked
-      · rename_i authored
-        split at checked
-        · cases checked
-        rename_i plan decodedPlan
-        split at checked
-        · rename_i finalBytes finalCapabilities finalizedDraft
+    · rename_i coordinates
+      obtain ⟨_, _, sameCapabilities⟩ := coordinates
+      subst sameCapabilities
+      split at checked
+      · cases checked
+      rename_i finalized decodedFinal
+      split at checked
+      · split at checked
+        · rename_i userExact
           split at checked
-          · rename_i coordinates
-            obtain ⟨_, _, sameCapabilities⟩ := coordinates
-            subst sameCapabilities
-            split at checked
-            · cases checked
-            rename_i finalized decodedFinal
-            split at checked
-            · rename_i canonical
-              split at checked
-              · rename_i userExact
-                split at checked
-                · cases checked
-                · rename_i slotsOk
-                  simp only [Except.ok.injEq, Prod.mk.injEq] at checked
-                  obtain ⟨rfl, rfl⟩ := checked
-                  exact ⟨draft, plan, finalized, purpose, rfl, authored, decodedPlan,
-                    finalizedDraft, decodedFinal, userExact, slotsOk, rfl⟩
-              · cases checked
-            · cases checked
           · cases checked
+          · rename_i slotsOk
+            simp only [Except.ok.injEq, Prod.mk.injEq] at checked
+            obtain ⟨rfl, rfl⟩ := checked
+            exact ⟨draft, plan, finalized, purpose, rfl, authored, decodedPlan,
+              finalizedDraft, decodedFinal, userExact, slotsOk, rfl⟩
         · cases checked
       · cases checked
     · cases checked
@@ -578,18 +604,17 @@ theorem swapped_plan_refused : SwappedPlanRefusedStatement := by
   · intro deployed author wanted planBytes draftBytes finalBytes capabilities draft finalized plan
       purpose grain decodedDraft noAuxiliary authored decodedPlan finalizedDraft domain semantics
       decodedFinal canonical changed
-    unfold checkBirthThin
-    simp [purpose, grain, decodedDraft, noAuxiliary, authored, decodedPlan, finalizedDraft, domain,
-      semantics, decodedFinal, canonical, changed]
+    simp [checkBirthThin, checkBirthIntentThin, purpose, grain, decodedDraft, noAuxiliary, authored,
+      decodedPlan, finalizedDraft, domain, semantics, decodedFinal, canonical, changed]
   · intro deployed author wanted planBytes draftBytes capabilities draft purpose grain decodedDraft
       noAuxiliary notAuthored
-    unfold checkBirthThin
-    simp [purpose, grain, decodedDraft, noAuxiliary, notAuthored]
+    simp [checkBirthThin, checkBirthIntentThin, purpose, grain, decodedDraft, noAuxiliary,
+      notAuthored]
 
 end Proofs
 
 #assert_axioms branchRequest_effects birthValues_effects checkSlots_header consented_effects
-  admitted_message checkBirthThin_ok display_is_commit swap_after_consent_refused
+  admitted_message checkBirthIntentThin_ok checkBirthThin_ok display_is_commit swap_after_consent_refused
   swapped_plan_refused
 
 end Minidregg.Kernel.NativeThinBirth
