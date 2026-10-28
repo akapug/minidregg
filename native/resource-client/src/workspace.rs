@@ -5274,35 +5274,6 @@ fn cell_storage(cell: &Value) -> Result<&'static str> {
     Ok("content")
 }
 
-/// The URI scheme of a link from a document to a resource that is not a
-/// document (a stream, a declared cell). The hyperdocument's `LinkTarget` has
-/// no resource constructor, so such a link is `external mini:KIND/ID` with an
-/// empty authority (this node): the resource's kind and id, nothing else.
-const RESOURCE_LINK_SCHEME: &str = "mini";
-
-fn resource_link_target(kind: &str, target: &str) -> Value {
-    json!({"type":"external","scheme":crate::hex(RESOURCE_LINK_SCHEME.as_bytes()),
-        "authority":"","path":crate::hex(format!("{kind}/{target}").as_bytes())})
-}
-
-/// `(kind, id)` of a link target that names a resource on this node
-/// (`resource_link_target`), as the Host spells it back.
-fn resource_link_of(target: &Value) -> Option<(String, String)> {
-    if target.get("type").and_then(Value::as_str) != Some("external") {
-        return None;
-    }
-    let text = |key: &str| {
-        mini_sdk::hex::decode(target.get(key)?.as_str()?).ok().and_then(|bytes| String::from_utf8(bytes).ok())
-    };
-    if text("scheme")? != RESOURCE_LINK_SCHEME || !text("authority")?.is_empty() {
-        return None;
-    }
-    let path = text("path")?;
-    let (kind, id) = path.split_once('/')?;
-    (matches!(kind, "object" | "account" | "program") && decimal(id, "id").is_ok())
-        .then(|| (kind.to_owned(), id.to_owned()))
-}
-
 fn page_entries(page: &Value) -> Result<&Vec<Value>> {
     page.get("entries")
         .and_then(Value::as_array)
@@ -5515,19 +5486,17 @@ fn document_actions(
                 let relation = member(action, "relation")?;
                 decimal(relation, "link relation")?;
                 // The link names what the target IS, read from a signed view
-                // of it now (which also shows this workspace may observe it):
-                // a document is a `document` target, any other resource a
-                // `mini:KIND/ID` link.
+                // of it now (which also shows this workspace may observe it).
+                // Every cell answers the link index's document key — a stream
+                // as much as a content document (`targetKeys`) — so a link to
+                // any cell names it as a document; `mini:KIND/ID` is for what
+                // is not a cell here.
                 let target_ref = reference(root, to)?;
                 let (target_view, _, _) = signed_view(root, workspace, &target_ref, "resource")?;
-                let cell = target_view.get("cell").ok_or("signed resource view lacks cell")?;
+                target_view.get("cell").ok_or("signed resource view lacks cell")?;
                 let id = member(&target_ref, "target")?;
-                let target = match cell_storage(cell)? {
-                    "content" => json!({"type":"document","id":id}),
-                    _ => resource_link_target(member(&target_ref, "kind")?, id),
-                };
                 json!({"type":"link","link":random_nonce()?,"source":null,
-                    "target":target,"relation":relation})
+                    "target":{"type":"document","id":id},"relation":relation})
             }
             _ => unreachable!("document action tags were checked"),
         });

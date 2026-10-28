@@ -7,8 +7,9 @@
 #             byte for byte.
 #   workroom  alice: `room new lab --template workroom` births lab, lab/index (the
 #             map: a doc only alice writes, that only grows), lab/wall (a stream),
-#             lab/notes (a draft), lab/tasks (a note); `doc show lab/index` lists
-#             the links by name; `doc backlinks lab/wall` finds the index.
+#             lab/notes (a draft), lab/tasks (a note); `doc show lab/index` prints
+#             the map's line and the room's shared names; `doc links lab/index`
+#             lists the links by name; `doc backlinks lab/wall` finds the index.
 #   by hand   the file `room template show` printed, with $ROOM and $ME replaced
 #             by sed, piped into `mini shell` (script mode) births lab2: the same
 #             shape (doc show / read outputs equal modulo the room's name, ids,
@@ -260,8 +261,9 @@ ok list alice "room template show social member"
 check list "room template show social member prints member.shell" cmp -s "$OUT" "$TPL/social/member.shell"
 
 # ------------------------------------------------ a workroom
+# 20 lines: chat adopt made workrooms chat rooms from birth (90562d76c).
 stderr_says workroom alice "room new lab --template workroom" 0 \
-  "template workroom/template.shell: 19 line(s) done"
+  "template workroom/template.shell: 20 line(s) done"
 for leaf in lab lab.index lab.wall lab.notes lab.tasks; do
   check workroom "alice holds a reference $leaf" test -f "$AW/$leaf.json"
 done
@@ -290,13 +292,23 @@ cp "$OUT" "$SD/lab-wall.read"
 ok workroom alice "doc show lab/index"
 cp "$OUT" "$SD/lab-index.show"
 check workroom "doc show lab/index: the map's line" grep -q "workroom lab: wall is what we say" "$OUT"
-check workroom "doc show lab/index: a link to lab/wall by name (a stream: mini:object/ID)" grep -qE -- "-> lab/wall \(object [0-9]+\)" "$OUT"
-check workroom "doc show lab/index: a link to lab/notes by name" grep -qE -- "-> lab/notes \(document [0-9]+\)" "$OUT"
-check workroom "doc show lab/index: a link to lab/tasks by name" grep -qE -- "-> lab/tasks \(document [0-9]+\)" "$OUT"
-check workroom "doc show lab/index: exactly three links" test "$(grep -c '^link ' "$OUT")" = 3
+check workroom "doc show lab/index: the room's shared names (wall, notes, tasks)" \
+  sh -c "grep -q 'wall → object:' '$OUT' && grep -q 'notes → object:' '$OUT' && grep -q 'tasks → object:' '$OUT'"
+ok workroom alice "doc links lab/index"
+cp "$OUT" "$SD/lab-index.links"
+check workroom "doc links lab/index: a link to lab/wall by name (a stream is a cell: a document target)" \
+  grep -qE -- "^link [0-9]+ -> document lab/wall \(target [0-9]+\) relation 0 " "$OUT"
+check workroom "doc links lab/index: a link to lab/notes by name" \
+  grep -qE -- "^link [0-9]+ -> document lab/notes \(target [0-9]+\) relation 0 " "$OUT"
+check workroom "doc links lab/index: a link to lab/tasks by name" \
+  grep -qE -- "^link [0-9]+ -> document lab/tasks \(target [0-9]+\) relation 0 " "$OUT"
+check workroom "doc links lab/index: exactly three links (the room's shared-name links beside them)" \
+  test "$(grep -cE '^link [0-9]+ -> document lab/' "$OUT")" = 3
 ok workroom alice "doc show lab/notes"
 cp "$OUT" "$SD/lab-notes.show"
-check workroom "doc show lab/notes links back to lab/index" grep -qE -- "-> lab/index \(document [0-9]+\)" "$OUT"
+ok workroom alice "doc links lab/notes"
+check workroom "doc links lab/notes links back to lab/index" \
+  grep -qE -- "^link [0-9]+ -> document lab/index \(target [0-9]+\) relation 0 " "$OUT"
 ok workroom alice "doc show lab/tasks"
 cp "$OUT" "$SD/lab-tasks.show"
 ok workroom alice "doc backlinks lab/wall"
@@ -338,9 +350,10 @@ INDEX=$(jq -r .target "$AW/lab.index.json"); NOTES=$(jq -r .target "$AW/lab.note
 ok member bob "import lab/index object $INDEX $BOBCAP"
 ok member bob "import lab/notes object $NOTES $BOBCAP"
 ok member bob "doc show lab/index"
-check member "bob reads the map: the line and three links" \
-  sh -c "grep -q 'workroom lab: wall is what we say' '$OUT' && test \$(grep -c '^link ' '$OUT') = 3"
-check member "bob's map names lab/notes by bob's own reference" grep -qE -- "-> lab/notes \(document $NOTES\)" "$OUT"
+check member "bob reads the map: the line" grep -q "workroom lab: wall is what we say" "$OUT"
+ok member bob "doc links lab/index"
+check member "bob reads the map: three links" test "$(grep -cE '^link [0-9]+ -> document ' "$OUT")" = 3
+check member "bob's map names lab/notes by bob's own reference" grep -qE -- "lab/notes \(target $NOTES\)" "$OUT"
 ok member bob "doc edit b1 lab/index 1 'bob rewrites the map'"
 refused member bob "submit b1" law-denied
 check member "the refusal names the index's clause (alice is the only writer)" grep -q "$A" "$ERR"
@@ -381,8 +394,9 @@ for leaf in pub pub.index pub.wall pub.intro; do
 done
 check social "pub/wall is a stream" jq -e '.storage == "stream"' "$WS/alice/sources/create-pub.wall.request.json"
 ok social alice "doc show pub/index"
+ok social alice "doc links pub/index"
 check social "pub's map links pub/wall and pub/intro by name" \
-  sh -c "grep -qE -- '-> pub/wall \(object [0-9]+\)' '$OUT' && grep -qE -- '-> pub/intro \(document [0-9]+\)' '$OUT'"
+  sh -c "grep -qE -- '^link [0-9]+ -> document pub/wall \(target [0-9]+\) ' '$OUT' && grep -qE -- '^link [0-9]+ -> document pub/intro \(target [0-9]+\) ' '$OUT'"
 stderr_says social alice "room welcome pub $C --template social" 0 "template social/member.shell: 4 line(s) done"
 check social "carl's stream: born in pub, owned by alice who bore it (a room birth is owned by its creator)" \
   jq -e --arg a "$A" --arg pub "$(jq -r .target "$AW/pub.json")" \
@@ -413,10 +427,12 @@ done
 check story "tale/scenes is a stream; chapters a note" \
   sh -c "jq -e '.storage == \"stream\"' '$WS/alice/sources/create-tale.scenes.request.json' && jq -e '.predicate.predicates[1].predicates[1].slot == \"content/atom-edits\"' '$WS/alice/sources/create-tale.chapters.request.json'"
 ok story alice "doc show tale/index"
+ok story alice "doc links tale/index"
 check story "tale's map links chapters, scenes and cast by name" \
-  sh -c "grep -qE -- '-> tale/chapters \(document' '$OUT' && grep -qE -- '-> tale/scenes \(object' '$OUT' && grep -qE -- '-> tale/cast \(document' '$OUT'"
+  sh -c "grep -qE -- '^link [0-9]+ -> document tale/chapters \(target [0-9]+\) ' '$OUT' && grep -qE -- '^link [0-9]+ -> document tale/scenes \(target [0-9]+\) ' '$OUT' && grep -qE -- '^link [0-9]+ -> document tale/cast \(target [0-9]+\) ' '$OUT'"
 ok story alice "doc show tale/chapters"
-check story "tale/chapters links tale/cast" grep -qE -- "-> tale/cast \(document" "$OUT"
+ok story alice "doc links tale/chapters"
+check story "tale/chapters links tale/cast" grep -qE -- "tale/cast \(target [0-9]+\)" "$OUT"
 
 # ------------------------------------------------ story under live traffic, and split tenancy
 # A second member appends in a loop (bob, into lab/notes: his grant writes
