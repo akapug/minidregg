@@ -711,9 +711,6 @@ if [ -n "$HOLD_UNIT" ]; then
       exit 1 ;;
   esac
 fi
-query_task after-hard 7 7001 71 "$EVIDENCE/controller.key" 30006
-jq -e '.cell.grain.generation == "2" and .cell.grain.status == "5" and
-  .cell.grain.reserved == "3"' "$EVIDENCE/after-hard/view.json" >/dev/null
 if "$MINI" retry --attempt "$EVIDENCE/stale-tool-input-attempt" --socket "$SOCKET" \
     --mode submit >"$EVIDENCE/stale-tool-input-retry.stdout" \
     2>"$EVIDENCE/stale-tool-input-retry.stderr"; then
@@ -722,23 +719,28 @@ if "$MINI" retry --attempt "$EVIDENCE/stale-tool-input-attempt" --socket "$SOCKE
 fi
 jq -e '.type == "refused"' "$EVIDENCE/stale-tool-input-attempt/retry-0001.json" >/dev/null
 
-# Recovery is operator-directed through the separate private admin socket.
-# The operator audited the stopped local process group. The runtime checks
-# the signed reserved amount, settles the configured zero charge, records that
-# audit and an explicit external-effect acknowledgement, then reattaches.
-"$GRAIN" admin "$EVIDENCE/runtime-state/admin.sock" 'reconcile parent audited' \
-  >"$EVIDENCE/reconcile-parent.stdout" 2>"$EVIDENCE/reconcile-parent.stderr"
+# Recovery after the breaker: the worker is physically stopped and its only external channel was
+# the Mini broker, so the runtime settles what it can prove by itself (88a0682c8,
+# `automatic_reconcile` after a lost hard connection). It settles the parent's held allowance at the
+# configured zero charge on its own managed law (not an operator audit) and derives the
+# external-effect acknowledgement. The owner can simply reattach. Nothing is left for the operator:
+# an operator-directed reconcile afterwards finds no held allowance and settles nothing twice.
 wait_for_journal '.parentHold == null and
-  (.reconciliationLog | any(.authority == "parent" and .stage == "signed-settlement-confirmed"))'
+  (.reconciliationLog | any(.authority == "parent" and .action == "settle-held-allowance" and
+    .originProof == "own-managed-law" and .originAudited == false)) and
+  (.reconciliationLog | any(.authority == "parent" and .stage == "signed-settlement-confirmed")) and
+  (.unresolvedExternal | length) == 0 and
+  (.reconciliationLog | any(.action == "derive-no-unaccounted-external-effects" and .automatic == true))'
 query_task reconciled-parent 7 7001 71 "$EVIDENCE/controller.key" 30010
 jq -e '.cell.grain.generation == "2" and .cell.grain.status == "0" and
   .cell.grain.remaining == "99" and .cell.grain.reserved == "0"' \
   "$EVIDENCE/reconciled-parent/view.json" >/dev/null
-"$GRAIN" admin "$EVIDENCE/runtime-state/admin.sock" 'reconcile effects' \
-  >"$EVIDENCE/reconcile-effects.stdout" 2>"$EVIDENCE/reconcile-effects.stderr"
-wait_for_journal '(.unresolvedExternal | length) == 0 and
-  (.reconciliationLog | any(.action == "acknowledge-external-effects" and
-    .externalEffectsAcknowledged == true))'
+if "$GRAIN" admin "$EVIDENCE/runtime-state/admin.sock" 'reconcile parent audited' \
+    >"$EVIDENCE/reconcile-parent.stdout" 2>"$EVIDENCE/reconcile-parent.stderr"; then
+  echo "operator reconcile settled a hold the runtime had already settled" >&2
+  exit 1
+fi
+grep -q 'no durable held allowance for this authority' "$EVIDENCE/reconcile-parent.stderr"
 
 mkfifo "$EVIDENCE/recovered-input.fifo"
 "$GRAIN" connect "$CONTROL_SOCKET" <"$EVIDENCE/recovered-input.fifo" \
