@@ -2,23 +2,18 @@
 # from each app's source and docs, not proven by a live write (see the lifecycle rows in the report).
 rt_py="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/rt-sio.py"
 
-# WBO 1.20 (github.com/lovasoa/whitebophir): server.js `socket.on("getboard")` joins the board,
-# `socket.on("broadcast")` applies {board, data:{tool,type,id,...}}. The board is saved to
-# $WBO_HISTORY_DIR/board-<name>.json after SAVE_INTERVAL (2 s) of inactivity, and server/server.js serves it at
-# GET /download/<board> (case "download"; there is no /boards/<name>.json route: that path is the board page
-# or a static file, and answered 404 in the b26630168 run).
+# WBO 1.20 (github.com/lovasoa/whitebophir): server.js `socket.on("getboard")` joins the board and answers one
+# `broadcast` event with the board's items (_children); `socket.on("broadcast")` applies {board, data:{tool,type,
+# id,...}}. The write is a Rectangle broadcast and the read-back is a SECOND socket's getboard (rt-sio.py wbo),
+# the app's own protocol. The saved-file route GET /download/<board> (board-<name>.json after the 2 s save) is
+# recorded as extra evidence only: /boards/<name>.json is no route (404), and /download answered 500 in the
+# b26630168 run for a reason the app's log would show (the world is gone).
 write_WBO() {
   local board=featured res
   res=$(python3 -I "$rt_py" wbo "$dir" "$board" 2>&1 | tail -1)
-  [[ $res == *'"ok": true'* ]] || { echo "0 socket.io broadcast: ${res:0:160}"; return; }
-  local id; id=$(sed 's/.*"id": "\([^"]*\)".*/\1/' <<<"$res")
-  local got try
-  for try in 1 2 3 4 5; do
-    got=$(req GET "/download/$board")
-    [[ $got == 200 ]] && grep -q "$id" "$body" && { echo "1 socket.io broadcast Rectangle $id; GET /download/$board $got (try $try)"; return; }
-    sleep 3
-  done
-  echo "0 socket.io broadcast sent as $id; GET /download/$board $got without it [$(head -c 160 "$body" | tr '\r\n\t' '   ')]"
+  local dl; dl=$(req GET "/download/$board")
+  [[ $res == *'"ok": true'* ]] && { echo "1 socket.io broadcast Rectangle, read back by a second socket's getboard (${res:0:100}); GET /download/$board $dl"; return; }
+  echo "0 socket.io write/read-back: ${res:0:200}; GET /download/$board $dl [$(head -c 100 "$body" | tr '\r\n\t' '   ')]"
 }
 
 # HedgeDoc 1.9.8: GET /new makes a note (303 to /<id>, row evidence from the featured table's
