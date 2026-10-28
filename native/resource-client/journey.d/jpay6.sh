@@ -159,7 +159,15 @@ operator = {"providerServices": [{"providerResourceId": PURSE, "tariff": {
 with open(path("enrollments.json"), "w") as out:
     json.dump([enrollment(s) for s in SUBJECTS if s != OPERATOR], out)
 spend, control, observe = CAPS[OPERATOR]
-overlay = (f"del(.grainPlatform) | .tailBound = {TAIL_BOUND} | .factoryControllerCapability = {FACTORY_CONTROL}"
+# The clock subject keeps its frame role but not the example's capability numbers
+# 71-74: the historical birth installs 71/72 (the parent's owner and control
+# capabilities) and the delegations install 73 and 75 (the parent witnesses), and
+# a birth whose grants reuse an installed capability is refused at prepare
+# (ResourceBirthController `authorityBatch`) - the grain acceptance moves its
+# clock the same way (native/grain-runtime/acceptance.sh).
+overlay = (f"del(.grainPlatform) | .clock += {{tickCapabilityId: 4071, spendCapabilityId: 4072,"
+           f" controlCapabilityId: 4073, factoryObserveCapabilityId: 4074}}"
+           f" | .tailBound = {TAIL_BOUND} | .factoryControllerCapability = {FACTORY_CONTROL}"
            f" | .sponsor.subject = {OPERATOR} | .sponsor.keyId = {1001 * OPERATOR} | .sponsor.accountId = {OPERATOR}"
            f" | .sponsor.spendCapabilityId = {spend} | .sponsor.controlCapabilityId = {control}"
            f" | .sponsor.factoryObserveCapabilityId = {observe} | .sponsor.initialBalance = {BALANCE[OPERATOR]}"
