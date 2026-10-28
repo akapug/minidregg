@@ -117,8 +117,8 @@ def SamePayload (left right : Request rootBytes) : Prop :=
     request.sameCheck request = true := by
   rw [sameCheck_eq_true_iff]
   exact ⟨rfl, rfl, rfl,
-    ⟨rfl, rfl, rfl, rfl⟩,
-    ⟨rfl, rfl, rfl, rfl⟩⟩
+    ⟨rfl, rfl, rfl, rfl, rfl⟩,
+    ⟨rfl, rfl, rfl, rfl, rfl⟩⟩
 
 end Request
 

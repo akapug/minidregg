@@ -345,7 +345,7 @@ namespace Example
 def write (cell : Nat) : DataWrite := ⟨⟨cell⟩, ⟨0⟩, ⟨0⟩, []⟩
 def event : StableEvent := ⟨0, ⟨0⟩, ⟨0⟩, []⟩
 def turn (tx cell : Nat) (subject : Option Nat) : IntentRecord :=
-  ⟨⟨tx⟩, [write cell], [], [], fun _ => 0, event, subject.map SubjectId.mk⟩
+  ⟨⟨tx⟩, [write cell], [], [], fun _ => 0, event, subject.map SubjectId.mk, fun _ => 0⟩
 
 /-- A writes the room at 1, B writes it at 2, an unsigned settlement at 3. -/
 def log : List IntentRecord := [turn 1 7 (some 1), turn 2 7 (some 2), turn 3 7 none]

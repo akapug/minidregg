@@ -242,7 +242,7 @@ theorem install_exact_debit
   change intent.exactCharge lane +
     (before.available lane - intent.exactCharge lane + intent.credit lane) =
       before.available lane + intent.credit lane
-  have := funded lane
+  have fits : intent.exactCharge lane ≤ before.available lane := funded lane
   omega
 
 /-- An uncredited install debits exactly (every family but the refill). -/
