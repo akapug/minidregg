@@ -526,6 +526,53 @@ fn signed_step_on(spec: &Spec, socket: &Path, attempt: &Path, what: &str, submit
     Err(format!("{what}: undecided after exact lookup; rerun `grain-runtime create` with the same spec to look it up again (attempt {})", attempt.display()))
 }
 
+/// Read authority and author through the live Host before signing a fresh birth.
+/// Read-only generations are retained separately: a crash before submit can
+/// acquire a fresh window without replacing any possibly admitted signed call.
+fn author_birth(spec: &Spec, socket: &Path, source: &Path, genesis: &Value, work: &Path) -> Result<PathBuf> {
+    let factory = genesis["factoryId"].as_str().ok_or("genesis lacks factoryId")?;
+    let grants: Vec<_> = spec.sponsor.grants.iter()
+        .filter(|grant| grant.kind == "object" && grant.target == factory).collect();
+    if grants.len() != 1 {
+        return Err("grain birth requires exactly one sponsor factory observation grant".into());
+    }
+    let generation = (0u64..).find_map(|number| {
+        let path = work.join(format!("birth-author-{number}"));
+        match fs::DirBuilder::new().mode(0o700).create(&path) {
+            Ok(()) => Some(Ok(path)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => None,
+            Err(error) => Some(Err(format!("create birth author generation: {error}"))),
+        }
+    }).ok_or("birth author generation exhausted")??;
+    let query_source = generation.join("factory-query.json");
+    let query = json!({"subject":spec.sponsor.subject,"nonce":spec.nonce,
+        "purpose":{"type":"query","kind":"object","target":factory,"view":"resource"},
+        "grants":[grants[0]]});
+    write_private_new(&query_source, &serde_json::to_vec(&query).map_err(|e| e.to_string())?)?;
+    let observation = generation.join("factory-query");
+    run(Command::new(&spec.mini).arg("query").arg("--host").arg(&spec.host)
+        .arg("--config").arg(&spec.host_config).arg("--socket").arg(socket)
+        .arg("--intent").arg(&query_source).args(["--intent-kind", "intent", "--view", "view-resource"])
+        .arg("--key").arg(&spec.sponsor.key).arg("--dir").arg(&observation), "mini query birth factory")?;
+    let author = generation.join("author");
+    run(Command::new(&spec.mini).arg("current-resource-intent").arg("--host").arg(&spec.host)
+        .arg("--config").arg(&spec.host_config).arg("--socket").arg(socket)
+        .arg("--source").arg(source).arg("--signed-observation").arg(observation.join("signed-observation.bin"))
+        .arg("--dir").arg(&author), "mini author current grain birth")?;
+    Ok(author.join("intent.bin"))
+}
+
+fn submit_birth(spec: &Spec, socket: &Path, source: &Path, genesis: &Value, work: &Path) -> Result<()> {
+    let birth = work.join("birth");
+    signed_step_on(spec, socket, &birth, "grain birth", || {
+        let authored = author_birth(spec, socket, source, genesis, work)?;
+        run(Command::new(&spec.mini).arg("submit").arg("--host").arg(&spec.host)
+            .arg("--config").arg(&spec.host_config).arg("--socket").arg(socket)
+            .arg("--intent").arg(&authored).args(["--intent-kind", "binary"])
+            .arg("--key").arg(&spec.sponsor.key).arg("--dir").arg(&birth), "mini submit birth").map(|_| ())
+    })
+}
+
 fn init_workspace(spec: &Spec, key: &Key, dir: &Path) -> Result<()> {
     if dir.join("workspace.json").exists() {
         return Ok(());
@@ -618,17 +665,17 @@ pub(crate) fn create_phase(spec_path: &Path, phase: Phase) -> Result<Value> {
     let genesis: Value = serde_json::from_slice(&fs::read(&spec.genesis).map_err(|e| format!("genesis: {e}"))?)
         .map_err(|e| format!("genesis: {e}"))?;
     let intent_path = work.join("birth-intent.json");
-    if !intent_path.exists() {
-        write_private_new(&intent_path, &serde_json::to_vec(&spec.birth_intent(&genesis)).map_err(|e| e.to_string())?)?;
+    let source = serde_json::to_vec(&spec.birth_intent(&genesis)).map_err(|e| e.to_string())?;
+    if intent_path.exists() {
+        if fs::read(&intent_path).map_err(|e| e.to_string())? != source {
+            return Err("retained grain birth source differs from current spec/genesis".into());
+        }
+    } else {
+        write_private_new(&intent_path, &source)?;
     }
     let birth = work.join("birth");
     let birth_socket = match &phase { Phase::Birth { socket } => socket.clone(), Phase::Whole => spec.host_socket.clone() };
-    signed_step_on(&spec, &birth_socket, &birth, "grain birth", || {
-        run(Command::new(&spec.mini).arg("submit").arg("--host").arg(&spec.host)
-            .arg("--config").arg(&spec.host_config).arg("--socket").arg(&birth_socket)
-            .arg("--intent").arg(&intent_path).args(["--intent-kind", "birth-intent"])
-            .arg("--key").arg(&spec.sponsor.key).arg("--dir").arg(&birth), "mini submit birth").map(|_| ())
-    })?;
+    submit_birth(&spec, &birth_socket, &intent_path, &genesis, &work)?;
 
     if matches!(phase, Phase::Birth { .. }) {
         return Ok(json!({"type":"mini-grain-birth-v1","task":spec.task,"root":spec.root,
@@ -721,6 +768,100 @@ mod tests {
             "worker":{"launcher":"/l/bwrap","runtimeRoot":"/rt","workspace":"/ws","network":"none",
                 "wallTimeSeconds":600,"reserve":"3","charge":"1"},
             "toolCharges":{"reserve":"2","charge":"1"}})
+    }
+
+    struct BirthFixture(PathBuf);
+    impl BirthFixture {
+        fn new() -> Self {
+            static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let path = std::env::temp_dir().join(format!("mini-create-birth-{}-{}", std::process::id(),
+                NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+            fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+        fn spec(&self) -> Spec {
+            let mut value = spec_json();
+            value["mini"] = json!(self.0.join("mini"));
+            value["sponsor"]["grants"].as_array_mut().unwrap().push(
+                json!({"kind":"object","target":"2","capability":"42"}));
+            serde_json::from_value(value).unwrap()
+        }
+        fn install_mini(&self) {
+            // A transport double: verify orchestration/retention, not Host admission.
+            fs::write(self.0.join("mini"), r#"#!/bin/sh
+set -eu
+root=${0%/*}
+verb=$1
+printf '%s\n' "$*" >> "$root/calls"
+shift
+dir=''
+while [ "$#" -gt 0 ]; do
+  case "$1" in --dir|--attempt) dir=$2;; esac
+  shift 2
+done
+mkdir -p "$dir"
+case "$verb" in
+ query) printf signed-current-factory > "$dir/signed-observation.bin";;
+ current-resource-intent) printf current-canonical-birth > "$dir/intent.bin";;
+ submit) printf exact-signed-call > "$dir/call.bin"; exit 1;;
+ retry) printf '{"type":"confirmed"}' > "$dir/outcome.json";;
+ *) exit 2;;
+esac
+"#).unwrap();
+            fs::set_permissions(self.0.join("mini"), fs::Permissions::from_mode(0o700)).unwrap();
+        }
+    }
+    impl Drop for BirthFixture {
+        fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); }
+    }
+
+    #[test]
+    fn create_birth_uses_current_signed_factory_and_binary_then_exact_lookup() {
+        let fixture = BirthFixture::new(); fixture.install_mini();
+        let spec = fixture.spec();
+        let source = fixture.0.join("source.json");
+        fs::write(&source, b"{}").unwrap();
+        let socket = Path::new("/operator-live.sock");
+        submit_birth(&spec, socket, &source, &json!({"factoryId":"2"}), &fixture.0).unwrap();
+        let calls = fs::read_to_string(fixture.0.join("calls")).unwrap();
+        let rows: Vec<_> = calls.lines().collect();
+        assert_eq!(rows.len(), 4);
+        assert!(rows[0].starts_with("query "));
+        assert!(rows[1].starts_with("current-resource-intent "));
+        assert!(rows[1].contains("factory-query/signed-observation.bin"));
+        assert!(rows[2].contains("author/intent.bin --intent-kind binary"));
+        assert!(rows[3].starts_with("retry ") && rows[3].contains("--mode lookup"));
+        assert!(rows.iter().all(|row| row.contains("--socket /operator-live.sock")));
+        let query: Value = serde_json::from_slice(&fs::read(fixture.0.join("birth-author-0/factory-query.json")).unwrap()).unwrap();
+        assert_eq!(query["purpose"]["target"], "2");
+        assert_eq!(query["grants"], json!([{"kind":"object","target":"2","capability":"42"}]));
+        // A lost confirmation on a rerun must not query, author, or submit again.
+        fs::remove_file(fixture.0.join("birth/outcome.json")).unwrap();
+        submit_birth(&spec, socket, &source, &json!({"factoryId":"2"}), &fixture.0).unwrap();
+        let again = fs::read_to_string(fixture.0.join("calls")).unwrap();
+        assert_eq!(again.lines().count(), 5);
+        assert!(again.lines().last().unwrap().starts_with("retry "));
+        assert!(!fixture.0.join("birth-author-1").exists());
+    }
+
+    #[test]
+    fn create_birth_unsubmitted_authoring_keeps_generations_and_requires_unique_factory_grant() {
+        let fixture = BirthFixture::new(); fixture.install_mini();
+        let mut spec = fixture.spec(); let socket = Path::new("/s");
+        let source = fixture.0.join("source.json"); fs::write(&source, b"{}").unwrap();
+        let genesis = json!({"factoryId":"2"});
+        let first = author_birth(&spec, socket, &source, &genesis, &fixture.0).unwrap();
+        let second = author_birth(&spec, socket, &source, &genesis, &fixture.0).unwrap();
+        assert_ne!(first, second); assert!(first.exists() && second.exists());
+        spec.sponsor.grants.push(spec.sponsor.grants[1].clone());
+        assert!(author_birth(&spec, socket, &source, &genesis, &fixture.0).unwrap_err().contains("exactly one"));
+        spec.sponsor.grants.retain(|g| g.kind != "object");
+        assert!(author_birth(&spec, socket, &source, &genesis, &fixture.0).unwrap_err().contains("exactly one"));
+        assert!(!fixture.0.join("birth-author-2").exists());
+        // A partial signed-attempt directory is retained and does not reauthor.
+        fs::create_dir(fixture.0.join("birth")).unwrap();
+        assert!(submit_birth(&spec, socket, &source, &genesis, &fixture.0).unwrap_err().contains("no signed call"));
+        assert!(!fixture.0.join("birth-author-2").exists());
     }
 
     #[test]
