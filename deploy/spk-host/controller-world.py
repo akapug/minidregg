@@ -679,6 +679,7 @@ def unit_bytes(r, base, upstream, consent=None):
                f'ExecStart={base}/bin/grain-runtime serve {worker_config(r)}\n'
                f'Environment=HOME={home}\nEnvironment=MINI_CONSENT_ANCHOR_DIR={home}/a\nWorkingDirectory={worker_layout(r) if r.get("workerTask") else home / "workspace"}\nReadWritePaths={home} {base}/reverse\n' + common)
     if r.get('workerTask'):
+        runtime = worker_runtime_access(runtime.encode(), r).decode()
         runtime += ''.join(f'Environment={key}={value}\n' for key, value in worker_environment(base, r).items())
     sock = (f'[Unit]\nDescription=Mini controller operator activation {r["store"]}\n[Socket]\n'
             f'ListenStream={home}/operator/mini.sock\n' +
@@ -1262,7 +1263,7 @@ def stage(store, helper, bundle_arg, bins_arg, upstream_arg, public_arg, worker=
     return {**r, 'stage': str(base / 'stage.json'), **({'consent': consent_record(base, r, pending)} if has_consent(r) else {})}
 
 
-def checked_units(base, r, partial=False, consent_upgrade_hashes=(), runtime_upgrade_hashes=(), proxy_upgrade_hashes=(), socket_upgrade_hashes=(), mini_upgrade_hashes=()):
+def checked_units(base, r, partial=False, consent_upgrade_hashes=(), runtime_upgrade_hashes=(), proxy_upgrade_hashes=(), socket_upgrade_hashes=(), mini_upgrade_hashes=(), controller_upgrade_hashes=()):
     stage_path = base / 'stage.json'
     if partial and not stage_path.exists():
         stage_path = base / 'stage-pending.json'
@@ -1276,7 +1277,8 @@ def checked_units(base, r, partial=False, consent_upgrade_hashes=(), runtime_upg
         actual = sha(read_file(UNITS / n, 0, 16384))
         require(actual == stage['units'][n] or (has_consent(r) and n == r['units'][4]
                 and actual in consent_upgrade_hashes) or (n == r['units'][2] and actual in proxy_upgrade_hashes)
-                or (n == r['units'][1] and actual in socket_upgrade_hashes), 'controller unit changed')
+                or (n == r['units'][1] and actual in socket_upgrade_hashes)
+                or (n == r['units'][0] and actual in controller_upgrade_hashes), 'controller unit changed')
     if 'statusProxy' in stage:
         pin = stage['statusProxy']
         require(isinstance(pin, dict) and set(pin) == {'binary', 'sha256'}
@@ -1506,6 +1508,62 @@ def checked_consent_memory(mib):
     require(type(mib) is int and 256 <= mib <= 16384 and mib % 256 == 0,
             'consent memory must be 256 through 16384 MiB in 256 MiB steps')
     return mib
+
+
+def worker_runtime_access(service, r):
+    """Hide all home trees while exposing only this controller's user manager."""
+    require(r.get('workerTask') and type(r['uid']) is int and r['uid'] > 0, 'worker runtime identity refused')
+    own = f'BindPaths=/run/user/{r["uid"]}\n'.encode()
+    protections = re.findall(rb'^ProtectHome=.*$', service, re.MULTILINE)
+    binds = [line+b'\n' for line in service.splitlines() if line.startswith(b'BindPaths=')]
+    require((protections == [b'ProtectHome=yes'] and not binds)
+            or (protections == [b'ProtectHome=tmpfs'] and binds == [own]), 'worker runtime mounts differ')
+    if protections == [b'ProtectHome=tmpfs']:
+        return service
+    return service.replace(b'ProtectHome=yes\n', b'ProtectHome=tmpfs\n'+own)
+
+
+def worker_runtime_access_upgrade(store, helper):
+    _, base, r = load(store, helper)
+    stopped_controller_units(r)
+    require(r.get('workerTask'), 'worker runtime access requires a worker controller')
+    unit = r['units'][0]; path = UNITS / unit; stage_path = base/'stage.json'
+    intent_path = base/'worker-runtime-access.json'
+    def archive(digest, kind):
+        require(isinstance(digest, str) and re.fullmatch('[0-9a-f]{64}', digest), 'worker runtime archive hash malformed')
+        return base/'configs'/('worker-runtime-access-'+digest+'.'+kind)
+    if not intent_path.exists() and not intent_path.is_symlink():
+        stage = checked_units(base, r)
+        old_stage = read_file(stage_path, 0, 65536, required_mode=0o600)
+        require(strict_json(old_stage) == stage, 'worker runtime stage changed')
+        old_unit = read_file(path, 0, 16384, required_mode=0o644)
+        new_unit = worker_runtime_access(old_unit, r)
+        stage['units'][unit] = sha(new_unit)
+        intent = {'protocol':'mini-controller-worker-runtime-access-v1', 'store':store, 'uid':r['uid']}
+        for name,kind,raw in (('oldStage','stage',old_stage),('newStage','stage',encoded(stage)),
+                              ('oldUnit','service',old_unit),('newUnit','service',new_unit)):
+            intent[name+'Sha256'] = sha(raw)
+            publish_exact(archive(sha(raw),kind),raw)
+        publish_exact(intent_path,encoded(intent))
+    intent = strict_json(read_file(intent_path,0,4096,required_mode=0o600))
+    require(set(intent) == {'protocol','store','uid','oldStageSha256','newStageSha256','oldUnitSha256','newUnitSha256'}
+            and intent['protocol'] == 'mini-controller-worker-runtime-access-v1' and intent['store'] == store
+            and intent['uid'] == r['uid'], 'worker runtime access intent differs')
+    kept = {}
+    for name,kind in (('oldStage','stage'),('newStage','stage'),('oldUnit','service'),('newUnit','service')):
+        digest = intent[name+'Sha256']; kept[name] = read_file(archive(digest,kind),0,65536,required_mode=0o600)
+        require(sha(kept[name]) == digest,'worker runtime archive differs')
+    expected = strict_json(kept['oldStage']); expected['units'][unit] = sha(kept['newUnit'])
+    require(encoded(expected) == kept['newStage'] and worker_runtime_access(kept['oldUnit'],r) == kept['newUnit'],
+            'worker runtime revision exceeds own runtime access')
+    require(sha(read_file(stage_path,0,65536,required_mode=0o600)) in
+            (intent['oldStageSha256'],intent['newStageSha256']),'stage is outside worker runtime access revision')
+    checked_units(base,r,controller_upgrade_hashes=(intent['oldUnitSha256'],intent['newUnitSha256']))
+    replace_root_record(path,kept['newUnit'],0o644)
+    replace_root_record(stage_path,kept['newStage'],0o600)
+    run(['/usr/bin/systemctl','daemon-reload']); checked_units(base,r)
+    return {'store':store,'workerRuntimeAccessUpgrade':str(intent_path),'runtimeDirectory':f'/run/user/{r["uid"]}',
+            'stageSha256':intent['newStageSha256'],'nativeOperationSubmitted':False}
 
 
 def consent_memory_transition(stage, service, service_name, mib):
@@ -2000,9 +2058,55 @@ def recover_api_unreserved(store, helper, request_id):
 
 def reconcile_controller(store, helper, selector):
     commands = {'parent': 'reconcile parent', 'effects': 'reconcile effects',
+                'parent-audited': 'reconcile parent audited', 'worker-audited': 'reconcile worker audited',
                 'foreground-audited': 'reconcile foreground audited'}
     require(selector in commands, 'unsupported controller reconciliation')
     return controller_admin_fixed(store, helper, commands[selector])
+
+
+def worker_unit_observation(store, helper):
+    """Observe only the exact retained worker through its registered manager."""
+    _, base, r = load(store, helper)
+    stage = checked_units(base, r)
+    stopped_controller_units(r)
+    require(r.get('workerTask'), 'worker observation requires a worker controller')
+    raw = read_file(worker_state(r)/'journal.json',r['uid'],8*1024*1024,required_mode=0o600)
+    child = strict_json(raw).get('child')
+    require(isinstance(child,dict) and type(child.get('operationId')) is int and child['operationId'] > 0,
+            'retained worker operation absent')
+    stem = f'mini-grain-t{r["workerTask"]}-o{child["operationId"]}'
+    require(child.get('unit') == stem, 'retained worker unit differs from task and operation')
+    unit = stem + '.service'
+    manager = stage['worker']['userManager']
+    require(manager == f'user@{r["uid"]}.service','worker manager differs')
+    before = manager_properties(manager)
+    require(before.get('ActiveState') in ('active','inactive','failed'), 'worker manager is transitioning')
+    started = before['ActiveState'] != 'active'
+    def identity():
+        os.setgroups([]); os.setgid(r['gid']); os.setuid(r['uid']); os.umask(0o077)
+    if started: worker_manager(base,r,'start')
+    try:
+        observed = subprocess.run(['/usr/bin/systemctl','--user','show',unit,
+            '--property=Id,LoadState,ActiveState,SubState,MainPID,ControlPID,ControlGroup,InvocationID'],
+            stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30,
+            preexec_fn=identity,env={**ENV,'HOME':r['home'],**worker_environment(base,r)})
+        require(observed.returncode in (0,4) and len(observed.stdout)+len(observed.stderr) <= 65536,
+                'worker manager observation failed')
+        fields = {}
+        for line in observed.stdout.decode().splitlines():
+            key, sep, value = line.partition('=')
+            require(sep and key not in fields and key in {'Id','LoadState','ActiveState','SubState','MainPID',
+                    'ControlPID','ControlGroup','InvocationID'},'worker manager output malformed')
+            fields[key] = value
+        require(fields.get('Id') == unit and fields.get('LoadState') in ('loaded','not-found','masked','error'),
+                'worker manager returned another unit')
+        require(read_file(worker_state(r)/'journal.json',r['uid'],8*1024*1024,required_mode=0o600) == raw,
+                'retained worker changed during observation')
+        return {'protocol':'mini-controller-worker-observation-v1','store':store,'unit':unit,
+                'journalSha256':sha(raw),'manager':manager,'managerStarted':started,'properties':fields,
+                'nativeOperationSubmitted':False}
+    finally:
+        if started: worker_manager(base,r,'stop')
 
 
 def controller_admin_fixed(store, helper, command):
@@ -2455,6 +2559,8 @@ def main(args):
         elif action == 'controller-runtime-upgrade' and len(extra) == 1: result = runtime_upgrade(store, helper, extra[0])
         elif action == 'controller-mini-upgrade' and len(extra) == 1: result = controller_binary_upgrade(store, helper, extra[0], 'mini')
         elif action == 'controller-consent-memory' and len(extra) == 1: result = consent_memory_upgrade(store, helper, extra[0])
+        elif action == 'controller-worker-runtime-access' and not extra: result = worker_runtime_access_upgrade(store, helper)
+        elif action == 'controller-worker-observe' and not extra: result = worker_unit_observation(store, helper)
         elif action == 'controller-status-proxy-upgrade' and len(extra) == 1: result = status_proxy_upgrade(store, helper, extra[0])
         elif action == 'controller-operator-endpoint' and len(extra) == 1: result = operator_endpoint_upgrade(store, helper, extra[0])
         elif action == 'controller-enroll' and len(extra) == 1:

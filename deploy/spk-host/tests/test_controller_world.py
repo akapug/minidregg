@@ -102,6 +102,8 @@ class ControllerWorldTests(unittest.TestCase):
         self.assertIn('MINI_GRAIN_WORKER_MANAGER=user', runtime)
         self.assertIn('MINI_GRAIN_CONTROLLER_REGISTRATION=' + str(base / 'registrations/9870001.json'), runtime)
         self.assertIn('XDG_RUNTIME_DIR=/run/user/' + str(r['uid']), runtime)
+        self.assertIn('ProtectHome=tmpfs\nBindPaths=/run/user/' + str(r['uid']) + '\n', runtime)
+        self.assertNotIn('ProtectHome=tmpfs', units[r['units'][2]].decode())
         self.assertEqual(c.worker_state(r), Path(r['home']) / 'grain/state')
         self.assertEqual(c.worker_state(self.record()), Path(r['home']) / 'state')
 
@@ -251,7 +253,9 @@ class ControllerWorldTests(unittest.TestCase):
         with patch.object(c, 'load', return_value=({}, base, r)), patch.object(c, 'checked_units'), patch.object(c, 'controller_child', return_value=0) as child:
             self.assertEqual(c.recover_api_unreserved(r['store'], 'helper', request), 0)
             self.assertEqual(child.call_args.args[1][-1], 'recover foreground api-unreserved ' + request)
-            for selector, command in (('parent', 'reconcile parent'), ('effects', 'reconcile effects'), ('foreground-audited', 'reconcile foreground audited')):
+            for selector, command in (('parent', 'reconcile parent'), ('effects', 'reconcile effects'),
+                                      ('parent-audited', 'reconcile parent audited'), ('worker-audited', 'reconcile worker audited'),
+                                      ('foreground-audited', 'reconcile foreground audited')):
                 c.reconcile_controller(r['store'], 'helper', selector)
                 self.assertEqual(child.call_args.args[1][-1], command)
             c.controller_admin_fixed(r['store'], 'helper', 'prepare idle')
@@ -1283,6 +1287,51 @@ class ControllerWorldTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'service command differs'):
                 c.status_proxy_transition(stage, r, base, b'ExecStart=/foreign\n', sock, 'ab'*32)
             self.assertEqual(new_stage['binaries'], stage['binaries'])
+
+    def test_worker_runtime_access_is_scoped_and_resumes_after_unit_publication(self):
+        with self.storage_upgrade_fixture('runtime-access') as (base,r,units,raw,_):
+            r['workerTask'] = '9870001'
+            old = (units/r['units'][0]).read_bytes()
+            original = c.replace_root_record; count = [0]
+            def interrupt(*args):
+                original(*args); count[0] += 1
+                if count[0] == 1: raise OSError('interrupted worker mount revision')
+            with patch.object(c,'replace_root_record',side_effect=interrupt),self.assertRaises(OSError):
+                c.worker_runtime_access_upgrade(r['store'],'/unused')
+            receipt = c.worker_runtime_access_upgrade(r['store'],'/unused')
+            self.assertFalse(receipt['nativeOperationSubmitted'])
+            self.assertEqual(c.worker_runtime_access_upgrade(r['store'],'/unused'),receipt)
+            new = (units/r['units'][0]).read_bytes()
+            self.assertEqual(new,old.replace(b'ProtectHome=yes\n',
+                f'ProtectHome=tmpfs\nBindPaths=/run/user/{r["uid"]}\n'.encode()))
+            expected = json.loads(raw); expected['units'][r['units'][0]] = c.sha(new)
+            self.assertEqual(c.checked_units(base,r),expected)
+            for bad in (old+b'BindPaths=/run/user\n',old.replace(b'ProtectHome=yes',b'ProtectHome=no'),
+                        new.replace(f'/run/user/{r["uid"]}'.encode(),b'/run/user/1')):
+                with self.assertRaisesRegex(ValueError,'mounts differ'):c.worker_runtime_access(bad,r)
+            (units/r['units'][0]).write_bytes(old+b'Environment=FOREIGN=1\n')
+            with self.assertRaisesRegex(ValueError,'controller unit changed'):
+                c.worker_runtime_access_upgrade(r['store'],'/unused')
+
+    def test_worker_observation_is_fixed_to_retained_child_and_restores_manager(self):
+        with self.storage_upgrade_fixture('worker-observe') as (base,r,units,raw,_):
+            r['workerTask'] = '9870001'
+            state = c.worker_state(r); state.mkdir(parents=True,mode=0o700)
+            journal = state/'journal.json'; unit = 'mini-grain-t9870001-o67.service'
+            journal.write_bytes(c.encoded({'child':{'operationId':67,'unit':unit.removesuffix('.service')}}));journal.chmod(0o600)
+            stage = json.loads(raw);stage['worker'] = {'userManager':f'user@{r["uid"]}.service','binaries':{}}
+            (base/'stage.json').write_bytes(c.encoded(stage))
+            response = SimpleNamespace(returncode=4,stdout=f'Id={unit}\nLoadState=not-found\nActiveState=inactive\nMainPID=0\nControlPID=0\n'.encode(),stderr=b'')
+            with patch.object(c,'worker_manager') as manager,patch.object(c.subprocess,'run',return_value=response) as command:
+                receipt = c.worker_unit_observation(r['store'],'/unused')
+                self.assertEqual(receipt['properties']['LoadState'],'not-found')
+                self.assertEqual([x.args[2] for x in manager.call_args_list],['start','stop'])
+                self.assertEqual(command.call_args.args[0][3],unit)
+                self.assertEqual(command.call_args.kwargs['env']['DBUS_SESSION_BUS_ADDRESS'],f'unix:path=/run/user/{r["uid"]}/bus')
+                response.stdout = b'Id=foreign.service\nLoadState=loaded\n'
+                with self.assertRaisesRegex(ValueError,'another unit'):c.worker_unit_observation(r['store'],'/unused')
+                journal.write_bytes(c.encoded({'child':{'operationId':68,'unit':unit.removesuffix('.service')}}))
+                with self.assertRaisesRegex(ValueError,'unit differs'):c.worker_unit_observation(r['store'],'/unused')
 
     def test_enroll_runs_fixed_native_command_once_and_brackets_only_inactive_helpers(self):
         with self.storage_upgrade_fixture('enroll') as (base,r,units,old_stage,old_unit):
