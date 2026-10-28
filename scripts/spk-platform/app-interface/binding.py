@@ -263,6 +263,47 @@ def dav_decode(body, calendar=False):
         raise Refusal('dav-response-invalid') from None
 
 
+def rss_decode(body, limit):
+    if b'<!DOCTYPE' in body.upper() or b'<!ENTITY' in body.upper():
+        raise Refusal('rss-xml-unsafe')
+    try:
+        root = ET.fromstring(body)
+        if root.tag != 'rss' or root.get('version') != '2.0':
+            raise ValueError()
+        channels = root.findall('channel')
+        if len(channels) != 1:
+            raise ValueError()
+        entries = channels[0].findall('item')
+        if len(entries) > limit:
+            raise Refusal('rss-items-over-bound')
+        result = []
+        for item in entries:
+            def field(name):
+                elements = item.findall(name)
+                if len(elements) > 1 or any(len(e) for e in elements):
+                    raise ValueError()
+                return (elements[0].text or '') if elements else None
+            identity = field('guid') or field('link')
+            if not identity:
+                raise ValueError()
+            enclosures = item.findall('enclosure')
+            if len(enclosures) > 1:
+                raise ValueError()
+            enclosure = None
+            if enclosures:
+                e = enclosures[0]
+                length = e.get('length', '')
+                if not e.get('url') or not e.get('type') or not re.fullmatch(r'[0-9]+', length):
+                    raise ValueError()
+                enclosure = {'url': e.get('url'), 'bytes': int(length), 'type': e.get('type')}
+            result.append({'id': identity, 'title': field('title'), 'link': field('link'),
+                           'description': field('description'), 'published': field('pubDate'),
+                           'enclosure': enclosure})
+        return result
+    except (ET.ParseError, ValueError, TypeError):
+        raise Refusal('rss-response-invalid') from None
+
+
 def decode_http(d, op, response):
     status, headers, body = response
     if len(body) > d['limits']['replyBytes']:

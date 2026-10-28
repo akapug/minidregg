@@ -63,5 +63,50 @@
     "path": "eace6915b227131cf0ed2b1a0db2e86b/zim_uploader/uploader/app.py",
     "sha256": "cd920ecd7c84399db273cff34392a165a6c046af3bb70b1d4aed9f08ea9ad639",
     "bytes": 11323
+  },
+  {
+    "path": "9365130605f1998f3d4aea205d8768ae/opt/app/lib/auth.js",
+    "sha256": "6c1872db9373bca097c5ca25a16884be1a2592a80e7a896e4f3fed15d9682040",
+    "bytes": 569
+  },
+  {
+    "path": "9365130605f1998f3d4aea205d8768ae/opt/app/lib/dashboard.js",
+    "sha256": "1f3e04afbc502d24f7924e9ce7af2f3064cbafd1b551bb868d125502a1300df7",
+    "bytes": 3025
+  },
+  {
+    "path": "9365130605f1998f3d4aea205d8768ae/opt/app/lib/metric.js",
+    "sha256": "858f1cea04ce5ff7a1b6fef858103ff0cdd4ada362fb521c5aff2282f2641de6",
+    "bytes": 2000
+  },
+  {
+    "path": "9365130605f1998f3d4aea205d8768ae/opt/app/lib/metrics/hits.js",
+    "sha256": "dab5f4cf0932a7e944dc4697ff317021f5eafa43bc6564a054e2238d3bb6b389",
+    "bytes": 471
+  },
+  {
+    "path": "9365130605f1998f3d4aea205d8768ae/opt/app/lib/metrics/locations.js",
+    "sha256": "dd4900e5532e43473ba52b9e97c0f315772127d56e5c8cee894bf0ad7e31d417",
+    "bytes": 1498
+  },
+  {
+    "path": "9365130605f1998f3d4aea205d8768ae/opt/app/lib/metrics/total_views.js",
+    "sha256": "c2fcbc4bc60a382c02706abf55cc3df23e118e06166dc137849f5f4ce008a7af",
+    "bytes": 361
+  },
+  {
+    "path": "9365130605f1998f3d4aea205d8768ae/opt/app/lib/metrics/views.js",
+    "sha256": "82b224198536111181e4fb430be345a3c643dfce9ab36d84360432160b6190ff",
+    "bytes": 399
+  },
+  {
+    "path": "9365130605f1998f3d4aea205d8768ae/opt/app/lib/tracker.js",
+    "sha256": "479d8c29c1deaaae0c1f3f144a54cdcb2b87f424d62fcbe4cb3e96b5270c6642",
+    "bytes": 1783
+  },
+  {
+    "path": "9365130605f1998f3d4aea205d8768ae/opt/app/sandstorm.js",
+    "sha256": "e721a6b1b2eb0211de68c470edfc1c9df772adb5396f7d768665e22295092c97",
+    "bytes": 576
   }
 ]

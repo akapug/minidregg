@@ -134,7 +134,8 @@
                       "dav-multistatus",
                       "text",
                       "json-lines",
-                      "caldav-multistatus"
+                      "caldav-multistatus",
+                      "rss"
                     ]
                   },
                   "status": {
