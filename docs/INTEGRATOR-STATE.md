@@ -59,7 +59,8 @@ the newest built main that passed the gate; each is reported in one line, and in
 | full | 1af366fe9 | `integ4/main-full.sh` started 02:25 (main-full.pid 3433976; the launcher subshell 3433959 is its parent; build.pid, then gate.pid + enrol-resume.pid under integ8); tests stage green 02:26; host stage from 02:26:38. Carries the regen tool, rust-check, effects-revival, hermes-b b740e6f0, grain-bare-prepare 746b182d, abuse-caps, snipe-unconfigured, red-jserve-envelope ffe1623f, rows-ledger 0a05ab6b and the broker fix |
 | 1af366fe9 result | — | host clean 02:59 (1995 s); consent rc=1 03:04: census, 37 structural moves plus DREGG/CLOCK/v5 owner-less (430e3fe96's twin deletion; the census counted owners by literal only, nine more pins were already fingerprint 7). Fixed f8c17f0f5 (a registry-constant reference is ownership) |
 | bd37686c0 | — | follow-on host stage rc=1 in 3 s: registry check, literal op 68 at native/spk-host/src/lifecycle_v3_native.rs:728 (7b3564733's test). Fixed f1ecba539 |
-| A9 | f8c17f0f5 | `integ4/regen-A9.sh` (pid file integ4/regen-A9.pid) from 03:08: host, regen (bumps the 37 moved and the ten newly owned identities), consent; diff in integ8/regen-A9.patch. Next: commit it to main, launch `integ4/main-full.sh <tip>` after moving integ8/{native-out,consent-out,artifacts,fixtures} aside |
+| A9 | f8c17f0f5 | host clean 03:14 (397 s); regen rc=2 03:18: the bare prefixes DREGG/NATIVE-HOST/LOG-TAG and DREGG/OBJECTIVE-BEND/ADMITTED-INPUT-CONTEXT moved in the same round their children were bumped (the tool judged them before the build that births the new name; LOG-TAG was also not declared `prefix_`). Fixed a62cab510 (deferred to the next round; selftest case) |
+| A10 | a62cab510 | `integ4/regen-A10.sh` (pid file integ4/regen-A10.pid) from 03:21: host, regen, consent; diff in integ8/regen-A10.patch. Next: commit it to main, launch `integ4/main-full.sh <tip>` after moving integ8/{native-out,consent-out,artifacts,fixtures} aside |
 
 A3's tree (main 8103b29a4) holds everything since aa9366f8: pd-host-rate, oracle-lifetime-grant, oracle-grant-factory,
 lean-audit-c, un-effects 2acd8acf (effect Plan; its codec pins re-emit with this regen), un-pb-twins 134535c2,
@@ -77,7 +78,7 @@ elaboration of the fix pending NativeHostReplay.olean). L1c (lean-audit-c a281e5
 constructors with pricedAt, drops e7958d3b9's arms on merge; unbuilt, not to merge until its warm-tree build
 elaborates) seeds its dregg-ref tree from the integ8 copy; tell it when the copy lands.
 
-Next steps: A9 → regen patch onto main → full build at main's tip (it carries 25cfb86bd, custody-b's
+Next steps: A10 → regen patch onto main → full build at main's tip (it carries 25cfb86bd, custody-b's
 delegated consent, hermes-b 5422506f, the world/ pack 1b870fbdd). On READY the chain runs gate + enrol-resume;
 report "candidate <sha> at <path>: gate <verdict>, reds by name" to the coordinator, and the sha + path to the rows
 validator (aeee8349c191e8506, the app tables wait on 25cfb86bd) and L4b (ad81db6d6fd317d3a). Pending lands:
@@ -106,6 +107,8 @@ shared with other trees (link count 8-11), and Lake rewrites a trace in place. F
 only `.lake/packages`; Lake's artifact cache restores the build dir as fresh inodes.
 
 ## Named reds outstanding
+
+- Uncommitted in the Mac worktree: Compiler/PersistedCodecTagCensus.lean `ownerless` (the census refuses a registered DREGG identity no definition spells or names). Unelaborated; land it only through a box build after the candidate.
 
 - None open on main beyond A3's outcome (un-pb-twins landed at 134535c2 via 36ce6bd3d).
 - A lane's "proved" is a claim until the integrator's build elaborates it: lean-audit-c's three proofs never
