@@ -105,9 +105,10 @@ pub fn store_key(text: &str) -> bool {
     crate::canonical::lower_hex_of(&text, 8)
 }
 
-/// A positive canonical decimal that fits a signed 64-bit integer (18 digits).
+/// A positive canonical decimal that fits an unsigned 64-bit integer (at most 20 digits): a member's
+/// application is a participant-namespace id, which is at least 2^63.
 pub fn decimal(text: &str) -> bool {
-    crate::canonical::decimal_within(text, 18) && text != "0"
+    crate::canonical::decimal_u64(text).is_some_and(|value| value != 0)
 }
 
 /// Mini's lifecycle receivers pin the resident unit name (Kernel
@@ -1495,12 +1496,12 @@ mod tests {
         format!("{}.slice", stem.rsplit_once('-').unwrap().0)
     }
 
-    /// Mirrors Kernel `ApplicationLifecycleCompletionReport.controlGroupBound` (317): the longest
+    /// Mirrors Kernel `ApplicationLifecycleCompletionReport.controlGroupBound` (323): the longest
     /// control group a resident unit can have, built from the real naming functions at their
-    /// maximum components (10-digit uid, 16-hex Store tag, 18-digit app and generation).
+    /// maximum components (10-digit uid, 16-hex Store tag, u64 app and generation: 20 digits).
     #[test]
     fn resident_control_group_stays_within_the_lean_bound() {
-        let (uid, st, big) = ("4294967295", "0123456789abcdef", "999999999999999999");
+        let (uid, st, big) = ("4294967295", "0123456789abcdef", "18446744073709551615");
         let longest = CLASSES.iter().map(|c| {
             let unit = format!("mini-spk-s{st}-a{big}-g{big}.service");
             assert!(parse_resident_unit(&unit).is_some(), "the unit is a resident unit");
@@ -1509,11 +1510,21 @@ mod tests {
             assert!(path.split('/').all(|part| part.len() <= 255), "NAME_MAX");
             path.len()
         }).max().unwrap();
-        assert_eq!(longest, 317);
+        assert_eq!(longest, 323);
+        assert!(longest < 4096, "the control-group cap");
         // the 260-byte group observed on dregg-build (app 9101, generation 2, uid 1000)
         let seen = format!("/user.slice/user-1000.slice/user@1000.service/s{st}.slice/s{st}-mini.slice/{}/{}/{}/mini-spk-s{st}-a9101-g2.service",
             grains_slice("mini", st), class_slice("mini", st, &class("S").unwrap()), app_slice("mini", st, &class("S").unwrap(), "9101"));
         assert_eq!(seen.len(), 260);
+    }
+    /// The u64 poles of a coordinate: a namespace id (at least 2^63) and the largest u64 are admitted;
+    /// 2^64, a 21-digit string, a leading zero and zero are refused.
+    #[test]
+    fn coordinates_admit_exactly_the_positive_u64() {
+        for good in ["1", "999999999999999999", "13827490942341725565", "18446744073709551615"] { assert!(decimal(good), "{good}"); }
+        for bad in ["0", "01", "18446744073709551616", "100000000000000000000", "123456789012345678901", "", "-1", "1a"] { assert!(!decimal(bad), "{bad}"); }
+        assert!(parse_resident_unit("mini-spk-s0123456789abcdef-a13827490942341725565-g18446744073709551615.service").is_some());
+        assert!(parse_resident_unit("mini-spk-s0123456789abcdef-a18446744073709551616-g1.service").is_none());
     }
     #[test]
     fn grain_class_slices_nest_by_class() {
