@@ -163,6 +163,13 @@ when the arm lands.
 
 ## 9. Debt and scope
 
+* **The authoring twin.** The box authors births with `Host.Json` (op 91, `Host.Main`), and the
+  consent provider, which links `Host.SourceAgreementJson`, re-authors with that module's
+  identical `birth`/`birthParts` (`Host.ThinBirthConsent`). The two are a pre-existing twin; if
+  they ever diverge, an honest thin birth is refused `draftNotAuthored` (completeness fails,
+  soundness does not). The loaded authoring now takes its two epoch projections as data
+  (`SourceAgreementJson.BirthEpochs`, `birthAt`); `birthCurrent` is `birthAt` at the loaded image.
+
 * **No new kernel effect.** The arm is consent-side only. The receiver, planner and authoring are
   unchanged (the authoring may gain one pure entry that takes coordinates as data instead of an
   `AuthState`; it is definitionally the same function).

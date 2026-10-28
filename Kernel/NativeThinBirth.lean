@@ -613,6 +613,265 @@ theorem swapped_plan_refused : SwappedPlanRefusedStatement := by
 
 end Proofs
 
+/-! ## Completeness: the honest Host passes -/
+
+section Completeness
+
+open private slot from Minidregg.Kernel.NativeHost
+
+variable {F : Type} [Field F] {profile : CanonicalRuntimeProfile.Profile F}
+  {deployment : CanonicalCellRegistry.Deployment} {pins : FactoryPins}
+  {durable : ResourceBirthController.Concrete.Durable} {d : Descriptor Registry}
+
+/-- **The member's derivation is the executor's request** up to the three authority coordinates
+(which `checkHeader` takes from the proposal) and the height and pre-root (which the plan frame
+zeroes), when the public pins are the executor's. -/
+theorem birthValues_exact
+    (prepared : ResourceBirthController.Concrete.PreparedBirth profile.compilerProfile deployment
+      pins durable d) (height : Height) (branch : Branch d) (deployed : PublicPins)
+    (domain : deployed.domain = pins.domain) (semantics : deployed.semantics = pins.semantics)
+    (federation : deployed.federation = pins.federation)
+    (factory : (⟨deployed.factory⟩ : ResourceId .object) = pins.factory)
+    (policy : (⟨deployed.factory⟩ : PolicyId) = pins.policyId) :
+    TypedAuthorizationRequestCodec.planOf
+        (NativeThinConsent.expectedRequest
+          (TypedAuthorizationRequestCodec.planOf (branchRequest prepared height branch))
+          (birthValues deployed d branch).2) =
+      TypedAuthorizationRequestCodec.planOf (branchRequest prepared height branch) := by
+  obtain ⟨pDomain, pSemantics, pFederation, pFactory⟩ := deployed
+  simp only at domain semantics federation factory policy
+  cases branch with
+  | factory =>
+      simp only [birthValues, branchRequest, ResourceBirthPolicyController.Concrete.rawLeg,
+        factoryValues, factoryRequest, NativeThinConsent.expectedRequest,
+        TypedAuthorizationRequestCodec.planOf, domain, semantics, federation, factory, policy]
+  | authority =>
+      simp only [birthValues, branchRequest, ResourceBirthPolicyController.Concrete.rawLeg,
+        ResourceBirthAuthority.request, factoryValues, factoryRequest,
+        NativeThinConsent.expectedRequest, TypedAuthorizationRequestCodec.planOf, domain,
+        semantics, federation, factory, policy]
+  | allocation index =>
+      simp only [birthValues, branchRequest, ResourceBirthPolicyController.Concrete.rawLeg,
+        ResourceBirthController.allocationRequest, allocationValues, factoryValues,
+        factoryRequest, NativeThinConsent.expectedRequest, TypedAuthorizationRequestCodec.planOf,
+        domain, semantics, federation, factory, policy]
+  | source index =>
+      simp only [birthValues, branchRequest, CanonicalResourceEffect.batchSourceRequest,
+        CanonicalResourceEffect.RequestContext.request,
+        ResourceBirthPolicyController.Concrete.resourceContexts, sourceValues,
+        NativeThinConsent.expectedRequest, TypedAuthorizationRequestCodec.planOf, domain,
+        semantics, federation, List.getElem?_eq_getElem index.isLt, Option.map_some,
+        Option.getD_some, List.get_eq_getElem]
+
+/-- The signed bytes of a request decode back to its plan form. -/
+theorem signedRequest_requestBytes (request : AuthorizationDeclaration.SomeRequest) :
+    NativeThinConsent.signedRequest (CredentialSignatureAdmission.requestBytes request) =
+      some (TypedAuthorizationRequestCodec.planOf request) := by
+  unfold NativeThinConsent.signedRequest CredentialSignatureAdmission.requestBytes
+    TypedAuthorizationRequestCodec.signedRequestBytes
+  simp [TypedAuthorizationRequestCodec.someRequestCodec, List.take_left', List.drop_left']
+
+/-- **A slot the honest planner built passes `checkHeader`** against the member's derivation. -/
+theorem slot_checked
+    (prepared : ResourceBirthController.Concrete.PreparedBirth profile.compilerProfile deployment
+      pins durable d) (height : Height) (branch : Branch d) (deployed : PublicPins)
+    (domain : deployed.domain = pins.domain) (semantics : deployed.semantics = pins.semantics)
+    (federation : deployed.federation = pins.federation)
+    (factory : (⟨deployed.factory⟩ : ResourceId .object) = pins.factory)
+    (policy : (⟨deployed.factory⟩ : PolicyId) = pins.policyId)
+    {snapshot : CredentialAuthorityDomain.Snapshot} {marker role index : Nat}
+    {built : NativeHostCodec.SigningSlot}
+    (ok : slot snapshot marker role index (branchRequest prepared height branch) = .ok built) :
+    built.role = role ∧ built.index = index ∧
+      ∀ n, checkHeader n marker (birthValues deployed d branch).2 built.header = .ok () := by
+  unfold slot at ok
+  cases signed : CredentialSignatureAdmission.signingHeader snapshot marker
+      (branchRequest prepared height branch) with
+  | error reason => simp [signed, bind, Except.bind, Except.mapError] at ok
+  | ok header =>
+    simp only [signed, bind, Except.bind, Except.mapError, pure, Except.pure,
+      Except.ok.injEq] at ok
+    subst ok
+    refine ⟨rfl, rfl, fun n => ?_⟩
+    unfold CredentialSignatureAdmission.signingHeader at signed
+    cases selected : CredentialSignatureAdmission.select snapshot (branchRequest prepared height branch) with
+    | error reason => simp [selected, bind, Except.bind] at signed
+    | ok choice =>
+      simp only [selected, bind, Except.bind, Except.ok.injEq] at signed
+      subst signed
+      have exact := birthValues_exact prepared height branch deployed domain semantics federation
+        factory policy
+      unfold checkHeader
+      simp only [CredentialSignedEnvelopeController.headerCodec.decode_encode,
+        CredentialSignatureAdmission.header, signedRequest_requestBytes]
+      rw [show CredentialSignatureAdmission.requestBytes
+          (NativeThinConsent.expectedRequest
+            (TypedAuthorizationRequestCodec.planOf (branchRequest prepared height branch))
+            (birthValues deployed d branch).2) =
+          CredentialSignatureAdmission.requestBytes (branchRequest prepared height branch) from
+        (TypedAuthorizationRequestCodec.signedRequestBytes_eq_iff _ _).mpr exact]
+      simp
+
+/-- `checkSlots` accepts slot lists that match the expected entries pointwise. -/
+theorem checkSlots_forall₂ (marker : Nat) :
+    ∀ (position : Nat) (slots : List NativeHostCodec.SigningSlot)
+      (expected : List (Nat × Nat × AuthorizationDeclaration.SomeRequest)),
+      List.Forall₂ (fun slot (entry : Nat × Nat × AuthorizationDeclaration.SomeRequest) =>
+        slot.role = entry.1 ∧ slot.index = entry.2.1 ∧
+          ∀ n, checkHeader n marker entry.2.2.2 slot.header = .ok ()) slots expected →
+      checkSlots marker position slots expected = .ok ()
+  | _, [], [], _ => rfl
+  | position, slot :: slots, (role, index, values) :: expected, .cons ⟨sameRole, sameIndex, checked⟩ rest => by
+      simp only [checkSlots, sameRole, sameIndex, and_self, if_true, checked position]
+      exact checkSlots_forall₂ marker (position + 1) slots expected rest
+
+private theorem mapM_forall₂ {α β : Type} (f : α → Except String β) :
+    ∀ (l : List α) (l' : List β), l.mapM f = .ok l' → List.Forall₂ (fun b a => f a = .ok b) l' l
+  | [], l', ok => by
+      simp only [List.mapM_nil, pure, Except.pure, Except.ok.injEq] at ok
+      subst ok
+      exact .nil
+  | a :: as, l', ok => by
+      rw [List.mapM_cons] at ok
+      cases fa : f a with
+      | error e => simp [fa, bind, Except.bind] at ok
+      | ok b =>
+        cases fas : as.mapM f with
+        | error e => simp [fa, fas, bind, Except.bind] at ok
+        | ok bs =>
+          simp only [fa, fas, bind, Except.bind, pure, Except.pure, Except.ok.injEq] at ok
+          subst ok
+          exact .cons fa (mapM_forall₂ f as bs fas)
+
+/-- `validateChecks` builds the config's public pins. -/
+theorem validateChecks_pins {config : NativeHost.Config} {seed : DurableReceiver.Seed}
+    {logStart : Digest} {directory? : Option (CellRegistry.Directory Nat CanonicalCellRegistry.registry)}
+    {logical? : Option (Store.Store CredentialAuthorityState.layout)} {lawful? : Option Bool}
+    {built : FactoryPins}
+    (validated : NativeHost.validateChecks config seed logStart directory? logical? lawful? = .ok built) :
+    built.federation = config.federation ∧ built.policyId = ⟨config.deployment.factoryId⟩ := by
+  unfold NativeHost.validateChecks at validated
+  simp only [bind, Except.bind, pure, Except.pure, NativeHost.check, NativeHost.need] at validated
+  repeat' split at validated
+  all_goals first
+    | (simp only [Except.ok.injEq] at validated; subst validated; exact ⟨rfl, rfl⟩)
+    | cases validated
+
+theorem opened_pins_public : OpenedPinsPublicStatement := by
+  intro config durable opened validated
+  unfold NativeHost.validateLoaded NativeHost.validateParts NativeHost.validatePartsWith
+    NativeHost.validatePartsVia NativeHost.validateCore at validated
+  cases checked : NativeHost.validateChecks config durable.image.seed durable.logStart
+      ((CredentialAuthorityDomainReceiver.loadDirectory durable).map (·.directory))
+      ((CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot).map
+        (·.snapshot.logical))
+      ((CredentialAuthorityDomainReceiver.loadDirectory durable).map
+        (fun loaded => NativeHost.cellsLawful config durable loaded.directory)) with
+  | error detail => simp [checked, bind, Except.bind, Except.map] at validated
+  | ok built =>
+    simp only [checked, bind, Except.bind, Except.map, NativeHost.need, pure, Except.pure] at validated
+    repeat' split at validated
+    all_goals first
+      | (simp only [Except.ok.injEq] at validated; subst validated; exact validateChecks_pins checked)
+      | cases validated
+
+/-- The executor's pins against the config's public pins, on the Host's own open. -/
+theorem publicPins_exact {config : NativeHost.Config} {durable' : ResourceBirthController.Concrete.Durable}
+    {opened : NativeHost.Opened config} {descriptor : Descriptor Registry}
+    (validated : NativeHost.validateLoaded config durable' = .ok opened)
+    (prepared : ResourceBirthController.Concrete.PreparedBirth config.profile.compilerProfile
+      config.deployment opened.pins opened.durable descriptor) :
+    (publicPins config).domain = opened.pins.domain ∧
+      (publicPins config).semantics = opened.pins.semantics ∧
+      (publicPins config).federation = opened.pins.federation ∧
+      (⟨(publicPins config).factory⟩ : ResourceId .object) = opened.pins.factory ∧
+      (⟨(publicPins config).factory⟩ : PolicyId) = opened.pins.policyId := by
+  obtain ⟨federation, policy⟩ := opened_pins_public config durable' opened validated
+  obtain ⟨factory, domain⟩ := prepared.pinsBound
+  refine ⟨domain.symm, prepared.profileBound.1.symm, federation.symm, ?_, policy.symm⟩
+  cases pinned : opened.pins.factory with
+  | mk value =>
+    rw [pinned] at factory
+    simp only at factory
+    simp [publicPins, factory]
+
+/-- **Satisfiable: the honest Host passes.** -/
+theorem honest_plan_accepted : HonestPlanAcceptedStatement := by
+  intro config durable' opened author wanted draftBytes capabilities draft plan validated purpose
+    grain decodedDraft canonical authored planned
+  unfold NativeHost.prepareLoaded at planned
+  simp only [grain, Option.isSome_none, Bool.false_eq_true, if_false, bind, Except.bind,
+    NativeHost.need, decodedDraft] at planned
+  generalize NativeHost.logicalHeight config opened.durable = height at planned
+  cases prep : ResourceBirthController.Concrete.prepareDraft config.profile.compilerProfile
+      config.profile.disabledEvaluators config.deployment opened.pins opened.durable draft height with
+  | error reason => simp [prep, Except.mapError] at planned
+  | ok prepared =>
+  obtain ⟨domain, semantics, federation, factory, policy⟩ :=
+    publicPins_exact validated prepared.prepared
+  have checkedSlot := fun (branch : Branch prepared.descriptor) {marker role index : Nat}
+      {built : NativeHostCodec.SigningSlot} =>
+    slot_checked (marker := marker) (role := role) (index := index) (built := built)
+      prepared.prepared height branch (publicPins config) domain semantics federation factory policy
+  simp only [prep, Except.mapError, NativeHost.check] at planned
+  split at planned
+  · cases planned
+  cases fac : slot prepared.prepared.authority.snapshot prepared.descriptor.authorityNullifier 0 0
+      (branchRequest prepared.prepared height .factory) with
+  | error reason => simp [fac] at planned
+  | ok factorySlot =>
+  cases aut : slot prepared.prepared.authority.snapshot prepared.descriptor.authorityNullifier 1 0
+      (branchRequest prepared.prepared height .authority) with
+  | error reason => simp [fac, aut] at planned
+  | ok authoritySlot =>
+  cases alloc : (List.finRange prepared.descriptor.createRequests.length).mapM (fun index =>
+      slot prepared.prepared.authority.snapshot prepared.descriptor.authorityNullifier 2 index.val
+        (branchRequest prepared.prepared height (.allocation index))) with
+  | error reason => simp [fac, aut, alloc] at planned
+  | ok allocationSlots =>
+  cases src : (List.finRange prepared.descriptor.resourceBatch.operations.length).mapM (fun index =>
+      slot prepared.prepared.authority.snapshot prepared.descriptor.authorityNullifier 3 index.val
+        (branchRequest prepared.prepared height (.source index))) with
+  | error reason => simp [fac, aut, alloc, src] at planned
+  | ok sourceSlots =>
+  simp only [fac, aut, alloc, src, pure, Except.pure, Except.ok.injEq] at planned
+  subst planned
+  have userExact : userPart prepared.descriptor = draft := by
+    have exact := prepared.sourceExact
+    unfold userPart
+    rw [exact]
+    simp [prepared.noAuxiliaryInput]
+    cases draft
+    simp_all
+  have slots : checkSlots prepared.descriptor.authorityNullifier 0
+      (factorySlot :: authoritySlot :: (allocationSlots ++ sourceSlots))
+      (birthSlotPlan (publicPins config) prepared.descriptor) = .ok () := by
+    apply checkSlots_forall₂
+    unfold birthSlotPlan ResourceBirthPolicyController.Concrete.policyBranches
+    simp only [List.map_cons, List.map_append, List.map_map]
+    refine .cons ?_ (.cons ?_ (List.rel_append ?_ ?_))
+    · exact checkedSlot .factory fac
+    · exact checkedSlot .authority aut
+    · have pointwise := mapM_forall₂ _ _ _ alloc
+      refine (List.forall₂_map_right_iff).mpr (pointwise.imp ?_)
+      intro built index ok
+      exact checkedSlot (.allocation index) ok
+    · have pointwise := mapM_forall₂ _ _ _ src
+      refine (List.forall₂_map_right_iff).mpr (pointwise.imp ?_)
+      intro built index ok
+      exact checkedSlot (.source index) ok
+  refine ⟨⟨draftBytes, capabilities, coordinatesOf draft,
+    CanonicalCellRegistry.sourceEncoding.codec.encode prepared.descriptor⟩, ?_⟩
+  simp [checkBirthThin, checkBirthIntentThin, purpose, grain, decodedDraft,
+    prepared.noAuxiliaryInput, authored, NativeHostCodec.signingPlanCodec.decode_encode,
+    publicPins, CanonicalCellRegistry.sourceEncoding.codec.decode_encode, userExact, canonical,
+    slots]
+
+#assert_axioms birthValues_exact signedRequest_requestBytes slot_checked checkSlots_forall₂
+  validateChecks_pins opened_pins_public publicPins_exact honest_plan_accepted
+
+end Completeness
+
 #assert_axioms branchRequest_effects birthValues_effects checkSlots_header consented_effects
   admitted_message checkBirthIntentThin_ok checkBirthThin_ok display_is_commit swap_after_consent_refused
   swapped_plan_refused
