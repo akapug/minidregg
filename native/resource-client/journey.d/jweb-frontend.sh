@@ -458,6 +458,7 @@ story_form() { python3 -I - "$R/story.html" "$1" <<'PY'
 import sys, re, html
 page, mark = open(sys.argv[1]).read(), sys.argv[2]
 for art in page.split("</article>"):
+    art = art[art.rfind("<article"):]
     if mark in art:
         m = re.search(r"<form[^>]*>(.*?)</form>", art, re.S)
         for tag in re.findall(r"<(?:input|textarea)[^>]*>", m.group(1) if m else ""):
