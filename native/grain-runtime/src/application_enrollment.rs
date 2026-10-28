@@ -68,7 +68,52 @@ fn retain(path: &Path, data: &[u8]) -> Result<()> {
     Ok(())
 }
 
+struct ConsumedOriginProof(Value);
+
+/// The origin is historical only after the native resident consumed its exact
+/// typed terminal refusal. An idle controller alone is insufficient. Read the
+/// two resident journals through their already-held guard and retain their
+/// hashes with the native outcome evidence; never clear the origin.
+fn consumed_origin(j: &Journal, config: &Config, resident: &quiescence::ResidentGuard) -> Result<Option<ConsumedOriginProof>> {
+    let Some(origin) = &j.resident_prompt_origin else { return Ok(None) };
+    if !matches!(resident.evidence(), quiescence::ResidentEvidence::Stopped {
+        prompt_pending:false, return_pending:false, queued_requests:false,
+        started_request:false, maintenance_pending:false }) {
+        return Err("retained resident origin requires stopped, drained resident custody".into());
+    }
+    let requests = resident.request_bytes().ok_or("consumed resident origin requires retained request custody")?;
+    let outcome = prompt_outcome::read_bound(&config.state_dir,origin.prompt_operation_id,
+        &origin.resident_prompt_id,&origin.prompt_sha256)?;
+    validate_consumed_frame(origin,resident.bytes()?,&outcome)?;
+    Ok(Some(ConsumedOriginProof(json!({"type":"mini-enrollment-consumed-resident-origin-v1",
+        "origin":origin,"residentState":resident.path()?,"residentStateSha256":sha256_bytes(resident.bytes()?)?,
+        "requestsSha256":sha256_bytes(requests)?,
+        "promptEvidence":prompt_outcome::evidence(&config.state_dir,origin.prompt_operation_id)?}))))
+}
+
+fn validate_consumed_frame(origin: &resident_origin::ResidentPromptOrigin, resident: &[u8], outcome: &prompt_outcome::Record) -> Result<()> {
+    let state: Value = serde_json::from_slice(resident).map_err(|e|e.to_string())?;
+    let frame = &state["lastCompletion"];
+    let completed: resident_origin::ResidentPromptOrigin = serde_json::from_value(frame["residentOrigin"].clone())
+        .map_err(|e|format!("resident drain lacks exact terminal origin: {e}"))?;
+    if state["completed"].as_u64().is_none_or(|n|n==0)
+        || frame["type"] != "prompt-complete" || frame["outcome"].as_str().is_none_or(|v| v == "completed")
+        || bytes(&completed)? != bytes(origin)? || outcome.session_id != origin.session_id
+        || outcome.prompt_operation_id != origin.prompt_operation_id
+        || outcome.resident_prompt_id.as_deref() != Some(&origin.resident_prompt_id)
+        || outcome.prompt_sha256.as_deref() != Some(&origin.prompt_sha256)
+        || !matches!(outcome.outcome,prompt_outcome::Outcome::Refused { .. }) {
+        return Err("resident origin has not consumed its exact native terminal refusal".into());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
 fn quiescent(j: &Journal, resident: quiescence::ResidentEvidence) -> Result<()> {
+    quiescent_with_origin(j,resident,None)
+}
+
+fn quiescent_with_origin(j: &Journal, resident: quiescence::ResidentEvidence, consumed: Option<&ConsumedOriginProof>) -> Result<()> {
     // Reuse the retained-work census, including unresolved historical rows.
     // A failed initial read may leave the connection fenced with no work; this
     // command preserves that fence. Soft alone is not a held allowance.
@@ -85,7 +130,8 @@ fn quiescent(j: &Journal, resident: quiescence::ResidentEvidence) -> Result<()> 
         || j.connection == Connection::Hard
         || j.provider_settlement.is_some()
         || provider_retry
-        || j.resident_prompt_origin.is_some()
+        || j.resident_prompt_origin.as_ref().is_some_and(|origin|
+            consumed.is_none_or(|proof| proof.0["origin"] != json!(origin)))
         || j.hermes_session.is_some()
     {
         return Err(
@@ -545,7 +591,7 @@ pub(crate) fn run(config_path: &Path, request_path: &Path) -> Result<Value> {
     let mut replayed = false;
     if record_path.exists() {
         let record: Value =
-            serde_json::from_slice(&private(&record_path, 8192)?).map_err(|e| e.to_string())?;
+            serde_json::from_slice(&private(&record_path, JOURNAL_LIMIT)?).map_err(|e| e.to_string())?;
         let before = private(&record_dir.join("before.json"), JOURNAL_LIMIT)?;
         let after = private(&record_dir.join("after.json"), JOURNAL_LIMIT)?;
         replayed = retained_state(&record, &id, &before, &after, &current_bytes)?;
@@ -576,7 +622,14 @@ pub(crate) fn run(config_path: &Path, request_path: &Path) -> Result<Value> {
         return Err("journal format differs".into());
     }
     let resident = quiescence::ResidentGuard::acquire(&target, request.resident_state.as_deref())?;
-    quiescent(&journal, resident.evidence())?;
+    let consumed = consumed_origin(&journal, &target, &resident)?;
+    quiescent_with_origin(&journal, resident.evidence(), consumed.as_ref())?;
+    if record_path.exists() {
+        let record: Value = serde_json::from_slice(&private(&record_path,JOURNAL_LIMIT)?).map_err(|e|e.to_string())?;
+        if record.get("consumedResidentOrigin") != consumed.as_ref().map(|proof| &proof.0) {
+            return Err("retained enrollment resident consumption proof differs".into());
+        }
+    }
     permitted(&old, &target, &journal, &request.mode)?;
     validate(&target)?;
     journal.validate_birth_registry()?;
@@ -605,13 +658,17 @@ pub(crate) fn run(config_path: &Path, request_path: &Path) -> Result<Value> {
     }
     if replayed {
         resident.assert_unchanged()?;
+        if consumed_origin(&journal,&target,&resident)?.map(|p|p.0) != consumed.as_ref().map(|p|p.0.clone()) {
+            return Err("resident terminal evidence changed during enrollment".into());
+        }
         return Ok(
             json!({"protocol":PROTOCOL,"status":"enrolled","replayed":true,"requestSha256":id,"record":record_path,"bindingSha256":digest(&after["binding"])?}),
         );
     }
     retain(&record_dir.join("before.json"), &source_bytes)?;
     retain(&record_dir.join("after.json"), &after_bytes)?;
-    let record = json!({"protocol":PROTOCOL,"requestSha256":id,"beforeSha256":sha256_bytes(&source_bytes)?,"afterSha256":sha256_bytes(&after_bytes)?});
+    let mut record = json!({"protocol":PROTOCOL,"requestSha256":id,"beforeSha256":sha256_bytes(&source_bytes)?,"afterSha256":sha256_bytes(&after_bytes)?});
+    if let Some(proof)=&consumed { record["consumedResidentOrigin"]=proof.0.clone(); }
     retain(&record_path, &bytes(&record)?)?;
     File::open(&record_dir)
         .and_then(|f| f.sync_all())
@@ -623,6 +680,9 @@ pub(crate) fn run(config_path: &Path, request_path: &Path) -> Result<Value> {
         return Err("enrollment inputs changed before commit".into());
     }
     resident.assert_unchanged()?;
+    if consumed_origin(&journal,&target,&resident)?.map(|p|p.0) != consumed.as_ref().map(|p|p.0.clone()) {
+        return Err("resident terminal evidence changed during enrollment".into());
+    }
     journal_io::write(&journal_path, &after_bytes)
         .map_err(|e| format!("enrollment journal publication: {e}"))?;
     Ok(
