@@ -3,6 +3,7 @@
 # same-store-inputs.py selection_shape is the consumer's field set; tests/test_composed_selection.py
 # holds this producer to it.
 #   $evidence $grains $broker $spk $sha  the operator's evidence root, the Store's grain root, broker, package
+#   $sizeClass                           the package's measured size class (S, M)
 #   $owner $member                       the app owner (also the shared room's owner) and the second session member
 #   $op                                  the scenario's operation prefix (the rooms phase's room is "<op>-room")
 #   $connector                           null, or {subject, host, ca}: the connector participant and the route
@@ -14,7 +15,7 @@
 | {owner: {subject: $owner, expectedHost: "grain-owner.test"}, member: {subject: $member, expectedHost: "grain-member.test"}} as $members
 | "930001" as $resources | "960001" as $capabilities
 | {protocol: "mini-spk-same-store-selection-v1", evidence: $evidence, grainsRoot: $grains, brokerSocket: $broker,
-   package: {path: $spk, sha256: $sha}, sizeClass: "S",
+   package: {path: $spk, sha256: $sha}, sizeClass: $sizeClass,
    app: {owner: $owner, room: $room, members: $members, resources: $resources, capabilities: $capabilities}}
 | if $connector == null then . else .connector = {
     subject: $connector.subject,
