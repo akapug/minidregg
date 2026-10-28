@@ -110,10 +110,14 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
   let height := NativeHost.logicalHeight config opened.durable
   let .ok ready := ApplicationShareIssueSource.prepare profile config request.spec
     | throw "grain-backed share source refused"
-  unless opened.pins.tariff == config.tariff do
-    throw "grain-backed share factory tariff differs from loaded host"
-  let tariff ← config.grainBirthTariffValue
-  let birthDraft := ready.expectedDescriptor profile config
+  let some record := ResourceBirthPolicyController.Concrete.platformRecordAt config.deployment
+      opened.durable
+    | throw "platform cell unavailable: the image holds no platform record to price a share ticket from"
+  unless opened.pins.tariff == record.creation do
+    throw "grain-backed share factory tariff differs from the platform record"
+  let some tariff := GrainResourceBirthAdmission.grainTariffOf record
+    | throw "grain-backed birth tariff: the image's platform record pins none"
+  let birthDraft := ready.expectedDescriptor profile config record
     opened.authority.snapshot.authState height request.payer request.funding
   let (toolRoot, toolBefore) ← currentAgent config opened request.tool.task
   let (parentRoot, parentBefore) ← currentAgent config opened request.parent.task

@@ -97,7 +97,8 @@ def charge (accepted : Accepted profile config pins durable ambient ingress) : C
 
 theorem charge_fee_source_quoted
     (accepted : Accepted profile config pins durable ambient ingress) :
-    charge accepted .feeDebit = accepted.decoded.source.birth.quotedFee config.tariff := by
+    charge accepted .feeDebit =
+      accepted.decoded.source.birth.quotedFee accepted.grainAccepted.pending.record.creation := by
   change accepted.decoded.source.birth.fee.amount = _
   exact accepted.special_fee_bound
 
@@ -175,8 +176,8 @@ def receiveLoaded (config : NativeHost.Config) (pins : FactoryPins)
     | return .rejected "noncanonical grain share issue ingress"
   let some grain := outer.decodeGrain
     | return .rejected "noncanonical grain-backed birth ingress"
-  let .ok tariff := config.grainBirthTariffValue
-    | return .rejected "grain-backed tariff unavailable"
+  let some tariff := GrainResourceBirthAdmission.grainTariffAt config.deployment durable
+    | return .rejected "grain-backed tariff unavailable: the image's platform record pins none"
   match replay durable config.deployment.domain outer grain tariff with
   | some (.ok historical) => return .historical historical
   | some (.error reason) => return .rejected reason

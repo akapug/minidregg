@@ -70,9 +70,12 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
   let height := NativeHost.logicalHeight config opened.durable
   let .ok ready := ApplicationShareIssueSource.prepare profile config spec
     | throw "share ticket source refused"
-  if opened.pins.tariff != config.tariff then
-    throw "share ticket factory tariff differs from loaded host"
-  let draft := ready.expectedDescriptor profile config
+  let some record := ResourceBirthPolicyController.Concrete.platformRecordAt config.deployment
+      opened.durable
+    | throw "platform cell unavailable: the image holds no platform record to price a share ticket from"
+  if opened.pins.tariff != record.creation then
+    throw "share ticket factory tariff differs from the platform record"
+  let draft := ready.expectedDescriptor profile config record
     opened.authority.snapshot.authState height payer funding
   let .ok prepared := ResourceBirthController.Concrete.prepareDraft
     profile.compilerProfile profile.disabledEvaluators config.deployment opened.pins

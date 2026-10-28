@@ -213,81 +213,9 @@
    "status": "owed"
   }
  },
- "Kernel/ApplicationShareIssueAdmission.lean": {
-  "config.tariff": {
-   "count": 4,
-   "status": "owed"
-  }
- },
- "Kernel/ApplicationShareIssueAuthoring.lean": {
-  "config.tariff": {
-   "count": 1,
-   "status": "owed"
-  }
- },
- "Kernel/ApplicationShareIssueGrainAdmission.lean": {
-  "config.tariff": {
-   "count": 3,
-   "status": "owed"
-  },
-  "grainBirthTariffValue": {
-   "count": 1,
-   "status": "owed"
-  }
- },
- "Kernel/ApplicationShareIssueGrainAuthoring.lean": {
-  "config.tariff": {
-   "count": 1,
-   "status": "owed"
-  },
-  "grainBirthTariffValue": {
-   "count": 1,
-   "status": "owed"
-  }
- },
- "Kernel/ApplicationShareIssueGrainReceiver.lean": {
-  "config.tariff": {
-   "count": 1,
-   "status": "owed"
-  },
-  "grainBirthTariffValue": {
-   "count": 1,
-   "status": "owed"
-  }
- },
- "Kernel/ApplicationShareIssueReceiver.lean": {
-  "config.tariff": {
-   "count": 1,
-   "status": "owed"
-  }
- },
- "Kernel/ApplicationShareIssueSource.lean": {
-  "config.tariff": {
-   "count": 3,
-   "status": "owed"
-  },
-  "template.lifetime": {
-   "count": 1,
-   "status": "owed"
-  },
-  "template.ownerBudget": {
-   "count": 1,
-   "status": "owed"
-  }
- },
- "Kernel/GrainResourceBirthAdmission.lean": {
-  "profile.template": {
-   "count": 3,
-   "status": "owed"
-  }
- },
  "Kernel/NativeHost.lean": {
   "config.tariff": {
    "count": 10,
-   "status": "owed"
-  },
-  "grainBirthTariffValue": {
-   "count": 1,
    "status": "owed"
   },
   "profile.template": {
@@ -312,7 +240,7 @@
   },
   "grainBirthTariffValue": {
    "count": 2,
-   "status": "owed"
+   "status": "genesis"
   }
  },
  "Kernel/NativeHostGenesis.lean": {
@@ -329,12 +257,6 @@
    "status": "genesis"
   }
  },
- "Kernel/NativeHostGrainBirth.lean": {
-  "grainBirthTariffValue": {
-   "count": 1,
-   "status": "owed"
-  }
- },
  "Kernel/NativeHostPayClaims.lean": {
   "config.tariff": {
    "count": 2,
@@ -348,10 +270,6 @@
  "Kernel/NativeHostReplay.lean": {
   "config.tariff": {
    "count": 22,
-   "status": "owed"
-  },
-  "grainBirthTariffValue": {
-   "count": 2,
    "status": "owed"
   }
  },
@@ -485,11 +403,7 @@
  },
  "TokenCensus/Table.lean": {
   "config.tariff": {
-   "count": 3,
-   "status": "owed"
-  },
-  "profile.template": {
-   "count": 1,
+   "count": 2,
    "status": "owed"
   }
  }
