@@ -83,6 +83,14 @@ class AttachmentTests(unittest.TestCase):
             return M.receipt(self.confirmed)
         op.delegate_observe = delegate
         op.prepare_config()
+        # The historical helper omitted this allowance as well as misnaming
+        # the bootstrap reference. Preserve both old defects in this fixture.
+        legacy_config = M.read(op.controller_stage)
+        legacy_config.pop("foregroundTool", None)
+        self.rewrite(op.controller_stage, legacy_config)
+        legacy_stage = M.read(op.root / "controller-stage.json")
+        legacy_stage["configSha256"] = M.sha(op.controller_stage)
+        self.rewrite(op.root / "controller-stage.json", legacy_stage)
         previous = self.file("old-attachment.py", b"original prepared orchestration source")
         pin = M.read(op.root / "attachment.json")
         pin["files"]["orchestrator"] = previous
@@ -137,6 +145,26 @@ class AttachmentTests(unittest.TestCase):
         self.rewrite(op.root / "attachment.json", pin)
         result = M.repair_prepared_bootstrap(Path(self.path), request)
         self.assertEqual(result["newName"], "oracle-bootstrap-app")
+
+    def test_prepared_bootstrap_repair_initializes_only_explicit_minimal_foreground_allowance(self):
+        op, request = self.prepared_legacy_repair()
+        value = M.read(request)
+        value["initializeForegroundTool"] = True
+        self.rewrite(request, value)
+        result = M.repair_prepared_bootstrap(Path(self.path), request)
+        self.assertTrue(result["initializedForegroundTool"])
+        self.assertEqual(M.read(op.controller_stage)["foregroundTool"], {"reserve": "1", "charge": "0"})
+        self.assertNotIn("foregroundTool", M.read(op.root / "repair-prepared-bootstrap/before-controller.json"))
+        self.assertEqual(M.repair_prepared_bootstrap(Path(self.path), request), result)
+
+    def test_prepare_preserves_explicit_foreground_allowance(self):
+        config = M.read(self.contract["paths"]["controllerConfig"])
+        config["foregroundTool"] = {"reserve": "12", "charge": "4"}
+        self.rewrite(self.contract["paths"]["controllerConfig"], config)
+        op = M.Attachment(self.path, "prepare-config")
+        op.delegate_observe = lambda *args: M.receipt(self.confirmed)
+        op.prepare_config()
+        self.assertEqual(M.read(op.controller_stage)["foregroundTool"], {"reserve": "12", "charge": "4"})
 
     def test_prepared_bootstrap_repair_refuses_later_phase_and_controller_journal(self):
         op, request = self.prepared_legacy_repair()
@@ -238,6 +266,7 @@ class AttachmentTests(unittest.TestCase):
         self.assertEqual(family["participantSubject"], self.a["controller"]["subject"])
         self.assertEqual(family["namespace"]["sessionOwnerCapability"], self.caps["sessionOwner"])
         self.assertNotIn("sessionOwner", family["namespace"])
+        self.assertEqual(config["foregroundTool"], {"reserve": "1", "charge": "0"})
         self.assertEqual(len(delegated), 6)
         self.assertEqual(delegated[-1][-1], self.a["controller"]["subject"])
         self.assertEqual(result["nextTool"]["arguments"]["application"], "oracle-bootstrap-app")

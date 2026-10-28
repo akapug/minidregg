@@ -34,7 +34,9 @@ installs files into the controller account or starts its service itself.
 repair-prepared-bootstrap accepts --input with protocol
 mini-application-attachment-bootstrap-repair-v1, previousOrchestrator (preserved
 old source file), controllerStatus and controllerEvidence (fixed-installer JSON),
-expectedStore and expectedRuntimeSha256. It repairs only the old bootstrap name
+expectedStore and expectedRuntimeSha256. Optional initializeForegroundTool:true
+also fills a missing foreground profile with reserve 1/charge 0, matching the
+fresh prepare-config default; existing profiles are preserved. It repairs the old bootstrap name
 before the controller has any journal or session phase; original native attempts
 remain unchanged. Install the repaired stage separately through the stopped
 controller installer, then refresh the controller config export.
@@ -295,6 +297,10 @@ class Attachment:
         c, a, caps = self.contract, self.agent, self.agent["plannedCaps"]
         home = Path(c["paths"]["controllerHome"])
         config = read(c["paths"]["controllerConfig"])
+        # The operator-driven session tool uses a parent allowance independently
+        # of its delegated tool charge. Preserve any explicit operator profile.
+        if config.get("foregroundTool") is None:
+            config["foregroundTool"] = {"reserve": "1", "charge": "0"}
         app = read(self.application["birthSource"])["applicationGrainBirth"]["applicationBirth"]["application"]
         if any(app[k] != self.allocation[k] for k in ("app", "packageManifest", "snapshotManifest")):
             raise ValueError("actual app birth differs from allocation")
@@ -793,8 +799,11 @@ def repair_prepared_bootstrap(contract_path, request_path):
     contract, request = read(contract_path), read(request_path)
     if request.get("protocol") != "mini-application-attachment-bootstrap-repair-v1":
         raise ValueError("prepared bootstrap repair protocol absent")
-    if set(request) != {"protocol", "previousOrchestrator", "controllerStatus", "controllerEvidence", "expectedStore", "expectedRuntimeSha256"}:
+    required = {"protocol", "previousOrchestrator", "controllerStatus", "controllerEvidence", "expectedStore", "expectedRuntimeSha256"}
+    if not required <= set(request) or set(request) - required - {"initializeForegroundTool"}:
         raise ValueError("prepared bootstrap repair fields differ")
+    if "initializeForegroundTool" in request and type(request["initializeForegroundTool"]) is not bool:
+        raise ValueError("initializeForegroundTool must be a boolean")
     root = Attachment.absolute(contract["paths"]["outputDir"])
     def private_directory(path):
         mode = path.lstat()
@@ -896,6 +905,9 @@ def repair_prepared_bootstrap(contract_path, request_path):
             if selected[0].get("appTarget") != allocation["app"]:
                 raise ValueError("repair reference names another application")
             selected[0]["name"] = new_name
+            initialized_foreground = request.get("initializeForegroundTool", False) and config.get("foregroundTool") is None
+            if initialized_foreground:
+                config["foregroundTool"] = {"reserve": "1", "charge": "0"}
             stage["nextTool"]["arguments"]["application"] = new_name
             new_config = encoded(config)
             stage["configSha256"] = digest(new_config)
@@ -908,7 +920,8 @@ def repair_prepared_bootstrap(contract_path, request_path):
             intent = {"protocol": "mini-application-attachment-bootstrap-repair-intent-v1",
                       "before": {name: digest(raw) for name, raw in before.items()},
                       "after": {name: digest(raw) for name, raw in after.items()}, "immutable": immutable,
-                      "oldName": old_name, "newName": new_name, "newSourceSha256": sha(__file__)}
+                      "oldName": old_name, "newName": new_name, "newSourceSha256": sha(__file__),
+                      "initializedForegroundTool": initialized_foreground}
             saved = {"request.json": encoded(request), "source-before.py": old_source,
                      "source-after.py": Path(__file__).read_bytes(), "controller-status.json": status_raw,
                      "controller-evidence.json": evidence_raw}
@@ -936,6 +949,14 @@ def repair_prepared_bootstrap(contract_path, request_path):
         if len(renamed) != 1 or intent["oldName"] != old_name or intent["newName"] != new_name:
             raise ValueError("repair archive is not the exact bootstrap rename")
         renamed[0]["name"] = old_name
+        initialized_foreground = request.get("initializeForegroundTool", False) and old_config.get("foregroundTool") is None
+        if intent.get("initializedForegroundTool") != initialized_foreground:
+            raise ValueError("repair foreground selection differs from explicit request")
+        if initialized_foreground:
+            if new_config.get("foregroundTool") != {"reserve": "1", "charge": "0"}:
+                raise ValueError("repair foreground allowance is not the minimal session profile")
+            if "foregroundTool" in old_config: new_config["foregroundTool"] = old_config["foregroundTool"]
+            else: del new_config["foregroundTool"]
         new_stage["nextTool"]["arguments"]["application"] = old_name
         new_stage["configSha256"] = digest(before["controller"])
         new_pin["files"]["orchestrator"] = old_pin["files"]["orchestrator"]
@@ -963,7 +984,7 @@ def repair_prepared_bootstrap(contract_path, request_path):
             sync(paths[name].parent)
         result = {"protocol": "mini-application-attachment-bootstrap-repair-v1", "stage": str(paths["stage"]),
                   "configSha256": intent["after"]["controller"], "oldName": intent["oldName"], "newName": intent["newName"],
-                  "archive": str(archive), "next": "Publish this stage through the stopped installer and refresh controllerConfig export; then create the first session once."}
+                  "archive": str(archive), "initializedForegroundTool": intent["initializedForegroundTool"], "next": "Publish this stage through the stopped installer and refresh controllerConfig export; then create the first session once."}
         completion = archive / "complete.json"
         if completion.exists():
             if read(completion) != result: raise ValueError("repair completion differs")
