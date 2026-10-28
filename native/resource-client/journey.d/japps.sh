@@ -103,6 +103,25 @@ if [ -n "$INSPECT" ] && [ -x "$INSPECT" ]; then
   printf '\xff' | dd of="$W/tampered.spk" bs=1 seek=$((size / 2)) conv=notrunc 2>/dev/null
   if "$INSPECT" "$W/tampered.spk" "$W/scratch" standard-v1 >/dev/null 2>"$W/tampered.err"; then ok=0; else ok=1; fi
   row "a tampered copy is refused by name" "$ok" "$(tail -1 "$W/tampered.err" | cut -c1-120)"
+elif [ "$mode" = --box ] && [ -x "$BIN/spk-host" ]; then
+  # The shipped reader: `spk-host qualify` verifies the signed stream and reports the signed appId
+  # (the dev-only inspect example is not part of the pack). It spools beside its input and refuses a
+  # world-writable ancestor, so the copies sit under the runner's own 0700 directory.
+  QS=${JAPPS_QUALIFY_ROOT:-$HOME}/.mini-japps-sig.$$
+  mkdir -m 0700 "$QS"
+  for pair in "$SLIDES_PKG:$SLIDES_APP" "$TODOS_PKG:$TODOS_APP"; do
+    pkg=${pair%%:*} app=${pair##*:}
+    cp "$W/state/quarantine/$pkg.spk" "$QS/$pkg.spk" && chmod 0600 "$QS/$pkg.spk"
+    q=$("$BIN/spk-host" qualify --import-profile standard-v1 "$QS/$pkg.spk" 2>"$W/sig-$pkg.err")
+    ok=0; grep -q "\"signedAppId\":\"$app\"" <<<"$q" && ok=1
+    row "qualify verifies $pkg: signature and signed appId == index appId" "$ok" "$(grep -o '"rawLength":"[0-9]*"' <<<"$q")$(tail -1 "$W/sig-$pkg.err" | cut -c1-120)"
+  done
+  cp "$W/state/quarantine/$SLIDES_PKG.spk" "$QS/tampered.spk" && chmod 0600 "$QS/tampered.spk"
+  size=$(stat -c %s "$QS/tampered.spk")
+  printf '\xff' | dd of="$QS/tampered.spk" bs=1 seek=$((size / 2)) conv=notrunc 2>/dev/null
+  if "$BIN/spk-host" qualify --import-profile standard-v1 "$QS/tampered.spk" >/dev/null 2>"$W/tampered.err"; then ok=0; else ok=1; fi
+  row "a tampered copy is refused by name" "$ok" "$(tail -1 "$W/tampered.err" | cut -c1-120)"
+  rm -rf "$QS"
 else
   row "inspect available (INSPECT or BIN/inspect)" 0 "no inspect example: cargo build -p minidregg-spk-package-stream --example inspect"
 fi
