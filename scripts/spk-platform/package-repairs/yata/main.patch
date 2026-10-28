@@ -1,0 +1,10 @@
+--- a/main.go
++++ b/main.go
+@@ -177,6 +177,7 @@
+ 	chkfatal(err)
+ 
+ 	r := mux.NewRouter()
++	registerTodoAPI(r, db)
+ 	r.Methods("GET").Path("/").
+ 		HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+ 			page := Page{
