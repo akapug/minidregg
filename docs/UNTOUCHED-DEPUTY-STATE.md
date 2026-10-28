@@ -69,6 +69,7 @@ Story: JSLK 23/23 on a fresh world with the a8376ce8f mini (2 of 23 red on the u
 Older: 2d8b7ed54 (jtemplates 196/196 there), 7027e0ace.
 
 ## Rows validator (a373556d56d56744d)
+- m6grain on 76758dba6: resident-start fixes hold (birth-a .. start-a2 pass); red at enroll-a2: `mini session-enrollment-plan` after the restart writes nothing and names no refusal (grain-journey.sh:604; later steps cascade). OURS, routed to a4e312352a7091f59 after its japps run (red-first test, the client must refuse by name). Evidence hbox:/tank/dregg-build/rows-76758dba/rerun-m6grain/.../rows/m6grain/evidence-a/.
 Its hbox worlds: /tank/rows-2d8b7ed5-apps/w-{featured,b1,b2,b4,b6,rt,fixups}. Mine: b3 /tank/lanes/app-market-b3, b5 /tank/rows-b5, b7 and b8 under /tank; japps /build/lanes/un-stream-continuity-runs/w*, jtemplates /build/t/uns-run* (dregg-build). Verdicts go to it for ROWS-OWED section 0.
 
 ## Shas sent to the integrator this round
