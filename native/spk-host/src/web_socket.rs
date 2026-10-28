@@ -8,6 +8,7 @@
 //! sockets per generation (`wsConcurrencyCap`, refused before any Mini write)
 //! and `ws_bytes_per_minute` per socket (`wsByteCap`, the socket is cut).
 
+use crate::io_context::IoContext;
 use crate::broker::SizeClass;
 use crate::stream_continuity::{ContinuityBinding, ContinuityTip, VerifiedContinuity};
 use base64::Engine as _;
@@ -113,7 +114,7 @@ fn nonce_hex(bytes: &[u8]) -> String {
 
 fn fresh_nonce() -> io::Result<[u8; 32]> {
     let mut nonce = [0; 32];
-    std::fs::File::open("/dev/urandom")?.read_exact(&mut nonce)?;
+    std::fs::File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut nonce)?;
     Ok(nonce)
 }
 
