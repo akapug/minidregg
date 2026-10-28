@@ -254,4 +254,9 @@ when the arm lands.
   hbox, candidate e89fe7b8b with that consent provider substituted
   (`/tank/dregg-build/claude-lanes/thin-birth/cand`, `run-jp2.sh`), main's scripts plus this
   branch's jpriv2/jthin-consent: JP2 PASS (71 rows: row 22, swapped plan 33-37), THIN PASS.
-* **Owed:** nothing on this arm; JP2/THIN on the first candidate built from main with this branch.
+* **Held by the integrator** (a34bdb948f1cf4796) under the module-conversion freeze (iter-speed
+  a0fd127abfb9aac75). When the integrator says the conversion is on main: merge origin/main into
+  lane/thin-birth; re-convert this branch's touched Lean files (`Kernel/NativeThinConsent.lean`,
+  `Host/ClientConsentCore.lean`, `Kernel.lean`'s comment line) with `scripts/lean-modularize.py`
+  as L1e does; per-file check on dregg-ref (lean-ask `--reload`); push; send the integrator the
+  merged sha. Its next build is the Host.Main closure, and JP2/THIN then go to the rows validator.
