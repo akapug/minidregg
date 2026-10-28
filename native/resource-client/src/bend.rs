@@ -622,6 +622,46 @@ fn await_of_view(view: &Value, object: &str, transaction: &str) -> Value {
     out
 }
 
+/// `bend deliver OBJECT TRANSACTION [--account REF]`: resume the activity with the settled outcome
+/// of the await it is on (the slot's decided answer, or `timedOut` past the deadline): one deliver
+/// turn, paid from my account. Anyone may deliver; the await id is spent once (a second delivery of
+/// the same await is refused). The attempt name is fixed per await, for `bend lookup`/`bend retry`.
+fn deliver_cmd(bend: &Bend, mut args: Args) -> Result<()> {
+    let object = text(&mut args, "object")?;
+    let transaction = text(&mut args, "transaction")?;
+    let account = opt(&mut args, "account")?;
+    args.finish()?;
+    decimal_arg(&object, "OBJECT")?;
+    decimal_arg(&transaction, "TRANSACTION")?;
+    let view = activity::view(&bend.ws, &json!({"objects": [&object], "births": [{"object": &object, "transaction": &transaction}]}))?;
+    let (record, await_id) = deliverable(&view)?;
+    let (payer, payer_cap) = bend.payer(account.as_deref())?;
+    let turn = json!({"kind": "deliver", "record": record, "await": await_id, "account": payer, "accountCapability": payer_cap});
+    let name = deliver_name(&await_id);
+    let meta = json!({"kind": "deliver", "object": object, "transaction": transaction, "await": await_id});
+    match bend.submit(&name, "deliver", &turn, &meta, false) {
+        Err(e) => ending_for(&name, e),
+        Ok((d, _)) => report(bend, &name, &meta, None, "bend deliver", d),
+    }
+}
+
+/// The record cell and the await id of an activity that is awaiting, from its public view.
+fn deliverable(view: &Value) -> Result<(String, String)> {
+    let record = view.pointer("/births/0/record").and_then(Value::as_str).ok_or("bend: the view names no activity record")?;
+    let phase = cell_of(view, record).and_then(|c| c.pointer("/record/phase")).ok_or("bend: the activity record is absent")?;
+    if phase.get("kind").and_then(Value::as_str) != Some("awaiting") {
+        return Err(format!("refused: the activity is not awaiting (phase {}): nothing to deliver",
+            phase.get("kind").and_then(Value::as_str).unwrap_or("none")));
+    }
+    let await_id = phase.pointer("/await/id").and_then(Value::as_str).ok_or("bend: the await names no id")?;
+    Ok((record.to_owned(), await_id.to_owned()))
+}
+
+fn deliver_name(await_id: &str) -> String {
+    use sha2::{Digest, Sha256};
+    format!("deliver-{}", &format!("{:x}", Sha256::digest(await_id.as_bytes()))[..16])
+}
+
 /// The attempt name of the answer to SLOT: fixed, so `bend lookup`/`bend retry` find it again.
 fn answer_name(slot: &str) -> String {
     use sha2::{Digest, Sha256};
@@ -659,6 +699,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         "show" => show(&bend, args),
         "await" => await_cmd(&bend, args),
         "answer" => answer_cmd(&bend, args),
+        "deliver" => deliver_cmd(&bend, args),
         "lookup" => lookup_cmd(&bend, args, false),
         "retry" => lookup_cmd(&bend, args, true),
         _ => Err("bend --action must be publish, run, show, await, answer, lookup or retry".into()),
@@ -668,6 +709,18 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deliver_names_the_awaiting_record_and_its_await() {
+        let view = |kind: &str| json!({"births":[{"object":"7","transaction":"9","record":"41"}],
+            "cells":[{"cell":"41","record":{"phase":{"kind":kind,"await":{"id":"55","deadline":"90","yieldedAt":"20",
+                "source":{"kind":"reply","slot":"66","decider":"8"}}}}}]});
+        assert_eq!(deliverable(&view("awaiting")).unwrap(), ("41".to_owned(), "55".to_owned()));
+        assert!(deliverable(&view("done")).unwrap_err().starts_with("refused: the activity is not awaiting"));
+        assert!(deliverable(&json!({"births":[]})).is_err());
+        assert_eq!(deliver_name("55"), deliver_name("55"));
+        assert_ne!(deliver_name("55"), deliver_name("56"));
+    }
 
     #[test]
     fn a_lookup_answers_from_the_attempts_retained_decision() {

@@ -72,6 +72,7 @@ read the declaration it names.
 - [Native Host](NATIVE-HOST.md): building and operating the Host.
 - [Lean qualification](LEAN-QUALIFICATION.md): the Lean build targets and what each checks.
 - [Durable Store](DURABLE-STORE.md): files, schema, backup and restore.
+- [PAY](PAY.md): the $DREGG payment rail and self-enrollment by payment, as shipped.
 - [Hot path](HOT-PATH-2026-10-27.md): the signed-write path and its representation.
 - [Carry verifier](CARRY-VERIFIER.md), [audit phase timing](audit-phase-timing.md),
   [observation batches](latency-observation-batch-2026-10-02.md),

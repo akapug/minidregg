@@ -48,7 +48,7 @@ TICK_SCRIPT, ACCEPTANCE = os.environ["PAY_TICK_SCRIPT"], os.environ["ACCEPTANCE"
 ROWS, STARTED = [], time.time()
 EMBER, FACTORY_CONTROL, OBSERVER, OBSERVER_CAP = 7, 53, 30, 4030
 FRIENDS = [8, 9]
-FLOAT = 31  # the enrollment float (PAY §11.2): the subject that holds the enrollment row's book index
+FLOAT = 31  # the enrollment float (docs/PAY.md §11.2): the subject that holds the enrollment row's book index
 def acct(s): return 100 + s
 CAP, RATE, MIN_TICK, INITIAL = 2000000000, 1, 1500, 100
 
@@ -352,7 +352,7 @@ row("tick A's records submitted again: every record already credited (receipt)",
     r.returncode == 0 and len(lines(r, "already-credited")) == 1 and lines(r, "already-credited")[0][3] == "receipt"
     and balance(8) == bal8, summary(r))
 
-# The observer's retained reports are lost (PAY §3.4: "if the attempt directory is lost"): the
+# The observer's retained reports are lost (docs/PAY.md §3.4: "if the attempt directory is lost"): the
 # receipts are derived from the credited attempts, so both go. They come back after tick D, as a
 # restored backup would, so the audit below sees every report.
 LOST = path("lost-observer-state")
@@ -443,7 +443,7 @@ row("kernel per-observation refusals: the report is probed; each record quaranti
     and len(os.listdir(os.path.join(OBS, "pay", "quarantine"))) == 2 and balance(8) == bal8,
     f"quarantined={sorted(q)} {summary(r)}")
 
-# The enrollment row (PAY §11). The watcher reads its index and the journal floor from the SIGNED tariff
+# The enrollment row (docs/PAY.md §11). The watcher reads its index and the journal floor from the SIGNED tariff
 # (`--enrol tariff`; the operator flags are retired), and the kernel admits a tariff naming an index only once
 # the enrollment float holds it (`PayBookReceiver.enrolReady`): the float takes the next free index, 2 (friends
 # 8 and 9 hold 0 and 1), and the operator installs the tariff's next version naming it. This happens after the

@@ -1,5 +1,5 @@
 /-
-# Kernel.PayEnrolDecision — what an enrollment-index payment decides (PAY §11.3–§11.4)
+# Kernel.PayEnrolDecision — what an enrollment-index payment decides (docs/PAY.md §11.3–§11.4)
 
 One finalized transfer to the enrollment index (`Tariff.enrolIndex`) is
 decided here, purely, over the pay cell:
@@ -66,7 +66,7 @@ structure Price where
   birthFee : Nat
   deriving DecidableEq, Repr
 
-/-- One node week plus the birth fee; derived, never stored (PAY §11.4). -/
+/-- One node week plus the birth fee; derived, never stored (docs/PAY.md §11.4). -/
 def enrolPrice (tariff : Tariff) (price : Price) : Nat := price.birthFee + tariff.nodeWeekRate
 
 /-- The native verifier's two answers for the observation's memo. -/
@@ -295,7 +295,7 @@ theorem classify_renew {store : PayStore} {tariff : Tariff} {price : Price} {tip
             · cases accepted
             · split at accepted <;> cases accepted
 
-/-! ## The named theorems (PAY §11.4) -/
+/-! ## The named theorems (docs/PAY.md §11.4) -/
 
 /-- **An enrollment is paid for**: the payment's credit covers the birth fee
 and one node week. -/
@@ -409,7 +409,7 @@ theorem enrol_lease_at_least_a_week {store : PayStore} {price : Price} {tip : Ch
 
 /-- **The decision does not depend on which transaction carried the memo**:
 a replay of a published memo in a new transaction is decided exactly as the
-original (so it renews its owner, a gift; PAY §11.3).  The transaction
+original (so it renews its owner, a gift; docs/PAY.md §11.3).  The transaction
 identity only enters through the nullifier, which the durable preflight
 spends once. -/
 theorem decide_deterministic (store : PayStore) (price : Price) (tip : ChainTip) (o : Observation)

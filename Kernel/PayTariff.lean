@@ -15,7 +15,7 @@ A tariff is `valid` only when it names a real token: a positive version, a
 System Program, which is no mint), positive rate and cap, and a positive node
 week rate.
 
-Version 2 (`DREGG/PAY/TARIFF/v2`, PAY §11) adds self-enrollment:
+Version 2 (`DREGG/PAY/TARIFF/v2`, docs/PAY.md §11) adds self-enrollment:
 `nodeHourRate` (an hourly unit), `enrolIndex` (the book index whose observations go to
 the enrollment receiver; `none` = self-enrollment off) and `journalFloor`
 (atomic units below which an enrollment-index transfer is not admitted at

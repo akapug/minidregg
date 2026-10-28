@@ -214,7 +214,7 @@ def viewStream : StreamCodec View :=
 def viewCodec : Minidregg.Theory.IndexedProgram.LawfulCodec View :=
   PayTariff.framed "DREGG/PAY/VIEW/v2".toUTF8.toList viewStream
 
-/-! ## The public enrollment view (PAY §11.5; socket op 112)
+/-! ## The public enrollment view (docs/PAY.md §11.5; socket op 112)
 
 What the box's root timer `mini-roster-sync` reads to render proxy login
 lines: the chain hour and, per self-enrolled Mini key, its derived subject,

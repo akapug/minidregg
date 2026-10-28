@@ -2,7 +2,7 @@
 //!
 //! The vector is a real run on persvati (2026-09-30): `ssh-keygen -t ed25519`,
 //! then `ssh-keygen -Y sign -n dregg-enrol@v1 -f key message.bin` over
-//! `mint(32) || enrolAddress(32) || miniKey(32)` (PAY §11.3), checked with
+//! `mint(32) || enrolAddress(32) || miniKey(32)` (docs/PAY.md §11.3), checked with
 //! `ssh-keygen -Y check-novalidate`. Only the public key, the message and the
 //! armoured signature are committed; the private key was deleted.
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
