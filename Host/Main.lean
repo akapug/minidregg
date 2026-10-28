@@ -1589,6 +1589,7 @@ def selectedReleaseSubmitSession (config : NativeHost.Config)
     | .contention => pure .contention
     | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
     | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  NativeHost.logOperatorRefusal outcome
   return NativeHost.publicSubmissionOutcome outcome
 
 /-- Lookup never submits missing work. An exact historical retry retains its
@@ -1816,6 +1817,7 @@ def fnConsumerNamespaceSubmitSession (config : NativeHost.Config)
   | .contention => pure .contention
   | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
   | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  NativeHost.logOperatorRefusal outcome
   return NativeHost.publicSubmissionOutcome outcome
 
 /-- Op41 is receipt-only. A missing original is never resubmitted. -/
@@ -1848,6 +1850,7 @@ def fnSelectedPollSubmitSession (config : NativeHost.Config)
   | .contention => pure .contention
   | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
   | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  NativeHost.logOperatorRefusal outcome
   return NativeHost.publicSubmissionOutcome outcome
 
 def fnSelectedPollLookupSession (config : NativeHost.Config)
@@ -1878,6 +1881,7 @@ def fnEmptyPollSubmitSession (config : NativeHost.Config)
   | .contention => pure .contention
   | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
   | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  NativeHost.logOperatorRefusal outcome
   return NativeHost.publicSubmissionOutcome outcome
 
 def fnEmptyPollLookupSession (config : NativeHost.Config)
@@ -1909,6 +1913,7 @@ def selectedSourcePublicationSubmitSession (config : NativeHost.Config)
     | .contention => pure .contention
     | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
     | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  NativeHost.logOperatorRefusal outcome
   return NativeHost.publicSubmissionOutcome outcome
 
 def selectedSourcePublicationLookupSession (config : NativeHost.Config)
@@ -1944,11 +1949,12 @@ def applicationShareIssueSubmitSession (config : NativeHost.Config)
         sessionConfirmed config state .replayed receipt.transactionId receipt.eventId
     | .confirmed kind receipt =>
         sessionConfirmed config state kind receipt.transactionId receipt.eventId
-    | .rejected _ => pure (.refused .operationRejected "application-share-issue".toUTF8.toList
-        "request refused".toUTF8.toList)
+    | .rejected reason => pure (.refused .operationRejected "application-share-issue".toUTF8.toList
+        reason.toUTF8.toList)
     | .contention => pure .contention
     | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
     | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  NativeHost.logOperatorRefusal outcome
   return NativeHost.publicSubmissionOutcome outcome
 
 def applicationShareIssueLookupSession (config : NativeHost.Config)
@@ -1990,11 +1996,12 @@ def applicationGrainShareIssueSubmitSession (config : NativeHost.Config)
         sessionConfirmed config state .replayed receipt.transactionId receipt.eventId
     | .confirmed kind receipt =>
         sessionConfirmed config state kind receipt.transactionId receipt.eventId
-    | .rejected _ => pure (.refused .operationRejected "application-grain-share-issue".toUTF8.toList
-        "request refused".toUTF8.toList)
+    | .rejected reason => pure (.refused .operationRejected "application-grain-share-issue".toUTF8.toList
+        reason.toUTF8.toList)
     | .contention => pure .contention
     | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
     | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  NativeHost.logOperatorRefusal outcome
   return NativeHost.publicSubmissionOutcome outcome
 
 /-- Receipt recovery uses the exact event-22 certificate and original receipt
@@ -2073,6 +2080,7 @@ def agentLifetimeGrantSubmitSession (config : NativeHost.Config)
     | .contention => .contention
     | .unavailable detail => .unavailable detail.toUTF8.toList
     | .uncertain detail => .uncertain detail.toUTF8.toList
+  NativeHost.logOperatorRefusal outcome
   return NativeHost.publicSubmissionOutcome outcome
 
 /-- Grant recovery selects the exact event27 original from a verified walk.

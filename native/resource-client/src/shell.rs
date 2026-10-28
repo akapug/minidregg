@@ -1544,6 +1544,13 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
         "delegate" => {
             let p = crate::shell_grammar::parse(&crate::shell_grammar::DELEGATE, &w)?;
             let verbs: Vec<&str> = p.arg(3).split(',').collect();
+            // A read is judged with a cost (its encoded intent's length), and a grant covers it only
+            // while cost <= MAX-COST: an observe grant at 0 covers no read, so its holder is refused
+            // `no-grant` on everything. Named here so the trap cannot be typed (the publish form's
+            // ceiling is deploy/demo-seed/public-read-max-cost).
+            if verbs.contains(&"observe") && p.arg(4).bytes().all(|b| b == b'0') {
+                return Err("a ceiling of 0 covers no read: an observe grant needs a MAX-COST above 0 (every signed read costs its encoded length); give a MAX-COST at or above the value in deploy/demo-seed/public-read-max-cost".into());
+            }
             let mut request = json!({"type":"minidregg-workspace-proposal-v1","action":"delegate",
                 "name":p.arg(1),"recipient":p.arg(2),"verbs":verbs,"maxCost":p.arg(4)});
             if let Some(Some(height)) = p.flag("--until") {
@@ -3654,6 +3661,12 @@ mod tests {
             json!({"type":"not","predicate":{"type":"eq","slot":"request/verb","value":"10"}}));
         assert_eq!(law["predicates"][1],
             json!({"type":"memberOf","slot":"request/subject","values":["7","9"]}));
+        // An observe grant at ceiling 0 covers no read: refused by name; a mutate-only 0 and an observe above 0 are not.
+        let refused = plan(&s, "delegate d0 lab 12 observe 0").err().unwrap();
+        assert!(refused.contains("ceiling of 0 covers no read"), "{refused}");
+        assert!(plan(&s, "delegate d0 lab 12 observe,mutate 000").is_err());
+        assert!(plan(&s, "delegate d1 lab 12 observe 50000").is_ok());
+        assert!(plan(&s, "delegate d2 lab 12 mutate 0").is_ok());
         let (_, request) = request_of(plan(&s, "room invite i1 lab 12").unwrap());
         assert_eq!(request, json!({"type":"minidregg-workspace-proposal-v1","action":"delegate",
             "name":"lab","recipient":"12","verbs":["observe","place"],"maxCost":"50000","room":true}));
