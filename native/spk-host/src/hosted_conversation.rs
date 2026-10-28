@@ -359,4 +359,162 @@ mod tests {
         assert!(descriptor(br#"{"version":1,"op":"close","channel":"../other"}"#).is_err());
         assert!(descriptor(br#"{"version":1,"op":"close","channel":"c","subject":2}"#).is_err());
     }
+    struct NoSession;
+    impl minidregg_spk_rpc::grain_capnp::ui_session::Server for NoSession {}
+    impl minidregg_spk_rpc::web_session_capnp::web_session::Server for NoSession {}
+    struct FailingStream(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+    impl minidregg_spk_rpc::web_session_capnp::web_session::web_socket_stream::Server
+        for FailingStream
+    {
+        async fn send_bytes(
+            self: capnp::capability::Rc<Self>,
+            _params: minidregg_spk_rpc::web_session_capnp::web_session::web_socket_stream::SendBytesParams,
+        ) -> capnp::Result<()> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err(capnp::Error::failed("intentional lost send reply".into()))
+        }
+    }
+    fn binding() -> SessionBinding {
+        SessionBinding {
+            app: 1,
+            process_generation: 2,
+            session_resource: 3,
+            session_generation: "4".into(),
+            subject: 5,
+            projection_fingerprint: [6; 32],
+            ticket_resource: None,
+            kind: crate::rpc_adapter::SessionKind::Web,
+            params: minidregg_spk_rpc::SessionParameters {
+                identity_id: [7; 32],
+                display_name: "member".into(),
+                preferred_handle: "member".into(),
+                permissions: vec![true],
+                tab_id: vec![],
+                base_path: "https://member.example.test".into(),
+                user_agent: "Mini".into(),
+                acceptable_languages: vec![],
+            },
+        }
+    }
+    fn channel(
+        binding: SessionBinding,
+        counter: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    ) -> (Channel, tokio::sync::mpsc::Sender<Vec<u8>>) {
+        let (tx, rx) = tokio::sync::mpsc::channel(16);
+        (
+            Channel {
+                binding,
+                endpoint: "websocket".into(),
+                protocol: "ddp-v1".into(),
+                expires: Instant::now() + Duration::from_secs(30),
+                socket: WebSocketSession {
+                    protocols: vec![],
+                    to_app: capnp_rpc::new_client(FailingStream(counter)),
+                    from_app: rx,
+                },
+                buffered: vec![],
+                fragment: vec![],
+                fragmenting: false,
+                ids: HashSet::new(),
+                max_frames: 64,
+                max_bytes: 65536,
+            },
+            tx,
+        )
+    }
+    fn request(value: Value) -> WebRequest {
+        WebRequest {
+            method: minidregg_spk_rpc::Method::HostedConversation,
+            path_and_query: "websocket".into(),
+            context: Default::default(),
+            body: Some(minidregg_spk_rpc::Body {
+                mime_type: "application/json".into(),
+                encoding: String::new(),
+                bytes: serde_json::to_vec(&value).unwrap(),
+            }),
+            dav: Default::default(),
+        }
+    }
+    #[test]
+    fn hosted_receiving_keeps_intervening_frames_and_refuses_changed_generation() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        tokio::task::LocalSet::new().block_on(&runtime,async {
+            let counter=std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let binding=binding();let (channel,tx)=channel(binding.clone(),counter.clone());
+            let mut pool=Pool::default();pool.channels.insert("c".into(),Some(channel));
+            let first=r#"{"msg":"updated","methods":["m"]}"#;
+            let second=r#"{"msg":"result","id":"m","result":null}"#;
+            let mut raw=vec![0x81,first.len() as u8];raw.extend(first.as_bytes());
+            raw.extend([0x81,second.len() as u8]);raw.extend(second.as_bytes());
+            tx.send(raw[..3].to_vec()).await.unwrap();tx.send(raw[3..].to_vec()).await.unwrap();
+            let req=request(json!({"version":1,"op":"receive","channel":"c","condition":{"msg":"any"},"maxFrames":64,"maxBytes":65536,"deadlineMs":100}));
+            let custody=Custody {directory:PathBuf::new(),api_prefix:None};
+            let session=capnp_rpc::new_client(NoSession);
+            for expected in [first,second] {
+                let result=pool.execute(&session,&binding,&req,&custody,Instant::now()+Duration::from_secs(1)).await.unwrap();
+                let WebResult::Content {body,..}=result.result else {panic!("content expected")};
+                let body:Value=serde_json::from_slice(&body).unwrap();assert_eq!(body["frames"][0],expected);
+            }
+            let mut changed=binding.clone();changed.session_generation="5".into();
+            assert!(pool.execute(&session,&changed,&req,&custody,Instant::now()+Duration::from_secs(1)).await.is_err());
+            assert!(pool.channels["c"].is_none());assert_eq!(counter.load(std::sync::atomic::Ordering::SeqCst),0);
+        });
+    }
+    #[test]
+    fn hosted_uncertain_send_retains_exact_frame_and_never_replays() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        tokio::task::LocalSet::new().block_on(&runtime, async {
+            let counter = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let binding = binding();
+            let (channel, _tx) = channel(binding.clone(), counter.clone());
+            let mut pool = Pool::default();
+            pool.channels.insert("c".into(), Some(channel));
+            let text = r#"{"msg":"method","method":"write","id":"m","params":[]}"#;
+            let req = request(json!({"version":1,"op":"send","channel":"c","text":text}));
+            let directory = std::env::temp_dir().join(format!(
+                "cx-hosted-send-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            crate::dispatch_native::private_dir(&directory).unwrap();
+            let custody = Custody {
+                directory: directory.clone(),
+                api_prefix: None,
+            };
+            let session = capnp_rpc::new_client(NoSession);
+            for _ in 0..2 {
+                assert!(pool
+                    .execute(
+                        &session,
+                        &binding,
+                        &req,
+                        &custody,
+                        Instant::now() + Duration::from_secs(1)
+                    )
+                    .await
+                    .is_err());
+            }
+            assert_eq!(counter.load(std::sync::atomic::Ordering::SeqCst), 1);
+            assert!(pool.channels["c"].is_none());
+            let frame = std::fs::read(directory.join("hosted-frame.bin")).unwrap();
+            assert_eq!(frame[0], 0x81);
+            let mask = &frame[2..6];
+            let payload: Vec<_> = frame[6..]
+                .iter()
+                .enumerate()
+                .map(|(i, b)| b ^ mask[i % 4])
+                .collect();
+            assert_eq!(payload, text.as_bytes());
+            std::fs::remove_dir_all(directory).unwrap();
+        });
+    }
 }
