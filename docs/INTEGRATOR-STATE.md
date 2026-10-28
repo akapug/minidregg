@@ -259,12 +259,12 @@ only `.lake/packages`; Lake's artifact cache restores the build dir as fresh ino
 
 ## Named reds outstanding
 
-
-- None open on main beyond A3's outcome (un-pb-twins landed at 134535c2 via 36ce6bd3d).
-- A lane's "proved" is a claim until the integrator's build elaborates it: lean-audit-c's three proofs never
-  had (fixed 61bf01e1d).
-- Cut 13 carries three flag days (lean-critical, un-effects, hot-path-v4): codec-shapes-regen.py runs once on the
-  box if the census reds on moved fingerprints.
+- TokenCensus.lean:34 "token census failed (21)" (umbrellas, non-blocking; first reached at 9bd52317c, 10-28 17:17):
+  10 unlisted private constructors of lean-audit-c's receivers (CompletionCustodianKey.Read, MeterRefillReceiver.*,
+  PlatformInstallReceiver.*, PlatformCellDomain.Loaded): L1e's successor; DurableHistory.RawEntry/RawNode.ofStore bare
+  tokens; 9 receiverVerifier calls outside its allow list (NativeHostReplay.derive, NativeHost.receivingOutcome,
+  PayEnrolProofs.intentOf, PayObservationReceiver.prepare). Named to the coordinator for routing.
+- Fixtures.NativeAcceptedFixture / NativeDocWriteFixture: ruling (c) (run-relative charge lanes), effects successor.
 
 ## Conventions
 
