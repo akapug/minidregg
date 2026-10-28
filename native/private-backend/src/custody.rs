@@ -27,7 +27,7 @@ fn parent_sync(p: &Path) -> Result<()> {
 }
 fn nonce() -> Result<u64> {
     let mut b = [0; 8];
-    File::open("/dev/urandom")?.read_exact(&mut b)?;
+    crate::entropy::os_fill(&mut b)?;
     Ok(u64::from_le_bytes(b))
 }
 pub(crate) fn snapshot(p: &Path, b: &[u8]) -> Result<()> {

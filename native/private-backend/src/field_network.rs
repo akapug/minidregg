@@ -489,20 +489,6 @@ impl Engine {
         expected_holder: u16,
         anchor: &Path,
     ) -> Result<Self> {
-        fn nat(c: &mut Cursor) -> Result<Nat> {
-            let mut ds = vec![];
-            loop {
-                let v = c.byte()?;
-                ds.push(v);
-                if v == 255 {
-                    break;
-                }
-            }
-            let mut r = crate::codec::Reader::new(&ds)?;
-            let n = r.nat()?;
-            r.finish()?;
-            Ok(n)
-        }
         let mut c = Cursor::new(b)?;
         let tag = b"DREGG.PRIVATE.FIELD.INITIAL\x01";
         if c.take(tag.len())? != tag {
@@ -510,8 +496,8 @@ impl Engine {
         }
         let plan = Plan::decode(&c.bytes()?)?;
         let me = c.u16()?;
-        let n = usize::try_from(nat(&mut c)?.value()?).map_err(|_| bad("field roster"))?;
-        let f = usize::try_from(nat(&mut c)?.value()?).map_err(|_| bad("field faults"))?;
+        let n = usize::try_from(c.nat()?.value()?).map_err(|_| bad("field roster"))?;
+        let f = usize::try_from(c.nat()?.value()?).map_err(|_| bad("field faults"))?;
         if plan != *expected_plan
             || me != expected_holder
             || f > 5
@@ -613,17 +599,7 @@ pub fn decode_message(b: &[u8]) -> Result<Message> {
     let context = c.fixed32()?;
     let body = match c.byte()? {
         0 => {
-            let mut digits = vec![];
-            loop {
-                let v = c.byte()?;
-                digits.push(v);
-                if v == 255 {
-                    break;
-                }
-            }
-            let mut r = crate::codec::Reader::new(&digits)?;
-            let gate = usize::try_from(r.nat()?.value()?).map_err(|_| bad("gate index"))?;
-            r.finish()?;
+            let gate = usize::try_from(c.nat()?.value()?).map_err(|_| bad("gate index"))?;
             Body::Opening {
                 gate,
                 holder: c.u16()?,
@@ -888,5 +864,28 @@ pub(crate) mod tests {
         assert!(
             Engine::reserve_many(p, &stocks, input, source, &sock, &root.join("retry")).is_err()
         );
+    }
+}
+
+#[cfg(test)]
+mod pin_wire {
+    use super::*;
+    use crate::asks::PhaseMessage as PinPhase;
+    #[test]
+    fn pin_phase_wire() {
+        for (tag, p) in [
+            (0u8, PinPhase::Init(vec![9, 8])),
+            (1, PinPhase::Echo(vec![9, 8])),
+            (2, PinPhase::Ready(vec![9, 8])),
+        ] {
+            let mut b = vec![];
+            put_phase(&p, &mut b);
+            assert_eq!(b, vec![tag, 2, 255, 9, 8]);
+            let mut c = crate::consensus_wire::Cursor::new(&b).unwrap();
+            assert_eq!(get_phase(&mut c).unwrap(), p);
+            c.finish().unwrap();
+        }
+        let mut c = crate::consensus_wire::Cursor::new(&[3, 0, 255]).unwrap();
+        assert!(get_phase(&mut c).is_err());
     }
 }

@@ -3,7 +3,7 @@
 //! commit before visibility. Honest crash storage only, no rollback/release authority.
 use crate::{
     asks::PhaseMessage,
-    codec::{bad, bytes, Generation, Nat, Reader},
+    codec::{bad, bytes, Generation, Nat},
     consensus_wire::Cursor,
     private_send_store,
     reconstruction::Field,
@@ -11,24 +11,9 @@ use crate::{
     transition_journal::{Journal, Machine},
 };
 use std::{
-    fs::File,
-    io::{Read, Result},
+    io::Result,
     path::Path,
 };
-pub(crate) fn count(c: &mut Cursor) -> Result<usize> {
-    let mut b = vec![];
-    loop {
-        let v = c.byte()?;
-        b.push(v);
-        if v == 255 {
-            break;
-        }
-    }
-    let mut r = Reader::new(&b)?;
-    let n = r.count()?;
-    r.finish()?;
-    Ok(n)
-}
 pub(crate) fn put_phase(p: &PhaseMessage, b: &mut Vec<u8>) {
     let (t, v) = match p {
         PhaseMessage::Init(v) => (0, v),
@@ -55,7 +40,7 @@ pub(crate) fn put_fields(v: &[Field], b: &mut Vec<u8>) {
     }
 }
 pub(crate) fn fields(c: &mut Cursor) -> Result<Vec<Field>> {
-    let n = count(c)?;
+    let n = c.count()?;
     if n > 128 {
         return Err(bad("Sh2t point vector capacity"));
     }
@@ -151,7 +136,7 @@ pub fn decode_message(b: &[u8]) -> Result<Message> {
             phase: phase(&mut c)?,
         },
         5 => Body::ReconRequest {
-            group: count(&mut c)?,
+            group: c.count()?,
             receiver: c.u16()?,
             requester: c.u16()?,
             phase: phase(&mut c)?,
@@ -161,7 +146,7 @@ pub fn decode_message(b: &[u8]) -> Result<Message> {
             phase: phase(&mut c)?,
         },
         7 => Body::Point {
-            group: count(&mut c)?,
+            group: c.count()?,
             receiver: c.u16()?,
             values: fields(&mut c)?,
             masks: fields(&mut c)?,
@@ -186,7 +171,7 @@ fn outbox(ps: &[Send]) -> Vec<u8> {
 }
 pub(crate) fn parse_outbox(b: &[u8], n: usize) -> Result<Vec<Send>> {
     let mut c = Cursor::new(b)?;
-    let len = count(&mut c)?;
+    let len = c.count()?;
     if len > crate::codec::MAX / 40 {
         return Err(bad("Sh2t outbox capacity"));
     }
@@ -233,7 +218,7 @@ impl Machine for Sh2tMachine {
         let out = match c.byte()? {
             5 => {
                 let seed = c.fixed32()?;
-                let n = count(&mut c)?;
+                let n = c.count()?;
                 if n != self.state.count() {
                     return Err(bad("Sh2t event polynomial count"));
                 }
@@ -275,7 +260,7 @@ impl Machine for Sh2tMachine {
                 self.state.receive(sender, m)?
             }
             3 => {
-                let group = count(&mut c)?;
+                let group = c.count()?;
                 let receiver = c.u16()?;
                 c.finish()?;
                 self.state.request_private_reconstruction(group, receiver)?
@@ -352,7 +337,7 @@ impl Store {
             }
         } else {
             let mut seed = [0; 32];
-            File::open("/dev/urandom")?.read_exact(&mut seed)?;
+            crate::entropy::os_fill(&mut seed)?;
             self.apply(&commit_event(seed, polys))?;
         }
         self.apply(&EMIT_EVENT)
@@ -566,5 +551,60 @@ mod tests {
         assert!(fresh.request_accusation(0).is_err());
         assert!(fresh.request_private_reconstruction(0, 0).is_err());
         assert_eq!(fs::metadata(root.join("fresh")).unwrap().len(), len);
+    }
+}
+
+#[cfg(test)]
+mod pin_wire {
+    use super::*;
+    use crate::asks::PhaseMessage as PinPhase;
+    fn pin_sends() -> Vec<Send> {
+        vec![
+            Send { to: 1, message: Message { context: [7; 32], body: Body::Termination(PinPhase::Echo(vec![1])) } },
+            Send { to: 3, message: Message { context: [7; 32], body: Body::Termination(PinPhase::Ready(vec![1])) } },
+        ]
+    }
+    /// Outbox wire: Nat count, then per packet u16 LE recipient and the
+    /// length-prefixed message wire; canonical, bounded, recipient-checked.
+    #[test]
+    fn pin_outbox_wire() {
+        let ps = pin_sends();
+        let b = outbox(&ps);
+        let mut want = vec![2, 255];
+        for s in &ps {
+            want.extend(s.to.to_le_bytes());
+            let m = encode_message(&s.message);
+            crate::codec::Nat::new(m.len() as u64).put(&mut want);
+            want.extend(m);
+        }
+        assert_eq!(&b[..4], &[2, 255, 1, 0]);
+        assert_eq!(b, want);
+        assert_eq!(parse_outbox(&b, 4).unwrap(), ps);
+        assert!(parse_outbox(&b, 3).is_err(), "recipient 3 is outside n = 3");
+        let mut trailing = b.clone();
+        trailing.push(0);
+        let b = trailing;
+        assert!(parse_outbox(&b, 4).is_err(), "trailing bytes refuse");
+        let mut huge = vec![];
+        crate::codec::Nat::new(crate::codec::MAX as u64).put(&mut huge);
+        let b = huge;
+        assert!(parse_outbox(&b, 4).is_err(), "an absurd count refuses");
+    }
+    #[test]
+    fn pin_phase_wire() {
+        for (tag, p) in [
+            (0u8, PinPhase::Init(vec![9, 8])),
+            (1, PinPhase::Echo(vec![9, 8])),
+            (2, PinPhase::Ready(vec![9, 8])),
+        ] {
+            let mut b = vec![];
+            put_phase(&p, &mut b);
+            assert_eq!(b, vec![tag, 2, 255, 9, 8]);
+            let mut c = crate::consensus_wire::Cursor::new(&b).unwrap();
+            assert_eq!(phase(&mut c).unwrap(), p);
+            c.finish().unwrap();
+        }
+        let mut c = crate::consensus_wire::Cursor::new(&[3, 0, 255]).unwrap();
+        assert!(phase(&mut c).is_err());
     }
 }

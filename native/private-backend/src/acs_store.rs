@@ -10,8 +10,7 @@ use crate::{
     transition_journal::{Journal, Machine},
 };
 use std::{
-    fs::File,
-    io::{Read, Result},
+    io::Result,
     path::Path,
 };
 #[derive(Clone)]
@@ -94,7 +93,7 @@ impl Store {
             let mut event = vec![1];
             event.extend(view.to_le_bytes());
             let mut random = vec![0u8; 2 * (self.state().f + 1) * 16];
-            File::open("/dev/urandom")?.read_exact(&mut random)?;
+            crate::entropy::os_fill(&mut random)?;
             event.extend(random);
             out.extend(self.apply(&event)?);
         }
