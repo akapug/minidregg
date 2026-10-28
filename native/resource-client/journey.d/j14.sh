@@ -860,7 +860,15 @@ fi
 
 if [ -n "$J14_AWAIT" ]; then
   # -------------------------------------------- the await bridge: a world program asks Hermes and resumes on the answer
-  install -m 0600 "$REPO/world/activity/Tally.obend" "$H/alice/requests/Tally.obend"
+  # Tally awaits its answer for `patience` heights (4 in world/activity/Tally.obend). A
+  # resident answers in a later pass, minutes and dozens of heights after the ask (run
+  # hb-q3-3: the slot's deadline 281 had passed at height 292, before Hermes listed it), so
+  # the bridge's program is Tally with a patience a resident pass can meet: the kernel's
+  # longest (Kernel.ObjectiveKernelConfig.maxPatience, 64 heights).
+  PATIENCE=${J14_AWAIT_PATIENCE:-64}
+  sed "s/patience: 4n/patience: ${PATIENCE}n/" "$REPO/world/activity/Tally.obend" >"$H/alice/requests/Tally.obend"
+  chmod 600 "$H/alice/requests/Tally.obend"
+  checkp await "the bridge's Tally waits $PATIENCE heights for its answer" grep -q "patience: ${PATIENCE}n" "$H/alice/requests/Tally.obend"
   ok await alice "bend publish tally @Tally.obend --entry tally"
   for o in ask-hermes ask-alice; do
     operator await "OBJECT: alice's content resource $o" "$MINI" workspace --action create --dir "$WS/alice" \
