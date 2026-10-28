@@ -316,6 +316,8 @@ Before it can run:
   route; `meta-llama/llama-3.1-8b-instruct` at 20000 / 50000 micro-credits per
   million input / output tokens (OpenRouter's $0.02 / $0.05 per million) plus
   100 per call; the user (BYOK) route pays 5 per call.
+  Purse 9872003 is the lobby resident's (`INSTANCE=lobby BASE=9872000`, the shared house room),
+  at the same tariff as the house resident's 9870003.
 - **The worker is upstream Hermes Agent.** `build-runtime-root SOURCE OUT
   CANDIDATE` stages it from a hermes-agent checkout at 6d8a8beb with
   `hermes-agent/mini-tool-catalogue.patch` (the restricted resident admits a
@@ -458,42 +460,68 @@ once: `chat join subscribers @subscribers-invite.json`; a renewal is adopted by
 Whether the coding plan's terms permit serving others' agents is for the join
 page to state.
 
-## State (lane L4c, 2026-10-28)
+## The shared house room
 
-**The room resident (J14)** passes whole on the lane (run 24, 153/153 rows; upstream Hermes
-Agent 6d8a8beb in the gated worker, pool route, `--network none` plus the bridge). The subscriber
-tier row's six tier-7 reds are fixed, unrun: bcd78780 (the turn count in a workroom), 2dfefa66
-(a failed prompt refused by the controller's typed record is closed and counted, so later passes are
-not blocked) and 65eca3e4 (the tier row's journey bound is 5400 s).
+Hermes lives in the house's `lobby`: the door joins every enrolled member to it (door.json `room:
+{"founder": "house", "name": "lobby"}`, beside `story`), the house member (`house`, the seed's `SEED_HOST`) summoned Hermes there and funds its
+turns, and every member asks it with `ask lobby QUESTION`; the replies land in the room for all of
+them. A member's `summon lobby as librarian` says Hermes is already the room's resident and how to
+ask it, and funds or grants nothing. Summon, its budget and dismissal stay the founder's. The lobby's
+resident is installed before the seed (deploy/demo-seed/README.md) by:
 
-**Sandbox tools** (docs/HERMES-TOOLS-2026-10-27.md, the design and the containment argument). A
-founder grants upstream Hermes's file, terminal and Python tools with room field 1014
-`hermes/tools` (bits 1/2/4), within the operator's `controller.json` `sandbox` ceiling (grain create
-`sandbox: S|M|L`). The worker gets a class-sized `/scratch` tmpfs, the class memory, task and CPU
-bounds, `LimitFSIZE`, `--disable-userns --cap-drop ALL --new-session`, and still no network.
-The catalogue check admits exactly Mini's tools plus the granted names. The gate records the
-worker's CPU (`UNIT.cpu`), and the resident pays ceil(CPU / `hermes/compute` seconds) as
-`hermes/turn` payments. Commits: fc2cf37a, 84637ef9, 17619fa2, 6240d0e9, 9b8a9ac8, 05b69e7e,
-3ffe040a, ec6f7307, 68394077. Controller tests passed on dregg-build (30/30).
-J14_TOOLS has not run: it needs a host built at or after bc88a5ab (genesis frame v8), and no
-candidate on dregg-build had one when this was written.
+```sh
+INSTANCE=lobby BASE=9872000 ROOM=lobby BUDGET=100 FOUNDER_MEMBER=house MEMBER_ROOT=/var/lib/mini/sessions \
+  HERMES_ROOT=OUT demo/install-hermes preflight route subjects room runtime create handoff summon controller dispatch resident
+```
 
-**The await bridge** (645fa559): `bend await OBJECT TRANSACTION` / `bend answer SLOT @FILE`, and
-the resident tools `mini_pending_awaits` / `mini_answer_await`. A member announces
+`FOUNDER_MEMBER` makes the hosted member the room's founder: its own tenant account runs the room,
+summon and tariff lines on the member socket, and the registry lands in its `HOME/hermes/registry.json`.
+
+**Running it.** `install-hermes refill` funds a purse from the sponsor's Book account (`mini pay
+refill`, PAY P6; `AMOUNT`, default 50,000, `PURSE` provider|parent|tool): the provider purse starts at
+50,000, and a pool call reserves up to its perOp plus the token caps' metered price, so a busy room
+drains it; the room's reply is `no-credit` until the refill. `install-hermes dismiss` is the founder's
+dismissal with its bundle dispatched into Hermes's inbox (nothing else on the box dispatches it), and
+`install-hermes resummon` then summons again: the new assignment's budget account has a new name, the
+controller config carries it, and the resident runs on a fresh per-assignment state.
+
+## Sandbox tools
+
+docs/HERMES-TOOLS-2026-10-27.md has the design and the containment argument. A founder grants
+upstream Hermes's file, terminal and Python tools with room field 1014 `hermes/tools` (bits 1/2/4),
+within the operator's `controller.json` `sandbox` ceiling (grain create `sandbox: S|M|L`). The
+worker gets a class-sized `/scratch` tmpfs, the class memory, task and CPU bounds, `LimitFSIZE`,
+`--disable-userns --cap-drop ALL --new-session`, and still no network. The catalogue check admits
+exactly Mini's tools plus the granted names; the controller answers Hermes's ACP
+`request_permission` with allow-once only for a granted toolset. The gate records the worker's CPU
+(`UNIT.cpu`), and the resident pays ceil(CPU / `hermes/compute` seconds) as `hermes/turn` payments.
+`sandbox.workspaceMib` (S 64 / M 128 / L 256 MiB) sits beside `scratchMib` (S 16 / M 64 / L 128).
+The demo's install-hermes grants no sandbox.
+
+## The await bridge
+
+`bend await OBJECT TRANSACTION`, `bend answer SLOT @FILE` and `bend deliver OBJECT TRANSACTION`,
+and the resident tools `mini_pending_awaits` / `mini_answer_await`. A member announces
 `await OBJECT TRANSACTION` in the room; that is the allowance. The kernel decides who may answer
-(notDecider) and refuses a second answer. Row: J14_AWAIT=1.
+(notDecider) and refuses a second answer; `bend lookup` reads an answer's retained outcome. After
+the answer, anyone delivers: `bend deliver` resumes the program with the settled outcome, declaring
+the extra heap the Host's resume quote names when the stored checkpoint needs more than the escrow
+carries. A resident must answer inside the await's patience (world/activity/Tally.obend: 4
+heights; the kernel's maximum is 64).
 
-**The Oracle through Hermes:**
+## The Oracle through Hermes
+
 - Room field `hermes/tools` bit 8 grants the oracle.
 - A restricted resident is offered `mini_oracle_discover` and `mini_oracle_call` (never the raw
   `mini_application_api`) when the operator's toolTask binds an Oracle lifetime route
-  (docs/oracle-agent-tools.md).
+  (docs/oracle-agent-tools.md). install-hermes binds none: on the demo box Hermes says
+  `oracle-not-configured`.
 - Every call goes through Mini's application dispatch and purse settlement. In a room without the
   bit, the call is refused `oracle-not-granted` before any dispatch.
 - The answer comes back as Hermes's paid reply. `J14_ORACLE=1` selects the dedicated
   `native/resource-client/journey.d/j14-oracle.sh` journey. It creates one fresh Store, enrolls
   Hermes, installs the Oracle in that same Store, and issues the session and lifetime grant for
-  the actual controller. There is no preissued `J14_ORACLE_TOOLTASK` fragment.
+  the actual controller.
 
 The Oracle row needs the usual journey inputs (`MINI`, `HOST`, `STORE`, `VERIFIER`,
 `GRAIN_RUNTIME`, `TEST_PROVIDER`, `JOURNEY_STEP_DIR`) plus these operator assets:
@@ -526,124 +554,29 @@ The resident-page check inspects HTTP/HTML grant state; rendered-browser use and
 restart/recovery belong to the separate Oracle shared-data journey. Command outputs and native
 attempts remain under `JOURNEY_STEP_DIR/oracle`, including a named failure when a phase stops.
 
-**Running J14 on dregg-build.** `/build/lanes/hermes-tier-run/tools-run.sh RUN_DIR` builds the
-lane binaries into `/build/lanes/hermes-tier-target` (CARGO_BUILD_JOBS=4), rebuilds the runtime
-root with `build-runtime-root` from `/build/lanes/hermes-live-run/hermes-agent` (6d8a8beb) against
-those binaries, and runs J0-J5 and J14 keep-going with J14_TOOLS=1 on the pool route. Set `C=` in it
-to a candidate whose host carries bc88a5ab, and add `J14_AWAIT=1` for the bridge rows. Constraints:
-- Run directories must sit under `/build/lanes/hermes-live-run/` (the sudo rule for the root-owned
-  provider table names it).
-- J14 holds the user unit `mini-grain-controller@9870001`, so only one J14 runs per account.
-- The manifest's `shell` must be the lane `mini`.
-- A runtime root built before 05b69e7e needs a full rebuild, not `--rebind`.
+## One uid per resident
 
-**The resident's tools** are added in `resource_tools.rs`:
-- the schema goes in `room_tool_specs()`, which is also the provider's function list and the
-  catalogue the worker must report;
-- reads go in `RoomTools::read`;
-- writes go in `ROOM_WRITE_TOOLS`, `validate_room_write` and `write_with_reply_guard`;
-- each write is paid (one `hermes/turn`) and journaled as a `room_attempt` before it runs, and its
-  exact lookup is `RoomTools::lookup`.
-
-**One uid per resident (L4b; coordinator rulings 2026-10-27: least-privilege route, fix the journal).**
 - **Accounts:** `install-hermes` acts as the operator (`mini-core`: sponsor, founder, concierge) and
   as `mini-h-INSTANCE` (system user + same-named group, nologin, home `/var/lib/mini/INSTANCE`,
   linger, one supplementary group = the key broker's socket group). Ownership: instance root and
   runtime root root's; `operator/` the operator's; the rest the resident's.
-- **The route** (`cae52528`): step `route` renders `mini-resident-operator-INSTANCE.socket`
-  (`run/mini.sock` fd3, `run/mini.control` fd4, `SocketUser` the resident) and `.service`
-  (`mini serve-resident-operator-proxy` as the operator). Only the resident uid connects; Host
-  frames pass only if the public relay would pass them AND the operation is in
-  `transport::RESIDENT_OPERATIONS` (1-5, 17, 19, 96-99, 102, 144, 151, 153, 210-214: what
-  J14's `host-ops.txt` shows the controller and resident use, their recovery reads, and the activity
-  ops the await bridge answers and delivers through); the rest are refused by name. The control listener passes `status` only. The route is a strict subset of
-  the public surface, so it needs no Lean-side statement. Clients pin the listener creator with
-  `MINI_OPERATOR_PEER_UID=0` (or `--operator-peer-uid`, now accepted on every command).
-  The list is seeded from run 24's retained custody; **confirm it** from `host-ops.txt` of the first
-  J14 on a v8 candidate (the lane's mini already speaks genesis v8: on 23861533 and 3315a908 every
-  world bootstrap refuses `unknown field platform`).
+- **The route:** step `route` renders `mini-resident-operator-INSTANCE.socket` (`run/mini.sock`
+  fd3, `run/mini.control` fd4, `SocketUser` the resident) and `.service` (`mini
+  serve-resident-operator-proxy` as the operator). Only the resident uid connects; Host frames pass
+  only if the public relay would pass them AND the operation is in `transport::RESIDENT_OPERATIONS`
+  (1-5, 17, 19, 96-99, 102, 144, 151, 153, 210-214: what J14's `host-ops.txt` shows the controller
+  and resident use, their recovery reads, and the activity ops the await bridge answers and
+  delivers through); the rest are refused by name. The control listener passes `status` only. The
+  route is a strict subset of the public surface. Clients pin the listener creator with
+  `MINI_OPERATOR_PEER_UID=0` (or `--operator-peer-uid`).
 - **Create split:** `grain-runtime create SPEC --birth-socket OPERATOR-SOCKET` (operator: the
-  sponsor-signed birth only), root `chown -R` the root, then the resident's `create SPEC`.
+  sponsor-signed birth only, authored at the current height through Host op 91 with the
+  deployment's provider routes), root `chown -R` the root, then the resident's `create SPEC`, which
+  no longer reads the operator's genesis once the birth is confirmed.
 - **Journal retention** (`history_compaction.rs`): after each prompt record, when the quiescence
-  census is empty, decided operations' files (`attempt-`, `query-`, `provider-*`, `policy-*`,
-  `source-`, `current-author-`) and decided room-workspace attempts become one line each in
-  `state/history.jsonl` (names, exact outcome, source digest); superseded chat reads and
-  `sources/q-*.json` go. `retained_outcome` answers exact lookup across the prune (filtered tests).
-  Kept: journal, `resident-*`, `prompt-outcome-*`, gates, proposals, `requests/`,
-  `room-operations/` (RoomTools::lookup), undecided attempts.
-- **Measured before / projected after** (J14 run 24, 3 prompts, 11 paid calls): before 43 MiB and
-  8,700 inodes; what compaction keeps there is about 5.4 MiB and 770 inodes, growing about
-  40 inodes per prompt (room-operations, requests, resident records) plus about 80 KiB per prompt
-  of `state.db` and history lines. **Owed: measure it** (footprint.tsv on the v8 candidate run;
-  the target is 32 MiB and about 2,000 inodes over a full summon budget), then send infra (ae95a4eac63b0715e; aed5ecf506cf840af is stopped) one
-  batch: the figure, the unit text above, and its four items (controller-entry per-registration
-  serviceUid with `User=`/`Group=`/`Requires=user@UID`/`Environment=MINI_OPERATOR_PEER_UID=0` for a
-  resident registration; the resident uids as broker provider peers; per uid the user@ drop-in
-  `RestrictNamespaces=` + `Delegate=cpu cpuset io memory pids` and a `user-UID.slice` wall;
-  `/var/lib/mini/glm` among the allowed write roots).
-- **The sandbox threshold** is its own figure (`sandbox.workspaceMib` S 64 / M 128 / L 256 MiB,
-  beside `scratchMib` S 16 / M 64 / L 128). The demo's install-hermes grants no sandbox today.
-- **Verification so far:** filtered tests on dregg-build (warm `hermes-tier`, branch
-  `lane/hermes-b`): grain-runtime `sandbox_`, `history_compaction`, `quiescence`, `grain_create`;
-  mini `resident_`, `operator_peer`, `agent_operator`. install-hermes has not run anywhere: it needs
-  the demo box with infra's items.
-
-**Where the lane stands (L4c, handed off at its context limit).** On main, each fix with its
-evidence:
-- **birthStale**: grain create authors its birth through Host op 91 at the current height, and
-  op 91 carries the deployment's provider routes (SourceAgreementJson.birthAt/birthCurrent).
-  Verified on candidate 349e59ef1: J14 `aged` rows (create at height 77 over genesis 10; a
-  genesis-authored birth is refused Reject.birthStale at prepare) and infra's demo-dry birth.
-- **The resident half of create no longer reads the operator's 0600 genesis** once the birth
-  is confirmed (18a3dcb26, `Spec::needs_genesis`). Infra resumes install-hermes at `create` on
-  the first candidate that carries it (9bd52317c or later).
-- **There was no request lag.** Every pass answers its own ask (J14 `own_pass` rows, green in
-  runs hb-q3-2..4). The tools and await reds were the deterministic provider reading
-  `selectedRequest.text`; it now reads the selected entry's text.
-- **Sandbox tools act** (9a4d442ea): the controller answers Hermes's ACP `request_permission`
-  with allow_once only for a toolset the room granted (`sandbox_tools::permission_outcome`).
-  The sandbox branch replies in 4 model calls, under the controller's per-prompt bound of 6.
-  The J14 tools rows are all green from run hb-q3-3 on.
-- **Await bridge.** Patience: world/activity/Tally.obend waits 4 heights; J14 uses the
-  kernel's maximum, 64 (ObjectiveKernelConfig.maxPatience). On the demo box a resident must
-  answer inside that window. Refusals: a refused answer is decided, because `bend lookup`
-  reads the attempt's retained outcome. New verb `bend deliver OBJECT TRANSACTION` (the
-  kernel's `deliver`; before it, nothing resumed a program after its answer); in J14, alice
-  delivers after Hermes answers. The redteam report is now the prompt's final reply:
-  upstream Hermes pauses an MCP server after 3 refused calls, which dropped a separate
-  report `mini_say`. Planted call 0 (`terminal`) is judged inside the sandbox when tools are
-  granted. Commits ee22e9a81 and earlier on lane/hermes-b.
-- **J14 runs on dregg-build**: `C=/build/candidates/SHA LANE_GRAIN=1
-  /build/lanes/hermes-tier-run/hb-q3.sh /build/lanes/hermes-live-run/hb-q3-N`.
-  `LANE_GRAIN=1` puts the tree's grain-runtime, bridge and mini over the candidate. Check out
-  the lane tip in /build/lanes/hermes-tier first. Run hb-q3-5 (ee22e9a81 over 68cf4ba7a) was
-  running at handoff, PID file /build/lanes/hermes-live-run/hb-q3-5.pid. Run hb-q3-4 had 12
-  reds out of 240 rows: the await resume (fixed by `bend deliver`), the notDecider check
-  (now reads the whole tool result), and redteam calls 0-6 plus the turn bound (the report
-  fix).
-
-**Next (owed, in order):**
-1. Read hb-q3-5's reds and fix forward.
-2. **Allowlist.** Union of ops J14 has used: 1-5, 17, 19, 96-98, 144, 210-214. The await
-   bridge needs 210-214, and `transport::RESIDENT_OPERATIONS` lacks them today, so on the
-   proxied box `mini_answer_await` and `bend deliver` would be refused. Narrow to 1-5, 17, 19,
-   96-99, 102 (fleet lookup and receipt recover a lost payment reply), 144 and 210-214; drop
-   0, 6-11, 30, 31, 100, 101, 151, 153 and 180. Add a transport test (`envelope_for` in the
-   transport tests).
-3. **Quota.** hb-q3-4 measured per-pass peaks (footprint-passes.tsv): 36.9 MiB and 7,063
-   inodes by the end, growing about 300-700 inodes per pass. The room workspace grew to
-   2,547 inodes and is still not compacted (referenced write attempts are kept whole). That
-   fits the interim quota (48/56 MiB, 10K/12K) but not the 32 MiB / 2,000 target. Send infra
-   (a298031c78e86d651) these measured peaks.
-4. **The qualification lead's static-read list** (agent ab292a1cd5ddfbbe5, main 65309b427),
-   not started:
-   - a stranger summons into their own room (only hermes-lab is registered);
-   - the seed lobby summon (no registration, no hermes/turn tariff);
-   - purse refill (50,000);
-   - summon after dismiss (the account name changes while the controller stays pinned);
-   - the Oracle tool task in install-hermes;
-   - operator-log reasons for ops 46, 76 and agentLifetimeGrantSubmitSession (Host/Main.lean).
-
-**Infra and the box.** Items 2-4 are in demo-vm 4138262; item 1 (per-registration service uid)
-is with infra. install-hermes reds fixed so far: the root provider-table check (20a7abaf), the
-anchor directories (cb638b87), umask (0cfb0986), birthStale, and the resident's genesis read.
+  census is empty, decided operations' files and the room workspace's finished attempts (decided,
+  signed reads, Host-refused reads, local renders) become one line each in `state/history.jsonl`;
+  superseded chat reads and `sources/q-*.json` go. `retained_outcome` answers exact lookup across the
+  prune. Kept: journal, `resident-*`, `prompt-outcome-*`, gates, proposals, `requests/`,
+  `room-operations/` and the attempts they name, undecided attempts, and the latest prompt's
+  operations (from its origin on).

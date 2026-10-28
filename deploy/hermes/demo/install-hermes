@@ -56,7 +56,7 @@
 #                    for each paying subject) and timer; MEMBER_HOMES: the hosted homes
 #                    directory (DIR/SUBJECT) that receives each window's join reference
 #
-#   FOUNDER_MEMBER   a hosted member (e.g. box) founds ROOM instead of the operator's own
+#   FOUNDER_MEMBER   a hosted member (e.g. house) founds ROOM instead of the operator's own
 #                    founder subject: Hermes is installed for that member's room (created
 #                    by `room` when it does not exist yet), the member's own shell does the
 #                    room, summon and tariff lines (as mini-s-MEMBER on MEMBER_SOCKET), and
@@ -67,7 +67,7 @@
 #
 #   The house's shared room (the lobby every member joins at the door; the seed's posts
 #   and the tour's Hermes step), installed before deploy/demo-seed/seed.sh runs:
-#     INSTANCE=lobby BASE=9872000 ROOM=lobby BUDGET=100 FOUNDER_MEMBER=box MEMBER_ROOT=/var/lib/mini/sessions \
+#     INSTANCE=lobby BASE=9872000 ROOM=lobby BUDGET=100 FOUNDER_MEMBER=house MEMBER_ROOT=/var/lib/mini/sessions \
 #       HERMES_ROOT=OUT install-hermes preflight route subjects room runtime create handoff summon controller dispatch resident
 #
 #   The subscriber tier (deploy/hermes/README.md "The subscriber tier"):
