@@ -785,7 +785,6 @@ theorem validateCore_pins {D A : Type} {config : NativeHost.Config} {seed : Dura
       | (simp only [pure, Except.pure, Except.ok.injEq] at validated; subst validated;
           exact validateChecks_pins checked)
       | cases validated
-      | skip
 
 theorem opened_pins_public : OpenedPinsPublicStatement := by
   intro config durable opened validated
@@ -829,13 +828,13 @@ theorem honest_plan_accepted : HonestPlanAcceptedStatement := by
   | ok prepared =>
   obtain ⟨domain, semantics, federation, factory, policy⟩ :=
     publicPins_exact validated prepared.prepared
-  have checkedSlot := fun (branch : Branch prepared.descriptor) {marker role index : Nat}
-      {built : NativeHostCodec.SigningSlot} =>
-    slot_checked (marker := marker) (role := role) (index := index) (built := built)
-      prepared.prepared height branch (publicPins config) domain semantics federation factory policy
-  simp only [prep, Except.mapError, NativeHost.check] at planned
-  split at planned
-  · cases planned
+  simp only [prep, Except.mapError] at planned
+  cases capabilityCount : NativeHost.check
+      (capabilities.length == prepared.descriptor.resourceBatch.operations.length)
+      "birth source capability count mismatch" with
+  | error reason => simp [capabilityCount] at planned
+  | ok unit =>
+  simp only [capabilityCount] at planned
   cases fac : hostSlot prepared.prepared.authority.snapshot prepared.descriptor.authorityNullifier 0 0
       (branchRequest prepared.prepared height .factory) with
   | error reason => simp [fac] at planned
@@ -870,16 +869,16 @@ theorem honest_plan_accepted : HonestPlanAcceptedStatement := by
     unfold birthSlotPlan ResourceBirthPolicyController.Concrete.policyBranches
     simp only [List.map_cons, List.map_append, List.map_map]
     refine .cons ?_ (.cons ?_ (List.rel_append ?_ ?_))
-    · exact checkedSlot .factory fac
-    · exact checkedSlot .authority aut
+    · exact slot_checked prepared.prepared height .factory (publicPins config) domain semantics federation factory policy fac
+    · exact slot_checked prepared.prepared height .authority (publicPins config) domain semantics federation factory policy aut
     · have pointwise := mapM_forall₂ _ _ _ alloc
       refine (List.forall₂_map_right_iff).mpr (pointwise.imp ?_)
       intro built index ok
-      exact checkedSlot (.allocation index) ok
+      exact slot_checked prepared.prepared height (.allocation index) (publicPins config) domain semantics federation factory policy ok
     · have pointwise := mapM_forall₂ _ _ _ src
       refine (List.forall₂_map_right_iff).mpr (pointwise.imp ?_)
       intro built index ok
-      exact checkedSlot (.source index) ok
+      exact slot_checked prepared.prepared height (.source index) (publicPins config) domain semantics federation factory policy ok
   refine ⟨⟨draftBytes, capabilities, coordinatesOf draft,
     CanonicalCellRegistry.sourceEncoding.codec.encode prepared.descriptor⟩, ?_⟩
   simp [checkBirthThin, checkBirthIntentThin, purpose, grain, decodedDraft,
