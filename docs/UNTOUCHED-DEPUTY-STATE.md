@@ -1,4 +1,4 @@
-# Untouched-areas deputy: state (rewritten whole; 2026-10-27 night)
+# Untouched-areas deputy: state (rewritten whole; 2026-10-28 04:00Z)
 
 Inputs: docs/review/2026-10-27-untouched-areas/{LEAN,NATIVE}.md, docs/review/2026-10-27-blind-spots/BLIND-SPOTS.md Sweep 1.
 Each lane: /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>.
@@ -11,30 +11,40 @@ Each lane: /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>.
 - Integration is continuous (no cuts). Re-genesis is free (flag days are not held).
 - Never kill by pattern; no PID file: tell the coordinator.
 
-## Landed earlier (on main)
-un-verify (Generic Simplex gate), un-bend (bend verb + lost reply), un-world (Tally/call/send native; DOMAINS.md), un-assurance (census, Door 11, StoryHistory, Kernel/StoryLaw), un-native-rows, un-moves, un-fixtures, un-seats, un-pb-codec (R8), un-pb-exec (R7/P9), un-pb-seal (R3 whole), un-pb-wal (R2 + all five two-step dealers, 68d9f28e).
+## Landed (all on main as of e05a19fe)
+un-verify (Generic Simplex gate), un-bend (bend verb + lost reply), un-world (Tally/call/send native; DOMAINS.md), un-assurance (census, Door 11, StoryHistory, Kernel/StoryLaw), un-native-rows, un-moves, un-fixtures, un-seats, un-pb-codec (R8), un-pb-exec (R7/P9), un-pb-seal (R3 whole), un-pb-wal (R2 + five two-step dealers), un-pb-twins 134535c2 (§5.3 deletions, Pool/Cut, AnchorFixture -> real serve, P6 verifier), un-pb-helpers 353a6d11d (Lagrange, Horner, PRG/urandom, Nat cursors, outbox/phase codecs), un-web-front 0da04999, un-effects 2acd8acf (effect Plan kernel, keystone 5e116ec9, pass-11 additions, world apps on the kernel protocol), un-pred-census 44479e30 (Vouchers sweep: every receiver a Kernel.Receiving.Family at receiverVerifier, Ran private with one mint, gate rows receiver-verifier and ran-mint), un-stream-continuity 6544ea37 (hot-route op154 fixed at the cause; statement accepted e0916a53).
+- World apps native on candidate 0ce31391 (un-effects-rows; commons split into app + scenarios, policy bound kept): effect 19/19, dues 17/17, bounty 21/21, play 27/27, ballot 27/27, story 25/25, commons 20/20; cohort gates ballot 37/37, dues 49/49, commons 64/64. README native lines + evidence at 20f28ac31 (docs only, sent to the integrator a34bdb948f1cf4796).
 
-## Pushed, waiting on the central build (reasoned; built only by the integrator so far)
-- un-effects 2acd8acf (fix 2b9de248 "ready" told; five more world scenarios bounty/play/ballot/story/commons 2d4ff2bd..2acd8acf, unrun). The effect Plan: keystone proved 5e116ec9 (on main). Pass-11 additions (FundsAgree, DepositIndependent, BirthCommitJudged, DeliverLawRefuses + two poles; commitYield_spec restated) at 2aaf5ec9. Kernel fix: deliver refuses payerInvalid when the submitter or the collector is the purse (Delivery.purseApart); payerInvalid docstring names it. 2b9de248 adds the missing opens (addCapacity; applyOperations/registerAccounts/deregisterAccounts/_accounts) and drops a no-progress dsimp. World apps (dues, bounty Board, play, ballot, story, commons) on the kernel protocol, e6c7ed42; native scenarios dues/effect + purse-as-submitter/law-refused rows 0fa0eb98. OWED to the central build: codec pins re-emit (scripts/codec-shapes-regen.py, ACTIVITY-RECORD v9), cohort gate (renamed rows: ballot 1, story 1, commons 2), native rows on a main candidate, README native lines; scenarios for bounty/play/ballot/story/commons not yet written. Continuation: docs/evidence/2026-10-27-world-native/EFFECTS-STATE.md. Its faerie is retired (~536k); the deputy owns the remainder.
-- un-pred-census 44479e30 (the integrator takes it for the cut-14 ReceivingVerifier red): Vouchers conversion = the whole sweep (every receiver is a Kernel.Receiving.Family through Family.receiver, now fixed to receiverVerifier with Answered = Ran). Ran private, one mint; live_voucher_has_ran (CredentialSignatureAdmission.lean:391); gate rows receiver-verifier (text) and ran-mint (term-level, needs AxiomCensusResearch built). L1's three receivers got forced edits only (PayEnrolReceiver 1182,1192,1195,1596-1601; V2 818-823,843,847; SubjectKeyRotation 427-428); L1 merges before editing them. Faerie retired (~299k).
-- un-stream-continuity 0d95b3e1 on main via cut 14; its 14 statement-file reds are the integrator's (faerie's 6544ea37 offered as a start; a pole statement change comes to the deputy and auditor). Was: hot-route op154 refusal fixed at the cause (Appended.headTagExact; exactCandidate carries the tag; withOpenedFreshTip through verdict with Head.verify; distinct refusals). Statement accepted (e0916a53). Gate: japps co-edit row; then L13 reruns DDP. Faerie (a4e312352a7091f59, ~220k) fixes forward routed reds.
-- un-pb-twins 134535c2: §5.3 deletions (reconstruction, two_bit_addition, source_endpoint outcome side, PROGRESS v1, dealer_start, binding v1, sequential Engine + store, circuit_batch items, reserve_material, custody Pool/Cut + CLI arms + crash-probes.py); AnchorFixture replaced by the real serve(listener, stop) (blocking accept, wake connect); P6 receipt verifier rebuilt on the anchor with its test (extends case shown); LayerEngine non-Boolean test. Faerie (a1d3a428143ff3b8e, ~294k) retired.
+## In flight
+- lane/un-shared-names (Sonnet a852f5df40229de24): a room bind judges its room pointer, index names and target in ONE opened snapshot (coordinator steer: snapshot is the default, bounded re-discover only where the protocol cannot pin, refusal names exactly what changed; say so if a Host read-at-height is missing); jtemplates background writer; seed.sh error tail plus explicit 600 s limits on story new/seal and template births (infra measured the 19-line story birth at 128 s vs as()'s 120 s default). Not yet merged; the faerie sends the integrator its sha.
 
-- un-effects-rows 4dc6225d3 (sha sent to the integrator): effect/bounty/play/ballot/story rows green natively on 0ce31391 (owner budget 1000000 for 104-150 KB publishes; laws read state/NAME; ballot SealedVote rename). commons red at publish (308,499 > SOURCE_BYTES 262,144): ruled split app + scenarios as dues, policy bound kept. Faerie ade649a1df3da1347 splitting it and running the cohort gates on dregg-build (bun at /build/tools/bun/node_modules/.bin/bun; dregg-ref has none), then README native lines.
+## Waiting on others
+- Codec pin re-emit (ACTIVITY-RECORD v9): the integrator's full build runs the regen once (its state file).
+- japps co-edit row on a candidate carrying the stream-continuity fix; then L13 reruns DDP. Faerie a4e312352a7091f59 fixes forward routed reds.
+- L1 merges before editing PayEnrolReceiver/V2 and SubjectKeyRotation (forced edits only from the Vouchers sweep).
 
 ## Owed / unowned
 - ember's ruling (memory "no hand-written kernel effects"): kernel effects must come from a revived Effects/ derivation engine. un-effects' transfer/commit are hand-written in Kernel/ObjectiveActivity.lean: deferrable for the demo, owed after (EFFECTS.md has the Phase-3 design: EffectSpec widened with refusal, authority demand and frame; the dispatch keystone; the hand arm deleted in the same commit).
-- private-backend helper-copy merges (Lagrange, Horner, PRG/urandom into Entropy, Nat cursors into one Cursor::nat, outbox codecs into one Outbox): in flight on lane/un-pb-helpers (Sonnet ad546f4c4b4fe0ede, from main 92ec75c3). One commit per family; outputs and wire bytes pinned by a test before each merge; non-twins kept and named; warm builds on dregg-build in /build/lanes/un-pb-helpers with the un-pb-seal-target. Shas go to the integrator as they land.
+- private-backend: three child() Generation derivations (acss, dzk, sh2t) not yet checked for twinship.
 - private-backend P6 (lost reply on reserve/burn): open; the verifier exists.
 - Tier 2 (after the opening): R1 the in-process MPC as a door. The sibling product deputy (a5a600787670d2be5) now owns the MPC demo door, invite codes, Host request rate, web3.js serializer, grain class slices: not ours.
 
 ## Web item (done)
 - un-web-front 0da04999: the public front page renders the operator's published document. mini-web-spawn reads /etc/mini/front-doc and passes --front-doc to the public body only; it falls back to the index. Infra writes `welcome` there (demo-vm 3b8e729, run-sheet step 9c); its check line: an anonymous GET / renders welcome. Sha sent to the integrator.
 
+## App market (taken over from L13, 2026-10-28; lane/app-market db312c6f is on main)
+Sources: docs/APP-MARKET-2026-10-27.md "State at hand-off"; docs/ROWS-OWED.md §0 and §3.
+- Every install on 0ce31391 was refused (op69 claim plan vs BEGIN); the fix 25cfb86bd is on main (81bca08c6), not in 1af366fe9; the first candidate carrying it is the build after 1af366fe9. On it: the batch tables run on fresh worlds (validator), and I own the reds.
+- app-writes-2 (Kimi) landed only Etherpad 956b91bff and Hacker Slides 8a3682c3e (merged); HakyllCMS, HackerCMS and OrgTodo are covered by faerie app-market-fixups.
+- Tale invite (the demo seed's item 4, decided): the door processor joins every enrolled member to `tale` once per world (lane/un-tale-welcome 19bb968e0, 4/4 filtered on dregg-build, sent to the integrator). Infra seam: story.author is the seed's SEED_HOST (demo: house), README bc6c837ba on main. Infra is now ae95a4eac63b0715e.
+- Faeries (Sonnet, recipes now, one run on the candidate): lane/app-market-b3 6f2bfd3bc pushed (DiagramsNet, EtherDraw, Scrumblr, SwaggerEditor; agent a85d12892ea6de3ca), lane/app-market-b7 d8ee43cdb pushed (2048, PerplexitySudoku, 3DBlockstack, SimpleChat; agent abf203f357754001b; its spk-rpc get_view_info UNIMPLEMENTED = empty ViewInfo change reviewed and accepted), lane/app-market-fixups (OrgTodo manifest, HakyllCMS START exit, HackerCMS write; not yet pushed). Shared brief: scratchpad market-common.txt.
+- japps co-edit row: faerie a4e312352a7091f59 runs it on the same candidate (stream-continuity 6544ea37 + 25cfb86bd), then L13's DDP rerun is mine to report.
+- Later: B5 (FileDrop, Kiwix; Groove Basin and Tube need streaming), B8 rest (Mercurial, MediaWiki, Firefly III; IPython recipe written), bodies > 8 MiB (designed §2b), the member install debit (apps-e2e.sh) into INSTALL.md §4. Each green app (lifecycle + write) goes into FEATURED in native/resource-client/src/apps.rs; target 2-3 dozen.
+
 ## Decided
 fn out; private-backend stays; Effects/ registry is Phase 3 (EFFECTS.md); dues and six more ride the effect Plan; DreggNet lease cluster parked; Contracts Cuts/Snapshot/Refinements/Futures kept; Pred BoundedQuantifiedView/CoordinationDial kept; twin conflict on un-pb-twins resolved to un-pb-wal 68d9f28e's design (82f3710b).
 
 ## Next three
-1. Read the central build's verdict on un-effects 2b9de248; fix routed reds by reasoning; get the codec pins re-emitted; write the remaining world scenarios (bounty, play, ballot, story, commons) in world-activity-admit.py and README native lines.
-2. Route any central reds on un-stream-continuity / un-pred-census / un-pb-twins to their faeries; tell the coordinator when the japps co-edit row is green.
-3. Review each un-pb-helpers landing (pinning test green on the box, bytes identical); send the shas to the integrator.
+1. On the first candidate carrying 25cfb86bd: tell the three market faeries and a4e312352a7091f59 to run; read the validator's batch tables; fix reds; add every green app to FEATURED.
+2. Review b3/b7/fixups recipes as they land; then B5 and B8 faeries (2-3 at a time).
+3. Owed after the demo: revive Effects/ so transfer/commit come from the derivation engine (EFFECTS.md); private-backend P6 lost reply; the child() twin check.
