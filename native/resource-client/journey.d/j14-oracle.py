@@ -4,6 +4,7 @@
 Every transition uses native Mini; the fixed installer handles cross-UID
 transport. Retained command outputs and exact native attempts survive failure.
 """
+import base64
 import hashlib
 import fcntl
 import importlib.util
@@ -920,8 +921,9 @@ class Journey:
             raise ValueError('native enrollment did not preserve settled journal')
         self.controller_config()
 
-    def resident(self,label):
-        home=Path(self.layout['controllerHome']);grain=Path(self.c['controllerRoot']);self.prompts+=1
+    def resident(self,label,completed=None):
+        home=Path(self.layout['controllerHome']);grain=Path(self.c['controllerRoot'])
+        self.prompts=(self.prompts if completed is None else completed)+1
         # A resumed journey may reuse a test label, but its earlier source and
         # controller-side copy remain evidence. Name each invocation by the
         # retained command frontier instead of overwriting that evidence.
@@ -980,6 +982,57 @@ class Journey:
                 or type(value['paidBefore']) is not int or value['paidBefore']<0 or provider_lines):
             raise ValueError('retained refusal continuation requires exact ask and no provider dispatch')
 
+    @staticmethod
+    def exported_state(exported,name):
+        file=exported.get('files',{}).get(name)
+        if file is None:return None
+        raw=base64.b64decode(file['base64'],validate=True)
+        if hashlib.sha256(raw).hexdigest()!=file['sha256']:
+            raise ValueError('resident state export hash differs')
+        return json.loads(raw)
+
+    @staticmethod
+    def completed_prompts(exported):
+        state=Journey.exported_state(exported,'resident/resident.json')
+        if state is None:return 0
+        if state.get('pending') is not None or state.get('returnPending',False):
+            raise ValueError('resident has retained completion custody; drain it before another probe')
+        completed=state.get('completed')
+        if type(completed) is not int or not 0<=completed<1000:
+            raise ValueError('native resident completed count is invalid')
+        return completed
+
+    @staticmethod
+    def retained_requests(exported):
+        queue=Journey.exported_state(exported,'resident/requests.json')
+        if queue is None:return []
+        selected=queue.get('selected')
+        if selected is not None and selected.get('started') is not None:
+            raise ValueError('resident has a started retained request; settle its native custody before another probe')
+        return ([selected] if selected is not None else [])+queue.get('pending',[])
+
+    @staticmethod
+    def unanswered_asks(rows,author,resident,question):
+        asks=[r for r in rows if r.get('author')==author and r.get('to')==resident
+              and r.get('kind')=='say' and question in r.get('text','')]
+        return [ask for ask in asks if not any(reply.get('author')==resident
+            and reply.get('to')==author and reply.get('kind')=='say'
+            and reply.get('reCell')==ask.get('cell') and reply.get('reSequence')==ask.get('sequence')
+            and str(reply.get('re'))==str(ask.get('n')) for reply in rows)]
+
+    @staticmethod
+    def selected_ask(call,rows,author,resident,question):
+        identity=call.get('selectedRequest',{});entry=call.get('selectedEntry',{})
+        if (not isinstance(identity,dict) or not isinstance(identity.get('binding'),dict)
+                or identity.get('author')!=author or entry.get('to')!=resident
+                or entry.get('kind')!='say' or question not in entry.get('text','')
+                or any(identity.get(k)!=entry.get(k) for k in ('author','cell','sequence'))):
+            raise ValueError('provider call lacks the exact native selected request')
+        fields=('author','cell','sequence','height','n','text','to','kind')
+        matches=[row for row in rows if all(row.get(k)==entry.get(k) for k in fields)]
+        if len(matches)!=1:raise ValueError('native selected request does not join exactly one signed room entry')
+        return matches[0]
+
     def probe(self,resume_refusal=None):
         question='Who wrote Leaves of Grass?';oraclelog=self.root/'provider.oracle.jsonl'
         prior_operation=None;asks=set()
@@ -989,8 +1042,14 @@ class Journey:
         def turn(label,answer,resumed=None):
             nonlocal prior_operation
             old_lines=oraclelog.read_text().splitlines() if oraclelog.exists() else []
+            exported=read(self.fixed('controller-export'))
+            queued=self.retained_requests(exported)
+            completed=self.completed_prompts(exported)
+            before_rows=transcript()
             if resumed is None:
-                before=self.paid();self.shell('bob','ask lab oracle: '+question)
+                before=self.paid()
+                if not queued and not self.unanswered_asks(before_rows,self.subjects['bob'],self.subjects['hermes'],question):
+                    self.shell('bob','ask lab oracle: '+question)
             else:
                 self.validate_refusal_resume(resumed,old_lines)
                 before=resumed['paidBefore']
@@ -998,21 +1057,25 @@ class Journey:
             selected=[r for r in rows if r.get('author')==self.subjects['bob'] and r.get('to')==self.subjects['hermes']
                       and question in r.get('text','')]
             if not selected:raise ValueError('selected room ask absent from signed history')
-            number=str(selected[-1]['n'])
-            if resumed is not None and number!=resumed['askNumber']:
-                raise ValueError('retained refusal ask differs from signed room history')
-            if number in asks:raise ValueError('room ask did not create a fresh entry')
-            asks.add(number)
-            self.resident(label)
+            if resumed is not None and not any(str(row['n'])==resumed['askNumber'] for row in selected):
+                raise ValueError('retained refusal ask absent from signed room history')
+            self.resident(label,completed)
             all_lines=oraclelog.read_text().splitlines()
             if all_lines[:len(old_lines)]!=old_lines:raise ValueError('provider log prefix changed')
             new_lines=all_lines[len(old_lines):]
-            phase_log=self.root/f'oracle-{label}.jsonl';phase_log.write_text('\n'.join(new_lines)+'\n')
+            phase_log=self.root/f'oracle-{label}-{self.counter:04d}.jsonl';phase_log.write_text('\n'.join(new_lines)+'\n')
             calls=[json.loads(line) for line in new_lines if json.loads(line).get('id')=='or-call']
             if not calls or calls[-1].get('question')!=question:raise ValueError('fresh provider call did not name selected question')
+            chosen=self.selected_ask(calls[-1],transcript(),self.subjects['bob'],self.subjects['hermes'],question)
+            number=str(chosen['n'])
+            if number in asks:raise ValueError('native resident selected an already qualified request')
+            asks.add(number)
+            if queued and not any(item.get('identity')==calls[-1]['selectedRequest'] for item in queued):
+                raise ValueError('provider selection differs from retained native request custody')
             expected='Whitman' if answer else 'oracle-not-granted'
             replies=[r for r in transcript() if r.get('author')==self.subjects['hermes'] and r.get('to')==self.subjects['bob']
-                     and str(r.get('re'))==number and r.get('kind')=='say']
+                     and str(r.get('re'))==number and r.get('reCell')==chosen['cell']
+                     and r.get('reSequence')==chosen['sequence'] and r.get('kind')=='say']
             if not any(expected in r.get('text','') for r in replies):raise ValueError('fresh room reply lacks expected Oracle outcome')
             if self.paid()<=before:raise ValueError('fresh Oracle room reply was not a paid turn')
             if not answer:
