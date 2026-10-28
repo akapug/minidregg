@@ -124,6 +124,19 @@ market-large-v1 (WordPress, Wekan, IPython). Seven worlds at once were fine on h
 A world from a candidate whose install failed cannot retry the install (UNRESOLVED by design): use a
 fresh world.
 
+**Open: SQLite `failure 15: locking protocol` at world start (unreproduced).** Seen on hbox
+(candidate 2d8b7ed54, 2026-10-28) when 6 world-ups started at the same moment as mini-operator
+under /tank: 5 of 6 failed in the store phase (`w/store/base/workroom.stderr`, "mini: local consent
+refused before signing ... sqlite-store error: opaque SQLite failure 15"); load average about 50 on
+24 cores, the store phase of a surviving world took 473 s. Not reproduced: 3 tries of 2 world-ups
+started at the same instant on dregg-build (candidate e89fe7b8b, each world with its own anchor
+directory, load low, store phases 52-63 s), and 24 concurrent readers plus a writer on one store.
+Leading hypothesis: WAL lock retry exhaustion under load; SQLITE_PROTOCOL is returned after
+repeated failed WAL-lock attempts and `sqlite3_busy_timeout` never covers it. Mitigation landed
+(3a8109059): bounded retry, then the named refusal "WAL lock protocol retries exhausted after 8
+attempts". Not stale residents: the codec-resident pairs were live. Keep OPEN until a loaded
+multi-world start passes on a candidate carrying 3a8109059.
+
 **Acceptance scripts.** env `CANDIDATE=$set/provenance.json MINI=$B/mini STORE_BINARY=$B/minidregg-link-sqlite-store SIGNATURE_BINARY=$B/minidregg-credential-signature-verifier GRAIN=$B/grain-runtime`.
 Never set `MINI_CONSENT_HOST` alone (mini then demands `MINI_LOCAL_HOST` and `MINI_CONSENT_CONFIG` too).
 authority-acceptance.sh needs `shasum`, so run it on hbox under `umask 077`.
