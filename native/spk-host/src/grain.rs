@@ -18,8 +18,8 @@
 //! namespace uid allocation and image publication. It reaches volume privilege
 //! only through the registered fixed-verb one-shot helper.
 
-use crate::broker::{self, Request};
 use crate::io_context::IoContext;
+use crate::broker::{self, Request};
 use crate::dispatch_native::{private_dir, PrivateOperator};
 use crate::lifecycle_selector::{self, LifecycleSelector};
 use crate::materialize::{verify_installed_spk, ImportProfile};
@@ -114,10 +114,10 @@ fn derived_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
         .create_new(true)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(&temp)?;
+        .open(&temp).ctx("open", &temp)?;
     file.write_all(bytes)?;
     file.sync_all()?;
-    fs::rename(&temp, path)?;
+    fs::rename(&temp, path).ctx("rename", &temp)?;
     File::open(parent).ctx("open", parent)?.sync_all()
 }
 
@@ -154,7 +154,7 @@ fn file_sha256(path: &Path) -> io::Result<String> {
 /// Hash/copy a regular input under the operator's bound without an archive-sized
 /// allocation. Check the bytes actually read as well as the opening length.
 fn copy_package_bounded(path: &Path, output: &mut impl Write, maximum: u64) -> io::Result<String> {
-    let mut file = OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(path)?;
+    let mut file = OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(&path).ctx("open", &path)?;
     let meta = file.metadata()?;
     if !meta.is_file() || meta.len() == 0 || meta.len() > maximum {
         return Err(invalid("signed SPK input refused"));
@@ -491,13 +491,13 @@ fn stage_package(host: &Host, spk: &Path) -> io::Result<(String, PathBuf, PathBu
         let mut random = [0u8; 8];
         File::open("/dev/urandom").ctx("open", "/dev/urandom")?.read_exact(&mut random)?;
         let temp = dir.join(format!(".package-{}.tmp", random.iter().map(|b| format!("{b:02x}")).collect::<String>()));
-        let mut staged = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temp)?;
+        let mut staged = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temp).ctx("open", &temp)?;
         let copied = (|| -> io::Result<()> {
             if copy_package_bounded(spk, &mut staged, maximum)? != raw_sha256 {
                 return Err(invalid("SPK changed while staging"));
             }
             staged.sync_all()?;
-            fs::rename(&temp, &copy)?;
+            fs::rename(&temp, &copy).ctx("rename", &temp)?;
             File::open(&dir).ctx("open", &dir)?.sync_all()
         })();
         if copied.is_err() { let _ = fs::remove_file(&temp).ctx("remove", &temp); }
@@ -516,7 +516,7 @@ fn stage_package(host: &Host, spk: &Path) -> io::Result<(String, PathBuf, PathBu
                 "qualification-interrupted-{}",
                 random.iter().map(|b| format!("{b:02x}")).collect::<String>()
             ));
-            fs::rename(&attempt, aside)?;
+            fs::rename(&attempt, aside).ctx("rename", &attempt)?;
         }
         let config = dir.join("qualify.json");
         let mut qualification_config = json!({
@@ -695,7 +695,7 @@ fn set_aside_refused_install(journal: &Path) -> io::Result<()> {
     for n in 1..=1000u32 {
         let aside = parent.join(format!("install-refused-{n}"));
         if !exists(&aside)? {
-            return fs::rename(journal, &aside);
+            return fs::rename(journal, &aside).ctx("rename", &journal);
         }
     }
     Err(invalid("INSTALL refused-attempt slots exhausted"))
@@ -1133,7 +1133,7 @@ fn start_inner(host: &Host, app: &str, prepare_only: bool) -> io::Result<Value> 
                     "descriptor-attempt-never-begun-{}",
                     random.iter().map(|b| format!("{b:02x}")).collect::<String>()
                 )),
-            )?;
+            ).ctx("rename", &descriptor)?;
             File::open(&dir).ctx("open", &dir)?.sync_all()?;
         }
     }
