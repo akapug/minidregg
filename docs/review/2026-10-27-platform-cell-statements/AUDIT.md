@@ -1219,3 +1219,66 @@ The two items listed for later (whole-epoch compatibility; two-level activity re
 lemmas from that Bool to the statements over an arbitrary witness, is the confessed, graded witness law 9
 permits. The fixture is not cSHAKE-bound the way item 7's images are, so I will ask then whether a kernel
 `decide` of that Bool is feasible.
+
+## 2026-10-28, twenty-ninth pass: the four scavenge findings (main, as of this pass)
+
+1. **`MultiCellHyperedge` joint apex: CONFIRMED, an identity carrier.**
+   - *What happens:* `step` sets `jointApex := declaration.header.apex` regardless of the carrier and the
+     turn (`Kernel/MultiCellHyperedge.lean:556`, and `:577` in `SemanticHyperedge`). `turnId` reads that
+     field back. So `agree` is `rfl` (`:592`), and `turnId i (step c t)` does not depend on `turn.post` or
+     on any cell's committed state.
+   - *Witness:* the instance satisfies `agree` for any `Commit`, including one whose legs commit under
+     different transactions. `Hyperedge.legs_agree`, and `HyperedgeKnowledge`'s distributed-knowledge
+     reading of it, therefore say nothing about deployed joint turns.
+   - *Corrected statement:* `turnId i` must read the apex from what the deployment records per leg. A
+     cell's post-state holds no apex, but the durable journal does: the transaction that last wrote cell
+     `i`'s root. Set `turnId i S := lastWriterTx S (cellId i)` over the committed snapshot. `agree`
+     becomes "every leg's root was last written by the one intent whose `transactionId` is
+     `header.turnId`", which follows from the joint commit installing all `rootWrites` in one `Intent`.
+     It is non-trivial, and its teeth are two legs committed by two intents.
+   - *Until it is restated:* label `legs_agree`'s instance at `MultiCellHyperedge` as definitional
+     (no deployed content).
+
+2. **`Pred.writeOnce` on 0: the predicate is honest. The authoring surface overstates.**
+   - *The predicate:* its own docstring states the semantics ("absent-old or `old[slot] = 0` ⇒ any",
+     `Pred/Core.lean:196`). The circuit's zero-indicator lowering forces 0 to be the unwritten sentinel,
+     since a field element has no "absent". Witness: old `{x:0}`, new `{x:5}` evaluates `true`. Teeth:
+     `eval_writeOnce_change` (`{x:3}` → `{x:5}` is `false`).
+   - *The hazard:* it is at the author surface. `Compiler/ObjectiveBendLaw.lean:15/57` offers
+     `writeOnce(FIELD)` to law authors with no mention of the sentinel, so a field whose legitimate value
+     is 0 (a status, an owner id, a counter) is not write-once.
+   - *Correction, down to the truth:* the author-facing spec reads "a *nonzero* value, once written,
+     never changes; 0 is unwritten". Add a pole `eval_writeOnce_zero_rewritable` stating it. Either have
+     `ObjectiveBendLaw` refuse `writeOnce` on a field whose declared domain includes 0, or document it in
+     the grammar.
+
+3. **`[LC-fs-adaptive] CLOSED`: CONFIRMED overstated.**
+   - *What the theorem covers:* `lightClientGrinding_sound` (`Selvage/LightClientGrinding.lean:455`)
+     bounds the probability, over coins `c : Fin qs.length → F`, that some chain among a family `chs`
+     fixed in advance folds, with the query list `qs` (nodup, covering every chain's link prefixes) and
+     the per-chain data `d` fixed *before* `c`. That covers an adversary adaptive in which chain it
+     outputs after seeing the answers. It does not cover one whose *queries* are chosen adaptively: query
+     `k+1` depending on answer `k` is a decision tree, not a fixed `qs`, and `Oracle.ofList qs c` cannot
+     express it.
+   - *Corrected label:* `[LC-fs-adaptive] PARTIAL: adaptive in the output chain; the query sequence is
+     fixed before the oracle answers. Adaptive (tree) query strategies are owed.`
+   - *Closing it properly:* the standard reduction answers queries by position. With fresh uniform answers
+     per distinct query, a depth-`t` strategy's bad event is bounded by the same per-query union, so the
+     statement over strategies `Strategy := (List F → LcQuery)` would carry the same bound. The manifest
+     docstring at `Assurance/SelvageV0Manifest.lean:1238` currently says "issuing `t` oracle queries"
+     without the qualifier, and must change with the label.
+
+4. **`Pred.witnessed` lowers to constant false: CONFIRMED. A fail-open-under-negation trap, not a
+   compiler lie.**
+   - *Where it stands:* `eval` (first-party) fails closed on it and the circuit indicator is constant 0
+     (`Compiler/PredCompile.lean:621`), so compiler and spec agree. But `supported` returns `true` for it
+     (`:667`), and `PolicyRecordCodec` decodes it from installed policy records (`:73`, `:136`). The
+     deployed path has no discharge oracle, so `.not (.witnessed vk)` compiles and is *always true*. A law
+     author's "deny when credential X is presented" silently admits everything.
+   - *Correction (law 10, loud refusal):* `supported profile (.witnessed _) = false`, with the theorem
+     `supported p = true → p has no witnessed leaf`, and teeth: a policy containing `not (witnessed vk)` is
+     refused `policyUnsupported` at install and at admission. Deleting the constructor (ZK D1) is the
+     end state. Until then, refusing it is the minimum.
+
+**Lanes:** (1) Kernel hyperedge owner; (2) the Pred/bend-law owner; (3) the Selvage owner, plus the
+manifest; (4) the PredCompile owner. Routed via the root.
