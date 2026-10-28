@@ -45,7 +45,7 @@ class Route:
 
     def http(self, request):
         body = request['body']
-        if request['path'] != self.d.get('auth', {}).get('postPath', '').lstrip('/'):
+        if request['path'] not in {self.d.get('auth', {}).get(key, '').lstrip('/') for key in ('postPath', 'credentialsPath')}:
             self.retain({'http': {**request, 'body': base64.b64encode(body).decode()}})
         headers = {**request['headers'], 'Cookie': '__Host-mini_spk_session=' + self.cookie,
                    'Origin': 'https://grain.test'}
@@ -62,7 +62,7 @@ class Route:
                 raise EOFError('invalid HTTP response') from e
             if len(data) > self.d['limits']['replyBytes']:
                 raise Refusal('reply-over-bound')
-            if request['path'] != self.d.get('auth', {}).get('postPath', '').lstrip('/'):
+            if request['path'] not in {self.d.get('auth', {}).get(key, '').lstrip('/') for key in ('postPath', 'credentialsPath')}:
                 self.retain({'response': {'status': response.status,
                              'contentType': response.getheader('content-type', ''),
                              'bodyBase64': base64.b64encode(data).decode()}})
@@ -83,7 +83,7 @@ class Route:
             ws = websocket.create_connection('ws://grain.test' + auth['websocket'], socket=s,
                     origin='https://grain.test', cookie='__Host-mini_spk_session=' + self.cookie,
                     timeout=self.d['limits']['seconds'])
-            ddp = DDP(ws, self.d['limits']['snapshotDocuments'], self.d['limits']['seconds'])
+            ddp = DDP(ws, self.d['limits']['snapshotDocuments'], self.d['limits']['seconds'], diagnostic=self.retain)
             ddp.connect()
             uid = ddp.authenticate(auth, self.http)
             local = {**context, 'userId': uid, 'nowMs': int(time.time() * 1000), 'operationId': uuid.uuid4().hex}
