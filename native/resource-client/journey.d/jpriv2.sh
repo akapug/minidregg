@@ -190,24 +190,59 @@ check friend "workspace pins socket ssh:box, no Host image, the Host digest, the
   jq -e --arg k "$FKEY" '.socket == "ssh:box" and .host == null and (.hostSha256 | length == 64) and .key == $k' "$FWS/workspace.json"
 
 # ------------------------------------------------------------------ use
-# The design's answer to a remote birth, asserted by name: thin consent
-# displays invocations and delegations only (Kernel.NativeThinConsent
-# .checkPlanThin has no birth arm), because a birth's plan (factory, authority,
-# allocation, source slots) is derived by the planner from the Store, which the
-# laptop's storeless provider does not read (named client-side, bef3b452c).
-# Delegated full consent is not this friend's path: it is the hosted member's
-# box-local service (a uid-pinned socket in the member's own 0700 directory on
-# the box, deploy/shell/README), unreachable from a laptop (this sshd forwards
-# nothing; the proxy key relays public-socket envelopes only), and its config
-# digest pins the operator's Store-naming config, which the row 2 check keeps
-# off the laptop on purpose. The lifecycle below a birth (write, read back,
-# delegate, export, sponsor import) is owed to the Phase-3 thin-birth design
-# item (DEMO-PREFIX-2026-10-26, "Consent mode, decided"); it is not asserted
-# while the design refuses it.
-run friend "create notes declared all[]: refused by name (thin consent has no birth arm)" 1 \
-  fshell 'create notes declared {"type":"all","predicates":[]}'
-check friend "  the refusal names the thin-consent birth rule before anything is signed" \
-  bash -c "grep -qF 'thin consent signs invocations and delegations only; a birth (create) is planned against the Store and needs the full consent provider' '$LOG/$N.err'"
+# A remote birth under thin consent (Kernel.NativeThinBirth, frames 234/235): the laptop's
+# storeless provider re-authors the friend's own source at the coordinates the box's draft
+# carries, checks the plan's finalized descriptor against that draft and every header against
+# its own derivation, and shows what it signs (thin-display.json beside the plan).
+run friend "create notes declared all[] (remote shell, thin birth)" 0 fshell 'create notes declared {"type":"all","predicates":[]}'
+NOTES_ATTEMPT=$FWS/attempts/create-notes
+check friend "  thin consent showed the birth: draft, coordinates and the finalized descriptor it signs" \
+  jq -e '.birth.draft != null and (.birth.finalized | length > 0) and (.birth.coordinates.height | length > 0)' "$NOTES_ATTEMPT/thin-display.json"
+run friend "invoke first-write notes create 2 1" 0 fshell 'invoke first-write notes create 2 1'
+run friend "submit first-write" 0 fshell 'submit first-write'
+check friend "write installed" jq -e '.type == "confirmed" and .confirmation == "installed"' "$LAST"
+run friend "read notes (CLI: mini --remote box workspace --action read)" 0 \
+  fmini --remote box workspace --action read --dir "$FWS" --name notes
+
+check friend "read back field 2 = 1" bash -c "[[ \$(jq -r '[.. | objects | select(.key?.field? == \"2\") | .value][0]' '$LAST') == 1 ]]"
+run friend "delegate grant-sponsor notes $SPONSOR_SUBJECT observe 50000" 0 fshell "delegate grant-sponsor notes $SPONSOR_SUBJECT observe 50000"
+run friend "submit grant-sponsor" 0 fshell 'submit grant-sponsor'
+run friend "publish grant-sponsor" 0 fshell 'publish grant-sponsor'
+run friend "export grant-sponsor" 0 fshell 'export grant-sponsor'
+REF=$(jq -c . "$LAST")
+run sponsor "hosted shell: import friend-notes <reference>" 0 sponsor "import friend-notes $REF"
+run sponsor "hosted shell: read friend-notes (the delegated grant)" 0 sponsor "read friend-notes"
+check sponsor "sponsor reads the friend's field 2 = 1 through the delegation" \
+  bash -c "[[ \$(jq -r '[.. | objects | select(.key?.field? == \"2\") | .value][0]' '$LAST') == 1 ]]"
+
+# ------------------------------------------------------------------ a swapped birth plan
+# A second thin birth gives a real plan of another descriptor. Offered to the laptop's own
+# provider as the plan of the FIRST birth (its intent and its source), it is refused
+# birthSourceChanged and nothing is returned to sign; the first birth's own plan, offered the
+# same way, is accepted (control: the provider is pure and the refusal is the swap's).
+run friend "create notes2 declared all[] (a second thin birth, whose plan is the swap)" 0 fshell 'create notes2 declared {"type":"all","predicates":[]}'
+NOTES_SOURCE=$(find "$FWS/sources" -path '*create-notes.authoring*' -name source.json | sort | tail -1)
+thin_birth_plan() { # intent plan source -> one frame 235 to the laptop's provider; prints byte and detail
+  python3 - "$LAPTOP/bin/minidregg-client-consent" "$LAPTOP/consent.json" "$PUB" "$@" <<'PY'
+import struct, subprocess, sys
+provider, settings, key, intent, plan, source = sys.argv[1], sys.argv[2], bytes.fromhex(sys.argv[3]), *[open(p, "rb").read() for p in sys.argv[4:7]]
+pair = lambda a, b: struct.pack("<I", len(a)) + a + b
+payload = bytes([235]) + pair(intent, pair(key, pair(plan, source)))
+child = subprocess.run([provider, settings, "stdio"], input=struct.pack("<I", len(payload)) + payload,
+                       stdout=subprocess.PIPE, timeout=600)
+b = child.stdout
+if len(b) < 5: print(f"no-reply bytes={len(b)}"); sys.exit(1)
+n = struct.unpack("<I", b[:4])[0]; f = b[4:4 + n]
+print(f"byte={f[0]} {f[1:].decode('utf-8', 'replace')[:300]}")
+PY
+}
+run friend "provider: the first birth's intent and source with the SECOND birth's plan (frame 235)" 0 \
+  thin_birth_plan "$NOTES_ATTEMPT/intent.bin" "$FWS/attempts/create-notes2/plan.bin" "$NOTES_SOURCE"
+check friend "  refused birthSourceChanged, no headers returned" \
+  bash -c "grep -q '^byte=255 ' '$LAST' && grep -q 'birthSourceChanged' '$LAST' && ! grep -q headers '$LAST'"
+run friend "control: the first birth's own plan, same frame" 0 \
+  thin_birth_plan "$NOTES_ATTEMPT/intent.bin" "$NOTES_ATTEMPT/plan.bin" "$NOTES_SOURCE"
+check friend "  accepted: the provider answers 235 with headers" bash -c "grep -q '^byte=235 ' '$LAST' && grep -q headers '$LAST'"
 
 # ------------------------------------------------------------------ custody
 BOXROOTS=("$JOURNEY_WORLD" "$BOX")
@@ -246,20 +281,19 @@ check operator "the friend's secret seed (raw or hex) is in no box file" jq -e '
 check operator "control: the sponsor's hosted seed IS found by the same scan" jq -e '.counts.sponsorSeed >= 1' "$D/seed-scan.json"
 
 # ------------------------------------------------------------------ refusals
-# The tampered/exact retained-call pair (a Host signature over the friend's
-# own call.bin) is part of the below-birth lifecycle and returns with the
-# Phase-3 thin-birth design; these rows police the proxy's envelope contract,
-# which needs no retained call.
-python3 - "$CONFIG" "$(jq -r .hostSha256 "$FWS/workspace.json")" "$D" <<'PY'
+python3 - "$CONFIG" "$(jq -r .hostSha256 "$FWS/workspace.json")" "$FWS/attempts/first-write/call.bin" "$D" <<'PY'
 import struct, sys
-config, host, d = open(sys.argv[1], "rb").read(), bytes.fromhex(sys.argv[2]), sys.argv[3]
+config, host, call, d = open(sys.argv[1], "rb").read(), bytes.fromhex(sys.argv[2]), open(sys.argv[3], "rb").read(), sys.argv[4]
 def envelope(cfg, pin, request):
     body = bytes([2]) + struct.pack("<I", len(cfg)) + cfg + pin + request
     return struct.pack("<I", len(body)) + body
+tampered = bytearray(call); tampered[len(call) // 2] ^= 0x01
 frames = {
+    "tampered-call": envelope(config, host, bytes([2]) + bytes(tampered)),
     "wrong-config": envelope(config.replace(b"}", b' }', 1), host, bytes([0])),
     "operator-op": envelope(config, host, bytes([22, 1])),
     "wrong-host-pin": envelope(config, bytes(32), bytes([0])),
+    "exact-call": envelope(config, host, bytes([2]) + call),
 }
 for name, frame in frames.items():
     open(f"{d}/frame-{name}.bin", "wb").write(frame)
@@ -287,6 +321,39 @@ proxy_case operator-op nz
 check friend "  proxy refused an operator-socket operation" bash -c "grep -q 'proxy: operation unavailable on selected socket' '$LOG/$((N - 1)).err'"
 proxy_case wrong-host-pin 0
 check friend "  the socket refused the Host pin (254)" bash -c "reply=\$(python3 -c 'import sys;b=open(sys.argv[1],\"rb\").read();print(b[4])' '$LOG/$((N - 1)).out'); [[ \$reply == 254 ]]"
+proxy_case tampered-call 0
+TAMPERED_REPLY=$LOG/$((N - 1)).out
+proxy_case exact-call 0
+EXACT_REPLY=$LOG/$((N - 1)).out
+# The Host decodes its own two outcomes (op 8, kind outcome), asked over the
+# same proxy in one session of two frames.
+python3 - "$CONFIG" "$(jq -r .hostSha256 "$FWS/workspace.json")" "$TAMPERED_REPLY" "$EXACT_REPLY" >"$D/frame-inspect.bin" <<'PY'
+import struct, sys
+config, host = open(sys.argv[1], "rb").read(), bytes.fromhex(sys.argv[2])
+out = sys.stdout.buffer
+for path in sys.argv[3:5]:
+    b = open(path, "rb").read(); n = struct.unpack("<I", b[:4])[0]; frame = b[4:4 + n]
+    assert frame[0] == 2, frame[:1]
+    request = bytes([8]) + struct.pack("<H", 7) + b"outcome" + frame[1:]
+    body = bytes([2]) + struct.pack("<I", len(config)) + config + host + request
+    out.write(struct.pack("<I", len(body)) + body)
+PY
+run friend "Host decodes both outcomes (two op-8 frames, one proxy session)" 0 friend_ssh <"$D/frame-inspect.bin"
+python3 - "$LAST" "$D/decoded-tampered.json" "$D/decoded-exact.json" <<'PY'
+import json, struct, sys
+b = open(sys.argv[1], "rb").read()
+for out in sys.argv[2:4]:
+    n = struct.unpack("<I", b[:4])[0]; frame = b[4:4 + n]; b = b[4 + n:]
+    assert frame[0] == 8, frame[:1]
+    json.dump(json.loads(frame[1:]), open(out, "w"), indent=1)
+PY
+row friend "  tampered-call outcome: $(jq -c '{type, reason: (.reason // .refusal // .detail // null)}' "$D/decoded-tampered.json" | cut -c1-150)" - - ok ""
+check friend "  the Host refused the tampered signed call" jq -e '.type == "refused"' "$D/decoded-tampered.json"
+row friend "  exact-call outcome: $(jq -c '{type, confirmation, acceptedCount}' "$D/decoded-exact.json")" - - ok ""
+check friend "  control: the untampered call on the same raw path is confirmed, replayed (no new effect)" \
+  jq -e '.type == "confirmed" and .confirmation == "replayed"' "$D/decoded-exact.json"
+run friend "after the refusals: read notes still answers field 2 = 1" 0 fshell 'read notes'
+check friend "  field 2 = 1" bash -c "[[ \$(jq -r '[.. | objects | select(.key?.field? == \"2\") | .value][0]' '$LAST') == 1 ]]"
 run friend "keygen over --remote is refused (not a participant Host command)" nz fmini --remote box keygen --secret "$ME/x.key" --public "$ME/x.pub"
 run sponsor "hosted shell unchanged: whoami" 0 sponsor whoami
 check sponsor "  sponsor session is subject $SPONSOR_SUBJECT" jq -e --arg s "$SPONSOR_SUBJECT" '.subject == $s' "$LAST"
@@ -296,4 +363,4 @@ row operator "stop sshd" - - ok ""
 trap - EXIT
 echo "$TABLE"
 if [[ $FAILS -ne 0 ]]; then echo "$FAILS of $N rows failed; first: $(awk -F'\t' '$6 == "FAIL" {print $1": "$3; exit}' "$TABLE")" >&2; exit 1; fi
-echo "$N rows ok: friend $FSUBJ enrolled from its own key over the proxy; the remote birth refused by name (thin consent has no birth arm; the below-birth lifecycle is owed to the Phase-3 thin-birth design); no friend key or seed on the box; 5 proxy refusals" >&2
+echo "$N rows ok: friend $FSUBJ enrolled from its own key, created (thin birth)/wrote/read/delegated over the proxy; a swapped birth plan refused birthSourceChanged; no friend key or seed on the box; 6 proxy/Host refusals" >&2

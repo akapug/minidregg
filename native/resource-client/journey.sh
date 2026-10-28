@@ -366,7 +366,7 @@ TITLE[JLS]="law-sat: an unsatisfiable law is caught at install; can --any's writ
 TITLE[JPAY1]="pay watcher: finalized transfers become Observation records"
 TITLE[JPAY2]="the pay cell: tariff, deposit book, assignment (own Store)"
 TITLE[KC]="K-CLOCK: the one clock; clock/now in every resource law"
-TITLE[JP2]="a friend's key never touches the box: enroll over the proxy; a remote birth refused by name"
+TITLE[JP2]="a friend's key never touches the box: enroll, create (thin birth), use and delegate over the proxy"
 TITLE[KT]="C14 TAIL-BOUND: no write past certified + L; a checkpoint restores progress"
 TITLE[JROT]="key pre-rotation: a stolen daily key cannot rotate; the next key does"
 TITLE[JROTL]="key rotation through the generic Receiver: a lost reply is found by lookup, exactly once; a rotation the Host never saw is absent and never resubmitted"
@@ -1175,7 +1175,7 @@ step_JFLEETIN() { hook jfleet-incoming "fleet-sign incoming (the helm adapter) l
 step_JSLK() { hook jstorylaw "shell path of the tour's doors 11 and 12: law, kind and the built-in story with the Host's admitted / refused-by-clause outcomes named (DEMO A7, A8)" shell; }
 step_JR17() { hook jr17 "home, key, app, adopt-next-key and hermes through mini shell, each ended by the Host's decision or a named refusal (R17)" shell; }
 step_JAUDIT() { hook jstoreaudit "mini store audit re-derives the Store from genesis (chain, tags, accumulator, spent map, checkpoints, head root) then re-admits every ingress and exits 0 printing both lines; one flipped byte of a non-head record in a copy exits 1 naming its height (lane plat-store-audit)"; }
-step_JP2() { hook jpriv2 "a subject enrolled from its own machine over mini --remote; the remote birth refused by name (thin consent has no birth arm; the below-birth lifecycle owed to the Phase-3 thin-birth design); no key of it on the box (J-PRIV-2, lane local-client)"; }
+step_JP2() { hook jpriv2 "a subject enrolled from its own machine creates under thin consent (Kernel.NativeThinBirth), writes, reads and delegates through mini --remote; a swapped birth plan is refused; no key of it on the box; a tampered frame is refused (J-PRIV-2, lane local-client)"; }
 
 # ---------------------------------------------------------------- run
 
