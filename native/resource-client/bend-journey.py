@@ -97,6 +97,22 @@ try:
         w.check('activity-record-awaits-its-decider', bool(w.await_of(s)), s['record'].get('phase'))
         w.check('purse-by-the-view-equals-the-line', m is not None and s['purse'] == int(m.group(6)), {'view': s['purse']})
 
+    with w.group('bend-fresh-object'):
+        # an object the member has not made: refused by name (nothing submitted), then the shell verb that
+        # makes a member-owned content cell, then the run admitted
+        before = height('height-before-fresh')
+        rc, out, err = shell('run-absent', 'bend run tally fresh-name')
+        w.check('absent-object-refused-by-name', rc == 3 and err.startswith('refused: no object named fresh-name: make one with `create fresh-name content open`'),
+                {'rc': rc, 'err': err[-300:]})
+        w.check('absent-object-submitted-nothing', height('height-after-fresh-refusal') == before and 'admitted' not in out, {'out': out})
+        rc, out, err = shell('create-fresh', 'create fresh-name content open')
+        w.check('create-makes-the-cell', rc == 0, {'rc': rc, 'out': out[-200:], 'err': err[-300:]})
+        ref = json.loads((w.sponsor / 'refs' / 'fresh-name.json').read_text())
+        w.objects['fresh-name'] = {'object': ref['target'], 'capability': ref['operationCapability']}
+        rc, out, err = shell('run-fresh', 'bend run tally fresh-name')
+        w.check('run-on-the-made-cell-admitted', rc == 0 and out.startswith('admitted: bend run tally on fresh-name') and 'state {total=0}' in out,
+                {'rc': rc, 'out': out[:300], 'err': err[-300:]})
+
     with w.group('bend-show'):
         rc, out, err = shell('show', 'bend show counter')
         w.check('show-reads-the-object', rc == 0 and 'state {total=0}' in out and f'pin {pin}' in out and 'purse' in out, {'rc': rc, 'out': out, 'err': err[-300:]})
