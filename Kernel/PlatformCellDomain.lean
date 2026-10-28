@@ -148,8 +148,13 @@ def recordOn (deployment : CanonicalCellRegistry.Deployment) (physical : Physica
 theorem recordOn_congr (deployment : CanonicalCellRegistry.Deployment) {a b : PhysicalSnapshot}
     (same : a.canonicalBytes (cellIdOf deployment) = b.canonicalBytes (cellIdOf deployment)) :
     recordOn deployment a = recordOn deployment b := by
-  unfold recordOn load
-  split <;> split <;> simp_all
+  have bytes : ∀ physical : PhysicalSnapshot, recordOn deployment physical =
+      (decodeCell (physical.canonicalBytes (cellIdOf deployment))).bind
+        fun cell => PlatformCellLayout.recordOf cell.logical := by
+    intro physical
+    unfold recordOn load
+    split <;> simp_all
+  rw [bytes, bytes, same]
 
 /-! ## The signing plan
 
