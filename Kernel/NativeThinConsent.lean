@@ -47,8 +47,27 @@ cells). It is inhabited by the honest Host (`honest_binds`: the executor's own
 pre bytes) and is a carrier, not an identity: it fails exactly at a collision of
 that cSHAKE root.
 -/
-import Kernel.ResourceTransaction
-import Kernel.NativeObservationController
+module
+
+public import Kernel.ResourceTransaction
+public import Kernel.NativeObservationController
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.NativeThinConsent
 
@@ -98,6 +117,17 @@ inductive Refusal where
   | viewMalformed (target : Nat)
   /-- The served view does not hold this target's role. -/
   | viewRole (target : Nat)
+  /-- A birth this arm does not consent to: not an ordinary resource birth
+  (`Kernel.NativeThinBirth`). -/
+  | birthRoute (what : String)
+  /-- The intent's birth draft is not a canonical descriptor without auxiliary creates. -/
+  | birthMalformed
+  /-- The intent's birth draft is not the deployed authoring of the member's own source at
+  the draft's coordinates. -/
+  | draftNotAuthored
+  /-- The plan's finalized descriptor differs from the intent's draft beyond the kernel's
+  auxiliary creates. -/
+  | birthSourceChanged
   deriving DecidableEq, Repr
 
 /-- The part of a target's patch that the member authored: every input is the
@@ -227,11 +257,11 @@ theorem computeTarget_root (snapshot : AuthoritySnapshot) (semantics : Digest) (
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
     | scalar actions =>
-        simp only [computeTarget] at computed
-        split at computed
-        · cases computed
-        · rename_i cell _
-          exact cell.candidate.modeEvidence.rootExact
+        simp only [computeTarget, scalarLeg] at computed
+        repeat' split at computed
+        all_goals first
+          | (rename_i cell _; exact cell.candidate.modeEvidence.rootExact)
+          | cases computed
     | world actions =>
         by_contra moved
         have hb : (root != pre.root) = true := bne_iff_ne.mpr moved
@@ -444,7 +474,7 @@ def observeValues (domain semantics : Digest) (federation : FederationId) (comma
     (target : Target) : Request target.kind :=
   { legValues domain semantics federation command target with
     verb := observeVerb target.kind
-    effectsDigest := (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.OBSERVE/v6".toUTF8.toList
+    effectsDigest := (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.OBSERVE/v7".toUTF8.toList
       ((StreamCodec.product bytesStream StreamCodec.nat).encode
         (commandBytes domain semantics command, target.target))).digest }
 

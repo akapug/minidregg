@@ -10,6 +10,7 @@
 //! token answers `identityRevoked` for every later generation. The grain never
 //! sees the record, only the token; the record carries no permission bits.
 
+use crate::io_context::IoContext;
 use minidregg_spk_rpc::{CustodyRefusal, IdentityCustody, SavedIdentity};
 use serde_json::{json, Value};
 use std::fs::{self, DirBuilder, OpenOptions};
@@ -43,7 +44,7 @@ fn now() -> String {
 
 /// A record file, bounded and owned by this uid, mode 0600.
 fn read_record(path: &Path) -> io::Result<Value> {
-    let mut file = OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW).open(path)?;
+    let mut file = OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW).open(&path).ctx("open", &path)?;
     let meta = file.metadata()?;
     if !meta.is_file()
         || meta.uid() != unsafe { libc::geteuid() }
@@ -67,24 +68,24 @@ fn read_record(path: &Path) -> io::Result<Value> {
 fn write_record(path: &Path, value: &Value, replace: bool) -> io::Result<()> {
     let bytes = serde_json::to_vec_pretty(value)?;
     let temp = path.with_extension("json.new");
-    let _ = fs::remove_file(&temp);
+    let _ = fs::remove_file(&temp).ctx("remove", &temp);
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(&temp)?;
+        .open(&temp).ctx("open", &temp)?;
     file.write_all(&bytes)?;
     file.sync_all()?;
     drop(file);
     if replace {
-        fs::rename(&temp, path)?;
+        fs::rename(&temp, path).ctx("rename", &temp)?;
     } else {
         // A fresh token never replaces a record: the name is 256 random bits.
         fs::hard_link(&temp, path).inspect_err(|_| {
-            let _ = fs::remove_file(&temp);
+            let _ = fs::remove_file(&temp).ctx("remove", &temp);
         })?;
-        fs::remove_file(&temp)?;
+        fs::remove_file(&temp).ctx("remove", &temp)?;
     }
     if let Ok(dir) = fs::File::open(path.parent().ok_or_else(|| invalid("record parent"))?) {
         let _ = dir.sync_all();

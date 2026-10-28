@@ -1,0 +1,29 @@
+candidate 0ce31391790a7e2ed9f83eb1b8bb85d6556a0de3  method world/story/CoAuthor.obend  entry tell  flags none
+extract-quote-is-the-policy-ceiling          check     ok {"published": {"extractTicks": "3200000"}, "policy": 3200000}
+publish                                      installed confirmed  
+create                                       installed confirmed  
+birth                                        installed confirmed  
+{"record": {"activity": "11787436005199539437472356581163934578157557056038163351422938020702149089906", "checkpointBytes": "33742", "checkpointDecodes": true, "checkpointDigest": "57951983909428711466346707721542469779883652458737895032946793014667936866777", "escrow": {"account": "7", "payer": "7", "resume": {"coreBytes": "129373", "domainWork": "0", "extractTicks": "3200000", "feeDebit": "0", "heap": "200000", "incidences": "0", "inputBytes": "0", "leaseByteBlocks": "0", "memoryTouches": "0", "networkBytes": "0", "outputBytes": "200000", "outputNodes": "20000", "proofWork": "0", "replayByte
+born-awaiting-the-keeper-shelf-empty         check     ok {"source": {"decider": "40", "kind": "reply", "slot": "110874972299776608687425349225633627010939018101266557319907812596118225336592", "slotCell": "21259990808
+resolve-propose-1                            installed confirmed  
+deliver-propose-1                            installed confirmed  
+resolve-propose-2                            installed confirmed  
+deliver-propose-2                            installed confirmed  
+resolve-vote-2                               installed confirmed  
+deliver-vote-2                               installed confirmed  
+resolve-seal                                 installed confirmed  
+deliver-seal                                 installed confirmed  
+seal-commits-the-winning-chapter             check     ok {"source": {"kind": "performed", "reason": null, "verdict": "settled"}, "state": {"fields": [{"name": "chapters", "value": {"tag": "natural", "value": "1"}}, {"
+deliver-settled                              installed confirmed  
+sealed-once-and-complete                     check     ok {"phase": null, "state": {"fields": [{"name": "chapters", "value": {"tag": "natural", "value": "1"}}, {"name": "author", "value": {"tag": "natural", "value": "2
+create-lawful                                installed confirmed  
+birth-lawful                                 installed confirmed  
+resolve-propose-lawful                       installed confirmed  
+deliver-propose-lawful                       installed confirmed  
+resolve-vote-lawful                          installed confirmed  
+deliver-vote-lawful                          installed confirmed  
+resolve-seal-lawful                          installed confirmed  
+deliver-seal-law-refused                     refused   refused operation-rejected usal.lawDenied { path := [2], clause := Minidregg.Pred.Pred.le "state/chapters" 0, before := some 0, after := some 1 }))
+law-refused-seal-writes-nothing              check     ok {"state": {"fields": [{"name": "chapters", "value": {"tag": "natural", "value": "0"}}, {"name": "author", "value": {"tag": "natural", "value": "0"}}, {"name": "
+{"rows": 25, "failed": []}
+overall rc=0

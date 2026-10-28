@@ -24,11 +24,7 @@ pub struct Message {
     pub dealer: u16,
     pub message: private_send::Message,
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Send {
-    pub to: u16,
-    pub message: Message,
-}
+pub type Send = crate::codec::Packet<Message>;
 #[derive(Clone)]
 pub struct RecipientResult {
     context: [u8; 32],
@@ -396,18 +392,7 @@ impl PrivateOutput {
         let holder = c.u16()?;
         let target = c.u16()?;
         fn nat(c: &mut Cursor) -> Result<usize> {
-            let mut b = vec![];
-            loop {
-                let v = c.byte()?;
-                b.push(v);
-                if v == 255 {
-                    break;
-                }
-            }
-            let mut r = Reader::new(&b)?;
-            let n = usize::try_from(r.nat()?.value()?).map_err(|_| bad("output Nat capacity"))?;
-            r.finish()?;
-            Ok(n)
+            usize::try_from(c.nat()?.value()?).map_err(|_| bad("output Nat capacity"))
         }
         let n = nat(&mut c)?;
         let f = nat(&mut c)?;

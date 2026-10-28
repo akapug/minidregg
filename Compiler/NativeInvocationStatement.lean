@@ -4,9 +4,28 @@ unsigned invocation body, excluding this framing and its signatures; signatures
 must bind these statement bytes through the actual authorization request.
 This codec does not itself change a legacy profile or grant any admission.
 -/
-import Theory.AssertAxioms
-import Compiler.Tower256ConcreteBackend
-import Compiler.ResourceBirthCodec
+module
+
+public import Theory.AssertAxioms
+public import Compiler.Tower256ConcreteBackend
+public import Compiler.ResourceBirthCodec
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.NativeInvocationStatement
 open Minidregg.Theory.TypedAuthorization

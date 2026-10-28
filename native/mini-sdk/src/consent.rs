@@ -5,7 +5,7 @@
 //!
 //! Frames (READ `Host/ClientConsentCore.lean`): 220 intent, 221 observation, 222 plan, 224
 //! operator (specialized) plan, 226 possession, 227 Objective, 228 offer a retained anchor, 229
-//! the anchor of what was admitted, 230–232 thin consent (no Store read), 233 re-check the Store
+//! the anchor of what was admitted, 230–232 thin consent and 234–235 thin birth consent (no Store read), 233 re-check the Store
 //! against the held admission.
 //!
 //! **Retained anchors.** The provider admits the Store's history before its first consent frame.
@@ -301,6 +301,32 @@ pub fn connect_resident(executable: &Path, settings_bytes: Vec<u8>, launch: Comm
     connect_resident_kind(ResidentKind::Consent, executable, settings_bytes, launch)
 }
 
+/// Make `command` a daemon of its own session that inherits nothing from its caller but stdio: every
+/// fd above 2 is marked close-on-exec, so a lock or socket the caller holds (a `flock` wrapper's
+/// fd, a journey's pipe) is never kept alive by a resident that outlives it. Marking, rather than
+/// closing, leaves the standard library's exec-error pipe intact.
+fn detach(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            #[cfg(target_os = "linux")]
+            if libc::syscall(libc::SYS_close_range, 3u32, u32::MAX, 4u32 /* CLOSE_RANGE_CLOEXEC */) == 0 {
+                return Ok(());
+            }
+            for fd in 3..4096 {
+                let flags = libc::fcntl(fd, libc::F_GETFD);
+                if flags >= 0 {
+                    libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC);
+                }
+            }
+            Ok(())
+        });
+    }
+}
+
 /// Connect to this binding's resident of `kind`, starting it when none listens. `launch` is the
 /// command that serves [`serve_resident_kind`] of this kind for this executable and settings (the
 /// client binary's own `consent-resident` or `codec-resident` verb).
@@ -318,9 +344,7 @@ pub fn connect_resident_kind(kind: ResidentKind, executable: &Path, settings_byt
                 .open(&log).map_err(|e| format!("{}: {e}", log.display()))?;
             let mut command = launch;
             command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(errors);
-            unsafe {
-                command.pre_exec(|| if libc::setsid() < 0 { Err(io::Error::last_os_error()) } else { Ok(()) });
-            }
+            detach(&mut command);
             let mut daemon = command.spawn().map_err(|e| format!("cannot start the {}: {e}", kind.name()))?;
             let began = std::time::Instant::now();
             loop {
@@ -519,6 +543,17 @@ fn serve_connection(kind: ResidentKind, stream: std::os::unix::net::UnixStream, 
     }
 }
 
+/// A thin plan frame's reply: `{display, headers}` with the headers as hex.
+fn thin_reply(reply: &[u8]) -> ConsentResult<(Value, Vec<Vec<u8>>)> {
+    let value: Value = serde_json::from_slice(reply).map_err(|e| Error(format!("thin consent reply: {e}")))?;
+    let display = value.get("display").cloned().ok_or("thin consent reply lacks display")?;
+    let rows = value.get("headers").and_then(Value::as_array).ok_or("thin consent reply lacks headers")?;
+    let headers = rows.iter()
+        .map(|row| crate::hex::decode_any_case(row.as_str().ok_or("thin consent header is not hex")?))
+        .collect::<Result<Vec<_>>>()?;
+    Ok((display, headers))
+}
+
 fn headers(bytes: &[u8]) -> Result<Vec<Vec<u8>>> {
     let value: Value = serde_json::from_slice(bytes).map_err(|e| format!("local consent headers: {e}"))?;
     let rows = value.as_array().ok_or("local consent headers are not a list")?;
@@ -587,14 +622,27 @@ impl Consent {
     /// refused with the unsigned input named.
     pub fn thin_plan(&mut self, intent_bin: &[u8], key: &[u8], plan: &[u8], views: &[Vec<u8>]) -> ConsentResult<(Value, Vec<Vec<u8>>)> {
         let payload = pair(intent_bin, &pair(key, &pair(plan, &stream_byte_list(views))?)?)?;
-        let reply = self.call(crate::host_operations::CONSENT_THIN_PLAN, &payload)?;
-        let value: Value = serde_json::from_slice(&reply).map_err(|e| Error(format!("thin consent reply: {e}")))?;
-        let display = value.get("display").cloned().ok_or("thin consent reply lacks display")?;
-        let rows = value.get("headers").and_then(Value::as_array).ok_or("thin consent reply lacks headers")?;
-        let headers = rows.iter()
-            .map(|row| crate::hex::decode_any_case(row.as_str().ok_or("thin consent header is not hex")?))
-            .collect::<Result<Vec<_>>>()?;
-        Ok((display, headers))
+        thin_reply(&self.call(crate::host_operations::CONSENT_THIN_PLAN, &payload)?)
+    }
+
+    /// Op 234, thin birth intent consent: the retained birth intent must be the deployed authoring
+    /// of the member's own `source` (its retained `source.json` bytes) at the coordinates the
+    /// draft carries (`Kernel.NativeThinBirth.checkBirthIntentThin`). The provider returns the
+    /// retained intent unchanged.
+    pub fn thin_birth_intent(&mut self, intent_bin: &[u8], key: &[u8], source: &[u8]) -> ConsentResult<()> {
+        let checked = self.call(crate::host_operations::CONSENT_THIN_BIRTH_INTENT, &pair(intent_bin, &pair(key, source)?)?)?;
+        if checked != intent_bin {
+            return Err("local consent returned a different retained intent".into());
+        }
+        Ok(())
+    }
+
+    /// Op 235, thin birth plan consent (`Kernel.NativeThinBirth.checkBirthThin`): the authoring
+    /// check again, the plan's finalized descriptor against the authored draft, and every header
+    /// against the member's derivation of its branch. Returns the display and the headers.
+    pub fn thin_birth_plan(&mut self, intent_bin: &[u8], key: &[u8], plan: &[u8], source: &[u8]) -> ConsentResult<(Value, Vec<Vec<u8>>)> {
+        let payload = pair(intent_bin, &pair(key, &pair(plan, source)?)?)?;
+        thin_reply(&self.call(crate::host_operations::CONSENT_THIN_BIRTH_PLAN, &payload)?)
     }
 
     /// Op 224: the operator's reply to a specialized plan request (one of the registry's
@@ -645,6 +693,29 @@ impl Consent {
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+
+    /// A resident started while its caller holds an fd (a `flock` wrapper's lock, a journey's pipe)
+    /// must not inherit it, or the resident keeps the caller's lock for as long as it lives.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_detached_resident_inherits_no_fd_from_its_caller() {
+        use std::os::unix::io::AsRawFd;
+        let dir = stub_dir("detach");
+        let held = fs::File::create(dir.join("held.lock")).unwrap();
+        let fd = held.as_raw_fd();
+        // an fd inherited across exec, as a `flock` wrapper's is
+        unsafe { libc::fcntl(fd, libc::F_SETFD, 0) };
+        assert_eq!(unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) }, 0);
+        let listing = dir.join("fds");
+        let mut command = Command::new("/bin/sh");
+        command.arg("-c").arg(format!("ls -1 /proc/$$/fd > {}", listing.display()));
+        detach(&mut command);
+        assert!(command.status().unwrap().success());
+        let seen = fs::read_to_string(&listing).unwrap();
+        let open: Vec<&str> = seen.lines().collect();
+        // (the shell keeps a private fd of its own, 10; the caller's must be absent)
+        assert!(!open.contains(&fd.to_string().as_str()), "the resident inherited the caller's fd: {open:?} (caller held {fd})");
+    }
 
     fn stub_dir(label: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("mini-sdk-consent-{label}-{}-{}", std::process::id(),

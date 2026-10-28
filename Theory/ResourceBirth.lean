@@ -19,8 +19,27 @@ the exact physical transaction must join this component in the existing
 `MultiCellHyperedge`/`DurableDataIntent` consumer. No semantic or durable
 completion claim follows merely from this allocator succeeding.
 -/
-import Theory.CellSlot
-import Theory.CanonicalResourceKernel
+module
+
+public import Theory.CellSlot
+public import Theory.CanonicalResourceKernel
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Theory.ResourceBirth
 

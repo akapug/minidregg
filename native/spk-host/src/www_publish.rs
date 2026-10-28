@@ -16,6 +16,7 @@
 //! before any open, so nothing outside the tree or behind a symlink is reached.
 //! No session, no Mini transaction, no write.
 
+use crate::io_context::IoContext;
 use std::ffi::CString;
 use std::fs::File;
 use std::io::{self, Read, Write};
@@ -82,14 +83,14 @@ impl WwwListener {
                 }
                 match UnixStream::connect(socket) {
                     Ok(_) => return Err(io::Error::new(io::ErrorKind::AlreadyExists, "publishing socket still accepting")),
-                    Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => std::fs::remove_file(socket)?,
+                    Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => std::fs::remove_file(&socket).ctx("remove", &socket)?,
                     Err(error) => return Err(error),
                 }
             }
         }
-        let listener = UnixListener::bind(socket)?;
-        std::fs::set_permissions(socket, std::fs::Permissions::from_mode(0o600))?;
-        let meta = std::fs::symlink_metadata(socket)?;
+        let listener = UnixListener::bind(&socket).ctx("bind", &socket)?;
+        std::fs::set_permissions(socket, std::fs::Permissions::from_mode(0o600)).ctx("set permissions", &socket)?;
+        let meta = std::fs::symlink_metadata(&socket).ctx("inspect", &socket)?;
         if !meta.file_type().is_socket() || meta.uid() != euid {
             return Err(refuse("publishing socket identity drift"));
         }
@@ -149,7 +150,7 @@ impl WwwListener {
 impl Drop for WwwListener {
     fn drop(&mut self) {
         if std::fs::symlink_metadata(&self.socket).is_ok_and(|m| m.ino() == self.ino) {
-            let _ = std::fs::remove_file(&self.socket);
+            let _ = std::fs::remove_file(&self.socket).ctx("remove", &self.socket);
         }
     }
 }

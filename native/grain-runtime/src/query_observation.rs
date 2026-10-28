@@ -108,8 +108,9 @@ fn stale_query_with(
         }
     }
     let frame = bounded_regular_file(&attempt.join("query-refusal.frame"), 12_102_761)?;
-    if frame.len() < 2 || frame[0] != 255 {
-        return Err("query refusal is not an op-255 frame".into());
+    // A query refusal is decided before any append: the Host answers it under NO_RECORD (c5e268ebd).
+    if frame.len() < 2 || frame[0] != mini_sdk::host_operations::RESPONSE_NO_RECORD {
+        return Err("query refusal is not a NO_RECORD frame".into());
     }
     let refusal = inspect(&frame[1..])?;
     Ok(refusal["type"] == "refused" && refusal["reason"] == "stale-root")
@@ -236,7 +237,7 @@ mod tests {
         fs::write(attempt.join("config.json"), b"config").unwrap();
         fs::write(attempt.join("intent.json"), b"source").unwrap();
         fs::write(attempt.join("signed-observation.bin"), b"signed").unwrap();
-        fs::write(attempt.join("query-refusal.frame"), b"\xffencoded").unwrap();
+        fs::write(attempt.join("query-refusal.frame"), [&[mini_sdk::host_operations::RESPONSE_NO_RECORD][..], b"encoded"].concat()).unwrap();
         fs::write(attempt.join("attempt.json"),serde_json::to_vec(&json!({"format":"minidregg-resource-client-attempt-v1",
             "operation":"query","host":config.host,"config":attempt.join("config.json"),"socket":config.host_socket})).unwrap()).unwrap();
         let mut marker = json!({"type":"minidregg-query-refusal-v1","stage":"query","operation":5});
@@ -424,7 +425,7 @@ printf '%s' '{"type":"refused","reason":"stale-root"}' > "$5"
         }
         assert_eq!(
             fs::read(first.join("query-refusal.frame")).unwrap(),
-            b"\xffencoded"
+            [&[mini_sdk::host_operations::RESPONSE_NO_RECORD][..], b"encoded"].concat()
         );
         assert_eq!(fs::read(first.join("intent.json")).unwrap(), source);
         assert!(!first.join("view.json").exists());

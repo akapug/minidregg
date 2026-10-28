@@ -5,9 +5,30 @@ record. Today's management, mutation, package and app observations are checked
 on one current image. This module emits no CAS or physical launch permit;
 Replay must additionally prove the original step belonged to admitted history.
 -/
-import Kernel.ApplicationLifecycleClaimV2Ingress
-import Kernel.ApplicationLifecycleBeginV2Admission
-import Kernel.ApplicationLifecycleClaimCore
+module
+
+public import Kernel.ApplicationLifecycleClaimV2Ingress
+public import Kernel.ApplicationLifecycleBeginV2Admission
+public import Kernel.ApplicationLifecycleClaimCore
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleClaimV2Core
 

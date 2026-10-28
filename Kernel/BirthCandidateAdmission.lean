@@ -1,9 +1,13 @@
 /- Joint newborn source-graph validation, distinct from export-law evaluation.
 The accepted authority batch supplies one post and all exact staged records.
 Sealed or unsatisfiable new local laws remain legal sources. -/
-import Compiler.CandidateLawResolution
-import Compiler.PhysicalLawResolution
-import Compiler.CredentialAuthorityDomainReceiver
+module
+
+public import Compiler.CandidateLawResolution
+public import Compiler.PhysicalLawResolution
+public import Compiler.CredentialAuthorityDomainReceiver
+
+@[expose] public section
 
 namespace Minidregg.Kernel.BirthCandidateAdmission
 

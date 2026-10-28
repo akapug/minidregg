@@ -2626,11 +2626,13 @@ fn inspected_pre_submit_refusal(config: &Config, attempt: &Path) -> Result<Optio
         }
     }
     let frame = read_bounded(&frame_path, 12_102_761)?;
+    // A prepare refusal is decided before any append, so the Host answers it under NO_RECORD
+    // (c5e268ebd); HOST_OUTCOME (255) carries only undecided answers and is never a refusal here.
     if frame.len() < 2
-        || frame[0] != 255
+        || frame[0] != mini_sdk::host_operations::RESPONSE_NO_RECORD
         || sha256_file(&frame_path)? != digest_field("frameSha256")?
     {
-        return Err("prepare refusal frame differs from retained op-255 reply".into());
+        return Err("prepare refusal frame differs from the retained NO_RECORD reply".into());
     }
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -13621,6 +13623,16 @@ impl Runtime {
         let unit = self.journal.child.as_ref().and_then(|c| c.unit.clone());
         let child = self.child.as_ref().ok_or("no live owned child")?;
         let pgid = child.id() as i32;
+        // A metered worker's gate records its CPU only when the worker exits
+        // by itself; this stop ends the unit, and the gate with it. Record the
+        // unit cgroup's CPU first, before any signal ends the unit, so the
+        // resident pays what the sandbox used rather than the pessimistic
+        // wall-time charge.
+        if let Some(unit) = &unit {
+            if let Err(error) = record_unit_cpu(&self.config.state_dir, unit) {
+                eprintln!("grain-runtime: worker {unit} CPU not recorded before stop ({error}); the pessimistic charge applies");
+            }
+        }
         // The leader remains unreaped until group cleanup, so its PID cannot
         // be recycled while signals address the process group.
         if group_has_live_member(pgid)? {
@@ -14503,6 +14515,9 @@ impl Runtime {
         if invocation.is_prompt() && (self.journal.resident_delivery.is_some() || self.journal.resident_completion.is_some()) {
             return Err("resident final delivery remains pending; drain it without another model turn".into());
         }
+        // The previous prompt is delivered and completed: its history may
+        // compact now (after its own record, its completion was still due).
+        if invocation.is_prompt() { self.compact_history(); }
         if let Some((resident_id,digest))=invocation.resident_identity() {
             resident_origin::validate(resident_id,digest,prompt)?;
             if self.config.state_dir.join(format!("resident-origin-id-{resident_id}.json"))
@@ -17476,6 +17491,37 @@ fn prove_controller_unit(task: &str) -> Result<()> {
     Ok(())
 }
 
+/// Write `STATE/UNIT.cpu` (`mini-grain-cpu-v1 USEC`, the launch gate's
+/// format) from systemd's CPU accounting of the live unit, unless the gate
+/// already wrote it. Rounded up to the next microsecond.
+fn record_unit_cpu(state_dir: &Path, unit: &str) -> Result<()> {
+    let path = state_dir.join(format!("{unit}.cpu"));
+    if path.try_exists().map_err(|e| e.to_string())? { return Ok(()); }
+    // The unit cgroup's cpu.stat usage_usec, as the gate reads it (it counts
+    // every descendant, exited ones too); systemd's CPUUsageNSec is unset
+    // when the user manager keeps no CPU accounting.
+    let output = deadline::output(systemd_manager::worker_command(unit)?
+        .args(["show", "-p", "ControlGroup", "--value", &format!("{unit}.service")]), deadline::MANAGER_QUERY)
+        .map_err(|e| deadline::describe("worker cgroup", e))?;
+    let group = String::from_utf8(output.stdout).map_err(|e| e.to_string())?.trim().to_owned();
+    let relative = Path::new(&group).strip_prefix("/").map_err(|_| format!("worker cgroup unavailable: {group:?}"))?;
+    if relative.components().any(|c| !matches!(c, std::path::Component::Normal(_)))
+        || relative.file_name().and_then(|n| n.to_str()) != Some(&format!("{unit}.service")) {
+        return Err(format!("worker cgroup does not name its unit: {group:?}"));
+    }
+    let stat = fs::read_to_string(Path::new("/sys/fs/cgroup").join(relative).join("cpu.stat"))
+        .map_err(|e| format!("worker cpu.stat: {e}"))?;
+    let usec = stat.lines().find_map(|l| l.strip_prefix("usage_usec ")).and_then(|n| n.trim().parse::<u64>().ok())
+        .ok_or("worker cpu.stat has no usage_usec")?;
+    let nsec = usec.saturating_mul(1000);
+    let temporary = path.with_extension("cpu.tmp");
+    let mut file = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temporary)
+        .map_err(|e| format!("cpu record: {e}"))?;
+    file.write_all(format!("mini-grain-cpu-v1 {}\n", nsec.div_ceil(1000)).as_bytes())
+        .and_then(|_| file.sync_all()).map_err(|e| format!("cpu record: {e}"))?;
+    fs::rename(&temporary, &path).map_err(|e| format!("cpu record: {e}"))
+}
+
 fn kill_unit(unit: &str) -> Result<()> {
     let name = format!("{unit}.service");
     let output = deadline::output(systemd_manager::worker_command(unit)?
@@ -19212,7 +19258,7 @@ mod tests {
         )
         .unwrap();
         let frame = attempt.join("pre-submit-refusal.frame");
-        fs::write(&frame, b"\xffcanonical outcome bytes").unwrap();
+        fs::write(&frame, [&[mini_sdk::host_operations::RESPONSE_NO_RECORD][..], b"canonical outcome bytes"].concat()).unwrap();
         let marker = attempt.join("pre-submit-refusal.json");
         fs::write(
             &marker,

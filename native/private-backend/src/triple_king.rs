@@ -10,7 +10,7 @@ use crate::{
     codec::{bad, bytes, Correlation, Generation, Journal, Nat, Purpose},
     consensus_wire::Cursor,
     custody::{self, hash},
-    reconstruction::Field,
+    reconstruction::{eval, Field},
     sh2t_id::{self, Sh2tId},
 };
 use std::{
@@ -18,9 +18,6 @@ use std::{
     io::{Error, ErrorKind, Result},
     path::Path,
 };
-fn eval(p: &[Field], x: Field) -> Field {
-    p.iter().rev().fold(Field(0), |a, c| a.mul(x).add(*c))
-}
 fn power(x: Field, n: usize) -> Field {
     (0..n).fold(Field(1), |a, _| a.mul(x))
 }
@@ -466,11 +463,7 @@ pub struct Message {
     pub context: [u8; 32],
     pub body: Body,
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Send {
-    pub to: u16,
-    pub message: Message,
-}
+pub type Send = crate::codec::Packet<Message>;
 #[derive(Clone)]
 pub struct CheckedTriples {
     generation: Generation,
@@ -771,7 +764,7 @@ impl TripleKing {
                 .take(2 * f + 1)
                 .map(|(h, v)| (*h, v.clone()))
                 .collect::<Vec<_>>();
-            let polys = acss_id::polynomial(&points, 2 * count + 1)?;
+            let polys = crate::reconstruction::polynomial(&points, 2 * count + 1)?;
             let values = polys.iter().map(|p| p[0]).collect::<Vec<_>>();
             if !self.initial_published {
                 self.initial_published = true;
@@ -794,7 +787,7 @@ impl TripleKing {
                         )
                     })
                     .collect::<Vec<_>>();
-                let polys = acss_id::polynomial(&points, 2)?;
+                let polys = crate::reconstruction::polynomial(&points, 2)?;
                 let mut masked = vec![];
                 for i in count + 1..=2 * count {
                     let at = Field(i as u128 + 1);
@@ -835,7 +828,7 @@ impl TripleKing {
                         .add(c[i]);
                     points.push((i as u16, vec![value]));
                 }
-                self.h = Some(acss_id::polynomial(&points, 1)?[0].clone());
+                self.h = Some(crate::reconstruction::polynomial(&points, 1)?[0].clone());
                 self.masked_sent = true;
                 out.extend(self.to_king(Body::ChallengePoint(self.basis.random.check_r)));
             }
@@ -1440,7 +1433,7 @@ pub(crate) mod tests {
                 (n.basis.me, vec![a, b, c])
             })
             .collect::<Vec<_>>();
-        let polys = acss_id::polynomial(&points, 3).unwrap();
+        let polys = crate::reconstruction::polynomial(&points, 3).unwrap();
         assert_ne!(polys[0][0], Field(0));
         assert_ne!(polys[1][0], Field(0));
         assert_eq!(polys[0][0].mul(polys[1][0]), polys[2][0]);

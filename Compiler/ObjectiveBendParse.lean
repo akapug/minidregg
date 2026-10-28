@@ -15,8 +15,13 @@ LineTerminator sets, not ASCII.
 
 Every recursion is fuel-bounded with fuel proportional to the input; running
 out is a refusal ("capacity"), never a different parse. -/
-import Lean
-import Compiler.ObjectiveBendLaw
+module
+
+public import Lean
+public import Compiler.ObjectiveBendLaw
+
+@[expose] public section
+
 namespace Minidregg.Compiler.ObjectiveBendParse
 open Lean
 set_option autoImplicit false

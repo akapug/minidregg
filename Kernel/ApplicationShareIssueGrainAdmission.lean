@@ -5,9 +5,13 @@ existing joint grain-birth checker. A separate current app delegation is
 checked against the same loaded authority and directory before the ticket's
 single empty allocation post is replaced by its source-derived initial atom.
 -/
-import Kernel.ApplicationShareIssueGrainSource
-import Kernel.ApplicationShareIssueDelegation
-import Kernel.GrainResourceBirthAdmission
+module
+
+public import Kernel.ApplicationShareIssueGrainSource
+public import Kernel.ApplicationShareIssueDelegation
+public import Kernel.GrainResourceBirthAdmission
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationShareIssueGrainAdmission
 

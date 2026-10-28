@@ -4,8 +4,29 @@ grain birth and the older bare share-issue event have different retained
 carriers and nullifier sets. Historical lookup selects only the exact event;
 semantic replay must re-admit this receiver at its original prefix.
 -/
-import Kernel.ApplicationShareIssueGrainAdmission
-import Kernel.GrainResourceBirthReceiver
+module
+
+public import Kernel.ApplicationShareIssueGrainAdmission
+public import Kernel.GrainResourceBirthReceiver
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationShareIssueGrainReceiver
 

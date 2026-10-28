@@ -20,7 +20,26 @@ Two places where this file's statements differ from §2.3's PROPOSED Lean, both 
 * `no_lease_no_cell` needs `c ≠ fillCell …`: the relay itself puts a cell at an unleased position (the
   fill), and it is in the vector. The hypothesis is load-bearing (`fill_at_unleased_slot_assembled`).
 -/
-import Theory.Channel.Cell
+module
+
+public import Theory.Channel.Cell
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Theory.Channel
 

@@ -8,9 +8,29 @@ and `frontEnd` names the one Lean front end (`ObjectiveBendFrontEndIdentity.iden
 whose output on these sources the receiver recomputes and requires
 (`ObjectiveBendPublication.publishedCore`, `ObjectiveBendNativeAdmission.SourceSelection`).
 An edition-2 package (three tool pins, stored ASTs) does not decode. -/
-import Compiler.NativeInvocationStatement
-import Compiler.PolicyRecordCodec
-import Theory.AssertAxioms
+module
+
+public import Compiler.NativeInvocationStatement
+public import Compiler.PolicyRecordCodec
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Compiler.ObjectiveSourcePackage
 open Minidregg.Theory Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization

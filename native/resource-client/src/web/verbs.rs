@@ -312,6 +312,46 @@ pub(super) fn form_for(name: &str, literals: &str, action: &str, hidden: &str) -
     Some(form_with(name, index, alt, verb.operation, action, hidden, &|_| None))
 }
 
+/// `form_for` with fields prefilled by query key (`prefill_key`: `SLOT` is `slot`,
+/// `INVITATION|@FILE` is `invitationfile`): a place's page embeds the real form with what the
+/// place already knows filled in; the person still presses Run.
+pub(super) fn form_for_filled(name: &str, literals: &str, action: &str, hidden: &str, filled: &[(&str, &str)]) -> Option<String> {
+    let verb = crate::shell::command_catalog().find(|v| v.name == name)?;
+    let alts = alternatives_of(name, verb.usage);
+    let (index, alt) = alts.iter().enumerate().find(|(_, a)| a.literals() == literals)?;
+    let prefill = |key: &str| filled.iter().find(|(k, _)| *k == key).map(|(_, v)| (*v).to_owned());
+    Some(form_with(name, index, alt, verb.operation, action, hidden, &prefill))
+}
+
+/// The lines one leaf of `name` assembles to from values given by argument name (the grammar's
+/// own names, `ROOM`, `N`, `set`), through the one assembler the forms use: the leaf is the one
+/// whose literal path is `literals` and whose arguments include every name given. A place whose
+/// control is not one field per argument (checkboxes summed to a bitmask) computes the values
+/// and still speaks the verb's grammar.
+pub(super) fn assemble_named(site: &Site, name: &str, literals: &str, values: &[(&str, &str)]) -> std::result::Result<(Vec<String>, String, bool, String), Page> {
+    let Some(verb) = crate::shell::command_catalog().find(|v| v.name == name) else {
+        return Err(simple(404, "No such verb", &format!("the shell has no verb {name}")));
+    };
+    let alts = alternatives_of(name, verb.usage);
+    // A value names its argument, or (a choice given as itself: `("hermes/tools", "hermes/tools")`)
+    // the choice argument that lists it.
+    let names = |tok: &Tok, key: &str, value: &str| match tok {
+        Tok::Arg { name, kind, .. } => name == key || (key == value && matches!(kind, Kind::Choice(options) if options.iter().any(|o| o == value))),
+        _ => false,
+    };
+    let Some((index, alt)) = alts.iter().enumerate().find(|(_, a)| a.literals() == literals && values.iter().all(|(k, v)| a.tokens.iter().any(|t| names(t, k, v)))) else {
+        return Err(simple(400, name, &format!("no leaf {literals} takes {}", values.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", "))));
+    };
+    let mut form = std::collections::BTreeMap::new();
+    form.insert("alt".to_owned(), index.to_string());
+    for (i, tok) in alt.tokens.iter().enumerate() {
+        if let Some((_, v)) = values.iter().find(|(k, v)| names(tok, k, v)) {
+            form.insert(format!("a{i}"), (*v).to_owned());
+        }
+    }
+    assemble(site, name, &form)
+}
+
 fn form(name: &str, index: usize, alt: &Alt, operation: &str, action: &str, hidden: &str) -> String {
     form_with(name, index, alt, operation, action, hidden, &|_| None)
 }
@@ -731,6 +771,12 @@ mod tests {
         let bends = alternatives_of("bend", bend.usage);
         assert_eq!(bends.iter().map(|a| a.literals()).collect::<Vec<_>>(), ["bend publish", "bend run", "bend lookup", "bend retry", "bend show", "bend await", "bend answer"]);
         assert_eq!(bends.len(), crate::shell_grammar::BEND.leaves.len(), "one form per grammar leaf");
+        // `apps`: one derived form per leaf, and `apps renew` is among them as a transition.
+        let apps = crate::shell::command_catalog().find(|v| v.name == "apps").expect("the shell has apps");
+        let app_alts = alternatives_of("apps", apps.usage);
+        assert_eq!(app_alts.len(), crate::shell_grammar::APPS.leaves.len(), "one form per grammar leaf");
+        let renew = app_alts.iter().position(|a| a.literals() == "apps renew").expect("apps renew has a derived form");
+        assert!(transition_of("apps", apps.usage, apps.operation, renew, "apps renew"), "apps renew writes an enrollment");
         for (i, is) in [true, true, false, true, false, false, true].into_iter().enumerate() {
             assert_eq!(transition_of("bend", bend.usage, bend.operation, i, &bends[i].literals()), is, "{}", bends[i].literals());
         }
@@ -798,5 +844,23 @@ mod tests {
             crate::chat::Line::Feedback { text: "the save button is gone".into(), from: Some("w-abc".into()), clause: Some(clause.into()), page: Some("/doc/paper".into()), via: None },
             "{}", lines[0]
         );
+    }
+
+    /// A place's computed control still speaks the verb's grammar: the founder's ticked tools become
+    /// `tariff ROOM set hermes/tools N`, assembled by the one assembler and parsed back by the shell's
+    /// grammar to the set leaf (a transition), and a filled form carries what its place knows.
+    #[test]
+    fn named_values_assemble_through_the_grammar_and_filled_forms_carry_them() {
+        let site = bare_site();
+        let (lines, _, transition, literals) = assemble_named(&site, "tariff", "tariff", &[("ROOM", "lab"), ("set", "set"), ("hermes/tools", "hermes/tools"), ("N", "9")]).unwrap_or_else(|p| panic!("{}", p.body));
+        assert_eq!((lines, transition, literals.as_str()), (vec!["tariff lab set hermes/tools 9".to_owned()], true, "tariff"));
+        let words = crate::shell::words("tariff lab set hermes/tools 9").unwrap();
+        let parsed = crate::shell_grammar::parse(&crate::shell_grammar::TARIFF, &words).expect("the shell parses what the face assembles");
+        assert_eq!(parsed.leaf.effect, crate::shell_grammar::Effect::Transition);
+        assert!(assemble_named(&site, "tariff", "tariff", &[("ROOM", "lab"), ("set", "set"), ("hermes/nothing", "hermes/nothing"), ("N", "9")]).is_err(), "a field the grammar does not list is no leaf");
+        let join = form_for_filled("story", "story join", "/verb/story", "", &[("name", "tale"), ("invitationfile", "@tale-invite.json")]).unwrap();
+        assert!(join.contains("value=\"tale\"") && join.contains("value=\"@tale-invite.json\"") && join.contains("action=\"/verb/story\""), "{join}");
+        let answer = form_for_filled("bend", "bend answer", "/verb/bend", "", &[("slot", "5551")]).unwrap();
+        assert!(answer.contains("value=\"5551\"") && answer.contains("<textarea"), "{answer}");
     }
 }

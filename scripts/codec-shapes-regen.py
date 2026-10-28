@@ -137,6 +137,8 @@ def classify(moved, baseline, fresh, bumped, prefixes, sources):
     (hexid -> (fingerprint, text)) at the start of the run and now; `bumped`: the
     hexids this run renamed; `prefixes`: declared bare-prefix texts; `sources`:
     [(file, text)] that are not the registry or the pins.
+    A prefix whose child this run renamed in the current round, before the build
+    that births the new name, is neither: it is judged again next round.
     Returns (repins: [(text, child text)], manual: [text])."""
     renamed = set(bumped) | {h for h in baseline if h not in fresh}
     born = {h for h in fresh if h not in baseline}
@@ -148,6 +150,9 @@ def classify(moved, baseline, fresh, bumped, prefixes, sources):
         under = lambda h: h.startswith(hexid) and len(h) > len(hexid)
         gone = sorted(h for h in renamed if under(h))
         new = sorted(h for h in born if under(h))
+        if gone and not new and any(h in bumped for h in gone) \
+                and not complete_frame_spellings(text, sources):
+            continue  # its child was renamed this round; the new name is born next round
         if not gone or not new or complete_frame_spellings(text, sources):
             manual.append(text)
             continue
@@ -176,6 +181,9 @@ def selftest():
          classify(moved, baseline, fresh_bumped, set(), set(), ok_src), ([], ["P"])),
         ("only an old child gone, no new one born: refused",
          classify(moved, baseline, {p: ("2" * 16, "P")}, set(), {"P"}, ok_src), ([], ["P"])),
+        ("a child bumped this round, its new name not built yet: judged next round",
+         classify(moved, baseline, {p: ("2" * 16, "P"), child_old: ("4" * 16, "P?")}, {child_old},
+                  {"P"}, ok_src), ([], [])),
     ]
     hx = lambda t: t.encode().hex()
     tags = "T.lean"
@@ -186,7 +194,17 @@ def selftest():
     clock_files = {tags: 'abbrev cv : Nat := 4\nabbrev c : String := s!"P/C/v{cv}"',
                    "A.lean": 'def w : String := "P/C/v4"'}
     clock_once = {tags: clock_files[tags], "A.lean": "def w : String := Tags.c"}
+    thm = {"K.lean": 'theorem t : f = "this Host P/L/v4" := by native_decide\n'
+                     '-- P/L/v4 in a comment\n/- P/L/v4 /- nested -/ -/\n'
+                     'def u := "P/L/v40"\ndef c := \'"\'\ndef w := "P/L/v4 again"',
+           "R.rs": 'const X: &str = "P/L/v4 left";'}
     cases += [
+        ("a bumped tag still spelled inside a theorem literal: refused by file:line",
+         stale_spellings(thm, ["P/L/v4"]), [("K.lean", 1, "P/L/v4"), ("K.lean", 6, "P/L/v4")]),
+        ("comments, a longer version and Rust are not Lean string spellings: clean",
+         stale_spellings({k: v for k, v in thm.items() if k != "K.lean"} |
+                         {"K.lean": thm["K.lean"].split("def w")[0].replace("this Host P/L/v4", "x")},
+                         ["P/L/v4"]), []),
         ("trailing version byte spelled as a literal: bumped everywhere",
          plan_bump(hx("P/Q") + "05", "P/Q?", byte_files, tags),
          ("P/Q?", {tags: 'abbrev x : List UInt8 := "P/Q".toUTF8.toList ++ [6]',
@@ -288,6 +306,60 @@ def plan_bump(hexid, text, files, tags_name, done=frozenset()):
     return new_text, edits, constants
 
 
+def lean_string_literals(text):
+    """(line, contents) of every string literal in Lean source, comments excluded
+    (`--` to end of line, nested `/- -/`); a char literal `'"'` opens nothing."""
+    out, i, n, line = [], 0, len(text), 1
+    while i < n:
+        c = text[i]
+        if c == "\n":
+            line += 1
+            i += 1
+        elif text.startswith("--", i):
+            j = text.find("\n", i)
+            i = n if j < 0 else j
+        elif text.startswith("/-", i):
+            depth, i = 1, i + 2
+            while i < n and depth:
+                if text.startswith("/-", i):
+                    depth, i = depth + 1, i + 2
+                elif text.startswith("-/", i):
+                    depth, i = depth - 1, i + 2
+                else:
+                    line += text[i] == "\n"
+                    i += 1
+        elif text.startswith("'\"'", i) or text.startswith("'\\\"'", i):
+            i = text.index("'", i + 1) + 1
+        elif c == '"':
+            start, j = line, i + 1
+            while j < n and text[j] != '"':
+                if text[j] == "\\":
+                    j += 1
+                line += j < n and text[j] == "\n"
+                j += 1
+            out.append((start, text[i + 1:j]))
+            i = j + 1
+        else:
+            i += 1
+    return out
+
+
+def stale_spellings(files, olds):
+    """Old `.../vN` identity texts a bump left behind inside a Lean string literal
+    (a theorem's message, an #assert, an interpolated label: any literal that is not
+    exactly the identity, which the bump rewrote). Returns [(file, line, old)]."""
+    pats = [(old, re.compile(re.escape(old) + r"(?!\d)")) for old in olds]
+    hits = []
+    for name, body in files.items():
+        if not name.endswith(".lean"):
+            continue
+        for line, lit in lean_string_literals(body):
+            for old, pat in pats:
+                if pat.search(lit):
+                    hits.append((name, line, old))
+    return hits
+
+
 def composite_twins(files, tags_name):
     """Identities the registry composes from a version constant that some other
     file ALSO spells as a literal: two spellings, one of which a bump can miss.
@@ -361,14 +433,22 @@ def main():
             print("pins up to date")
             assert_census()
             return
-        unbumped, done = [], set()
+        unbumped, done, olds = [], set(), []
         for hexid, text in moved:
             result = bump(hexid, text, done)
             if result is None or not result[1]:
                 unbumped.append((hexid, text))
             else:
                 bumped.add(hexid)
+                if version_forms(hexid, text) and version_forms(hexid, text)[0] == "v":
+                    olds.append(text)
                 print(f"BUMPED {text} -> {result[0]} in {result[1]}")
+        stale = stale_spellings(source_texts(), olds)
+        for name, line, old in stale:
+            print(f"stale: {name}:{line} still spells {old} inside a string literal")
+        if stale:
+            sys.exit("refused: a bumped identity's old name survives the bump (spell it from the registry "
+                     "constant or interpolate its label; then rerun)")
         sources = [(str(path.relative_to(ROOT)), path.read_text(errors="surrogateescape"))
                    for path in source_files() if path not in (TAGS, PINS)]
         repins, manual = classify(unbumped, baseline, fresh, bumped,

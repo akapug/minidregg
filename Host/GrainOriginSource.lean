@@ -8,9 +8,28 @@ grain/parent/publication command, and renders only Mini's strict application
 source. fn retains hybrid signing, article admission, peering and identity.
 Other Mini origin shapes have no constructor in this renderer.
 -/
-import Kernel.FnPortableSource
-import Kernel.AgentGrain
-import Compiler.ResourceBirthCodec
+module
+
+public import Kernel.FnPortableSource
+public import Kernel.AgentGrain
+public import Compiler.ResourceBirthCodec
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Host.GrainOriginSource
 

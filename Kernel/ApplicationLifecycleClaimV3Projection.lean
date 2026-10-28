@@ -4,8 +4,27 @@ signed package action descriptor and grain launch binding are retained through
 the original v3 BEGIN and claim. A native claim receipt identifies a durable
 reservation; this projection alone does not attest a process or allow a retry.
 -/
-import Kernel.ApplicationLifecycleClaimProjection
-import Kernel.ApplicationLifecycleClaimV3Ingress
+module
+
+public import Kernel.ApplicationLifecycleClaimProjection
+public import Kernel.ApplicationLifecycleClaimV3Ingress
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleClaimV3Projection
 

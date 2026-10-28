@@ -5,6 +5,7 @@
 //! `serve_dynamic_with_aux`; each request is authored, signed and admitted by
 //! Mini before fd 3 delivery (`dispatch_delivery`).
 
+use crate::io_context::IoContext;
 use crate::hostd::Journal;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -239,7 +240,7 @@ impl CustodianPolicy {
         let file = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW)
-            .open(directory.join("custodian.json"))?;
+            .open(directory.join("custodian.json")).ctx("open", &(directory.join("custodian.json")))?;
         let meta = file.metadata()?;
         if !meta.is_file()
             || meta.nlink() != 1
@@ -310,7 +311,7 @@ impl CustodianPolicy {
 
 fn random_token() -> io::Result<String> {
     let mut bytes = [0_u8; 32];
-    File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut bytes)?;
     let mut token = String::with_capacity(64);
     for byte in bytes {
         use std::fmt::Write as _;
@@ -325,7 +326,7 @@ fn write_private(directory: &Path, name: &str, bytes: &[u8]) -> io::Result<()> {
         .create_new(true)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(directory.join(name))?;
+        .open(directory.join(name)).ctx("open", &(directory.join(name)))?;
     file.write_all(bytes)?;
     file.sync_all()
 }
@@ -401,7 +402,7 @@ fn initialize_custodian_policy(
     write_private(directory, "bootstrap.token", bootstrap.as_bytes())?;
     write_private(directory, "api.token", api.as_bytes())?;
     write_private(directory, "custodian.json", &serde_json::to_vec(&config)?)?;
-    File::open(directory)?.sync_all()?;
+    File::open(&directory).ctx("open", &directory)?.sync_all()?;
     let _ = CustodianPolicy::load(directory)?;
     Ok(())
 }
@@ -1332,7 +1333,7 @@ impl PrivateHttpEntrance {
             .create(true)
             .mode(0o600)
             .custom_flags(libc::O_NOFOLLOW)
-            .open(directory.join(".http.lock"))?;
+            .open(directory.join(".http.lock")).ctx("open", &(directory.join(".http.lock")))?;
         let meta = lock.metadata()?;
         if !meta.is_file()
             || meta.nlink() != 1
@@ -1367,24 +1368,24 @@ impl PrivateHttpEntrance {
                         ))
                     }
                     Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => {
-                        let current = fs::symlink_metadata(&socket)?;
+                        let current = fs::symlink_metadata(&socket).ctx("inspect", &socket)?;
                         if current.dev() != old.dev() || current.ino() != old.ino() {
                             return Err(refuse("custodian HTTP stale socket changed"));
                         }
-                        fs::remove_file(&socket)?;
+                        fs::remove_file(&socket).ctx("remove", &socket)?;
                     }
                     Err(error) => return Err(error),
                 }
             }
         }
-        let listener = UnixListener::bind(&socket)?;
-        fs::set_permissions(&socket, fs::Permissions::from_mode(0o600))?;
+        let listener = UnixListener::bind(&socket).ctx("bind", &socket)?;
+        fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)).ctx("set permissions", &socket)?;
         if let Some(edge) = policy.edge_gid {
             // Group first, then the group bits: never group-open to another group.
             std::os::unix::fs::lchown(&socket, None, Some(edge))?;
-            fs::set_permissions(&socket, fs::Permissions::from_mode(socket_mode(&policy)))?;
+            fs::set_permissions(&socket, fs::Permissions::from_mode(socket_mode(&policy))).ctx("set permissions", &socket)?;
         }
-        let meta = fs::symlink_metadata(&socket)?;
+        let meta = fs::symlink_metadata(&socket).ctx("inspect", &socket)?;
         if !meta.file_type().is_socket()
             || meta.uid() != unsafe { libc::geteuid() }
             || policy.edge_gid.is_some_and(|edge| meta.gid() != edge)
@@ -1481,7 +1482,7 @@ impl Drop for PrivateHttpEntrance {
     fn drop(&mut self) {
         if let Ok(meta) = fs::symlink_metadata(&self.socket) {
             if meta.dev() == self.socket_dev && meta.ino() == self.socket_ino {
-                let _ = fs::remove_file(&self.socket);
+                let _ = fs::remove_file(&self.socket).ctx("remove", &self.socket);
             }
         }
     }
@@ -1496,7 +1497,7 @@ fn read_private_token(directory: &Path, name: &str, expected: &[u8; 32]) -> io::
     let mut file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(directory.join(name))?;
+        .open(directory.join(name)).ctx("open", &(directory.join(name)))?;
     let meta = file.metadata()?;
     if !meta.is_file()
         || meta.nlink() != 1
@@ -1576,7 +1577,7 @@ fn bootstrap(
             // The marker is durable before the cookie is emitted. A lost reply
             // needs operator review; the bootstrap token is never replayed.
             write_private(directory, "bootstrap.used", b"used\n")?;
-            File::open(directory)?.sync_all()?;
+            File::open(&directory).ctx("open", &directory)?.sync_all()?;
             let response = format!(
                 "HTTP/1.1 303 See Other\r\nLocation: /\r\nSet-Cookie: {SESSION_COOKIE}={browser}; Secure; HttpOnly; SameSite=Strict; Path=/\r\nContent-Length: 0\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\nConnection: close\r\n\r\n"
             );

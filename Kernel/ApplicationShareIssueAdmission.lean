@@ -4,8 +4,12 @@ image supplies the source-authored ticket birth and the current signed app
 `.delegateObject` check. This module does not yet emit a durable special issue
 intent or implement replay; callers must not treat Accepted as a receipt.
 -/
-import Kernel.ApplicationShareIssueDelegation
-import Kernel.ResourceBirthReceiver
+module
+
+public import Kernel.ApplicationShareIssueDelegation
+public import Kernel.ResourceBirthReceiver
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationShareIssueAdmission
 open Minidregg.Compiler

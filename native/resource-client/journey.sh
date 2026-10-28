@@ -54,6 +54,8 @@
 #          refused overdraw and a topic send (journey.d/jfleet-incoming.sh)
 #   JSLK   A7/A8 on the shell path: law install/refusal/revision, kind create/revise, the built-in story
 #          (journey.d/jstorylaw.sh; the web path's rows are jweb-frontend's tour rows)
+#   JSGM   door 11 with a GM who is not the author: story new --gm, seal, invite gm, join, narrate admitted, the author's narrate
+#          refused (journey.d/jstorygm.sh; enrolls one friend)
 #   JR17   R17: home, key, app, adopt-next-key, hermes through mini shell, each ended by the Host's
 #          decision or a named refusal (journey.d/jr17.sh)
 #   JP2    J-PRIV-2 (PRIVACY.md): a friend enrolled from their own key reaches
@@ -121,7 +123,7 @@ HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 SELF="$HERE/$(basename -- "$0")"
 . "$HERE/journey.d/lib/shortdir.sh"
 
-STEPS=(J0 J1 J2 J3 J12X J4 P7KR THIN JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KIX KF KH K12C JMKT K12I K12T K12N K12E K12M K12R K12H WEB JWF KW K10C JLI KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12W JNAMES JDV JPD J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JFEEDBACK JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JGATE JDISCLOSE JESC JFLEETIN JSLK JR17 JAUDIT)
+STEPS=(J0 J1 J2 J3 J12X J4 P7KR THIN JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KIX KF KH K12C JMKT K12I K12T K12N K12E K12M K12R K12H WEB JWF KW K10C JLI KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12W JNAMES JDV JPD J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JFEEDBACK JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JGATE JDISCLOSE JESC JFLEETIN JSLK JSGM JR17 JAUDIT)
 # The two journeys (docs/JOURNEY.md "Two journeys"; DEMO-PREFIX lane L9). SPINE, the tree-neutral J0-J8
 # of the 2026-09-29 bake-off, runs in both. Every other step is in exactly one set:
 #   demo    what the public demo's surfaces need: the ssh shell, documents and the web, rooms, Hermes
@@ -132,7 +134,7 @@ STEPS=(J0 J1 J2 J3 J12X J4 P7KR THIN JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K1
 # JOURNEY_SET=demo|kernel selects SPINE + that set (unset: every step). A step in no set, in two, or a
 # set naming no step refuses every run before anything starts: a new step must be placed.
 SPINE=(J0 J1 J2 J3 J4 J5 J6 J7 J8)
-DEMO_STEPS=(J12X JSERVE THIN KC KT K10 KIX K10C JLI KTPL JPRIV1 JCHAT JFEEDBACK J14 J17 K12C K12T K12M K12H K12R K12I WEB JWF J12 J12W JNAMES JDV JPD M3 M4 M5 M6 M7 M8 JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JGATE JDISCLOSE JESC JFLEETIN JSLK JR17 JAUDIT)
+DEMO_STEPS=(J12X JSERVE THIN KC KT K10 KIX K10C JLI KTPL JPRIV1 JCHAT JFEEDBACK J14 J17 K12C K12T K12M K12H K12R K12I WEB JWF J12 J12W JNAMES JDV JPD M3 M4 M5 M6 M7 M8 JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JGATE JDISCLOSE JESC JFLEETIN JSLK JSGM JR17 JAUDIT)
 KERNEL_STEPS=(P7KR G K4 KBW JJ K11 KCH KF KH JMKT K12N K12E KW J15 JN2 JN3 JN3P JN5 JSYNC BD J13 JJOB1 JJOB JJOBM KCL J12A JINSPECT JLS)
 journey_sets_check() {
   local id n bad=""
@@ -366,7 +368,7 @@ TITLE[JLS]="law-sat: an unsatisfiable law is caught at install; can --any's writ
 TITLE[JPAY1]="pay watcher: finalized transfers become Observation records"
 TITLE[JPAY2]="the pay cell: tariff, deposit book, assignment (own Store)"
 TITLE[KC]="K-CLOCK: the one clock; clock/now in every resource law"
-TITLE[JP2]="a friend's key never touches the box: enroll, use and delegate over the proxy"
+TITLE[JP2]="a friend's key never touches the box: enroll, create (thin birth), use and delegate over the proxy"
 TITLE[KT]="C14 TAIL-BOUND: no write past certified + L; a checkpoint restores progress"
 TITLE[JROT]="key pre-rotation: a stolen daily key cannot rotate; the next key does"
 TITLE[JROTL]="key rotation through the generic Receiver: a lost reply is found by lookup, exactly once; a rotation the Host never saw is absent and never resubmitted"
@@ -375,6 +377,7 @@ TITLE[JGATE]="gateway law: an ordinary subject's signed direct call on the gatew
 TITLE[JDISCLOSE]="disclosure: a narrowed refusal, authentication before any target, the installer's lockout, eight client fixes"
 TITLE[JESC]="escrow: enc-public, keygen --escrow-to-sponsor and escrow-recover (wrong subject and wrong sponsor refused); the Host answers a read signed with the recovered key as the friend"
 TITLE[JFLEETIN]="fleet incoming: the helm adapter's incoming ledger (Host op 180) holds exactly the confirmed transfer and topic send, not the refused overdraw"
+TITLE[JSGM]="a story told by a GM who is not its author: sealed, the GM invited, joined and narrating once; the author is refused when narrating (door 11, the shared-names control-capability red)"
 TITLE[JSLK]="shell path of doors 11 and 12: a law installed, a write refused by its clause, the law revised, a kind defined and revised, the built-in story sealed with a legal move admitted and the impossible one refused"
 TITLE[JR17]="R17 verbs through mini shell: home, key, app, adopt-next-key and hermes each end in the Host's decision or a named refusal"
 TITLE[JAUDIT]="mini store audit: the Store re-derived from genesis, then every ingress re-admitted; one flipped byte of a non-head record in a copy is refused naming its height"
@@ -535,6 +538,17 @@ run_step() {
     STATUS[$id]=SKIPPED; WALL[$id]=0.000; ART[$id]=""; DET[$id]="skipped: not in JOURNEY_ONLY"
     printf '%s\t%s\t%s\t%s\t%s\n' "$id" SKIPPED 0.000 "" "${DET[$id]}" >>"$TSV"
     echo "STEP $id SKIPPED" >&2
+    result_json "$(frontier)"
+    return
+  fi
+  # PRODUCT_COMMIT (the candidate's commit, set by the runner when the harness is main's): a step whose behaviour
+  # the candidate does not carry is SKIPPED-NOT-IN-CANDIDATE, named with the commit it needs (scripts/gates/row-requires.tsv).
+  local needs
+  if [ -n "${PRODUCT_COMMIT:-}" ] && ! needs=$(python3 "$HERE/../../scripts/gates/row-requires.py" check "$id"); then
+    [ -n "$needs" ] || { echo "journey: row-requires could not judge $id against $PRODUCT_COMMIT" >&2; exit 2; }
+    STATUS[$id]=SKIPPED-NOT-IN-CANDIDATE; WALL[$id]=0.000; ART[$id]=""; DET[$id]="$needs"
+    printf '%s\t%s\t%s\t%s\t%s\n' "$id" SKIPPED-NOT-IN-CANDIDATE 0.000 "" "$needs" >>"$TSV"
+    echo "STEP $id SKIPPED-NOT-IN-CANDIDATE ($needs)" >&2
     result_json "$(frontier)"
     return
   fi
@@ -1172,10 +1186,11 @@ step_JDISCLOSE() { hook jdisclose "a --fields 1 guest is refused naming no claus
 step_M7() { hook m7 "a candidate built from portable interfaces reproduces the pinned hashes and runs this journey with no private fixture (list item 7, lane m7-candidate)" candidate; }
 step_JESC() { hook jescrow "the escrow loop closes: the sponsor recovers the friend's key from the escrow, and the Host answers a signed read made with it as the friend (R8)"; }
 step_JFLEETIN() { hook jfleet-incoming "fleet-sign incoming (the helm adapter) lists exactly the accepted fleet turns that paid the profile: the transfer and the topic send, not the refused overdraw (R10, Host op 180)"; }
+step_JSGM() { hook jstorygm "a story told by a GM who is not its author: invite as gm, join, one narrate admitted, the author's narrate refused" shell; }
 step_JSLK() { hook jstorylaw "shell path of the tour's doors 11 and 12: law, kind and the built-in story with the Host's admitted / refused-by-clause outcomes named (DEMO A7, A8)" shell; }
 step_JR17() { hook jr17 "home, key, app, adopt-next-key and hermes through mini shell, each ended by the Host's decision or a named refusal (R17)" shell; }
 step_JAUDIT() { hook jstoreaudit "mini store audit re-derives the Store from genesis (chain, tags, accumulator, spent map, checkpoints, head root) then re-admits every ingress and exits 0 printing both lines; one flipped byte of a non-head record in a copy exits 1 naming its height (lane plat-store-audit)"; }
-step_JP2() { hook jpriv2 "a subject enrolled from its own machine creates, writes, reads and delegates through mini --remote; no key of it on the box; a tampered frame is refused (J-PRIV-2, lane local-client)"; }
+step_JP2() { hook jpriv2 "a subject enrolled from its own machine creates under thin consent (Kernel.NativeThinBirth), writes, reads and delegates through mini --remote; a swapped birth plan is refused; no key of it on the box; a tampered frame is refused (J-PRIV-2, lane local-client)"; }
 
 # ---------------------------------------------------------------- run
 
@@ -1266,6 +1281,7 @@ run_step JDISCLOSE J0
 run_step JESC J0
 run_step JFLEETIN J0
 run_step JSLK J0
+run_step JSGM J0
 run_step JR17 J0
 run_step JAUDIT J0
 

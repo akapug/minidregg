@@ -43,10 +43,30 @@ by one guarded operation.  A production
 layout may shard balances and leases into sparse fields while preserving the
 same operation normalization and conservation law.
 -/
-import Mathlib.Data.DFinsupp.Encodable
-import Theory.CellState
-import Theory.TypedAuthorization
-import Theory.AssertAxioms
+module
+
+public import Mathlib.Data.DFinsupp.Encodable
+public import Theory.CellState
+public import Theory.TypedAuthorization
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Mathlib.Tactic.DeriveCountable
+
+@[expose] public section
 
 namespace Minidregg.Theory.CanonicalResourceKernel
 

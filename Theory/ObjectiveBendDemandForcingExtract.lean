@@ -10,7 +10,27 @@
 * `HeapForces` / `yieldedPlan_heapForces`: a successful Plan extraction is a chain of finished
   closed demands (`demand_forces`), so the yielded heap forces to the extraction's heap, on
   every valid control and stack of the yielded heap. -/
-import Theory.ObjectiveBendDemandForcingSegment
+module
+
+public import Theory.ObjectiveBendDemandForcingSegment
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Theory.ObjectiveBendDemandForcing
 open Minidregg.Theory.ObjectiveBendOpenRecursion
 open Minidregg.Theory.ObjectiveBendDemandMachine

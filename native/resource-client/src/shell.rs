@@ -1609,7 +1609,7 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             let p = crate::shell_grammar::parse(&crate::shell_grammar::LAW, &w)?;
             match p.leaf.path {
                 ["law", "show"] => client("workspace", vec![flag("action", "law-show"), flag("dir", ws()), flag("name", p.arg(0))]),
-                ["law", "export", "show"] => client("workspace", vec![flag("action", "law-export-show"), flag("dir", ws()), flag("name", p.arg(1))]),
+                ["law", "export", "show"] => client("workspace", vec![flag("action", "law-export-show"), flag("dir", ws()), flag("name", p.arg(0))]),
                 ["law", "export"] => {
                     let component = if p.arg(2) == "none" { Value::Null } else { json_argument(session, p.arg(2), "descendant law component")? };
                     proposal(session, p.arg(0), &json!({"type":"minidregg-workspace-proposal-v1","action":"install-export","name":p.arg(1),"component":component}))
@@ -2697,6 +2697,38 @@ mod tests {
         let _ = std::fs::remove_dir_all(&home);
     }
 
+    /// Every `apps` grammar leaf, planned by the shell and read back by `apps::run`'s own argument
+    /// reader, leaves no flag unconsumed: the shell passes the workspace to every apps verb, and
+    /// `run` takes it for every action (it had left `--dir` on all but install and bootstrap, so
+    /// `apps search` and `apps list` failed with "unknown or duplicate option --dir").
+    #[test]
+    fn every_apps_leaf_is_read_whole_by_the_apps_argument_reader() {
+        let home = std::env::temp_dir().join(format!("mini-apps-leaves-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let s = Session { home: home.clone(), ..session() };
+        for leaf in crate::shell_grammar::APPS.leaves {
+            let mut words = leaf.path.iter().map(|w| w.to_string()).collect::<Vec<_>>();
+            for a in leaf.args {
+                words.push(match a.name {
+                    "GRAIN" => "a4501", "MEMBER" => "bob", "FILE" => "out.spk", "TOKEN" => "t0",
+                    "REQUEST-ID" => "00000000000000000000000000000000", "TERM" => "slides", _ => "x1",
+                }.to_owned());
+            }
+            let line = words.join(" ");
+            let Plan::Client { command, flags, .. } = plan(&s, &line).unwrap_or_else(|e| panic!("{line}: {e}")) else { panic!("{line}: not a client plan") };
+            assert_eq!(command, "apps", "{line}");
+            let args = crate::Args { command: "apps".into(), values: flags.into_iter().map(|(k, v)| (std::ffi::OsString::from(format!("--{k}")), v)).collect() };
+            // The run may fail on a world this test does not have (no index, no worker socket); it must
+            // not fail on the arguments.
+            if let Err(error) = crate::apps::run(args) {
+                assert!(!error.contains("unknown or duplicate option") && !error.contains("unexpected argument"), "{line}: {error}");
+            }
+        }
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
     fn client(plan: Plan) -> (String, Vec<(String, String)>, Vec<(PathBuf, String)>) {
         let Plan::Client { command, flags, writes } = plan else {
             panic!("not a client plan: {plan:?}");
@@ -2823,6 +2855,14 @@ mod tests {
         let removed=client(super::plan(&s,"law export remove poll none").unwrap());
         let request:Value=serde_json::from_str(&removed.2[0].1).unwrap();
         assert!(request["component"].is_null());
+    }
+
+    #[test]
+    fn law_export_show_passes_the_whole_reference() {
+        let s=session();
+        let shown=client(super::plan(&s,"law export show jli-room/notes").unwrap());
+        assert!(shown.1.contains(&("action".into(),"law-export-show".into())));
+        assert!(shown.1.contains(&("name".into(),"jli-room/notes".into())));
     }
 
     #[test]

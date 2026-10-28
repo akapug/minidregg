@@ -7,16 +7,37 @@ Logical height and admission share one Loaded image, and the receiver's CAS is
 against that exact image. Contention requires preparation/signing against the
 new state. Exact historical replay is looked up before fresh authorization.
 -/
-import Kernel.NativeHostContext
-import Kernel.ObjectiveBendAuthenticatedInputs
-import Kernel.NativeHostGrainBirth
-import Kernel.GrainResourceBirthReceiver
-import Kernel.NativeObservationController
-import Kernel.NativeHostReplay
-import Compiler.DurableHistoryStore
-import Kernel.FnConsumerProgressHistory
-import Kernel.PreparedInvocationDiagnostics
-import Kernel.NativeHostLight
+module
+
+public import Kernel.NativeHostContext
+public import Kernel.ObjectiveBendAuthenticatedInputs
+public import Kernel.NativeHostGrainBirth
+public import Kernel.GrainResourceBirthReceiver
+public import Kernel.NativeObservationController
+public import Kernel.NativeHostReplay
+public import Compiler.DurableHistoryStore
+public import Kernel.FnConsumerProgressHistory
+public import Kernel.PreparedInvocationDiagnostics
+public import Kernel.NativeHostLight
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.NativeHost
 

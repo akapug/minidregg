@@ -4,6 +4,7 @@
 //! a crash, retained artifacts may resume an already-fsynced Fenced journal
 //! or audit Stopped, but can never mint another fresh callback or fence Running.
 
+use crate::io_context::IoContext;
 use crate::completion_custodian::preflight_custodian;
 use crate::dispatch_author::private_signing_key;
 use crate::dispatch_author::SignerPin;
@@ -61,8 +62,8 @@ fn acquire_run_lock(journal_dir: &Path) -> io::Result<File> {
         .create(true)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(&path)?;
-    let named = fs::symlink_metadata(&path)?;
+        .open(&path).ctx("open", &path)?;
+    let named = fs::symlink_metadata(&path).ctx("inspect", &path)?;
     let opened = lock.metadata()?;
     if !opened.is_file()
         || named.dev() != opened.dev()
@@ -84,7 +85,7 @@ fn acquire_run_lock(journal_dir: &Path) -> io::Result<File> {
             Err(error)
         };
     }
-    let named = fs::symlink_metadata(&path)?;
+    let named = fs::symlink_metadata(&path).ctx("inspect", &path)?;
     if named.dev() != opened.dev() || named.ino() != opened.ino() {
         return Err(invalid("STOP supervisor lock path changed"));
     }
@@ -279,7 +280,7 @@ fn inspect_original(
     let committed = read_private(&claim_dir.join("committed-v3.bin"), MAX_FRAME)?;
     let original_frame = read_private(&claim_dir.join("op26-frame.bin"), MAX_FRAME)?;
     let committed_tag = b"DREGG/APPLICATION/LIFECYCLE-CLAIM-COMMITTED/v3";
-    if framed_payload(&original_frame, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, committed_tag)? != committed {
+    if framed_payload("lifecycle claim submit", &original_frame, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, committed_tag)? != committed {
         return Err(invalid("STOP original fresh callback differs"));
     }
     let requested: Value = serde_json::from_slice(&read_private(
@@ -357,13 +358,13 @@ fn inspect_original(
 
 fn fresh_probe(journal_dir: &Path, label: &str) -> io::Result<PathBuf> {
     let mut random = [0u8; 16];
-    File::open("/dev/urandom")?.read_exact(&mut random)?;
+    File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut random)?;
     Ok(journal_dir.join(format!("{label}-{}", hex(&random))))
 }
 
 fn nonce() -> io::Result<String> {
     let mut bytes = [0u8; 16];
-    File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut bytes)?;
     let number = u128::from_le_bytes(bytes);
     if number == 0 {
         return Err(invalid("STOP report nonce zero"));
@@ -689,14 +690,14 @@ fn report_needs_fresh(directory: &Path) -> io::Result<bool> {
     if !absent(&directory.join("report-source.json"))? {
         return Ok(false);
     }
-    if fs::read_dir(directory)?.next().is_some() {
+    if fs::read_dir(&directory).ctx("list", &directory)?.next().is_some() {
         return Err(invalid(
             "STOP report directory has artifacts but no first source",
         ));
     }
     // An empty directory is the crash point immediately after mkdir; there
     // are no nonce or signed bytes to preserve yet.
-    fs::remove_dir(directory)?;
+    fs::remove_dir(&directory).ctx("remove", &directory)?;
     Ok(true)
 }
 
@@ -773,7 +774,7 @@ fn assemble_completion(
     )?;
     let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_COMPLETION_PLAN, &fixed.selector.framed(&request)?)?;
     write_new(attempt_dir, "op70-frame.bin", &reply)?;
-    let plan = framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_COMPLETION_PLAN, PLAN_TAG)?;
+    let plan = framed_payload("launch completion plan", &reply, crate::host_operations::APPLICATION_LAUNCH_COMPLETION_PLAN, PLAN_TAG)?;
     let plan_path = write_new(attempt_dir, "plan.bin", plan)?;
     let view: Value = serde_json::from_slice(&operator.tool(
         "inspect",
@@ -835,7 +836,7 @@ fn assemble_completion(
     write_new(attempt_dir, "op71-requested.bin", &pair)?;
     let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_COMPLETION_ASSEMBLE, &pair)?;
     write_new(attempt_dir, "op71-frame.bin", &reply)?;
-    let ingress = framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_COMPLETION_ASSEMBLE, INGRESS_TAG)?.to_vec();
+    let ingress = framed_payload("launch completion assemble", &reply, crate::host_operations::APPLICATION_LAUNCH_COMPLETION_ASSEMBLE, INGRESS_TAG)?.to_vec();
     write_new(attempt_dir, "completion-v2.bin", &ingress)?;
     Ok(ingress)
 }
@@ -879,7 +880,7 @@ fn completion_ingress_retained(
     }
     let ingress = read_private(&dir.join("completion-v2.bin"), MAX_FRAME)?;
     let frame = read_private(&dir.join("op71-frame.bin"), MAX_FRAME)?;
-    if framed_payload(&frame, crate::host_operations::APPLICATION_LAUNCH_COMPLETION_ASSEMBLE, INGRESS_TAG)? != ingress {
+    if framed_payload("launch completion assemble", &frame, crate::host_operations::APPLICATION_LAUNCH_COMPLETION_ASSEMBLE, INGRESS_TAG)? != ingress {
         return Err(invalid("STOP retained completion assembly differs"));
     }
     Ok(ingress)
@@ -903,8 +904,8 @@ fn completion_dir(base: &Path) -> io::Result<(PathBuf, bool)> {
             current = next;
             continue;
         }
-        if fs::read_dir(&current)?.next().is_none() {
-            fs::remove_dir(&current)?;
+        if fs::read_dir(&current).ctx("list", &current)?.next().is_none() {
+            fs::remove_dir(&current).ctx("remove", &current)?;
             return Ok((current, false));
         }
         // Even a complete detached assembly may have become stale if an
@@ -974,7 +975,7 @@ fn retained_completion_anchor(
     {
         return Ok(None);
     }
-    let payload = framed_payload(&bytes, crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_SUBMIT, OUTCOME_TAG)?;
+    let payload = framed_payload("lifecycle completion submit", &bytes, crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_SUBMIT, OUTCOME_TAG)?;
     let probe = fresh_probe(dir, "frame-recovery")?;
     DirBuilder::new().mode(0o700).create(&probe)?;
     let input = write_new(&probe, "outcome.bin", payload)?;
@@ -1011,7 +1012,7 @@ fn complete_once_or_lookup(
         write_new(dir, "op38-requested.json", &serde_json::to_vec(&marker)?)?;
         let frame = operator.invoke(crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_SUBMIT, ingress)?;
         write_new(dir, "op38-frame.bin", &frame)?;
-        let payload = framed_payload(&frame, crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_SUBMIT, OUTCOME_TAG)?;
+        let payload = framed_payload("lifecycle completion submit", &frame, crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_SUBMIT, OUTCOME_TAG)?;
         let input = write_new(dir, "op38-outcome.bin", payload)?;
         let inspected =
             operator.tool("inspect", "outcome", &input, &dir.join("op38-outcome.json"))?;
@@ -1035,7 +1036,7 @@ fn complete_once_or_lookup(
     let probe = fresh_probe(dir, "op39-lookup")?;
     DirBuilder::new().mode(0o700).create(&probe)?;
     let frame = operator.invoke(crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_LOOKUP, ingress)?;
-    let payload = framed_payload(&frame, crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_LOOKUP, OUTCOME_TAG)?;
+    let payload = framed_payload("lifecycle completion lookup", &frame, crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_LOOKUP, OUTCOME_TAG)?;
     let input = write_new(&probe, "outcome.bin", payload)?;
     let inspected = operator.tool("inspect", "outcome", &input, &probe.join("outcome.json"))?;
     let view: Value = serde_json::from_slice(&inspected)?;
@@ -1093,14 +1094,14 @@ fn set_aside_pure_begin(config: &StopConfig, journal_dir: &Path) -> io::Result<(
         return Ok(());
     }
     let mut random = [0u8; 16];
-    File::open("/dev/urandom")?.read_exact(&mut random)?;
+    File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut random)?;
     let aside = journal_dir.join(format!("stop-begin-plan-only-{}", hex(&random)));
-    fs::rename(attempt, &aside)?;
-    File::open(journal_dir)?.sync_all()?;
+    fs::rename(attempt, &aside).ctx("rename", &attempt)?;
+    File::open(&journal_dir).ctx("open", &journal_dir)?.sync_all()?;
     if !absent(&active)? {
-        fs::rename(&active, aside.join("active-marker.json"))?;
-        File::open(&aside)?.sync_all()?;
-        File::open(journal_dir)?.sync_all()?;
+        fs::rename(&active, aside.join("active-marker.json")).ctx("rename", &active)?;
+        File::open(&aside).ctx("open", &aside)?.sync_all()?;
+        File::open(&journal_dir).ctx("open", &journal_dir)?.sync_all()?;
     }
     Ok(())
 }

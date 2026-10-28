@@ -12,65 +12,86 @@ signature helper is the existing cryptographic execution boundary. Unknown old
 wire versions and unsupported event families refuse rather than becoming opaque
 trusted history. Profile/clock changes require an explicit future migration.
 -/
-import Kernel.NativeHostContext
-import Kernel.NativeHostServed
-import Kernel.ObjectiveBendAuthenticatedInputs
-import Kernel.CarriedSessionEnrollmentAdmission
-import Kernel.CarriedDispatchAdmission
-import Kernel.AuditTiming
-import Kernel.GrainResourceBirthReceiver
-import Kernel.FnSelectiveReleaseAdmission
-import Kernel.FnSelectiveReleaseSourceReceiver
-import Kernel.ApplicationLifecycleBeginReceiver
-import Kernel.ApplicationLifecycleClaimCore
-import Kernel.ApplicationLifecycleClaimV2Core
-import Kernel.ApplicationShareIssueReceiver
-import Kernel.ApplicationShareIssueGrainReceiver
-import Kernel.ApplicationAgentLifetimeGrantIntentTemplate
-import Kernel.ApplicationAgentLifetimeDispatchCore
-import Kernel.ApplicationDispatchHistoricalCore
-import Kernel.ApplicationDispatchAgentCore
-import Kernel.FnConsumerFrontierReplay
-import Kernel.FnConsumerNamespaceAdmissionAt
-import Kernel.FnConsumerNamespaceHistory
-import Kernel.FnSelectedPollReleaseShape
-import Kernel.FnSelectedPollAdmissionAt
-import Kernel.FnEmptyPollAdmissionAtV2
-import Kernel.ApplicationLifecycleCompletionCore
-import Kernel.ApplicationLifecycleBeginV3Admission
-import Kernel.ApplicationLifecycleClaimV3Core
-import Kernel.ApplicationLifecycleCompletionV2Core
-import Kernel.ApplicationFailedStartRecoveryCore
-import Kernel.ApplicationLifecycleRetryBeginV4Admission
-import Kernel.ApplicationLifecycleRetryClaimV4Core
-import Kernel.ApplicationLifecycleRetryCompletionV4Core
-import Kernel.ApplicationLifecycleCreatedHistory
-import Kernel.ApplicationLifecycleRetryCompletionV4CreatedHistory
-import Kernel.ApplicationGrainSessionEnrollmentIntent
-import Kernel.ParticipantKeyEnrollmentReceiver
-import Kernel.Receivers.SubjectKeyRotation
-import Kernel.SubjectKeyCommitmentAdoption
-import Kernel.ParticipantFactoryProvisioningReceiver
-import Kernel.FleetTurnReceiver
-import Kernel.PayBookReceiver
-import Kernel.PlatformInstallReceiver
-import Kernel.PayAssignmentReceiver
-import Kernel.RealmWellReceiver
-import Kernel.ClockTickReceiver
-import Kernel.PayObservationReceiver
-import Kernel.PayEnrolReceiver
-import Kernel.PayEnrolV2Receiver
-import Kernel.PayClaimReceiver
-import Kernel.PurseRefillReceiver
-import Kernel.JobMoneyReceiver
-import Kernel.ObjectiveActivityReceiver
-import Kernel.SeatReceiver
-import Kernel.CertifyReceiver
-import Kernel.CapabilityRenounce
-import Kernel.JointReserveIngress
-import Kernel.JointReceiver
-import Kernel.JointControlBootstrap
-import Kernel.JointControlBootstrapBundle
+module
+
+public import Kernel.NativeHostContext
+public import Kernel.NativeHostServed
+public import Kernel.ObjectiveBendAuthenticatedInputs
+public import Kernel.CarriedSessionEnrollmentAdmission
+public import Kernel.CarriedDispatchAdmission
+public import Kernel.AuditTiming
+public import Kernel.GrainResourceBirthReceiver
+public import Kernel.FnSelectiveReleaseAdmission
+public import Kernel.FnSelectiveReleaseSourceReceiver
+public import Kernel.ApplicationLifecycleBeginReceiver
+public import Kernel.ApplicationLifecycleClaimCore
+public import Kernel.ApplicationLifecycleClaimV2Core
+public import Kernel.ApplicationShareIssueReceiver
+public import Kernel.ApplicationShareIssueGrainReceiver
+public import Kernel.ApplicationAgentLifetimeGrantIntentTemplate
+public import Kernel.ApplicationAgentLifetimeDispatchCore
+public import Kernel.ApplicationDispatchHistoricalCore
+public import Kernel.ApplicationDispatchAgentCore
+public import Kernel.FnConsumerFrontierReplay
+public import Kernel.FnConsumerNamespaceAdmissionAt
+public import Kernel.FnConsumerNamespaceHistory
+public import Kernel.FnSelectedPollReleaseShape
+public import Kernel.FnSelectedPollAdmissionAt
+public import Kernel.FnEmptyPollAdmissionAtV2
+public import Kernel.ApplicationLifecycleCompletionCore
+public import Kernel.ApplicationLifecycleBeginV3Admission
+public import Kernel.ApplicationLifecycleClaimV3Core
+public import Kernel.ApplicationLifecycleCompletionV2Core
+public import Kernel.ApplicationFailedStartRecoveryCore
+public import Kernel.ApplicationLifecycleRetryBeginV4Admission
+public import Kernel.ApplicationLifecycleRetryClaimV4Core
+public import Kernel.ApplicationLifecycleRetryCompletionV4Core
+public import Kernel.ApplicationLifecycleCreatedHistory
+public import Kernel.ApplicationLifecycleRetryCompletionV4CreatedHistory
+public import Kernel.ApplicationGrainSessionEnrollmentIntent
+public import Kernel.ParticipantKeyEnrollmentReceiver
+public import Kernel.Receivers.SubjectKeyRotation
+public import Kernel.SubjectKeyCommitmentAdoption
+public import Kernel.ParticipantFactoryProvisioningReceiver
+public import Kernel.FleetTurnReceiver
+public import Kernel.PayBookReceiver
+public import Kernel.PlatformInstallReceiver
+public import Kernel.PayAssignmentReceiver
+public import Kernel.RealmWellReceiver
+public import Kernel.ClockTickReceiver
+public import Kernel.PayObservationReceiver
+public import Kernel.PayEnrolReceiver
+public import Kernel.PayEnrolV2Receiver
+public import Kernel.PayClaimReceiver
+public import Kernel.PurseRefillReceiver
+public import Kernel.JobMoneyReceiver
+public import Kernel.ObjectiveActivityReceiver
+public import Kernel.SeatReceiver
+public import Kernel.CertifyReceiver
+public import Kernel.CapabilityRenounce
+public import Kernel.JointReserveIngress
+public import Kernel.JointReceiver
+public import Kernel.JointControlBootstrap
+public import Kernel.JointControlBootstrapBundle
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.NativeHostReplay
 
@@ -1526,7 +1547,19 @@ def Derived.ofBootstrapBundle {config : Config} {opened : Opened config}
     begin := none
     beginV2 := none
     claimV2 := none
-    bootstrapBundle := some ⟨source,accepted,rfl⟩ }
+    bootstrapBundle := some ⟨source,accepted,rfl⟩
+    ordinary := none
+    beginV3 := none
+    claimV3 := none
+    completionV2 := none
+    grantIssue := none
+    jointReservation := none
+    bootstrap := none
+    kernel := none
+    failedStartRecovery := none
+    beginV4 := none
+    claimV4 := none
+    completionV4 := none }
 
 /-- Fresh reserve admission is retained as executable proof data for source
 replay and one physical append; no raw event can construct this witness. -/
@@ -1540,7 +1573,19 @@ def Derived.ofJointReserve {config : Config} {opened : Opened config}
     begin := none
     beginV2 := none
     claimV2 := none
-    jointReservation := some ⟨reserved,rfl⟩ }
+    jointReservation := some ⟨reserved,rfl⟩
+    ordinary := none
+    beginV3 := none
+    claimV3 := none
+    completionV2 := none
+    grantIssue := none
+    bootstrap := none
+    bootstrapBundle := none
+    kernel := none
+    failedStartRecovery := none
+    beginV4 := none
+    claimV4 := none
+    completionV4 := none }
 
 /-- Retain the original native birth admission for an exact CAS readback.
 The accepted value can only be made by the complete birth admission path. -/
@@ -1554,7 +1599,19 @@ def Derived.ofBirth {config : Config} {opened : Opened config}
     begin := none
     beginV2 := none
     claimV2 := none
-    bootstrap := JointControlBootstrap.admitBirth accepted }
+    bootstrap := JointControlBootstrap.admitBirth accepted
+    ordinary := none
+    beginV3 := none
+    claimV3 := none
+    completionV2 := none
+    grantIssue := none
+    jointReservation := none
+    bootstrapBundle := none
+    kernel := none
+    failedStartRecovery := none
+    beginV4 := none
+    claimV4 := none
+    completionV4 := none }
 
 theorem Derived.ofBirth_intent {config : Config} {opened : Opened config}
     (accepted : ResourceBirthPolicyController.Concrete.AcceptedBirth
@@ -1662,7 +1719,19 @@ def FailedStartRecoveryAt.toDerived {config : Config} {opened : Opened config}
   { intent := admitted.intent
     admission := .applicationFailedStartRecovery admitted
     issue := none, begin := none, beginV2 := none, claimV2 := none
-    failedStartRecovery := some ⟨ingress, ⟨admitted, rfl⟩⟩ }
+    failedStartRecovery := some ⟨ingress, ⟨admitted, rfl⟩⟩
+    ordinary := none
+    beginV3 := none
+    claimV3 := none
+    completionV2 := none
+    grantIssue := none
+    jointReservation := none
+    bootstrap := none
+    bootstrapBundle := none
+    kernel := none
+    beginV4 := none
+    claimV4 := none
+    completionV4 := none }
 
 theorem FailedStartRecoveryAt.toDerived_intent {config : Config} {opened : Opened config}
     {ingress : ApplicationFailedStartRecoveryIngress.Ingress}
@@ -1687,7 +1756,19 @@ def BeginAtV4.toDerived {config : Config} {opened : Opened config}
   { intent := admitted.intent
     admission := .applicationRetryBeginV4 admitted
     issue := none, begin := none, beginV2 := none, claimV2 := none
-    beginV4 := some ⟨ingress, ⟨admitted, rfl⟩⟩ }
+    beginV4 := some ⟨ingress, ⟨admitted, rfl⟩⟩
+    ordinary := none
+    beginV3 := none
+    claimV3 := none
+    completionV2 := none
+    grantIssue := none
+    jointReservation := none
+    bootstrap := none
+    bootstrapBundle := none
+    kernel := none
+    failedStartRecovery := none
+    claimV4 := none
+    completionV4 := none }
 
 theorem BeginAtV4.toDerived_intent {config : Config} {opened : Opened config}
     {ingress : ApplicationLifecycleRetryBeginV4Ingress.Ingress}
@@ -1700,7 +1781,19 @@ def ClaimAtV4.toDerived {config : Config} {opened : Opened config}
   { intent := admitted.intent
     admission := .applicationRetryClaimV4 admitted
     issue := none, begin := none, beginV2 := none, claimV2 := none
-    claimV4 := some ⟨ingress, ⟨admitted, rfl⟩⟩ }
+    claimV4 := some ⟨ingress, ⟨admitted, rfl⟩⟩
+    ordinary := none
+    beginV3 := none
+    claimV3 := none
+    completionV2 := none
+    grantIssue := none
+    jointReservation := none
+    bootstrap := none
+    bootstrapBundle := none
+    kernel := none
+    failedStartRecovery := none
+    beginV4 := none
+    completionV4 := none }
 
 theorem ClaimAtV4.toDerived_intent {config : Config} {opened : Opened config}
     {ingress : ApplicationLifecycleRetryClaimV4Ingress.Ingress}
@@ -1713,7 +1806,19 @@ def CompletionAtV4.toDerived {config : Config} {opened : Opened config}
   { intent := admitted.intent
     admission := .applicationRetryCompletionV4 admitted
     issue := none, begin := none, beginV2 := none, claimV2 := none
-    completionV4 := some ⟨ingress, ⟨admitted, rfl⟩⟩ }
+    completionV4 := some ⟨ingress, ⟨admitted, rfl⟩⟩
+    ordinary := none
+    beginV3 := none
+    claimV3 := none
+    completionV2 := none
+    grantIssue := none
+    jointReservation := none
+    bootstrap := none
+    bootstrapBundle := none
+    kernel := none
+    failedStartRecovery := none
+    beginV4 := none
+    claimV4 := none }
 
 theorem CompletionAtV4.toDerived_intent {config : Config} {opened : Opened config}
     {ingress : ApplicationLifecycleRetryCompletionV4Ingress.Ingress}

@@ -82,6 +82,8 @@ with tempfile.TemporaryDirectory(prefix="package-test-") as tmp:
     for rel in SCRIPTS:
         (repo / rel).parent.mkdir(parents=True, exist_ok=True)
         (repo / rel).write_text(f"stub {rel}\n")
+    (repo / "world" / "activity").mkdir(parents=True)
+    (repo / "world" / "activity" / "Tally.obend").write_text("stub world program\n")
     git(repo, "init", "-q")
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "stub")
@@ -131,6 +133,9 @@ with tempfile.TemporaryDirectory(prefix="package-test-") as tmp:
         check("SHA256SUMS lists the consent binary and every bundle file",
               "bin/minidregg-client-consent" in sums
               and all(f"bin/clients/x86_64-unknown-linux-gnu/{n}" in sums for n in names))
+        check("the example programs ship read-only under world/ and SHA256SUMS lists them",
+              (cand / "world" / "activity" / "Tally.obend").read_text() == "stub world program\n"
+              and "world/activity/Tally.obend" in sums)
         check("SHA256SUMS verifies", all(sha(cand / rel) == digest for rel, digest in sums.items()))
         manifest = json.loads((cand / "manifest.json").read_text())
         check("manifest.json names consentHost with its pin",

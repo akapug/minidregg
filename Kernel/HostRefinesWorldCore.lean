@@ -119,12 +119,31 @@ Its two poles, which T4 must keep:
   append-only rewrite, `Example.toy_rewrite_refused` shows `ofIntent` refusing
   it); and `policy_source_rewrite_has_no_turn` (no turn rewrites a ROM record).
 -/
-import Kernel.SnapRepresents
-import Kernel.DeployedBridge
-import Kernel.TurnRecord
-import Compiler.DurableReceiverCore
-import Compiler.CanonicalCellRegistry
-import Theory.AssertAxioms
+module
+
+public import Kernel.SnapRepresents
+public import Kernel.DeployedBridge
+public import Kernel.TurnRecord
+public import Compiler.DurableReceiverCore
+public import Compiler.CanonicalCellRegistry
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.HostRefinesWorld
 

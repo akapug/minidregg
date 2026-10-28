@@ -3,8 +3,13 @@ This establishes source/module/front-end/selection identity. That the selected
 core IS this front end's output on these sources is checked at admission
 (`ObjectiveBendNativeAdmission.SourceSelection.replayExact`, the receiver
 recomputing `ObjectiveBendPublication.publishedCore`). -/
-import Compiler.ObjectiveSourcePackage
-import Kernel.ContentResource
+module
+
+public import Compiler.ObjectiveSourcePackage
+public import Kernel.ContentResource
+
+@[expose] public section
+
 namespace Minidregg.Kernel.ObjectiveBendPublishedPackage
 open Minidregg.Compiler Minidregg.Theory Minidregg.Theory.Hyperdocument
 open Minidregg.Compiler.Tower256ConcreteBackend

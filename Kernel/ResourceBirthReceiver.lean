@@ -11,10 +11,31 @@ Stable replay identity retains exact ingress bytes and the complete descriptor;
 matching a recorded ingress precedes any new nullifier or state-root admission.
 A replay returns the recorded receipt and performs no new semantic execution.
 -/
-import Kernel.ResourceBirthPolicyController
-import Compiler.DurableReceiverIO
-import Compiler.CredentialAuthorityReplay
-import Kernel.PlatformCellDomain
+module
+
+public import Kernel.ResourceBirthPolicyController
+public import Compiler.DurableReceiverIO
+public import Compiler.CredentialAuthorityReplay
+public import Kernel.PlatformCellDomain
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ResourceBirthReceiver
 

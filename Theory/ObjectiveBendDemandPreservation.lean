@@ -1,13 +1,33 @@
 /- Preservation lemmas over the frozen demand graph and actual source typing.
 All-constructor preservation connects the checker derivation to every actual
 raw transition; termination, liveness and native authority are separate. -/
-import Theory.ObjectiveBendDemandPreservation.Cases.Functions
-import Theory.ObjectiveBendDemandPreservation.Cases.Pairs
-import Theory.ObjectiveBendDemandPreservation.Cases.Records
-import Theory.ObjectiveBendDemandPreservation.Cases.Arithmetic
-import Theory.ObjectiveBendDemandPreservation.Cases.Sums
-import Theory.ObjectiveBendDemandPreservation.Cases.Activities
-import Theory.ObjectiveBendStepCases
+module
+
+public import Theory.ObjectiveBendDemandPreservation.Cases.Functions
+public import Theory.ObjectiveBendDemandPreservation.Cases.Pairs
+public import Theory.ObjectiveBendDemandPreservation.Cases.Records
+public import Theory.ObjectiveBendDemandPreservation.Cases.Arithmetic
+public import Theory.ObjectiveBendDemandPreservation.Cases.Sums
+public import Theory.ObjectiveBendDemandPreservation.Cases.Activities
+public import Theory.ObjectiveBendStepCases
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Theory.ObjectiveBendDemandPreservation
 open ObjectiveBendTypes ObjectiveBendTyping ObjectiveBendOpenRecursion ObjectiveBendDemandMachine ObjectiveBendDemandTyping
 set_option autoImplicit false

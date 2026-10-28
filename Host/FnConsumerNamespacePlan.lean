@@ -2,8 +2,27 @@
 The caller must be the restricted native Host route that runs the pinned fn
 binary, checks its exact scope/control identity, and supplies its fenced
 position/status. These numbers are not portable evidence or remote proof. -/
-import Kernel.FnConsumerNamespaceAdmissionAt
-import Lean.Data.Json
+module
+
+public import Kernel.FnConsumerNamespaceAdmissionAt
+public import Lean.Data.Json
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Host.FnConsumerNamespacePlan
 

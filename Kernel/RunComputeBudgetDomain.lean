@@ -2,8 +2,27 @@
 The invocation receiver is the sole consumer: it combines these posts with the
 program effects and admits the signed funding capability/current law first.
 -/
-import Kernel.RunComputeBudget
-import Kernel.PayCellDomain
+module
+
+public import Kernel.RunComputeBudget
+public import Kernel.PayCellDomain
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.RunComputeBudgetDomain
 

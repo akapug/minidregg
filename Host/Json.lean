@@ -3,63 +3,155 @@ Bounded JSON authoring for the native host. JSON is only a human-facing
 notation: successful authoring constructs the real source values and invokes
 their canonical codecs. All unbounded integers are decimal strings.
 -/
-import Kernel.NativeHost
-import Compiler.NativeHostEffectClass
-import Kernel.PayStarterAllowance
-import Host.BirthRuntimeProfile
-import Host.CapabilityInspection
-import Host.InspectRender
-import Kernel.NativeHostGenesis
-import Kernel.AgentGrain
-import Kernel.ProviderRoute
-import Kernel.CapabilityRevocationController
-import Kernel.ContentResource
-import Host.LegacyContentView
-import Kernel.ApplicationGrainBirth
-import Kernel.ApplicationGrainSessionBirth
-import Kernel.ApplicationShareIssueAuthoring
-import Kernel.ApplicationDispatchAuthoring
-import Host.ApplicationLifecycleCompletionAuthoring
-import Host.ApplicationLifecycleCompletionOperator
-import Host.ApplicationLifecycleBeginOperator
-import Host.ApplicationLifecycleLaunchBeginInspection
-import Host.ApplicationLifecycleLaunchClaimInspection
-import Host.ApplicationLifecycleLaunchCompletionInspection
-import Host.ApplicationLifecycleLaunchReportAuthoring
-import Host.ApplicationLifecycleRetryLaunchReportAuthoring
-import Host.ApplicationLifecycleRetryBeginV4Inspection
-import Host.ApplicationLifecycleRetryClaimV4Inspection
-import Host.ApplicationLifecycleRetryCompletionV4Inspection
-import Host.ApplicationAgentLifetimeGrantInspection
-import Host.ApplicationLifecycleClaimOperator
-import Host.ApplicationDispatchAgentPaidInspection
-import Host.ApplicationAgentLifetimeDispatchPaidInspection
-import Host.ApplicationShareIssueGrainInspection
-import Host.ApplicationGrainSessionEnrollmentInspection
-import Kernel.ApplicationDispatchAgentReserveContext
-import Kernel.ApplicationDispatchCodec
-import Kernel.ParticipantKeyEnrollment
-import Kernel.Receivers.SubjectKeyRotation
-import Kernel.ParticipantFactoryProvisioning
-import Kernel.FleetTurn
-import Kernel.PayBookReceiver
-import Kernel.PayAssignmentReceiver
-import Kernel.ClockTickReceiver
-import Kernel.PayObservationReceiver
-import Kernel.PayEnrolReceiver
-import Kernel.PayEnrolQuote
-import Kernel.CertifyReceiver
-import Kernel.ApplicationLifecycleResidentProfile
-import Host.ApplicationPermissionSchemaAuthoring
-import Host.ApplicationSpkLaunchDescriptorAuthoring
-import Kernel.NockProgramCell
-import Kernel.NockDoor
-import Kernel.DocumentHistory
-import Host.ResidentContextInspection
-import Host.ObjectiveActivityJson
-import Host.SeatJson
-import Lean.Data.Json
-import Kernel.NativeHostStoreIdentity
+module
+
+public import Kernel.NativeHost
+public import Compiler.NativeHostEffectClass
+public import Kernel.PayStarterAllowance
+public import Host.BirthRuntimeProfile
+public import Host.CapabilityInspection
+public import Host.InspectRender
+public import Kernel.NativeHostGenesis
+public import Kernel.AgentGrain
+public import Kernel.ProviderRoute
+public import Kernel.CapabilityRevocationController
+public import Kernel.ContentResource
+public import Host.LegacyContentView
+public import Kernel.ApplicationGrainBirth
+public import Kernel.ApplicationGrainSessionBirth
+public import Kernel.ApplicationShareIssueAuthoring
+public import Kernel.ApplicationDispatchAuthoring
+public import Host.ApplicationLifecycleCompletionAuthoring
+public import Host.ApplicationLifecycleCompletionOperator
+public import Host.ApplicationLifecycleBeginOperator
+public import Host.ApplicationLifecycleLaunchBeginInspection
+public import Host.ApplicationLifecycleLaunchClaimInspection
+public import Host.ApplicationLifecycleLaunchCompletionInspection
+public import Host.ApplicationLifecycleLaunchReportAuthoring
+public import Host.ApplicationLifecycleRetryLaunchReportAuthoring
+public import Host.ApplicationLifecycleRetryBeginV4Inspection
+public import Host.ApplicationLifecycleRetryClaimV4Inspection
+public import Host.ApplicationLifecycleRetryCompletionV4Inspection
+public import Host.ApplicationAgentLifetimeGrantInspection
+public import Host.ApplicationLifecycleClaimOperator
+public import Host.ApplicationDispatchAgentPaidInspection
+public import Host.ApplicationAgentLifetimeDispatchPaidInspection
+public import Host.ApplicationShareIssueGrainInspection
+public import Host.ApplicationGrainSessionEnrollmentInspection
+public import Kernel.ApplicationDispatchAgentReserveContext
+public import Kernel.ApplicationDispatchCodec
+public import Kernel.ParticipantKeyEnrollment
+public import Kernel.Receivers.SubjectKeyRotation
+public import Kernel.ParticipantFactoryProvisioning
+public import Kernel.FleetTurn
+public import Kernel.PayBookReceiver
+public import Kernel.PayAssignmentReceiver
+public import Kernel.ClockTickReceiver
+public import Kernel.PayObservationReceiver
+public import Kernel.PayEnrolReceiver
+public import Kernel.PayEnrolQuote
+public import Kernel.CertifyReceiver
+public import Kernel.ApplicationLifecycleResidentProfile
+public import Host.ApplicationPermissionSchemaAuthoring
+public import Host.ApplicationSpkLaunchDescriptorAuthoring
+public import Kernel.NockProgramCell
+public import Kernel.NockDoor
+public import Kernel.DocumentHistory
+public import Host.ResidentContextInspection
+public import Host.ObjectiveActivityJson
+public import Host.SeatJson
+public import Lean.Data.Json
+public import Kernel.NativeHostStoreIdentity
+meta import Kernel.NativeHost
+meta import Compiler.NativeHostEffectClass
+meta import Kernel.PayStarterAllowance
+meta import Host.BirthRuntimeProfile
+meta import Host.CapabilityInspection
+meta import Host.InspectRender
+meta import Kernel.NativeHostGenesis
+meta import Kernel.AgentGrain
+meta import Kernel.ProviderRoute
+meta import Kernel.CapabilityRevocationController
+meta import Kernel.ContentResource
+meta import Host.LegacyContentView
+meta import Kernel.ApplicationGrainBirth
+meta import Kernel.ApplicationGrainSessionBirth
+meta import Kernel.ApplicationShareIssueAuthoring
+meta import Kernel.ApplicationDispatchAuthoring
+meta import Host.ApplicationLifecycleCompletionAuthoring
+meta import Host.ApplicationLifecycleCompletionOperator
+meta import Host.ApplicationLifecycleBeginOperator
+meta import Host.ApplicationLifecycleLaunchBeginInspection
+meta import Host.ApplicationLifecycleLaunchClaimInspection
+meta import Host.ApplicationLifecycleLaunchCompletionInspection
+meta import Host.ApplicationLifecycleLaunchReportAuthoring
+meta import Host.ApplicationLifecycleRetryLaunchReportAuthoring
+meta import Host.ApplicationLifecycleRetryBeginV4Inspection
+meta import Host.ApplicationLifecycleRetryClaimV4Inspection
+meta import Host.ApplicationLifecycleRetryCompletionV4Inspection
+meta import Host.ApplicationAgentLifetimeGrantInspection
+meta import Host.ApplicationLifecycleClaimOperator
+meta import Host.ApplicationDispatchAgentPaidInspection
+meta import Host.ApplicationAgentLifetimeDispatchPaidInspection
+meta import Host.ApplicationShareIssueGrainInspection
+meta import Host.ApplicationGrainSessionEnrollmentInspection
+meta import Kernel.ApplicationDispatchAgentReserveContext
+meta import Kernel.ApplicationDispatchCodec
+meta import Kernel.ParticipantKeyEnrollment
+meta import Kernel.Receivers.SubjectKeyRotation
+meta import Kernel.ParticipantFactoryProvisioning
+meta import Kernel.FleetTurn
+meta import Kernel.PayBookReceiver
+meta import Kernel.PayAssignmentReceiver
+meta import Kernel.ClockTickReceiver
+meta import Kernel.PayObservationReceiver
+meta import Kernel.PayEnrolReceiver
+meta import Kernel.PayEnrolQuote
+meta import Kernel.CertifyReceiver
+meta import Kernel.ApplicationLifecycleResidentProfile
+meta import Host.ApplicationPermissionSchemaAuthoring
+meta import Host.ApplicationSpkLaunchDescriptorAuthoring
+meta import Kernel.NockProgramCell
+meta import Kernel.NockDoor
+meta import Kernel.DocumentHistory
+meta import Host.ResidentContextInspection
+meta import Host.ObjectiveActivityJson
+meta import Host.SeatJson
+meta import Lean.Data.Json
+meta import Kernel.NativeHostStoreIdentity
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+import all Init.Data.Int.Repr
+import all Init.Data.List.Sort.Basic
+import all Init.Data.Range.Basic
+import all Init.Data.String.Legacy
+import all Init.Data.String.Pattern.String
+import all Init.Data.String.Search
+import all Init.Data.String.Slice
+import all Init.Data.String.TakeDrop
+import all Init.Prelude
+import all Lean.Data.Json.Basic
+import all Lean.Data.Json.FromToJson.Basic
+import all Lean.Data.Json.Parser
+import all Lean.Data.Json.Printer
+import all Std.Data.DHashMap.Basic
+
+@[expose] public section
 
 namespace Minidregg.Host.Json
 

@@ -4,8 +4,29 @@ admission, a freshly won durable CAS, exact complete post-image readback and
 validation. Already-present and reply-lost readback preserves the original
 receipt, but cannot mint another physical delivery permit.
 -/
-import Compiler.ApplicationReceivingDomain
-import Kernel.ApplicationDispatchAgentProjection
+module
+
+public import Compiler.ApplicationReceivingDomain
+public import Kernel.ApplicationDispatchAgentProjection
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationDispatchAgentReceiver
 

@@ -16,9 +16,28 @@ closure per install. This module is the one representation they share:
 * `entries` is the canonical stream: ascending id, one entry per id
   (`entries_ascending`), and `ofList (entries t) = t` (`ofList_entries`).
 -/
-import Kernel.DurableReceiver
-import Theory.AxiomPin
-import Std.Data.ExtTreeMap
+module
+
+public import Kernel.DurableReceiver
+public import Theory.AxiomPin
+public import Std.Data.ExtTreeMap
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel
 

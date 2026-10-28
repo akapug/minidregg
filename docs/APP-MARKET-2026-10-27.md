@@ -103,7 +103,7 @@ past start: both failed there on w11 because of the provenance bug, which is now
 
 **Not this lane's:** the co-edit red (`authority handoff requires an opening read from the
 Store`, `withOpenedFreshTip`) is with the deputy's faerie. When it is fixed, the validator
-reruns `register-X2` and `ddp-coedit.py`.
+reruns `register-Xs` and `ddp-coedit.py`.
 
 **Box notes (for the validator):**
 - After each checkout on dregg-build, run `chmod go-w deploy/spk-host/*`.
@@ -116,14 +116,14 @@ reruns `register-X2` and `ddp-coedit.py`.
 
 Everything below is on the demo box (`dregg-demo`, Debian 13, split tenancy, loopback behind
 Caddy, nftables default-deny egress per uid; `dregg-infra` `edge/demo/CONFINEMENT.md`). The grain
-world is `mini-core`'s (its user manager runs the SPK broker, residents and the worker), exactly as
+world is `mini-core`'s (its user manager runs the SPK broker and residents; the worker is a system unit as mini-core), exactly as
 the one-grain EtherCalc design (WEB-SPK-PUBLIC §4) already has it.
 
 | who | uid | does | reaches |
 |---|---|---|---|
 | **market fetcher** `mini-market-fetch` (`mini-market.timer`, every 6 h and on demand) | `mini-market` | refreshes `/var/lib/mini-market/index.json` from `https://app-index.sandstorm.io/apps/index.json` (bounded 4 MiB, parsed and re-serialised by `mini apps index-check`: unknown shape refused, the file replaced atomically); fetches packages named in `/var/lib/mini-market/wanted/` into the quarantine `/var/lib/mini-market/quarantine/<packageId>.spk` (0640 `mini-market:mini-apps`), refusing a download whose SHA-256 does not start with its `packageId` or exceeds the standard profile's 256 MiB; writes `meta/<packageId>.json` (sha256, bytes, fetchedAt) | **the only uid with egress to `app-index.sandstorm.io:443`** (nftables `cg_market`/`dst_market`, resolved from `/etc/mini/market.json` like every other egress row); nothing else, no Mini socket, no key |
 | **member verbs** `mini apps …` | `mini-s-NAME` | read the index and the verdict table (world-readable data); author the member's own Mini turns (§3); talk to the worker over `/run/mini-apps/worker.sock` | the public socket, as every member verb does; the worker socket |
-| **worker** `mini apps-worker` | `mini-core` (user manager, beside the broker) | acts on admitted install requests through `spk-host grain` (install, share, start, enroll, route, stop, export); writes receipts, verdicts and the origin table; serves the worker socket | the operator socket (it is the operator), the broker, the quarantine (read), `/var/lib/mini-apps` (write) |
+| **worker** `mini apps-worker` | `mini-core` (system unit; reaches the broker in mini-core's user manager) | acts on admitted install requests through `spk-host grain` (install, share, start, enroll, route, stop, export); writes receipts, verdicts and the origin table; serves the worker socket | the operator socket (it is the operator), the broker, the quarantine (read), `/var/lib/mini-apps` (write) |
 | **front** `mini apps-front` | `mini-apps-edge` (group `mini-edge`) | one loopback listener `127.0.0.1:8799` that Caddy proxies every `*.demo.dregg.online` request to; selects the grain by `Host`, the participant route by the token presented, and pumps the request (and a WebSocket after 101) to that route's `http.sock` | the route sockets (0660, group `mini-edge`, the W6 `edgeGid`), the origin table (read); no key, no Mini socket, no network but loopback |
 | **Caddy** | `caddy` | terminates TLS for `*.demo.dregg.online` with the one wildcard certificate (ember's ruling 2026-10-27; hybrid X25519MLKEM768 then X25519), proxies to the front | loopback; `/var/lib/mini` stays hidden from it |
 | **residents / apps** | `mini-core` → app uid in bwrap | unchanged (`deploy/spk-host/README.md`) | fd 3, loopback in their own netns; no egress ever |
@@ -335,7 +335,7 @@ What still refuses by name: an `apiPath` outside the checked prefix.
 ## 4. The worker: one custodian, the existing lifecycle
 
 `mini apps-worker --state /var/lib/mini-apps --profile GRAIN-HOST.json --socket /run/mini-apps/worker.sock`
-runs as `mini-core` in the user manager (a user unit beside `mini-spk-broker@`). Per admitted
+runs as `mini-core` as a system unit (User=mini-core; drives `mini-spk-broker@` in mini-core's user manager). Per admitted
 request, in order, each step idempotent on its retained artifact, as `grain-journey.sh` does today:
 
 1. **Package**: the quarantine copy with the exact SHA-256 (or `wanted/<packageId>` for the
@@ -367,7 +367,7 @@ connector** (`STATE/edge.sock`, 0660 `mini-core:mini-edge`): the front asks `con
 and receives the connected custodian socket over `SCM_RIGHTS`; the worker adds no authority (the
 custodian still checks the token the browser presents) and the front still parses HTTP as
 `mini-apps-edge` with `/var/lib/mini` hidden. The origin table names the connector. Groups (ruling
-2026-10-27): `mini-core` is not a member of `mini-edge`; the worker's user unit carries
+2026-10-27): `mini-core` is not a member of `mini-edge`; the worker's system unit carries
 `SupplementaryGroups=mini-edge` (membership inside that process only, never the account) and the
 worker itself creates `edge.sock` 0660 with that group and `worker.sock` 0660 with
 `mini-sessions`; a group it cannot resolve is a refusal at start, never a silently private socket.

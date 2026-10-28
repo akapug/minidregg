@@ -4,9 +4,13 @@ release for one selected poll. This checked object is deliberately not yet a
 durable admission: a verifier-minted unified frontier predecessor is also
 required before event17 can advance Mini or authorize any fn ACK.
 -/
-import Kernel.FnConsumerFrontierGateway
-import Kernel.FnSelectedPollReleaseLink
-import Kernel.FnSelectedPollAdmissionAt
+module
+
+public import Kernel.FnConsumerFrontierGateway
+public import Kernel.FnSelectedPollReleaseLink
+public import Kernel.FnSelectedPollAdmissionAt
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnSelectedPollAdmission
 

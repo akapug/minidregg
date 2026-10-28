@@ -119,4 +119,17 @@ sh1 story-again "go north"
 want_refused "go north again: the impossible move is refused by the sealed story law" law-denied
 sh1 story-law "story law $TALE"
 row "story law: the law a player is judged by, printed" "rc 0 and clauses" "rc $RC, $(short 100 <"$OUT")" "$([ "$RC" = 0 ] && [ -s "$OUT" ] && echo 1 || echo 0)"
+# A story told by a GM who is not its author: the scenes stream's law is re-installed under the author's
+# control capability (demo-dry red on 2d8b7ed54: "install: PolicyInstallController.Reject.capability").
+GMTALE=gm$SUF
+before=$(confirmed_count "$WS")
+sh1 story-gm-new "story new $GMTALE --from tale --gm 17787897211000750718"
+if [ "$RC" = 4 ]; then
+  want_undecided "story new --gm: the transitions still deciding (the Host has not said)"
+else
+  want_admitted "story new --gm: the scenes law is handed to the GM and the table is admitted" "$before" "$WS"
+fi
+sh1 story-gm-list "story list"
+row "story list: the GM story is held by its author" "rc 0 and the story named" "rc $RC, $(short 100 <"$OUT")" \
+  "$([ "$RC" = 0 ] && grep -q "$GMTALE" "$OUT" && echo 1 || echo 0)"
 rows_finish

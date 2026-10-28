@@ -47,7 +47,11 @@ built here, in three layers:
    allocation.
 Executed: scripts/kn2/coprocess-faults.lean.
 -/
-import Std.Sync.Mutex
+module
+
+public import Std.Sync.Mutex
+
+@[expose] public section
 
 namespace Minidregg.Compiler.NativeCoprocess
 

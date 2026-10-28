@@ -4,6 +4,7 @@
 # routes. All semantic encoders and admission remain in Lean.
 set -eu
 umask 077
+. "$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)/native/resource-client/journey.d/lib/evidence.sh"
 
 if [ "$#" -ne 2 ]; then
   echo "usage: $0 MINIDREGG_HOST NEW_EVIDENCE_DIRECTORY" >&2
@@ -16,6 +17,8 @@ HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 REPO=$(CDPATH='' cd -- "$HERE/../.." && pwd)
 . "$REPO/native/resource-client/journey.d/lib/genesis-params.sh"
 resolve_params_sh "$REPO" || exit 2
+. "$REPO/native/resource-client/journey.d/lib/wire.sh"
+CONTENT_VERSION=$(content_command_version "$REPO")
 MINI=${MINI:-"$HERE/target/debug/mini"}
 STORE_BINARY=${STORE_BINARY:-"$REPO/native/hyperdocument-link-sqlite-store/target/debug/minidregg-link-sqlite-store"}
 SIGNATURE_BINARY=${SIGNATURE_BINARY:-"$REPO/native/credential-signature-verifier/target/debug/minidregg-credential-signature-verifier"}
@@ -40,7 +43,7 @@ if [ -n "$MESSAGE_SUFFIX" ]; then
 fi
 mkdir -m 700 "$EVIDENCE"
 EVIDENCE=$(CDPATH='' cd -- "$EVIDENCE" && pwd)
-shasum -a 256 "$0" "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY" \
+sha256 "$0" "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY" \
   "$HERE/selected-release-drop-reply.rs" >"$EVIDENCE/input-sha256.txt"
 
 decimal() {
@@ -59,11 +62,11 @@ refused() {
 }
 
 logical_image() {
-  "$STORE_BINARY" read-to "$EVIDENCE/recipient/store" "$EVIDENCE/recipient/$1-image.bin"
+  durable_image "$EVIDENCE/recipient/store" "$EVIDENCE/recipient/$1-image.bin" "$RECIPIENT_CONFIG"
 }
 
 digest_file() {
-  shasum -a 256 "$1" | awk '{print $1}'
+  sha256 "$1" | awk '{print $1}'
 }
 
 "$MINI" keygen --secret "$EVIDENCE/owner.key" --public "$EVIDENCE/owner.pub" \
@@ -146,13 +149,13 @@ query_policy before-policy 30008
 
 NOTE_HEX=$(printf '%s' 'Selected source note: one exact public version.' | od -An -tx1 -v | tr -d ' \n')
 CHANGED_HEX=$(printf '%s' 'Changed selected source note under the same release key.' | od -An -tx1 -v | tr -d ' \n')
-jq -n --slurpfile view "$EVIDENCE/source/before/view.json" \
+jq -n --arg version "$CONTENT_VERSION" --slurpfile view "$EVIDENCE/source/before/view.json" \
   --slurpfile challenge "$EVIDENCE/source/before/challenge.json" \
   --arg payload "$NOTE_HEX" --arg changed "$CHANGED_HEX" \
   '{subject:"7",nonce:"30003",purpose:{type:"prepare",draft:{type:"invoke",
     command:{subject:"7",
       nonce:"30004",targets:[{kind:"object",target:"8001",capability:"61",
-        observeCapability:null,schemaVersion:"1",expectedTargetRoot:$view[0].cell.root,
+        observeCapability:null,schemaVersion:$version,expectedTargetRoot:$view[0].cell.root,
         payload:{type:"content",actions:[{type:"createAtom",atom:"7401",
           kind:{type:"text"},payload:$payload},
           {type:"createAtom",atom:"7402",kind:{type:"text"},payload:$changed}]}}]}}},
@@ -277,7 +280,7 @@ build_ingress original current
 if [ "${SELECTED_RELEASE_STOP_AFTER_ORIGINAL:-0}" = 1 ]; then
   # Private fixture handoff only: the selected candidate is not source
   # publication authority, and recipient op20 has not been submitted.
-  shasum -a 256 "$0" "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY" \
+  sha256 "$0" "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY" \
     "$HERE/selected-release-drop-reply.rs" >"$EVIDENCE/final-input-sha256.txt"
   cmp "$EVIDENCE/input-sha256.txt" "$EVIDENCE/final-input-sha256.txt"
   printf 'selected candidate prepared without publication or receiving: %s\n' "$EVIDENCE"
@@ -480,7 +483,7 @@ test "$(jq -er '.worldRoot' "$EVIDENCE/recipient/reopened/challenge.json")" = \
 query_resource source 8001 source-final 30022
 test "$(jq -er '.cell.root' "$EVIDENCE/source/source-final/view.json")" = \
   "$(jq -er '.cell.root' "$EVIDENCE/source/selected/view.json")"
-shasum -a 256 "$0" "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY" \
+sha256 "$0" "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY" \
   "$HERE/selected-release-drop-reply.rs" >"$EVIDENCE/final-input-sha256.txt"
 cmp "$EVIDENCE/input-sha256.txt" "$EVIDENCE/final-input-sha256.txt"
 jq -n --slurpfile original "$ORIGINAL_OUTCOME" \

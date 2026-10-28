@@ -1,7 +1,11 @@
 /- Canonical route-admission presentation. Private receiver provenance, not
 this inspector's JSON, authenticates a current registration. -/
-import Kernel.ApplicationDispatchReceiver
-import Host.ApplicationStreamContinuityInspection
+module
+
+public import Kernel.ApplicationDispatchReceiver
+public import Host.ApplicationStreamContinuityInspection
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationRouteAdmissionInspection
 

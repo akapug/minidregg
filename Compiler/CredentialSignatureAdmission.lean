@@ -19,12 +19,33 @@ All its incidences may bind that one marker. Native implementation/transport
 and cryptographic custody assumptions remain explicit; the receipt is not a
 Lean proof of Ed25519 or physical commit.
 -/
-import Compiler.CredentialSignatureIO
-import Compiler.CredentialAuthorityDomain
-import Compiler.TypedAuthorizationRequestCodec
-import Compiler.ResourceBirthCodec
-import Compiler.PlanFootprintCodec
-import Theory.Receiving
+module
+
+public import Compiler.CredentialSignatureIO
+public import Compiler.CredentialAuthorityDomain
+public import Compiler.TypedAuthorizationRequestCodec
+public import Compiler.ResourceBirthCodec
+public import Compiler.PlanFootprintCodec
+public import Theory.Receiving
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Compiler.CredentialSignatureAdmission
 

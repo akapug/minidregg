@@ -1,6 +1,6 @@
 //! `mini apps-worker`: the operator-side custodian of the app market
-//! (docs/APP-MARKET-2026-10-27.md §4). It runs as the grain world's operator in
-//! its user manager, beside the SPK broker, and acts on admitted install
+//! (docs/APP-MARKET-2026-10-27.md §4). It runs as the grain world's operator (a
+//! system unit, User=mini-core), reaches the SPK broker in mini-core's user manager, and acts on admitted install
 //! requests through `spk-host grain` and the ordinary `mini` client verbs, the
 //! way `scripts/spk-platform/grain-journey.sh` does by hand. It holds no member
 //! key; the member is named by the socket peer (`SO_PEERCRED`), never by a
@@ -85,6 +85,18 @@ pub(crate) struct RouteBound {
     pub browser_token_sha256: String,
     pub bootstrap_token_sha256: String,
     pub api_token_sha256: String,
+    /// What a later enrollment needs, retained with the route: the guest session, its
+    /// capability, the ticket and the issue anchor, the app and package observe capabilities.
+    pub enrollment: Value,
+}
+
+/// The result of bringing a route's session enrollment up to the app's serving generation.
+#[derive(Debug, PartialEq)]
+pub(crate) enum Enrolled {
+    /// The session already names the serving generation: nothing was submitted.
+    Current(String),
+    /// A new enrollment against the serving generation was accepted.
+    Renewed(String),
 }
 
 /// The lifecycle outcome `spk-host grain` reports: STOP is minutes long.
@@ -107,6 +119,9 @@ pub(crate) trait World {
     /// session birth, the ticket under the delegated capability, the
     /// enrollment and `spk-host grain route`.
     fn route(&self, work: &Path, app: &str, member: &str, expected_host: &str) -> Result<RouteBound>;
+    /// Enroll the route's guest session against the app's CURRENT serving generation (event28),
+    /// closing a session still active for an older generation first. Idempotent per generation.
+    fn enroll(&self, work: &Path, app: &str, member: &str, enrollment: &Value) -> Result<Enrolled>;
     fn export(&self, app: &str, out: &Path) -> Result<()>;
     fn identities(&self, app: &str) -> Result<Vec<Value>>;
     fn revoke_identity(&self, app: &str, token: &str) -> Result<()>;
@@ -203,6 +218,7 @@ impl Worker {
             "delete" => self.with_grain(member, request, false, |w, g, r| w.delete(g, r)),
             "identities" => self.with_grain(member, request, true, |w, g, r| w.identities(g, &r)),
             "revoke-identity" => self.with_grain(member, request, false, |w, g, r| w.revoke_identity(g, r, request)),
+            "renew" => self.with_grain(member, request, false, |w, g, r| w.renew(g, r)),
             other => refused("unknownVerb", format!("{other:?}")),
         }
     }
@@ -271,6 +287,38 @@ impl Worker {
             "identityNotice":IDENTITY_NOTICE}))
     }
 
+    /// Bring every route's session enrollment up to the app's serving generation. Returns the
+    /// generations renewed per member and the count already current.
+    fn enroll_routes(&self, grain: &str, record: &Value, only: Option<&str>) -> Result<(Vec<(String, String)>, usize)> {
+        let app = record["app"].as_str().unwrap_or("");
+        let (mut renewed, mut current) = (Vec::new(), 0usize);
+        let Some(routes) = record.get("routes").and_then(Value::as_object) else { return Ok((renewed, current)) };
+        for (member, route) in routes {
+            if only.is_some_and(|m| m != member) { continue; }
+            let work = self.state.join("work").join(grain).join(format!("enroll-{member}"));
+            private_dir(&work)?;
+            match self.world.enroll(&work, app, member, &route["enrollment"])? {
+                Enrolled::Current(_) => current += 1,
+                Enrolled::Renewed(generation) => renewed.push((member.clone(), generation)),
+            }
+        }
+        Ok((renewed, current))
+    }
+
+    /// `renew`: re-enroll the grain's routes against the generation it now serves. A restart moves
+    /// the app to a new generation and a session's enrollment names the old one, so a route refuses
+    /// until it is renewed; START renews on its own, and this is the explicit form.
+    fn renew(&self, grain: &str, record: Value) -> Value {
+        if record["state"].as_str() != Some("running") {
+            return refused("notRunning", format!("{grain} is {}; only a running grain serves a generation to enroll against: `mini apps start --grain {grain}`", record["state"].as_str().unwrap_or("not running")));
+        }
+        match self.enroll_routes(grain, &record, None) {
+            Ok((renewed, current)) if renewed.is_empty() => performed("current", format!("{grain}: every route already names the serving generation ({current} checked); nothing was submitted"), json!({"grain":grain,"renewed":[],"current":current})),
+            Ok((renewed, current)) => performed("renewed", format!("{grain}: {} route(s) enrolled against the serving generation", renewed.len()), json!({"grain":grain,"renewed":renewed.iter().map(|(m, g)| json!({"member":m,"generation":g})).collect::<Vec<_>>(),"current":current})),
+            Err(error) => undecided("enrolling", format!("the enrollment did not complete: {error}; nothing is repeated blindly"), &format!("mini apps renew --grain {grain}")),
+        }
+    }
+
     fn lifecycle(&self, grain: &str, mut record: Value, start: bool) -> Value {
         let app = record["app"].as_str().unwrap_or("").to_owned();
         let verb = if start { "start" } else { "stop" };
@@ -281,6 +329,12 @@ impl Worker {
                 record["lifecycleAt"] = json!(now());
                 if let Err(e) = write_json(&grain_file(&self.state, grain), &record) {
                     return undecided("stateUnavailable", e, &format!("mini apps status --grain {grain}"));
+                }
+                if start {
+                    // The restart moved the app to a new serving generation: renew each route's enrollment.
+                    if let Err(error) = self.enroll_routes(grain, &record, None) {
+                        return undecided("enrolling", format!("{grain} started, but its routes are not enrolled against the new generation: {error}"), &format!("mini apps renew --grain {grain}"));
+                    }
                 }
                 performed(record["state"].as_str().unwrap_or(verb), format!("{grain} {verb} completed through Mini"), json!({"grain":grain,"state":record["state"]}))
             }
@@ -312,6 +366,11 @@ impl Worker {
                 record["routes"][to] = route_json(&bound, to);
                 if let Err(e) = write_json(&grain_file(&self.state, grain), &record).and_then(|_| self.publish_origin(grain, &record)) {
                     return undecided("stateUnavailable", e, &format!("mini apps share --grain {grain} --to {to}"));
+                }
+                if record["state"].as_str() == Some("running") {
+                    if let Err(error) = self.enroll_routes(grain, &record, Some(to)) {
+                        return undecided("enrolling", format!("the route for {to} is bound but not enrolled against the serving generation: {error}"), &format!("mini apps renew --grain {grain}"));
+                    }
                 }
                 performed("shared", format!("{grain} shared with {to}: they open it with `mini apps open --grain {grain}`"), json!({"grain":grain,"member":to,"origin":record["origin"],"identityNotice":IDENTITY_NOTICE}))
             }
@@ -556,6 +615,9 @@ impl Worker {
         if let Err(e) = write_json(&grain_file(&self.state, &grain), &record).and_then(|_| self.publish_origin(&grain, &record)) {
             return undecided("stateUnavailable", e, &retry);
         }
+        if let Err(error) = self.enroll_routes(&grain, &record, Some(&member)) {
+            return undecided("enrolling", format!("the owner's route is bound but not enrolled against the serving generation: {error}"), &retry);
+        }
         retained["phases"]["route"] = json!({"state":"bound","at":now()});
         retained["state"] = json!("running");
         performed("running", format!("{} installed as {grain}; open it with `mini apps open --grain {grain}`", retained["indexName"].as_str().unwrap_or("the app")), json!({
@@ -641,7 +703,7 @@ fn role_basis(world: &Value, schema: &Value) -> Value {
 fn route_json(bound: &RouteBound, member: &str) -> Value {
     json!({"member":member,"directory":bound.directory,"socket":bound.socket,
         "browserTokenSha256":bound.browser_token_sha256,"bootstrapTokenSha256":bound.bootstrap_token_sha256,
-        "apiTokenSha256":bound.api_token_sha256,"boundAt":now()})
+        "apiTokenSha256":bound.api_token_sha256,"enrollment":bound.enrollment,"boundAt":now()})
 }
 
 // ---------------------------------------------------------- the sockets
@@ -1084,6 +1146,7 @@ impl World for ProcessWorld {
         let launch = read_json(&state_app.join("install").join("launch-descriptor").join("launch-inspection.json"))?;
         let birth_source = read_json(&work.join("birth-source.json"))?;
         let appcap = birth_source.pointer("/applicationGrainBirth/applicationBirth/application/appOwnerCapability").and_then(Value::as_str).ok_or("birth source lacks appOwnerCapability")?.to_owned();
+        let pkgcap = birth_source.pointer("/applicationGrainBirth/applicationBirth/application/packageOwnerCapability").and_then(Value::as_str).ok_or("birth source lacks packageOwnerCapability")?.to_owned();
         let (app_state, _) = self.query(work, &format!("{label}-app-state"), app, &appcap, base + 300, "resource")?;
         let pversion = app_state["cell"]["entries"].as_array().and_then(|e| e.iter().find(|x| x["key"]["field"] == "2")).and_then(|x| x["value"].as_str()).unwrap_or("0").to_owned();
         let t = work.join(format!("{label}-ticket"));
@@ -1142,8 +1205,92 @@ impl World for ProcessWorld {
             browser_token_sha256: text(&custodian, "browserTokenSha256")?.to_owned(),
             bootstrap_token_sha256: text(&custodian, "bootstrapTokenSha256")?.to_owned(),
             api_token_sha256: text(&custodian, "apiTokenSha256")?.to_owned(),
+            enrollment: json!({"session":session.to_string(),"cap":cap.to_string(),"ticket":ticket.to_string(),
+                "appObserveCapability":appcap,"packageObserveCapability":pkgcap,
+                "ticketIssue":t.join("issue")}),
             directory,
         })
+    }
+    fn enroll(&self, work: &Path, app: &str, member: &str, enrollment: &Value) -> Result<Enrolled> {
+        let [session, cap, ticket, appcap, pkgcap] = ["session", "cap", "ticket", "appObserveCapability", "packageObserveCapability"]
+            .map(|k| enrollment.get(k).and_then(Value::as_str).unwrap_or("").to_owned());
+        if [&session, &cap, &ticket, &appcap, &pkgcap].iter().any(|v| v.is_empty()) {
+            return Err(format!("routeUnenrollable: the route for {member} was bound before enrollment facts were retained; it needs a new share"));
+        }
+        let issue = PathBuf::from(enrollment.get("ticketIssue").and_then(Value::as_str).unwrap_or(""));
+        let (session_n, cap_n): (u64, u64) = (session.parse().map_err(|_| "session is not decimal")?, cap.parse().map_err(|_| "cap is not decimal")?);
+        let app_n: u64 = app.parse().map_err(|_| "app is not decimal")?;
+        let label = format!("enroll-{member}");
+        let base = self.nonce()?;
+        // The serving generation: the app cell's field 0.
+        let (app_cell, _) = self.query(work, &format!("{label}-app-{base}"), app, &appcap, base, "resource")?;
+        let generation = app_cell["cell"]["entries"].as_array().and_then(|e| e.iter().find(|x| x["key"]["field"] == "0")).and_then(|x| x["value"].as_str())
+            .ok_or("the app cell carries no generation")?.to_owned();
+        let attempt = work.join(format!("{label}-g{generation}"));
+        if fs::metadata(attempt.join("receipt.json")).map(|m| m.len() > 0).unwrap_or(false) {
+            return Ok(Enrolled::Current(generation));
+        }
+        let [h, c, o, s] = [self.host.to_str().unwrap_or(""), self.config.to_str().unwrap_or(""), self.operator_socket.to_str().unwrap_or(""), self.public_socket.to_str().unwrap_or("")];
+        let k = self.management_seed.to_str().unwrap_or("");
+        // A session still active for an older generation is closed by its owner first.
+        let (sview, challenge) = self.query(work, &format!("{label}-session-{base}"), &session, &cap, base + 1, "resource")?;
+        let field = |name: &str| sview["cell"]["entries"].as_array().and_then(|e| e.iter().find(|x| x["key"]["field"] == name)).and_then(|x| x["value"].as_str()).and_then(|v| v.parse::<i64>().ok());
+        let (sgen, status) = (field("2").ok_or("the session cell carries no generation")?, field("3").ok_or("the session cell carries no status")?);
+        if status == 5 || status == 1 {
+            let n = (base + 2).to_string();
+            let intent = json!({"subject":self.management_subject,"nonce":n,"grants":[{"kind":"object","target":session,"capability":cap}],
+                "purpose":{"type":"prepare","draft":{"type":"invoke","command":{"subject":self.management_subject,"nonce":n,
+                    "targets":[{"kind":"object","target":session,"capability":cap,"observeCapability":cap,"schemaVersion":"1",
+                        "expectedTargetRoot":sview["cell"]["root"],
+                        "payload":{"type":"scalar","actions":[
+                            {"type":"write","key":{"type":"object","resource":session,"field":"2"},"expected":sgen.to_string(),"value":(sgen + 1).to_string()},
+                            {"type":"write","key":{"type":"object","resource":session,"field":"3"},"expected":status.to_string(),"value":(status + 1).to_string()}]}}]}}}});
+            let _ = challenge;
+            let close = work.join(format!("{label}-close-g{generation}-intent.json"));
+            write_json(&close, &intent)?;
+            let closed = work.join(format!("{label}-close-g{generation}-attempt"));
+            let _ = fs::remove_dir_all(&closed);
+            self.mini(work, &format!("{label}-close-g{generation}"), &["submit", "--host", h, "--config", c, "--socket", s, "--intent", close.to_str().unwrap_or(""), "--key", k, "--dir", closed.to_str().unwrap_or("")])?;
+            if read_json(&closed.join("outcome.json"))?.get("type").and_then(Value::as_str) != Some("confirmed") {
+                return Err(format!("the stale session {session} was not closed (attempt {})", closed.display()));
+            }
+        }
+        let anchor = read_json(&issue.join("receipt-anchor.json")).map_err(|e| format!("the ticket's issue receipt anchor is missing: {e}"))?;
+        let count: i64 = anchor.pointer("/receipt/acceptedCount").and_then(Value::as_str).and_then(|v| v.parse().ok()).ok_or("the issue anchor has no acceptedCount")?;
+        let pkgdir = self.identities_root.join(app).join("install").join("launch-descriptor").join("package-v1");
+        let schema = read_json(&pkgdir.join("schema-inspection.json"))?;
+        let request = json!({"issueIndex":(count - 1).to_string(),"ticketResource":ticket,"packageManifest":(app_n + 1).to_string(),
+            "role":{"basis":role_basis(&self.role_basis, &schema),"added":[],"removed":[],"roleSchemaRoot":schema["root"],"roleVersion":schema["version"]},
+            "descriptorCapability":(cap_n + 2).to_string(),"sessionObserveCapability":cap,"descriptorObserveCapability":(cap_n + 2).to_string(),
+            "manifestObserveCapability":pkgcap,"nonce":(base + 3).to_string()});
+        let _ = session_n;
+        let request_path = work.join(format!("{label}-g{generation}-request.json"));
+        write_json(&request_path, &request)?;
+        let _ = fs::remove_dir_all(&attempt);
+        let plan_args = ["session-enrollment-plan", "--host", h, "--config", c, "--operator-socket", o, "--request", request_path.to_str().unwrap_or(""), "--dir", attempt.to_str().unwrap_or("")];
+        self.mini(work, &format!("{label}-g{generation}-plan"), &plan_args)
+            .map_err(|e| format!("session-enrollment-plan was refused: {e}"))?;
+        for part in ["plan.bin", "plan-inspected.json", "request.bin"] {
+            if !attempt.join(part).is_file() {
+                return Err(format!("session-enrollment-plan wrote no {part}"));
+            }
+        }
+        let inspected = read_json(&attempt.join("plan-inspected.json"))?;
+        let approval = self.approve(&inspected, "headerHex", json!({"type":"minidregg-session-enrollment-approval-v1",
+            "requestSha256":Self::sha_file(&attempt.join("request.bin"))?,"planSha256":Self::sha_file(&attempt.join("plan.bin"))?,
+            "planInspectionSha256":Self::sha_file(&attempt.join("plan-inspected.json"))?}))?;
+        let approval_path = work.join(format!("{label}-g{generation}-approval.json"));
+        write_json(&approval_path, &approval)?;
+        self.mini(work, &format!("{label}-g{generation}-seal"), &["session-enrollment-seal", "--attempt", attempt.to_str().unwrap_or(""), "--approval", approval_path.to_str().unwrap_or("")])?;
+        if !attempt.join("submit-marker.json").exists() {
+            // An uncertain submit is never repeated; the exact lookup decides.
+            let _ = self.mini(work, &format!("{label}-g{generation}-submit"), &["session-enrollment-submit", "--attempt", attempt.to_str().unwrap_or("")]);
+        }
+        self.mini(work, &format!("{label}-g{generation}-lookup"), &["session-enrollment-lookup", "--attempt", attempt.to_str().unwrap_or("")])?;
+        if !fs::metadata(attempt.join("receipt.json")).map(|m| m.len() > 0).unwrap_or(false) {
+            return Err(format!("the enrollment for generation {generation} has no receipt (attempt {})", attempt.display()));
+        }
+        Ok(Enrolled::Renewed(generation))
     }
     fn export(&self, app: &str, out: &Path) -> Result<()> {
         let output = Command::new(&self.spk_host).args(["grain", "export", self.profile.to_str().unwrap_or(""), app, out.to_str().unwrap_or("")]).output().map_err(|e| e.to_string())?;
@@ -1225,6 +1372,8 @@ mod tests {
         identities: RefCell<Vec<Value>>,
         verdicts: RefCell<Vec<(String, Value)>>,
         route_dir: PathBuf,
+        enrolled: RefCell<Vec<(String, String)>>,
+        generation: RefCell<u32>,
     }
     unsafe impl Send for FakeWorld {}
     unsafe impl Sync for FakeWorld {}
@@ -1253,7 +1402,15 @@ mod tests {
             let dir = self.route_dir.join(member);
             fs::create_dir_all(&dir).unwrap();
             fs::write(dir.join("bootstrap.token"), "b0".repeat(32)).unwrap();
-            Ok(RouteBound { directory: dir.clone(), socket: dir.join("http.sock"), browser_token_sha256: "1".repeat(64), bootstrap_token_sha256: "2".repeat(64), api_token_sha256: "3".repeat(64) })
+            Ok(RouteBound { directory: dir.clone(), socket: dir.join("http.sock"), browser_token_sha256: "1".repeat(64), bootstrap_token_sha256: "2".repeat(64), api_token_sha256: "3".repeat(64), enrollment: json!({"session":"450110"}) })
+        }
+        fn enroll(&self, _: &Path, app: &str, member: &str, _: &Value) -> Result<Enrolled> {
+            let mut done = self.enrolled.borrow_mut();
+            let generation = self.generation.borrow().to_string();
+            if done.iter().any(|(m, g)| m == member && *g == generation) { return Ok(Enrolled::Current(generation)); }
+            let _ = app;
+            done.push((member.to_owned(), generation.clone()));
+            Ok(Enrolled::Renewed(generation))
         }
         fn export(&self, _: &str, out: &Path) -> Result<()> { fs::create_dir_all(out).unwrap(); fs::write(out.join("manifest.sig"), b"sig").unwrap(); Ok(()) }
         fn identities(&self, _: &str) -> Result<Vec<Value>> { Ok(self.identities.borrow().clone()) }
@@ -1290,13 +1447,46 @@ mod tests {
         let root = scratch(name);
         let quarantine = root.join("quarantine");
         fs::create_dir_all(&quarantine).unwrap();
-        let world = FakeWorld { quarantine: quarantine.clone(), wanted: RefCell::new(vec![]), installs: RefCell::new(0), stops: RefCell::new(0), routes: RefCell::new(vec![]), stop_undecided: RefCell::new(false), identities: RefCell::new(vec![json!({"token":"c".repeat(64),"displayName":"alice","revoked":false})]), verdicts: RefCell::new(vec![]), route_dir: root.join("routes") };
+        let world = FakeWorld { quarantine: quarantine.clone(), wanted: RefCell::new(vec![]), installs: RefCell::new(0), stops: RefCell::new(0), routes: RefCell::new(vec![]), stop_undecided: RefCell::new(false), identities: RefCell::new(vec![json!({"token":"c".repeat(64),"displayName":"alice","revoked":false})]), verdicts: RefCell::new(vec![]), route_dir: root.join("routes"), enrolled: RefCell::new(vec![]), generation: RefCell::new(2) };
         (Worker::open(root.join("state"), Box::new(world)).unwrap(), root)
     }
 
     fn fake(w: &Worker) -> &FakeWorld {
         // The test world is the only World this test built.
         unsafe { &*(w.world.as_ref() as *const dyn World as *const FakeWorld) }
+    }
+
+    #[test]
+    fn apps_worker_renew_enrolls_once_per_generation_and_says_so_when_nothing_is_stale() {
+        let _serial = SERIAL.lock().unwrap();
+        let (w, root) = worker("renew");
+        let id = "0".repeat(32);
+        let _ = w.handle("alice", &install_request(&id));
+        fs::write(root.join("quarantine").join(format!("{PKG}.spk")), b"spk").unwrap();
+        let retry = w.handle("alice", &json!({"protocol":WORKER_PROTOCOL,"verb":"retry","requestId":id}));
+        assert_eq!(retry["state"], "running", "{retry}");
+        // The install enrolled the owner's route against generation 2.
+        assert_eq!(fake(&w).enrolled.borrow().as_slice(), [("alice".to_owned(), "2".to_owned())]);
+        // Nothing is stale: renew says so and submits nothing.
+        let renew = |w: &Worker| w.handle("alice", &json!({"protocol":WORKER_PROTOCOL,"verb":"renew","grain":"a4501"}));
+        let same = renew(&w);
+        assert_eq!(same["state"], "current", "{same}");
+        assert_eq!(fake(&w).enrolled.borrow().len(), 1);
+        // A restart moved the serving generation: START renews on its own.
+        *fake(&w).generation.borrow_mut() = 4;
+        let started = w.handle("alice", &json!({"protocol":WORKER_PROTOCOL,"verb":"start","grain":"a4501"}));
+        assert_eq!(started["state"], "running", "{started}");
+        assert_eq!(fake(&w).enrolled.borrow().last().unwrap(), &("alice".to_owned(), "4".to_owned()));
+        // And the explicit verb renews a generation START did not (a later move).
+        *fake(&w).generation.borrow_mut() = 6;
+        let renewed = renew(&w);
+        assert_eq!(renewed["state"], "renewed", "{renewed}");
+        assert_eq!(renewed["receipt"]["renewed"][0]["generation"], "6");
+        // A stopped grain has no generation to enroll against: refused by name.
+        let _ = w.handle("alice", &json!({"protocol":WORKER_PROTOCOL,"verb":"stop","grain":"a4501"}));
+        assert_eq!(renew(&w)["refused"], "notRunning");
+        // Another member cannot renew the owner's grain.
+        assert_eq!(w.handle("bob", &json!({"protocol":WORKER_PROTOCOL,"verb":"renew","grain":"a4501"}))["refused"], "notOwner");
     }
 
     #[test]

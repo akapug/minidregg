@@ -3,9 +3,28 @@ Source-authored completion command. The current package atom and roots carried
 here are candidates only; the receiving path must bind them to the observed
 old image and authenticate both original lifecycle events before admission.
 -/
-import Kernel.ApplicationLifecycleCompletionPolicy
-import Kernel.ApplicationLifecycleClaimV2Ingress
-import Kernel.ContentResource
+module
+
+public import Kernel.ApplicationLifecycleCompletionPolicy
+public import Kernel.ApplicationLifecycleClaimV2Ingress
+public import Kernel.ContentResource
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleCompletionSource
 

@@ -290,6 +290,15 @@ fn refusals(root: &Path, extra: Option<&Path>) -> Vec<(SystemTime, String, PathB
                 let intent = attempt.join("intent.json");
                 found.push((time, name.clone(), path, intent.is_file().then_some(intent)));
             }
+            // A fleet turn's plan refusal (op 96): the Host's own decoding, retained
+            // by `fleet::plan_refusal`, decided only when that decoding says
+            // `refused` — the same typed record that closes the operation.
+            let plan = attempt.join("plan-refusal.bin");
+            if let (Some(time), Ok(value)) = (modified(&plan), bounded_json(&plan.with_extension("json"))) {
+                if value["type"] == "refused" {
+                    found.push((time, name.clone(), plan, None));
+                }
+            }
             // A submitted call's outcome, and each retry's (`retry-NNNN`), when refused.
             let mut outcomes = vec![attempt.join("outcome.bin")];
             if let Ok(files) = fs::read_dir(&attempt) {
@@ -433,5 +442,31 @@ pub(super) fn run(
         "turn" => turn(root, workspace, need("PROPOSAL")?, json_out),
         "why" => why(root, workspace, name, refusal_dir, json_out),
         _ => Err("--view must be caps, law, receipt, turn or why".into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `refusals` lists a fleet attempt's plan refusal from the Host's own
+    /// decoding (`plan-refusal.bin`/`.json`, retained by `fleet::plan_refusal`),
+    /// decided only when that decoding says `refused`: an undecided envelope in
+    /// the same place decides nothing, exactly as `recover_operation` reads it.
+    #[test]
+    fn why_lists_a_decided_plan_refusal_and_not_an_undecided_envelope() {
+        let root = std::env::temp_dir().join(format!("mini-why-plan-refusal-{}-{}", std::process::id(), crate::workspace::random_nonce().unwrap()));
+        let refused = root.join("attempts").join("a-refused");
+        let undecided = root.join("attempts").join("b-undecided");
+        for (dir, kind) in [(&refused, "refused"), (&undecided, "unavailable")] {
+            fs::create_dir_all(dir).unwrap();
+            fs::write(dir.join("plan-refusal.bin"), [kind.as_bytes()].concat()).unwrap();
+            fs::write(dir.join("plan-refusal.json"),
+                format!("{{\"type\":\"{kind}\",\"reason\":\"bookRefused\"}}")).unwrap();
+        }
+        let found = refusals(&root, None);
+        assert_eq!(found.len(), 1, "only the decided plan refusal is listed");
+        assert!(found[0].2.ends_with("a-refused/plan-refusal.bin"));
+        let _ = fs::remove_dir_all(&root);
     }
 }

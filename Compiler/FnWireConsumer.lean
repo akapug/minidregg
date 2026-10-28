@@ -24,8 +24,27 @@ and `Compiler.FnWirePinned` proves each is the pinned file's family of that name
 interpreter's two round trips apply to them. A frame is accepted exactly when the octets are
 one frame of the family and nothing else (`decodeAll` after the hex), within the family's bound.
 -/
-import Compiler.FnWireFncu
-import Compiler.FnWireSized
+module
+
+public import Compiler.FnWireFncu
+public import Compiler.FnWireSized
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.FnWire
 

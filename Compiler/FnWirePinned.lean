@@ -25,11 +25,20 @@ Re-pinning to another fn revision is: vendor the file, set `pinnedRevision` and
 
 TRUST CLASS: compiled evaluation (`native_decide` + `#assert_compiled`) over a fixed file.
 -/
-import Compiler.FnWireJson
-import Compiler.FnWireFncu
-import Compiler.FnWireSized
-import Compiler.FnWireConsumer
-import Theory.AssertCompiled
+module
+
+public import Compiler.FnWireJson
+public import Compiler.FnWireFncu
+public import Compiler.FnWireSized
+public import Compiler.FnWireConsumer
+public import Theory.AssertCompiled
+meta import Compiler.FnWireJson
+meta import Compiler.FnWireFncu
+meta import Compiler.FnWireSized
+meta import Compiler.FnWireConsumer
+meta import Theory.AssertCompiled
+
+@[expose] public section
 
 namespace Minidregg.Compiler.FnWire
 

@@ -12,8 +12,27 @@ A light ground's cells are its served state's whole cell state; its basis keys n
 transactions and nullifiers, so the record read does not depend on them
 (`recordOn_light_keys`).
 -/
-import Compiler.ServedBasis
-import Kernel.PlatformCellDomain
+module
+
+public import Compiler.ServedBasis
+public import Kernel.PlatformCellDomain
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.CompletionCustodianKey
 

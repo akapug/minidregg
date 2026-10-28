@@ -120,6 +120,17 @@ socket.
   free route. The paid route stays open (the stranger pays). Nothing fails silently: every refusal
   is a named reason on the stranger's page and a journal line.
 - Mini's own per-member limits apply after enrolment (the sponsor's tariffs, the Host's lanes).
+- `story` (optional; `{"author": "box", "name": "tale"}`, lowercase words): the built-in story every
+  member joins, so the tour's story door has the member's own cell to move on. `author` is the account
+  that holds the seed's `tale`, i.e. the seed's `SEED_HOST` (default `box`, which `door.json.example`
+  carries; a node that runs the seed with `SEED_HOST=house` writes `"author": "house"`). After enrolment the
+  author's account runs `story invite tale SUBJECT`, the processor hands the invitation to the member's
+  `HOME/requests/tale-invite.json`, and the member runs `story join tale @tale-invite.json`: both are
+  ordinary shell lines in each account's own session. Once per world: the world is named by the digest of
+  the node's pinned config, so after a re-genesis (once the seed has made `tale` again) every member is
+  invited again. The invitation is recorded before the join, so a failed join retries only the join. A
+  failure is shown on the stranger's page (`story.error`) and never refuses enrolment; the next tick
+  retries. Absent: no story step.
 
 ## Rate limits and abuse
 

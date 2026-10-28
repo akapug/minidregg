@@ -55,8 +55,9 @@ journey_set_row() {
     steps="$steps $id"
   done <"$OUT/set.txt"
   # the journey's own wall budget ends 400 s inside the runner's row timeout, so a slow run is a named red
+  # J14 and J17 name the grain runtime GRAIN_RUNTIME; the runner exports the set's as GRAIN
   JOURNEY_KEEP_GOING=${JOURNEY_KEEP_GOING:-1} JOURNEY_STEPS="${steps# }" JOURNEY_GROWTH_LEVELS=10 JOURNEY_BUDGET_S=$(( ${PIPELINE_ROW_TIMEOUT_S:-5400} - 400 )) \
-    bash "$js" "$MANIFEST" "$RUN/j" >"$OUT/journey.out" 2>"$OUT/journey.err"
+    GRAIN_RUNTIME=${GRAIN_RUNTIME:-${GRAIN:-$BIN/grain-runtime}} bash "$js" "$MANIFEST" "$RUN/j" >"$OUT/journey.out" 2>"$OUT/journey.err"
   local rc=$?
   [ -s "$RUN/j/journey-result.json" ] || { tail -1 "$OUT/journey.err" >&2; return 1; }
   cp "$RUN/j/journey-result.json" "$OUT/"

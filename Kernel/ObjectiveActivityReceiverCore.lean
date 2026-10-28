@@ -61,14 +61,35 @@ envelope ceilings and tariff are the deployment's Objective policy (the
 activities with it. Fees are in the deployment's creation-tariff asset, paid to
 its collector.
 -/
-import Kernel.CapabilityRevocationController
-import Kernel.ResourceBirthController
-import Kernel.ObjectiveActivity
-import Kernel.ActivitySeatEnd
-import Kernel.ObjectiveAdmittedTurn
-import Kernel.ObjectiveKernelConfig
-import Kernel.ObjectiveBendNativeAdmission
-import Kernel.PayAssignmentOwner
+module
+
+public import Kernel.CapabilityRevocationController
+public import Kernel.ResourceBirthController
+public import Kernel.ObjectiveActivity
+public import Kernel.ActivitySeatEnd
+public import Kernel.ObjectiveAdmittedTurn
+public import Kernel.ObjectiveKernelConfig
+public import Kernel.ObjectiveBendNativeAdmission
+public import Kernel.PayAssignmentOwner
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ObjectiveActivityReceiver
 

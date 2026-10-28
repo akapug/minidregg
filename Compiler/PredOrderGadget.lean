@@ -22,7 +22,26 @@ extension, not a larger label on modular scalar arithmetic.
 Every constraint below is composed from the existing AIR DSL and `rangeGadget`.
 There is no second evaluator, Rust circuit, or positive-only slack assertion.
 -/
-import Compiler.AirRange
+module
+
+public import Compiler.AirRange
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.PredOrder
 

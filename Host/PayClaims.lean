@@ -5,9 +5,13 @@ its duplicate-key parser and 4096-byte raw-body limit before passing Json here.
 Byte values and 32-byte little-endian digests are hexadecimal. Natural scalars
 are canonical decimal strings. No signing, transfer, or pricing is done in JSON.
 -/
-import Kernel.NativeHostPayClaims
-import Kernel.PayStarterAllowance
-import Lean.Data.Json
+module
+
+public import Kernel.NativeHostPayClaims
+public import Kernel.PayStarterAllowance
+public import Lean.Data.Json
+
+@[expose] public section
 
 namespace Minidregg.Host.PayClaims
 

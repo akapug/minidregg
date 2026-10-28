@@ -7,15 +7,20 @@ receiver recomputes at admission. `author` is the ordinary source publication
 payload author; its expectedCore is a consumer's own replay (for a third
 party's offered core, `ObjectiveBendPublication.publishedCore` again). No
 authority is created by source publication. -/
-import Compiler.ObjectiveSourcePackage
-import Compiler.ObjectiveBendPublication
-import Compiler.ObjectiveBendSourceArtifact
-import Kernel.ObjectiveBendNativeInput
-import Kernel.ObjectiveBendPublishedPackage
-import Kernel.ObjectiveBendNativeAdmission
-import Compiler.ObjectiveBendGenericResult
-import Kernel.ObjectiveActivity
-import Kernel.SeatStore
+module
+
+public import Compiler.ObjectiveSourcePackage
+public import Compiler.ObjectiveBendPublication
+public import Compiler.ObjectiveBendSourceArtifact
+public import Kernel.ObjectiveBendNativeInput
+public import Kernel.ObjectiveBendPublishedPackage
+public import Kernel.ObjectiveBendNativeAdmission
+public import Compiler.ObjectiveBendGenericResult
+public import Kernel.ObjectiveActivity
+public import Kernel.SeatStore
+
+@[expose] public section
+
 namespace Minidregg.Host.ObjectivePackageAuthor
 open Minidregg.Compiler
 open Lean Minidregg.Theory Minidregg.Theory.TypedAuthorization

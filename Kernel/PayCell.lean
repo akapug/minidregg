@@ -56,11 +56,30 @@ not activate compute or assert that historical execution used no allowance.
 Compute requires a separately authenticated fresh-genesis or closed-legacy
 history activation. Its append-only record prevents resetting the free epoch.
 -/
-import Kernel.PayEnrolClaim
-import Kernel.PayEnrolMemoV2
-import Compiler.StoreCodec
-import Kernel.PayTariff
-import Kernel.PayEnrolMemo
+module
+
+public import Kernel.PayEnrolClaim
+public import Kernel.PayEnrolMemoV2
+public import Compiler.StoreCodec
+public import Kernel.PayTariff
+public import Kernel.PayEnrolMemo
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PayCell
 
@@ -518,7 +537,7 @@ def valueStream : (space : Namespace) → StreamCodec (Namespace.Value space)
   | .computeUsage => computeUsageStream
   | .computeActivation => computeActivationStream
 
-def wireName : String := "DREGG/PAY/CELL/v9"
+def wireName : String := "DREGG/PAY/CELL/v10"
 
 def wire : Wire layout where
   name := wireName
@@ -544,19 +563,19 @@ def wire : Wire layout where
     | .computeUsage => "subject-id/nat"
     | .computeActivation => "unit"
   valueCodecId
-    | .tariff => "DREGG/PAY/TARIFF/v7"
+    | .tariff => "DREGG/PAY/TARIFF/v8"
     | .book => "address32/bytes"
     | .assignment => "account-id/nat"
-    | .enrolment => "DREGG/PAY/ENROLMENT/v4"
+    | .enrolment => "DREGG/PAY/ENROLMENT/v5"
     | .sshIndex => "mini-key32/bytes"
-    | .journal => "DREGG/PAY/UNATTRIBUTED/v4"
-    | .claim => "DREGG/PAY/CLAIM/v5"
-    | .claimConsumption => "DREGG/PAY/CLAIM/CONSUMPTION/v5"
-    | .pendingOwner => "DREGG/PAY/PENDING-OWNER/v4"
-    | .pendingOwnerHistory => "DREGG/PAY/PENDING-OWNER/v4"
-    | .chainTip => "DREGG/PAY/CHAIN-TIP/v4"
-    | .computeUsage => "DREGG/RUN/COMPUTE-USAGE/v4"
-    | .computeActivation => "DREGG/RUN/COMPUTE-ACTIVATION/v4"
+    | .journal => "DREGG/PAY/UNATTRIBUTED/v5"
+    | .claim => "DREGG/PAY/CLAIM/v6"
+    | .claimConsumption => "DREGG/PAY/CLAIM/CONSUMPTION/v6"
+    | .pendingOwner => "DREGG/PAY/PENDING-OWNER/v5"
+    | .pendingOwnerHistory => "DREGG/PAY/PENDING-OWNER/v5"
+    | .chainTip => "DREGG/PAY/CHAIN-TIP/v5"
+    | .computeUsage => "DREGG/RUN/COMPUTE-USAGE/v5"
+    | .computeActivation => "DREGG/RUN/COMPUTE-ACTIVATION/v5"
 
 def materializer : Materializer layout Digest := StoreCodec.materializer wire
 

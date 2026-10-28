@@ -3,13 +3,34 @@ Current-image selectors for special application dispatch. These helpers do not
 admit a request by themselves: the receiver must check signed observations,
 the DRC invocation, accepted historical share issuance, and one durable CAS.
 -/
-import Kernel.ApplicationDispatchAdmissionIngress
-import Kernel.ApplicationDispatchManifest
-import Kernel.ApplicationDispatchWitness
-import Kernel.ApplicationDispatchAuthority
-import Kernel.ApplicationShareIssueSource
-import Kernel.ResourceObservationAdmission
-import Kernel.PhysicalResourceReadGuard
+module
+
+public import Kernel.ApplicationDispatchAdmissionIngress
+public import Kernel.ApplicationDispatchManifest
+public import Kernel.ApplicationDispatchWitness
+public import Kernel.ApplicationDispatchAuthority
+public import Kernel.ApplicationShareIssueSource
+public import Kernel.ResourceObservationAdmission
+public import Kernel.PhysicalResourceReadGuard
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationDispatchAdmission
 
@@ -422,7 +443,7 @@ theorem observedPhysicalRoot_current {deployment : Deployment}
 selected issue/ticket coordinates, without including their own envelopes. -/
 def observationContext (ingress : ApplicationDispatchAdmissionIngress.Ingress) :
     List UInt8 :=
-  "DREGG/APPLICATION/DISPATCH-OBSERVATION/v5".toUTF8.toList ++
+  "DREGG/APPLICATION/DISPATCH-OBSERVATION/v6".toUTF8.toList ++
     ((StreamCodec.product digestStream
       (StreamCodec.product StreamCodec.nat
         (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream

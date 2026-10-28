@@ -38,8 +38,25 @@ const MAX_REPLY: usize = 64 * 1024;
 pub(crate) const STANDARD_RAW_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_TEXT: usize = 512;
 const WORKER_VERBS: &[&str] = &[
-    "list", "status", "install", "retry", "open", "stop", "start", "share", "export", "delete",
+    "list", "status", "install", "retry", "open", "stop", "start", "share", "export", "delete", "renew",
+    "identities", "revoke-identity",
 ];
+
+/// The flag a grammar positional is spelled as on the CLI (`mini apps share a4501 bob` is
+/// `--grain a4501 --to bob`): one table for the CLI's positional reader, so the shell and the
+/// command line take the same words.
+pub(crate) fn positional_flag(argument: &str) -> &'static str {
+    match argument {
+        "TERM" => "term",
+        "APP-ID|PACKAGE-ID" => "app",
+        "REQUEST-ID" => "request-id",
+        "GRAIN" => "grain",
+        "MEMBER" => "to",
+        "FILE" => "out",
+        "TOKEN" => "token",
+        _ => "arg",
+    }
+}
 
 /// One catalogue entry: the index's claims about one app, bounded and typed.
 #[derive(Clone, Debug, PartialEq)]
@@ -269,6 +286,10 @@ pub(crate) const FEATURED: &[(&str, &str)] = &[
     ("8x12h6p0x0nrzk73hfq6zh2jxtgyzzcty7qsatkg7jfg2mzw5n90", "a plain-text journal: POST /add a transaction, GET /accounts and the JSON API"),
     ("7qvcjh7gk0rzdx1s3c8gufd288sesf6vvdt297756xcv4q8xxvhh", "the deck is slides.md: PUT /slides.md, GET it back; published at <grain>-www"),
     ("m86q05rdvj14yvn78ghaxynqz7u2svw6rnttptxx49g1785cdv1h", "REST /api (boards, lists, cards) and DDP"),
+    ("61gh7gnns305cknp20v2ekvdex48g4d3rv6wghuzk6huzx5qmp7h", "hg over HTTP: POST /?cmd=unbundle pushes a changegroup; GET /raw-file/<rev>/<path> and /rev/<node> read it back"),
+    ("1gda5n8p8zsc0r9pcana2yjgtvsq169068k4ve8mk68z4x9fvzuh", "drawings over socket.io: draw:progress and draw:end add a stroke to a room; a subscriber's project:load reads it back"),
+    ("w544a46cjwtje73rfearjvszwa3nhjtxjanu5s83qkdutx6k0nz0", "sticky notes over socket.io: joinRoom then createCard; initializeMe answers initCards from the board's redis"),
+    ("1d3umpx9ug1jv5stepvqfrucx3yr8n2a4gd7y5cud2vsq6mmj8uh", "the spec is one file: PUT /editor/spec, GET it back"),
 ];
 
 pub(crate) fn featured(app_id: &str) -> Option<(usize, &'static str)> {
@@ -496,13 +517,13 @@ fn request_id() -> Result<String> {
 
 /// `install`: the member's choice, retained under the workspace before it is
 /// sent, so a lost reply is answered by the exact retry of the same id.
-fn install(mut args: Args, paths: &Paths, as_json: bool) -> Result<()> {
+fn install(mut args: Args, paths: &Paths, as_json: bool, dir: Option<std::ffi::OsString>) -> Result<()> {
     let selector = text_flag(&mut args, "app")?.ok_or("install requires --app APP-ID|PACKAGE-ID")?;
     let class = text_flag(&mut args, "class")?.unwrap_or_else(|| "auto".into());
     if !matches!(class.as_str(), "S" | "M" | "L" | "auto") {
         return Err("classRefused: --class takes S, M or L".into());
     }
-    let root = absolute(&path(args.required("dir")?))?;
+    let root = absolute(&path(dir.ok_or("missing --dir")?))?;
     // The member's session home (the shell passes it): HOME/inbox holds the delegated
     // references the frame leaves at enrolment.
     let home = args.optional("home").map(|v| absolute(&path(v))).transpose()?
@@ -605,12 +626,15 @@ fn install(mut args: Args, paths: &Paths, as_json: bool) -> Result<()> {
 
 
 fn catalogue(action: &str, mut args: Args, paths: &Paths, as_json: bool) -> Result<()> {
+    // Every flag is consumed before the index is read: an unconsumed one is a usage error first.
+    let (term, category, selector) = match action {
+        "search" => (text_flag(&mut args, "term")?.unwrap_or_default(), text_flag(&mut args, "category")?, None),
+        _ => (String::new(), None, Some(text_flag(&mut args, "app")?.ok_or("show requires --app APP-ID|PACKAGE-ID")?)),
+    };
+    args.finish()?;
     let entries = load_index(&paths.index)?;
     match action {
         "search" => {
-            let term = text_flag(&mut args, "term")?.unwrap_or_default();
-            let category = text_flag(&mut args, "category")?;
-            args.finish()?;
             let found = search(&entries, &term, category.as_deref());
             if as_json {
                 let list: Vec<Value> = found
@@ -643,8 +667,7 @@ fn catalogue(action: &str, mut args: Args, paths: &Paths, as_json: bool) -> Resu
             Ok(())
         }
         "show" => {
-            let selector = text_flag(&mut args, "app")?.ok_or("show requires --app APP-ID|PACKAGE-ID")?;
-            args.finish()?;
+            let selector = selector.unwrap_or_default();
             let entry = resolve(&entries, &selector)?;
             let v = verdict(&paths.verdicts, &paths.meta, &entry.package_id);
             let value = entry_json(entry, &v);
@@ -714,10 +737,13 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         .map_err(|_| "action must be UTF-8".to_owned())?;
     let as_json = args.optional("json").is_some();
     let paths = paths(&mut args);
+    // The shell passes the member's workspace to every apps verb; only bootstrap and install use it,
+    // and no verb may leave it unconsumed (`unknown or duplicate option --dir`).
+    let dir = args.optional("dir");
     match action.as_str() {
         "index-check" => index_check(args),
         "bootstrap" => {
-            let root = absolute(&path(args.required("dir")?))?;
+            let root = absolute(&path(dir.ok_or("missing --dir")?))?;
             let budget = text_flag(&mut args, "budget")?.unwrap_or_else(|| "100000".into());
             let tool_ref = text_flag(&mut args, "tool-ref")?.unwrap_or_else(|| "tool".into());
             let parent_ref = text_flag(&mut args, "parent-ref")?.unwrap_or_else(|| "parent".into());
@@ -732,12 +758,12 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             Ok(())
         }
         "search" | "show" => catalogue(&action, args, &paths, as_json),
-        "install" => install(args, &paths, as_json),
+        "install" => install(args, &paths, as_json, dir),
         verb if WORKER_VERBS.contains(&verb) => {
             let mut request = Map::new();
             request.insert("protocol".into(), json!(WORKER_PROTOCOL));
             request.insert("verb".into(), json!(verb));
-            for flag in ["grain", "to", "out", "request-id"] {
+            for flag in ["grain", "to", "out", "request-id", "token"] {
                 if let Some(value) = text_flag(&mut args, flag)? {
                     if flag == "grain" && !valid_grain(&value) {
                         return Err(format!("grainRefused: {value:?} is not a grain id of the form a<app>"));
@@ -746,8 +772,11 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 }
             }
             args.finish()?;
-            if matches!(verb, "open" | "stop" | "start" | "share" | "export" | "delete" | "status") && !request.contains_key("grain") {
+            if matches!(verb, "open" | "stop" | "start" | "share" | "export" | "delete" | "status" | "renew" | "identities" | "revoke-identity") && !request.contains_key("grain") {
                 return Err(format!("{verb} requires --grain a<app>"));
+            }
+            if verb == "revoke-identity" && !request.contains_key("token") {
+                return Err("revoke-identity requires --token TOKEN".into());
             }
             if verb == "share" && !request.contains_key("to") {
                 return Err("share requires --to MEMBER".into());
@@ -1171,6 +1200,8 @@ pub(crate) fn bootstrap(root: &Path, ws: &Value, budget: &str, tool_ref: &str, p
             "appsConfig":{"protocol":"mini-apps-config-v1","managementSubject":subject,"toolRef":tool_ref,"parentRef":parent_ref,"tariff":{"base":"2","perBirth":"1"}}})
     };
     if let (Ok(tool), Ok(parent)) = (w::reference(root, tool_ref), w::reference(root, parent_ref)) {
+        // A world bootstrapped before the tasks were activated is repaired by a rerun.
+        activate_tasks(root, ws, &subject, &tool, &parent)?;
         return Ok(report(&tool, &parent));
     }
     let context = w::bounded_json(&member_path(ws, "birthContext")?)?;
@@ -1235,7 +1266,65 @@ pub(crate) fn bootstrap(root: &Path, ws: &Value, budget: &str, tool_ref: &str, p
             "authority":"hint-only"});
         crate::create_private(&reference_path, &serde_json::to_vec_pretty(&value).map_err(|e| e.to_string())?)?;
     }
-    Ok(report(&w::reference(root, tool_ref)?, &w::reference(root, parent_ref)?))
+    let (tool, parent) = (w::reference(root, tool_ref)?, w::reference(root, parent_ref)?);
+    activate_tasks(root, ws, &subject, &tool, &parent)?;
+    Ok(report(&tool, &parent))
+}
+
+/// A task `apps bootstrap` has just birthed is idle (status 0): in the grain-task law only an attach
+/// leaves status 0 (to 1, generation +1), and a reserve is legal only from an attached task. So every
+/// member's first install reservation was law-denied. The workroom fixture's `workroom_ready` does
+/// exactly this: attach the tool; attach the metered birth parent and reserve 1 on it. Each step is
+/// one retained grain-intent attempt, recovered exactly and never submitted twice, and a task already
+/// past the step is left alone (a rerun of bootstrap finds it done).
+fn activate_tasks(root: &Path, ws: &Value, subject: &str, tool: &Value, parent: &Value) -> Result<()> {
+    for (name, task) in ACTIVATION_STEPS {
+        let (reference, operation) = match name {
+            "tool-attach" => (tool, json!({"type":"attach","soft":false})),
+            "parent-attach" => (parent, json!({"type":"attach","soft":false})),
+            _ => (parent, json!({"type":"reserve","amount":"1"})),
+        };
+        let _ = task;
+        activate_step(root, ws, subject, name, reference, operation)?;
+    }
+    Ok(())
+}
+
+/// The activation steps in the order the law permits them (name, which task).
+const ACTIVATION_STEPS: [(&str, &str); 3] = [("tool-attach", "tool"), ("parent-attach", "parent"), ("parent-reserve", "parent")];
+
+/// Whether a step is still needed given the task's grain state (status and reserved as the signed
+/// view prints them): attach only leaves status 0, and the parent's one-unit reserve is legal only once
+/// attached (status 1) with nothing reserved.
+pub(crate) fn activation_needed(step: &str, grain: &Value) -> bool {
+    match step {
+        "tool-attach" | "parent-attach" => grain["status"] == "0",
+        "parent-reserve" => grain["status"] == "1" && grain["reserved"] == "0",
+        _ => false,
+    }
+}
+
+fn activate_step(root: &Path, ws: &Value, subject: &str, name: &str, task: &Value, operation: Value) -> Result<()> {
+    use crate::workspace::{self as w, member_path};
+    let attempt = root.join("attempts").join(format!("apps-activate-{name}"));
+    if attempt.exists() {
+        if w::accepted_outcome(&attempt)?.is_none() && attempt.join("call.bin").is_file() {
+            crate::retry(&attempt, "lookup", false)?;
+        }
+        return w::accepted_outcome(&attempt)?.map(|_| ()).ok_or_else(|| format!("taskActivationUndecided: {name} is neither confirmed nor refused; inspect {}", attempt.display()));
+    }
+    let (view, _, _) = w::signed_view(root, ws, task, "resource")?;
+    let grain = view.pointer("/cell/grain").ok_or("the task's signed view has no grain state")?;
+    if !activation_needed(name, grain) {
+        return Ok(());
+    }
+    let intent = tool_intent(subject, &w::random_nonce()?, name, task, &view, operation)?;
+    let intent_path = root.join("sources").join(format!("apps-activate-{name}.json"));
+    let _ = fs::remove_file(&intent_path);
+    crate::create_private(&intent_path, &serde_json::to_vec_pretty(&intent).map_err(|e| e.to_string())?)?;
+    eprintln!("apps task activation attempt: {}", attempt.display());
+    crate::submit(&w::workspace_host(ws)?, &member_path(ws, "config")?, &intent_path, std::ffi::OsStr::new("grain-intent"), &member_path(ws, "key")?, &attempt, false)?;
+    w::accepted_outcome(&attempt)?.map(|_| ()).ok_or_else(|| format!("taskActivationRefused: {name}; see {}", attempt.display()))
 }
 
 // ------------------------------------------------ the request cell (law.apps)
@@ -1382,6 +1471,25 @@ fn camel(flag: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_freshly_bootstrapped_world_activates_its_tasks_before_any_reservation() {
+        // `apps bootstrap` births both tasks idle: status 0, nothing reserved. The grain-task law lets
+        // only an attach leave status 0, and a reserve only follows an attach, so the first install's
+        // reservation on an unactivated task is law-denied. The steps the bootstrap now takes:
+        let idle = json!({"generation":"0","status":"0","remaining":"1000000","reserved":"0"});
+        let attached = json!({"generation":"1","status":"1","remaining":"1000000","reserved":"0"});
+        let reserved = json!({"generation":"2","status":"3","remaining":"999999","reserved":"1"});
+        assert!(activation_needed("tool-attach", &idle) && activation_needed("parent-attach", &idle));
+        assert!(!activation_needed("parent-reserve", &idle), "a reserve before the attach is the law-denied step");
+        assert!(activation_needed("parent-reserve", &attached));
+        // A rerun finds every step done and submits nothing.
+        for step in ["tool-attach", "parent-attach", "parent-reserve"] {
+            assert!(!activation_needed(step, &reserved), "{step}");
+        }
+        assert!(!activation_needed("tool-attach", &attached), "an attached tool is left alone");
+        assert_eq!(ACTIVATION_STEPS.iter().map(|s| s.0).collect::<Vec<_>>(), ["tool-attach", "parent-attach", "parent-reserve"], "attach precedes reserve");
+    }
     use super::*;
 
     const FIXTURE: &[u8] = include_bytes!("../tests/fixtures/sandstorm-index-2026-10-27.json");
@@ -1429,7 +1537,7 @@ mod tests {
         assert_eq!(all.len(), entries.len());
         let names: Vec<&str> = all.iter().take(FEATURED.len()).map(|e| e.name.as_str()).collect();
         assert_eq!(names[0], "Etherpad");
-        assert_eq!(names.len(), 13, "every featured appId is in the recorded index: {names:?}");
+        assert_eq!(names.len(), 17, "every featured appId is in the recorded index: {names:?}");
         assert!(all[FEATURED.len()..].iter().all(|e| featured(&e.app_id).is_none()));
         let pad = entry_json(all[0], &Verdict { state: "unverified".into(), reason: None, raw_bytes: None, signed_app_id: None, running: 0 });
         assert_eq!(pad["featured"]["rank"], 1);

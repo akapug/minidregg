@@ -4,7 +4,26 @@ delegation components. This module has no receive/submit entry point. Its
 `template` is not issue authority: the upper Replay admission must also prove
 the exact original ticket issue at a verified prefix before durable dispatch.
 -/
-import Kernel.ApplicationAgentLifetimeGrantAdmission
+module
+
+public import Kernel.ApplicationAgentLifetimeGrantAdmission
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationAgentLifetimeGrantIntentTemplate
 open Minidregg.Compiler

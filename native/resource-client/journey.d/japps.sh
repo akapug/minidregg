@@ -88,9 +88,11 @@ slides=$("$MINI" apps show --index "$FIXTURE" --verdicts "$W/verdicts" --meta "$
 row "a fetched package's size and class come from the fetcher's meta" "$(grep -q 'class      S' <<<"$slides" && grep -q '16778192 bytes' <<<"$slides" && echo 1 || echo 0)" "$(grep -E 'size|class' <<<"$slides" | tr -s ' ' | tr '\n' ';')"
 
 # ---- signatures: the stream reader's inspect (Mac) and spk-host qualify (box) -----------------
+# On the box the shipped verifier is spk-host qualify (below), so the operator's inspect example,
+# which the candidate does not pack, is the Mac's path only.
 INSPECT=${3:-${INSPECT:-}}
 if [ -z "$INSPECT" ] && [ -x "$BIN/inspect" ]; then INSPECT=$BIN/inspect; fi
-if [ -n "$INSPECT" ] && [ -x "$INSPECT" ]; then
+if [ "$mode" != --box ] && [ -n "$INSPECT" ] && [ -x "$INSPECT" ]; then
   mkdir -p "$W/scratch"
   for pair in "$SLIDES_PKG:$SLIDES_APP" "$TODOS_PKG:$TODOS_APP"; do
     pkg=${pair%%:*} app=${pair##*:}
@@ -103,7 +105,7 @@ if [ -n "$INSPECT" ] && [ -x "$INSPECT" ]; then
   printf '\xff' | dd of="$W/tampered.spk" bs=1 seek=$((size / 2)) conv=notrunc 2>/dev/null
   if "$INSPECT" "$W/tampered.spk" "$W/scratch" standard-v1 >/dev/null 2>"$W/tampered.err"; then ok=0; else ok=1; fi
   row "a tampered copy is refused by name" "$ok" "$(tail -1 "$W/tampered.err" | cut -c1-120)"
-else
+elif [ "$mode" != --box ]; then
   row "inspect available (INSPECT or BIN/inspect)" 0 "no inspect example: cargo build -p minidregg-spk-package-stream --example inspect"
 fi
 if [ "$mode" = --box ]; then
@@ -120,7 +122,17 @@ if [ "$mode" = --box ]; then
       if q=$("$BIN/spk-host" qualify --import-profile standard-v1 "$Q/$pkg.spk" 2>"$W/q-$pkg.err"); then got=accept; else got=$(grep -oE 'saveIdentityCaps|expectAppHooks|apiPath' "$W/q-$pkg.err" | head -1); fi
       facilities=$(grep -oE '"saveIdentityCaps":(true|false),"expectAppHooks":(true|false)' <<<"$q" | head -1)
       row "spk-host qualify $pkg -> $want" "$([ "$got" = "$want" ] && echo 1 || echo 0)" "${got:-$(tail -1 "$W/q-$pkg.err" | cut -c1-120)} ${facilities}"
+      app=; [ "$pkg" = "$SLIDES_PKG" ] && app=$SLIDES_APP; [ "$pkg" = "$TODOS_PKG" ] && app=$TODOS_APP
+      if [ -n "$app" ]; then
+        ok=0; grep -q "\"signedAppId\":\"$app\"" <<<"$q" && ok=1
+        row "spk-host qualify $pkg: signed appId == index appId" "$ok" "$(grep -o '"signedAppId":"[a-z0-9]*"' <<<"$q")"
+      fi
     done
+    cp "$Q/$SLIDES_PKG.spk" "$Q/tampered.spk" && chmod 0600 "$Q/tampered.spk"
+    size=$(stat -c %s "$Q/tampered.spk")
+    printf '\xff' | dd of="$Q/tampered.spk" bs=1 seek=$((size / 2)) conv=notrunc 2>/dev/null
+    if "$BIN/spk-host" qualify --import-profile standard-v1 "$Q/tampered.spk" >/dev/null 2>"$W/q-tampered.err"; then ok=0; else ok=1; fi
+    row "spk-host qualify refuses a tampered copy by name" "$ok" "$(tail -1 "$W/q-tampered.err" | cut -c1-120)"
     rm -rf "$Q"
   else
     row "spk-host present for qualify" 0 "no $BIN/spk-host"
@@ -214,14 +226,16 @@ if [ "$mode" = --box ]; then
       state=$(jq -er .stateRoot "$(jq -er .profilePath "$run/evidence/profile-result.json")")
       # The tour's step 7: a second browser session on the running Simple Todos grain co-edits.
       app_b=$(jq -er '.applicationGrainBirth.applicationBirth.application.app' "$run/evidence/b-app-source.json")
-      if jenv $J share-b2 enroll-b2 register-b2 get-b2 >"$W/coedit-world.out" 2>"$W/coedit-world.err"; then
+      if jenv $J share-bs enroll-bs register-bs get-bs >"$W/coedit-world.out" 2>"$W/coedit-world.err"; then
         co=$(python3 "$REPO/scripts/spk-platform/ddp-coedit.py" "$state/apps/$app_b/routes/owner-web" "$state/apps/$app_b/routes/guest2-web" 2>&1 | tail -1)
       else co="second session: $(tail -1 "$W/coedit-world.err")"; fi
       row "a second browser session co-edits Simple Todos (B sees A's todo over DDP)" "$(jq -e .ok <<<"$co" >/dev/null 2>&1 && echo 1 || echo 0)" "$(cut -c1-160 <<<"$co")"
       # The publishing origin: restart the stopped Hacker Slides grain and read its /var/www
       # through the resident's www.sock (the socket the front reaches through the connector).
       app_a_dir=$state/apps/$app_a
-      if jenv $J start-a >"$W/www-world.out" 2>"$W/www-world.err"; then
+      # The restart moved the app to a new serving generation, so the owner session is re-enrolled
+      # (enroll-a2 renews it) before the write: the first enrollment names the old generation.
+      if jenv $J start-a enroll-a2 >"$W/www-world.out" 2>"$W/www-world.err"; then
         www=$(curl -sS --max-time 120 --unix-socket "$app_a_dir/www.sock" -H 'Host: grain.test' -o "$W/www-index.body" -D - http://grain.test/ 2>&1 | head -1 | tr -d '\r')
         post=$(curl -sS --max-time 30 --unix-socket "$app_a_dir/www.sock" -X POST -o /dev/null -w '%{http_code}' http://grain.test/ 2>&1)
         esc=$(curl -sS --max-time 30 --unix-socket "$app_a_dir/www.sock" -o /dev/null -w '%{http_code}' --path-as-is 'http://grain.test/../g2/resident.json' 2>&1)

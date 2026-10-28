@@ -3,7 +3,26 @@ Strict signed carrier for a checked lifecycle completion. Event family 18 is
 separate from pending BEGIN family 12 and one-shot claim family 16. A replay
 of the same physical report cannot mint another completion nullifier.
 -/
-import Kernel.ApplicationLifecycleCompletionSource
+module
+
+public import Kernel.ApplicationLifecycleCompletionSource
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleCompletionIngress
 

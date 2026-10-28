@@ -2,7 +2,12 @@
 attribute; the named census independently extracts receiving identities and
 requires both sets to be equal. Inline receiving tags may remain in their own
 modules, avoiding coupling unrelated Kernel edits to this build check. -/
-import Lean
+module
+
+public import Lean
+meta import Lean
+
+@[expose] public section
 
 namespace Minidregg.Compiler.PersistedCodecTags
 open Lean Elab Command

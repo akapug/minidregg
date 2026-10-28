@@ -1,6 +1,11 @@
 /- Source-owned protected content coordinates retain ordinary write protection
 independently of any particular execution language or checkpoint codec. -/
-import Compiler.ContentControlFrame
+module
+
+public import Compiler.ContentControlFrame
+
+@[expose] public section
+
 namespace Minidregg.Kernel.ProtectedContentGate
 open Minidregg.Kernel.DurableDataIntent
 set_option autoImplicit false

@@ -18,6 +18,7 @@
 //! namespace uid allocation and image publication. It reaches volume privilege
 //! only through the registered fixed-verb one-shot helper.
 
+use crate::io_context::IoContext;
 use crate::broker::{self, Request};
 use crate::dispatch_native::{private_dir, PrivateOperator};
 use crate::lifecycle_selector::{self, LifecycleSelector};
@@ -107,24 +108,24 @@ fn derived_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
         ".{}.tmp",
         path.file_name().and_then(|n| n.to_str()).unwrap_or("derived")
     ));
-    let _ = fs::remove_file(&temp);
+    let _ = fs::remove_file(&temp).ctx("remove", &temp);
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(&temp)?;
+        .open(&temp).ctx("open", &temp)?;
     file.write_all(bytes)?;
     file.sync_all()?;
-    fs::rename(&temp, path)?;
-    File::open(parent)?.sync_all()
+    fs::rename(&temp, path).ctx("rename", &temp)?;
+    File::open(parent).ctx("open", parent)?.sync_all()
 }
 
 fn private_directory(path: &Path) -> io::Result<()> {
     match DirBuilder::new().mode(0o700).create(path) {
         Ok(()) => {
             if let Some(parent) = path.parent() {
-                File::open(parent)?.sync_all()?;
+                File::open(parent).ctx("open", parent)?.sync_all()?;
             }
         }
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
@@ -133,8 +134,11 @@ fn private_directory(path: &Path) -> io::Result<()> {
     private_dir(path)
 }
 
+#[cfg(test)]
+pub(crate) fn read_bounded_for_test(path: &Path) -> io::Result<String> { file_sha256(path) }
+
 fn file_sha256(path: &Path) -> io::Result<String> {
-    let mut file = File::open(path)?;
+    let mut file = File::open(path).ctx("open", path)?;
     let mut digest = Sha256::new();
     let mut chunk = [0u8; 64 * 1024];
     loop {
@@ -150,7 +154,7 @@ fn file_sha256(path: &Path) -> io::Result<String> {
 /// Hash/copy a regular input under the operator's bound without an archive-sized
 /// allocation. Check the bytes actually read as well as the opening length.
 fn copy_package_bounded(path: &Path, output: &mut impl Write, maximum: u64) -> io::Result<String> {
-    let mut file = OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(path)?;
+    let mut file = OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(&path).ctx("open", &path)?;
     let meta = file.metadata()?;
     if !meta.is_file() || meta.len() == 0 || meta.len() > maximum {
         return Err(invalid("signed SPK input refused"));
@@ -170,7 +174,7 @@ fn copy_package_bounded(path: &Path, output: &mut impl Write, maximum: u64) -> i
 }
 
 fn pinned_executable(path: &Path, sha: &str) -> io::Result<()> {
-    let meta = fs::symlink_metadata(path)?;
+    let meta = fs::symlink_metadata(path).ctx("inspect", path)?;
     if !path.is_absolute()
         || !meta.is_file()
         || !(crate::os::root_owner(meta.uid()) || meta.uid()==unsafe{libc::geteuid()})
@@ -485,18 +489,18 @@ fn stage_package(host: &Host, spk: &Path) -> io::Result<(String, PathBuf, PathBu
     let copy = dir.join("package.spk");
     if !exists(&copy)? {
         let mut random = [0u8; 8];
-        File::open("/dev/urandom")?.read_exact(&mut random)?;
+        File::open("/dev/urandom").ctx("open", "/dev/urandom")?.read_exact(&mut random)?;
         let temp = dir.join(format!(".package-{}.tmp", random.iter().map(|b| format!("{b:02x}")).collect::<String>()));
-        let mut staged = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temp)?;
+        let mut staged = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temp).ctx("open", &temp)?;
         let copied = (|| -> io::Result<()> {
             if copy_package_bounded(spk, &mut staged, maximum)? != raw_sha256 {
                 return Err(invalid("SPK changed while staging"));
             }
             staged.sync_all()?;
-            fs::rename(&temp, &copy)?;
-            File::open(&dir)?.sync_all()
+            fs::rename(&temp, &copy).ctx("rename", &temp)?;
+            File::open(&dir).ctx("open", &dir)?.sync_all()
         })();
-        if copied.is_err() { let _ = fs::remove_file(&temp); }
+        if copied.is_err() { let _ = fs::remove_file(&temp).ctx("remove", &temp); }
         copied?;
     }
     if copy_package_bounded(&copy, &mut io::sink(), maximum)? != raw_sha256 {
@@ -507,12 +511,12 @@ fn stage_package(host: &Host, spk: &Path) -> io::Result<(String, PathBuf, PathBu
     if !exists(&result)? {
         if exists(&attempt)? {
             let mut random = [0u8; 8];
-            File::open("/dev/urandom")?.read_exact(&mut random)?;
+            File::open("/dev/urandom").ctx("open", "/dev/urandom")?.read_exact(&mut random)?;
             let aside = dir.join(format!(
                 "qualification-interrupted-{}",
                 random.iter().map(|b| format!("{b:02x}")).collect::<String>()
             ));
-            fs::rename(&attempt, aside)?;
+            fs::rename(&attempt, aside).ctx("rename", &attempt)?;
         }
         let config = dir.join("qualify.json");
         let mut qualification_config = json!({
@@ -529,7 +533,7 @@ fn stage_package(host: &Host, spk: &Path) -> io::Result<(String, PathBuf, PathBu
         }
         let bytes = serde_json::to_vec(&qualification_config)?;
         if exists(&config)? {
-            fs::remove_file(&config)?;
+            fs::remove_file(&config).ctx("remove", &config)?;
         }
         derived_file(&config, &bytes)?;
         crate::launch_descriptor_native::qualify_launch(&config)?;
@@ -691,7 +695,7 @@ fn set_aside_refused_install(journal: &Path) -> io::Result<()> {
     for n in 1..=1000u32 {
         let aside = parent.join(format!("install-refused-{n}"));
         if !exists(&aside)? {
-            return fs::rename(journal, &aside);
+            return fs::rename(journal, &aside).ctx("rename", &journal);
         }
     }
     Err(invalid("INSTALL refused-attempt slots exhausted"))
@@ -859,7 +863,7 @@ fn decimal_u64(value: Option<&Value>) -> Option<u64> {
 
 fn scan_runs(app_dir: &Path) -> io::Result<Vec<Run>> {
     let mut runs = Vec::new();
-    for entry in fs::read_dir(app_dir)? {
+    for entry in fs::read_dir(app_dir).ctx("list", app_dir)? {
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().into_owned();
         let Some(generation) = name
@@ -939,16 +943,68 @@ fn scan_runs(app_dir: &Path) -> io::Result<Vec<Run>> {
     Ok(runs)
 }
 
-fn unit_property(unit: &str, property: &str) -> io::Result<String> {
+/// What `systemctl --user show` said about one property of a unit.
+#[derive(Debug, PartialEq, Eq)]
+enum UnitProperty {
+    Known(String),
+    /// systemctl failed or printed nothing. `show` always prints `ActiveState`, even for
+    /// a unit that does not exist (`inactive`), so this is "could not ask" (a busy or
+    /// pressured user manager), never an answer about the unit.
+    Unreadable(String),
+}
+
+fn classify_show(success: bool, stdout: &[u8], stderr: &[u8]) -> UnitProperty {
+    let value = String::from_utf8_lossy(stdout).trim().to_owned();
+    if success && !value.is_empty() {
+        return UnitProperty::Known(value);
+    }
+    let said = String::from_utf8_lossy(stderr).trim().to_owned();
+    UnitProperty::Unreadable(if said.is_empty() { "systemctl printed nothing".into() } else { said })
+}
+
+fn unit_probe(unit: &str, property: &str) -> io::Result<UnitProperty> {
     let output = crate::os::systemctl()
         .args(["--user", "show", unit, &format!("--property={property}"), "--value"])
         .stdin(Stdio::null())
         .output()?;
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+    Ok(classify_show(output.status.success(), &output.stdout, &output.stderr))
+}
+
+fn unit_property(unit: &str, property: &str) -> io::Result<String> {
+    match unit_probe(unit, property)? {
+        UnitProperty::Known(value) => Ok(value),
+        UnitProperty::Unreadable(said) => Err(io::Error::other(format!(
+            "cannot read {property} of {unit}: {said}"
+        ))),
+    }
 }
 
 fn unit_active(unit: &str) -> io::Result<String> {
     unit_property(unit, "ActiveState")
+}
+
+/// Consecutive unreadable polls (500 ms apart) the START wait absorbs before it gives
+/// up on the user manager: one minute.
+const MAX_UNREADABLE_POLLS: u32 = 120;
+
+/// One poll of the START wait. A readable state resets the count and is returned; an
+/// unreadable one is absorbed (`None`) until `MAX_UNREADABLE_POLLS` in a row.
+fn judge_poll(unit: &str, probe: UnitProperty, unreadable: &mut u32) -> io::Result<Option<String>> {
+    match probe {
+        UnitProperty::Known(state) => {
+            *unreadable = 0;
+            Ok(Some(state))
+        }
+        UnitProperty::Unreadable(said) => {
+            *unreadable += 1;
+            if *unreadable > MAX_UNREADABLE_POLLS {
+                return Err(io::Error::other(format!(
+                    "cannot read ActiveState of {unit} for {MAX_UNREADABLE_POLLS} polls: {said}"
+                )));
+            }
+            Ok(None)
+        }
+    }
 }
 
 /// The resident unit is rendered by the broker from its own template (the
@@ -988,7 +1044,7 @@ fn routes(app_dir: &Path, app: &str) -> io::Result<Vec<Value>> {
     if !exists(&root)? {
         return Ok(routes);
     }
-    let mut names: Vec<_> = fs::read_dir(&root)?
+    let mut names: Vec<_> = fs::read_dir(&root).ctx("list", &root)?
         .map(|entry| entry.map(|e| e.path()))
         .collect::<io::Result<_>>()?;
     names.sort();
@@ -1070,15 +1126,15 @@ fn start_inner(host: &Host, app: &str, prepare_only: bool) -> io::Result<Value> 
         let descriptor = dir.join("descriptor-attempt");
         if exists(&descriptor)? {
             let mut random = [0u8; 8];
-            File::open("/dev/urandom")?.read_exact(&mut random)?;
+            File::open("/dev/urandom").ctx("open", "/dev/urandom")?.read_exact(&mut random)?;
             fs::rename(
                 &descriptor,
                 dir.join(format!(
                     "descriptor-attempt-never-begun-{}",
                     random.iter().map(|b| format!("{b:02x}")).collect::<String>()
                 )),
-            )?;
-            File::open(&dir)?.sync_all()?;
+            ).ctx("rename", &descriptor)?;
+            File::open(&dir).ctx("open", &dir)?.sync_all()?;
         }
     }
     let latest = runs
@@ -1176,6 +1232,7 @@ fn start_inner(host: &Host, app: &str, prepare_only: bool) -> io::Result<Value> 
             return Err(error);
         }
     }
+    let mut unreadable = 0u32;
     let completed = loop {
         // Re-read each turn: the lane is fixed only once the resident retains
         // its admitted marker (a recovered create retries under v4).
@@ -1191,7 +1248,13 @@ fn start_inner(host: &Host, app: &str, prepare_only: bool) -> io::Result<Value> 
         if exists(&completed)? && sockets_ready && agents_ready {
             break completed;
         }
-        let state = unit_active(&unit)?;
+        // The 2026-10-27 HakyllCMS row failed here at 125 s with an empty state while its
+        // resident was alive until the world was torn down (a START takes 140-630 s): an
+        // unreadable state is not a stopped unit.
+        let Some(state) = judge_poll(&unit, unit_probe(&unit, "ActiveState")?, &mut unreadable)? else {
+            std::thread::sleep(Duration::from_millis(500));
+            continue;
+        };
         if !matches!(state.as_str(), "active" | "activating") {
             return Err(io::Error::other(format!(
                 "resident unit {unit} is {state} before START completion; see journalctl -u {unit}"
@@ -1400,7 +1463,7 @@ fn export(host: &Host, app: &str, out: &Path) -> io::Result<Value> {
             "volumeMib":placement.volume_mib,
             "stopGeneration":latest.generation.to_string(),
         }),
-        &fs::read(&receipt)?,
+        &fs::read(&receipt).ctx("read", &receipt)?,
         &host.profile.completion_custodian_seed,
     )
 }
@@ -1624,6 +1687,46 @@ mod tests {
                 app_capability:"9502".into(),app_observe_capability:"9503".into(),package_capability:"9504".into(),package_observe_capability:"9505".into()},
             raw_sha256:"a".repeat(64),image_dir:None,app_uid:64010,app_gid:64010,
             volume_resource:"8502".into(),volume_mib:512,class:"S".into() }
+    }
+
+    #[test]
+    fn systemctl_that_prints_nothing_or_fails_is_unreadable_never_a_state() {
+        assert_eq!(classify_show(true, b"active\n", b""), UnitProperty::Known("active".into()));
+        assert_eq!(classify_show(true, b"failed\n", b""), UnitProperty::Known("failed".into()));
+        assert_eq!(classify_show(true, b"", b""), UnitProperty::Unreadable("systemctl printed nothing".into()));
+        assert_eq!(classify_show(true, b"  \n", b""), UnitProperty::Unreadable("systemctl printed nothing".into()));
+        assert_eq!(
+            classify_show(false, b"", b"Failed to connect to bus\n"),
+            UnitProperty::Unreadable("Failed to connect to bus".into())
+        );
+        // A nonzero exit never yields a state, whatever it printed.
+        assert!(matches!(classify_show(false, b"active", b""), UnitProperty::Unreadable(_)));
+    }
+
+    #[test]
+    fn start_wait_absorbs_a_pressured_manager_and_gives_up_only_after_a_minute() {
+        let gone = || UnitProperty::Unreadable("Failed to connect to bus".into());
+        let mut misses = 0;
+        for _ in 0..MAX_UNREADABLE_POLLS {
+            assert_eq!(judge_poll("u", gone(), &mut misses).unwrap(), None);
+        }
+        // One readable poll resets the run.
+        assert_eq!(
+            judge_poll("u", UnitProperty::Known("activating".into()), &mut misses).unwrap(),
+            Some("activating".into())
+        );
+        assert_eq!(misses, 0);
+        for _ in 0..MAX_UNREADABLE_POLLS {
+            assert_eq!(judge_poll("u", gone(), &mut misses).unwrap(), None);
+        }
+        let error = judge_poll("u", gone(), &mut misses).unwrap_err().to_string();
+        assert!(error.contains("cannot read ActiveState of u") && error.contains("Failed to connect to bus"));
+        // A real terminal state is returned at once, not absorbed.
+        let mut fresh = 0;
+        assert_eq!(
+            judge_poll("u", UnitProperty::Known("failed".into()), &mut fresh).unwrap(),
+            Some("failed".into())
+        );
     }
 
     #[test]

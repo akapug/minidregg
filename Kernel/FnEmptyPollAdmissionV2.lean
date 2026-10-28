@@ -3,10 +3,14 @@ Current configured gateway authority for an ordered empty fn page. This is
 pre-admission only: the accepted special event19 must also advance the
 verifier-minted shared frontier before any fn ACK is authorized.
 -/
-import Kernel.FnConsumerFrontierGateway
-import Kernel.FnEmptyPollProgressV2
-import Kernel.NativeHostReplay
-import Kernel.FnEmptyPollAdmissionAtV2
+module
+
+public import Kernel.FnConsumerFrontierGateway
+public import Kernel.FnEmptyPollProgressV2
+public import Kernel.NativeHostReplay
+public import Kernel.FnEmptyPollAdmissionAtV2
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnEmptyPollAdmissionV2
 

@@ -5,9 +5,28 @@ cursor and event. This selector neither invokes fn nor ACKs a cursor. It reads
 the accepted Mini event, rather than trusting a caller-supplied ingress or
 receipt, and binds it to the projected owner-signed article.
 -/
-import Host.FnSelectiveReleaseFnReceiving
-import Kernel.FnSelectiveReleaseReceiver
-import Kernel.NativeHostReplay
+module
+
+public import Host.FnSelectiveReleaseFnReceiving
+public import Kernel.FnSelectiveReleaseReceiver
+public import Kernel.NativeHostReplay
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Host.FnSelectiveReleaseFnAck
 

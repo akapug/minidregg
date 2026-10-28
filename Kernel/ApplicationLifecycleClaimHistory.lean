@@ -7,9 +7,13 @@ same head), and the original BEGIN is freshly re-admitted on that prior state.
 This is not a trusted history witness or a launch permit. The upper adapter
 must also select the same step from `NativeHostReplay.Verified`.
 -/
-import Kernel.ApplicationLifecycleClaimIngress
-import Kernel.ApplicationLifecycleBeginReceiver
-import Kernel.NativeHistorySelection
+module
+
+public import Kernel.ApplicationLifecycleClaimIngress
+public import Kernel.ApplicationLifecycleBeginReceiver
+public import Kernel.NativeHistorySelection
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleClaimHistory
 

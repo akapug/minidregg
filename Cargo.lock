@@ -873,6 +873,7 @@ dependencies = [
  "minidregg-compatible-upgrade-custody",
  "minidregg-inference-scheduler",
  "minidregg-mini-keys",
+ "minidregg-mini-sdk",
  "minidregg-signed-api-path",
  "ring",
  "serde",

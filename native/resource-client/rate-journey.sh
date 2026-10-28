@@ -23,6 +23,7 @@
 # the verdict is the last stderr line. Exit 0 iff every row passed.
 set -eu
 umask 077
+. "$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)/native/resource-client/journey.d/lib/evidence.sh"
 
 if [ "$#" -ne 5 ]; then
   echo "usage: $0 MINIDREGG_HOST MINI STORE VERIFIER NEW_RUN_DIRECTORY" >&2
@@ -41,8 +42,7 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 2; }
 [ ! -e "$RUN" ] || { echo "refusing existing run directory: $RUN" >&2; exit 2; }
 mkdir -m 700 "$RUN"
 RUN=$(CDPATH='' cd -- "$RUN" && pwd)
-shasum -a 256 "$0" "$HOST" "$MINI" "$STORE" "$VERIFIER" >"$RUN/input-sha256.txt" 2>/dev/null ||
-  sha256sum "$0" "$HOST" "$MINI" "$STORE" "$VERIFIER" >"$RUN/input-sha256.txt"
+sha256 "$0" "$HOST" "$MINI" "$STORE" "$VERIFIER" >"$RUN/input-sha256.txt"
 
 LIMIT=3
 WINDOW_MS=20000

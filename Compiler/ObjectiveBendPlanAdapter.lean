@@ -1,8 +1,13 @@
 /- Core4 scalar-record ABI to the existing complete guarded native Plan binder.
 This decoder confers no authority. Current source/family/law/capacity admission
 remains the native receiver's responsibility. No returns in this explicit slice. -/
-import Theory.ObjectiveBendDemandData
-import Compiler.ObjectiveNativeScalarBinding
+module
+
+public import Theory.ObjectiveBendDemandData
+public import Compiler.ObjectiveNativeScalarBinding
+
+@[expose] public section
+
 namespace Minidregg.Compiler.ObjectiveBendPlanAdapter
 open Minidregg.Theory.ObjectiveBendDemandData
 open ObjectiveNativeScalarBinding

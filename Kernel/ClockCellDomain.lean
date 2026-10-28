@@ -10,8 +10,27 @@ accepted record's law saw the clock the committed image holds.  A tick is one
 validated patch of the cell, physically one `DataWrite` guarded at the loaded
 root (`Loaded.write_pre_is_loaded_root`).
 -/
-import Compiler.CredentialAuthorityDomainReceiver
-import Kernel.ClockCell
+module
+
+public import Compiler.CredentialAuthorityDomainReceiver
+public import Kernel.ClockCell
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ClockCellDomain
 

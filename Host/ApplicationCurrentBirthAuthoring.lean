@@ -5,8 +5,12 @@ supplies current height, authority epochs and the platform record (creation tari
 grain-birth tariff, grant window). A genesis description is checked against the pinned
 seed but never used as today's authority state or prices.
 -/
-import Host.Json
-import Kernel.NativeHost
+module
+
+public import Host.Json
+public import Kernel.NativeHost
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationCurrentBirthAuthoring
 

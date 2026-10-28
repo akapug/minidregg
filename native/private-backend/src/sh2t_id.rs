@@ -7,27 +7,18 @@ use crate::{
     asks::{Bracha, PhaseMessage},
     codec::{bad, Generation, Nat},
     custody::hash,
+    entropy::Entropy,
     private_send::{self, PrivateSend},
-    reconstruction::Field,
+    reconstruction::{eval, polynomial, Field},
 };
 use std::{
     collections::BTreeMap,
     io::{Error, ErrorKind, Result},
 };
-fn eval(p: &[Field], x: Field) -> Field {
-    p.iter().rev().fold(Field(0), |a, c| a.mul(x).add(*c))
-}
 fn alpha(i: usize) -> Field {
     Field(i as u128 + 1)
 }
-fn entropy(seed: [u8; 32], context: [u8; 32], tag: u8, index: usize) -> [u8; 32] {
-    let mut b = b"DREGG.SH2T.ID.RANDOM.V1".to_vec();
-    b.extend(seed);
-    b.extend(context);
-    b.push(tag);
-    b.extend((index as u64).to_le_bytes());
-    hash(&b)
-}
+const RANDOM: &[u8] = b"DREGG.SH2T.ID.RANDOM.V1";
 fn child(g: &Generation, context: [u8; 32], i: usize) -> Generation {
     let mut b = b"DREGG.SH2T.ID.CHILD.V1".to_vec();
     b.extend(context);
@@ -304,11 +295,7 @@ pub struct Message {
     pub context: [u8; 32],
     pub body: Body,
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Send {
-    pub to: u16,
-    pub message: Message,
-}
+pub type Send = crate::codec::Packet<Message>;
 #[derive(Clone)]
 struct Payload {
     values: Vec<Field>,
@@ -543,7 +530,7 @@ impl Sh2tId {
                 (0..=2 * self.f)
                     .map(|k| {
                         Field(u128::from_le_bytes(
-                            entropy(seed, self.context, 0, i * (2 * self.f + 1) + k)[..16]
+                            Entropy::derive(RANDOM, seed, self.context, 0, i * (2 * self.f + 1) + k)[..16]
                                 .try_into()
                                 .unwrap(),
                         ))
@@ -603,7 +590,7 @@ impl Sh2tId {
                     (0..=self.f)
                         .map(|j| {
                             Field(u128::from_le_bytes(
-                                entropy(seed, self.context, 1, i * 32 + k * 16 + j)[..16]
+                                Entropy::derive(RANDOM, seed, self.context, 1, i * 32 + k * 16 + j)[..16]
                                     .try_into()
                                     .unwrap(),
                             ))
@@ -877,10 +864,12 @@ impl Sh2tId {
                 let pts = self.points[group]
                     .iter()
                     .take(2 * self.f + 1)
-                    .map(|(i, (v, m))| (*i, v.clone(), m.clone()))
+                    .map(|(i, (v, m))| (*i, v.as_slice(), m.as_slice()))
                     .collect::<Vec<_>>();
-                let vp = interpolate(&pts, self.per_group, false)?;
-                let mp = interpolate(&pts, self.per_group, true)?;
+                let vpts = pts.iter().map(|(i, v, _)| (*i, *v)).collect::<Vec<_>>();
+                let mpts = pts.iter().map(|(i, _, m)| (*i, *m)).collect::<Vec<_>>();
+                let vp = polynomial(&vpts, self.per_group)?;
+                let mp = polynomial(&mpts, self.per_group)?;
                 let own = self
                     .accepted
                     .as_ref()
@@ -910,7 +899,7 @@ impl Sh2tId {
                     b.extend((group as u64).to_le_bytes());
                     b.extend(self.me.to_le_bytes());
                     b.extend(self.matrix.output.as_ref().unwrap());
-                    for (i, v, m) in &pts {
+                    for &(i, v, m) in &pts {
                         b.extend(i.to_le_bytes());
                         for x in v.iter().chain(m) {
                             b.extend(x.0.to_le_bytes());
@@ -1037,42 +1026,6 @@ fn valid_one(p: &PhaseMessage, init: bool) -> Result<()> {
         Ok(())
     }
 }
-fn interpolate(
-    points: &[(u16, Vec<Field>, Vec<Field>)],
-    count: usize,
-    masks: bool,
-) -> Result<Vec<Vec<Field>>> {
-    let mut out = vec![vec![Field(0); points.len()]; count];
-    for (i, (holder, v, m)) in points.iter().enumerate() {
-        let vals = if masks { m } else { v };
-        if vals.len() != count {
-            return Err(bad("point length"));
-        }
-        let xi = alpha(*holder as usize);
-        let mut basis = vec![Field(1)];
-        let mut denom = Field(1);
-        for (j, (other, _, _)) in points.iter().enumerate() {
-            if i != j {
-                let xj = alpha(*other as usize);
-                let mut next = vec![Field(0); basis.len() + 1];
-                for (k, c) in basis.iter().enumerate() {
-                    next[k] = next[k].add(c.mul(xj));
-                    next[k + 1] = next[k + 1].add(*c);
-                }
-                basis = next;
-                denom = denom.mul(xi.add(xj));
-            }
-        }
-        let inv = denom.inv()?;
-        for (ell, value) in vals.iter().enumerate() {
-            for (k, c) in basis.iter().enumerate() {
-                out[ell][k] = out[ell][k].add(value.mul(*c).mul(inv));
-            }
-        }
-    }
-    Ok(out)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1463,5 +1416,30 @@ mod tests {
         assert!(n.request_accusation(0).is_err());
         assert!(n.request_private_reconstruction(0, 0).is_err());
         assert!(n.request_private_reconstruction(0, 1).is_err());
+    }
+}
+
+#[cfg(test)]
+mod pin_helpers {
+    use super::*;
+    fn pin_p() -> Vec<Field> {
+        vec![Field(0x0123456789abcdeffedcba9876543210), Field(0x00112233445566778899aabbccddeeff), Field(0xdeadbeefcafebabe0badf00dfeedface)]
+    }
+    #[test]
+    fn pin_interpolate_values_and_masks() {
+        let p = pin_p();
+        let values = vec![(0u16, vec![p[0], p[1]]), (2, vec![p[1], p[2]]), (3, vec![p[2], p[0]])];
+        let masks = vec![(0u16, vec![p[2], p[1]]), (2, vec![p[0], p[0]]), (3, vec![p[1], p[2]])];
+        assert_eq!(polynomial(&values, 2).unwrap(), vec![vec![Field(0xe6fcc0defa32b3efe5af2d2474f13231), Field(0x3ae217b780bb674404bc9d274805a5af), Field(0xdd3d920ef32219441fcf0a9b4aa0a58e)], vec![Field(0xe44d91f9ec1c941f3017f93978914e3d), Field(0x1d5d18a90d42066c907d8635d080c6c8), Field(0xf901ab63a50bf40428f3d5b764cc660a)]]);
+        assert_eq!(polynomial(&masks, 2).unwrap(), vec![vec![Field(0xdd2e889c112e36d6a850343348045a2d), Field(0x27bf0f1e8df9612894c11b1298856367), Field(0x243c396d5629ed40373cdf2c2e6cc384)], vec![Field(0x5137c77e2d2fb92f9cc73f4a00f9f60a), Field(0xe1b3a8ef93f9a6d40e8a9eae3cfbb537), Field(0xb0954da2fa83798c1ad40b5ff0dfadc2)]]);
+        assert!(polynomial(&values, 3).is_err());
+    }
+    #[test]
+    fn pin_sh2t_seeded_prg() {
+        let seed: [u8; 32] = std::array::from_fn(|i| i as u8);
+        let ctx: [u8; 32] = std::array::from_fn(|i| 100 + i as u8);
+        assert_eq!(Entropy::derive(RANDOM, seed, ctx, 0, 0), [0xaf, 0x7d, 0x41, 0xad, 0x74, 0x96, 0x13, 0x33, 0x4e, 0x4f, 0x57, 0x81, 0x47, 0x96, 0x28, 0xfc, 0xbe, 0x06, 0x8a, 0x6f, 0x04, 0xe9, 0x1d, 0xd5, 0xf7, 0x96, 0xe9, 0x4d, 0x2a, 0x5a, 0xe3, 0x8f]);
+        assert_eq!(Entropy::derive(RANDOM, seed, ctx, 1, 0), [0x7c, 0xb1, 0xbf, 0xbb, 0xf2, 0x22, 0x47, 0x4d, 0x7e, 0x23, 0x86, 0x19, 0x80, 0xaa, 0xaa, 0xd3, 0x09, 0x68, 0xe0, 0x2c, 0xad, 0x8f, 0x3f, 0x39, 0x1a, 0x03, 0x57, 0xaa, 0xf2, 0x63, 0x6f, 0x4a]);
+        assert_eq!(Entropy::derive(RANDOM, seed, ctx, 3, 7), [0x17, 0x93, 0xd2, 0xc3, 0x5b, 0x01, 0xbd, 0xa6, 0x09, 0xa7, 0x8d, 0x0c, 0x6a, 0x71, 0xc0, 0x04, 0x60, 0x5d, 0x3c, 0xf3, 0xc7, 0xbb, 0xce, 0x5b, 0x45, 0x6c, 0xdd, 0xcb, 0x69, 0x33, 0x1e, 0x7c]);
     }
 }

@@ -3,60 +3,25 @@
 //! outboxes precede publication. Honest crash-storage premise; no rollback anchor,
 //! enrolled-credential authority or public-release permission is manufactured.
 use crate::{
-    asks::PhaseMessage,
     codec::{bad, bytes, Generation, Nat},
-    consensus_wire::Cursor,
+    consensus_wire::{get_phase, put_phase, Cursor},
     dzk::{Body, Dzk, Message, OpenProof, Send, Transferred, Verification},
     private_send_store,
     reconstruction::Field,
     transition_journal::{Journal, Machine},
 };
 use std::{
-    fs::File,
-    io::{Read, Result},
+    io::Result,
     path::Path,
 };
-fn put_phase(p: &PhaseMessage, b: &mut Vec<u8>) {
-    let (tag, v) = match p {
-        PhaseMessage::Init(v) => (0, v),
-        PhaseMessage::Echo(v) => (1, v),
-        PhaseMessage::Ready(v) => (2, v),
-    };
-    b.push(tag);
-    bytes(v, b);
-}
-fn phase(c: &mut Cursor) -> Result<PhaseMessage> {
-    let tag = c.byte()?;
-    let v = c.bytes()?;
-    match tag {
-        0 => Ok(PhaseMessage::Init(v)),
-        1 => Ok(PhaseMessage::Echo(v)),
-        2 => Ok(PhaseMessage::Ready(v)),
-        _ => Err(bad("dZK phase")),
-    }
-}
 fn put_fields(xs: &[Field], b: &mut Vec<u8>) {
     Nat::new(xs.len() as u64).put(b);
     for x in xs {
         b.extend(x.0.to_le_bytes());
     }
 }
-fn count(c: &mut Cursor) -> Result<usize> {
-    let mut b = vec![];
-    loop {
-        let x = c.byte()?;
-        b.push(x);
-        if x == 255 {
-            break;
-        }
-    }
-    let mut r = crate::codec::Reader::new(&b)?;
-    let n = r.count()?;
-    r.finish()?;
-    Ok(n)
-}
 fn fields(c: &mut Cursor) -> Result<Vec<Field>> {
-    let n = count(c)?;
+    let n = c.count()?;
     if n > 128 {
         return Err(bad("dZK field vector bound"));
     }
@@ -100,7 +65,7 @@ pub fn decode_message(b: &[u8]) -> Result<Message> {
     }
     let context = c.fixed32()?;
     let body = match c.byte()? {
-        0 => Body::Public(phase(&mut c)?),
+        0 => Body::Public(get_phase(&mut c)?),
         1 => Body::Private {
             holder: c.u16()?,
             message: private_send_store::decode_message(&c.bytes()?)?,
@@ -121,36 +86,10 @@ pub fn decode_message(b: &[u8]) -> Result<Message> {
     Ok(m)
 }
 fn outbox(ps: &[Send]) -> Vec<u8> {
-    let mut b = vec![];
-    Nat::new(ps.len() as u64).put(&mut b);
-    for s in ps {
-        b.extend(s.to.to_le_bytes());
-        bytes(&encode_message(&s.message), &mut b);
-    }
-    b
+    crate::consensus_wire::put_outbox(ps, encode_message)
 }
 fn parse_outbox(b: &[u8], n: usize) -> Result<Vec<Send>> {
-    let mut c = Cursor::new(b)?;
-    let count = count(&mut c)?;
-    if count > crate::codec::MAX / 40 {
-        return Err(bad("dZK outbox capacity"));
-    }
-    let mut out = vec![];
-    for _ in 0..count {
-        let to = c.u16()?;
-        if to as usize >= n {
-            return Err(bad("dZK outbox recipient"));
-        }
-        out.push(Send {
-            to,
-            message: decode_message(&c.bytes()?)?,
-        });
-    }
-    c.finish()?;
-    if outbox(&out) != b {
-        return Err(bad("dZK outbox canonical"));
-    }
-    Ok(out)
+    crate::consensus_wire::get_outbox(b, n, crate::codec::MAX / 40, "dZK", decode_message, encode_message)
 }
 #[derive(Clone)]
 pub struct DzkMachine {
@@ -175,7 +114,7 @@ impl Machine for DzkMachine {
         let out = match c.byte()? {
             0 => {
                 let seed = c.fixed32()?;
-                let n = count(&mut c)?;
+                let n = c.count()?;
                 if n != self.state.profile.count {
                     return Err(bad("dZK event polynomial count"));
                 }
@@ -283,7 +222,7 @@ impl Store {
                 return Err(bad("dZK not dealer"));
             }
             let mut seed = [0; 32];
-            File::open("/dev/urandom")?.read_exact(&mut seed)?;
+            crate::entropy::os_fill(&mut seed)?;
             let mut event = vec![0];
             event.extend(seed);
             Nat::new(polys.len() as u64).put(&mut event);
@@ -486,5 +425,43 @@ mod tests {
         let reopened = Store::open(&root.join("party2"), 2, 0, 4, 1, &g(), 1, 1).unwrap();
         assert_eq!(reopened.replay_outboxes().unwrap(), expected);
         assert_eq!(reopened.state().transferred(1).unwrap().values(), values);
+    }
+}
+
+#[cfg(test)]
+mod pin_wire {
+    use super::*;
+    use crate::asks::PhaseMessage as PinPhase;
+    fn pin_sends() -> Vec<Send> {
+        vec![
+            Send { to: 1, message: Message { context: [7; 32], body: Body::Public(PinPhase::Echo(vec![1])) } },
+            Send { to: 3, message: Message { context: [7; 32], body: Body::Public(PinPhase::Ready(vec![1])) } },
+        ]
+    }
+    /// Outbox wire: Nat count, then per packet u16 LE recipient and the
+    /// length-prefixed message wire; canonical, bounded, recipient-checked.
+    #[test]
+    fn pin_outbox_wire() {
+        let ps = pin_sends();
+        let b = outbox(&ps);
+        let mut want = vec![2, 255];
+        for s in &ps {
+            want.extend(s.to.to_le_bytes());
+            let m = encode_message(&s.message);
+            crate::codec::Nat::new(m.len() as u64).put(&mut want);
+            want.extend(m);
+        }
+        assert_eq!(&b[..4], &[2, 255, 1, 0]);
+        assert_eq!(b, want);
+        assert_eq!(parse_outbox(&b, 4).unwrap(), ps);
+        assert!(parse_outbox(&b, 3).is_err(), "recipient 3 is outside n = 3");
+        let mut trailing = b.clone();
+        trailing.push(0);
+        let b = trailing;
+        assert!(parse_outbox(&b, 4).is_err(), "trailing bytes refuse");
+        let mut huge = vec![];
+        crate::codec::Nat::new(crate::codec::MAX as u64).put(&mut huge);
+        let b = huge;
+        assert!(parse_outbox(&b, 4).is_err(), "an absurd count refuses");
     }
 }

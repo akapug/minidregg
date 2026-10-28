@@ -7,8 +7,32 @@ copy.
 
 Nothing here decides anything: an envelope is judged by the kernel that
 covers it (`Config.covers`). -/
-import Compiler.ObjectiveInvocationClaim
-import Lean.Data.Json
+module
+
+public import Compiler.ObjectiveInvocationClaim
+public import Lean.Data.Json
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Lean.Data.Json.Basic
+import all Init.Data.String.Search
+import all Init.Prelude
+import Std.Data.TreeMap.Raw.Lemmas
+import Std.Data.String.ToNat
+
+@[expose] public section
 
 namespace Minidregg.Host.CapacityJson
 open Lean (Json toJson)

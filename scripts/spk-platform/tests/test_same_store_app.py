@@ -215,7 +215,20 @@ class RuntimeReadyTests(unittest.TestCase):
             actual=os.lstat
             def owned(path):
                 meta=actual(path);return os.stat_result((meta.st_mode,meta.st_ino,meta.st_dev,meta.st_nlink,0,meta.st_gid,meta.st_size,0,0,0))
-            with self.assertRaisesRegex(RuntimeError,'outside root custody'):app.runtime_ready(x)
+            with self.assertRaisesRegex(RuntimeError,'pins a bwrap outside its custody'):app.runtime_ready(x)
+            x.run.assert_not_called()
+            # The runtime may be the operator's own (the broker's pinned_root_executable); bwrap may not.
+            def only_bwrap_root(path):
+                meta=actual(path);uid=0 if str(path)==pins['bwrap'] else meta.st_uid
+                return os.stat_result((meta.st_mode,meta.st_ino,meta.st_dev,meta.st_nlink,uid,meta.st_gid,meta.st_size,0,0,0))
+            with patch.object(app.os,'lstat',only_bwrap_root):
+                app.runtime_ready(x)
+            def stranger_runtime(path):
+                meta=actual(path);uid=0 if str(path)==pins['bwrap'] else os.geteuid()+1
+                return os.stat_result((meta.st_mode,meta.st_ino,meta.st_dev,meta.st_nlink,uid,meta.st_gid,meta.st_size,0,0,0))
+            x.run.reset_mock()
+            with patch.object(app.os,'lstat',stranger_runtime):
+                with self.assertRaisesRegex(RuntimeError,'pins a spkHost outside its custody'):app.runtime_ready(x)
             x.run.assert_not_called()
             with patch.object(app.os,'lstat',owned):
                 app.runtime_ready(x);self.assertEqual(x.run.call_args.args[0][1:3],['grain','runtime-status'])

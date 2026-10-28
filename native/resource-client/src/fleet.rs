@@ -281,16 +281,26 @@ fn lookup_exact(agent: &Agent, directory: &Path, ingress: &[u8]) -> Result<Value
     )
 }
 
-/// The Host's own decoding of this attempt's plan refusal (op 96 answered
-/// 255), or `None` when the plan frame is not a refusal. A `stale-root`
-/// reason means the signed observation it was given is no longer current;
-/// nothing was signed yet, so the attempt is decided and a fresh observation
-/// re-plans it. The reason is read from the decoding, never from the text.
+/// The Host's own decoding of this attempt's plan refusal, or `None` when the
+/// plan frame is not a decided refusal. The session answers a receiver's
+/// refusal of op 96 under NO_RECORD (253: proven no-append, a plan appends
+/// nothing whatever it answers) and an undecided envelope under 255
+/// (`RequestRefusal.returnedMarker`); either way the refusal is read from the
+/// decoding, never from the byte or the text. A `stale-root` reason means the
+/// signed observation it was given is no longer current; nothing was signed
+/// yet, so the attempt is decided and a fresh observation re-plans it. The
+/// retained `plan-refusal.bin`/`.json` are also the operation record's
+/// closure: `recover_operation` reads them, so a payment the Host refused is
+/// recovered `refused`, never a pending `not-submitted` that blocks the
+/// request's next attempt.
 fn plan_refusal(agent: &Agent, directory: &Path) -> Result<Option<Value>> {
     let frame = crate::agent_reserve::bounded(&directory.join("plan.frame"), LIMIT)?;
-    let [255, body @ ..] = frame.as_slice() else {
+    let [byte, body @ ..] = frame.as_slice() else {
         return Ok(None);
     };
+    if !crate::is_outcome_frame(*byte) {
+        return Ok(None);
+    }
     retain(&directory.join("plan-refusal.bin"), body)?;
     let outcome = inspect(
         agent,
@@ -391,7 +401,10 @@ fn exact_status(outcome: &Value) -> &'static str {
 /// recovers the exact retained call instead of paying again (`recover_operation`). A further
 /// operation of the same request is the member's explicit decision (`again`), and is refused
 /// while the previous one is undecided; a previous one that never reached submission
-/// (`not-submitted`) may be followed only once its submitter has stopped, which `again` asserts.
+/// (`not-submitted`) may be followed only once its submitter has stopped, which `again`
+/// asserts. A previous one the Host refused is closed (`recover_operation` reads its plan
+/// refusal): nothing was appended and nothing can follow from it, so the next attempt of the
+/// same request begins a fresh record at once, the refused one kept whole as evidence.
 pub(crate) fn default_operation(root: &Path, family: &str, context: &Value, again: bool) -> Result<PathBuf> {
     let dir = root.join("operations");
     crate::fsio::ensure_private_dir(&dir)?;
@@ -409,15 +422,13 @@ pub(crate) fn default_operation(root: &Path, family: &str, context: &Value, agai
     let status = recovered["status"].as_str().unwrap_or("uncertain");
     let lookup = format!("mini credit --action lookup-operation --dir {} --operation-record {}", root.display(), latest.display());
     match (status, again) {
-        ("confirmed" | "refused", true) => Ok(name(n + 1)),
-        ("not-submitted", true) => Ok(name(n + 1)),
+        // A decided refusal closed the previous record: nothing was appended, so nothing
+        // can follow from it and the next attempt of the same request begins afresh.
+        ("refused", _) => Ok(name(n + 1)),
+        ("confirmed" | "not-submitted", true) => Ok(name(n + 1)),
         ("confirmed", false) => {
             print_json(&recovered)?;
             Err(format!("this {family} is already confirmed (record {}); a new one is a new operation: repeat with --again", latest.display()))
-        }
-        ("refused", false) => {
-            print_json(&recovered)?;
-            Err(format!("the Host refused this {family} (record {}); a new attempt is your own decision: repeat with --again", latest.display()))
         }
         ("not-submitted", false) => {
             print_json(&recovered)?;
@@ -436,6 +447,20 @@ fn decided_outcome(path: &Path) -> Result<Option<Value>> {
     if !retained_file(path)? { return Ok(None); }
     let value = workspace::bounded_json(path)?;
     Ok((exact_status(&value) != "uncertain").then_some(value))
+}
+
+/// The attempt's decided plan refusal (`plan_refusal`'s retained Host decoding):
+/// `Some` only when that decoding says `refused` — a refusal the Host answered
+/// the plan with, having appended nothing. No retention yet (a crash before the
+/// refusal was recorded), or an undecided envelope, leaves the operation
+/// pending for `recover_operation`.
+fn decided_plan_refusal(attempt: &Path) -> Result<Option<Value>> {
+    let path = attempt.join("plan-refusal.json");
+    if !retained_file(&path)? {
+        return Ok(None);
+    }
+    let outcome = workspace::bounded_json(&path)?;
+    Ok((outcome.get("type").and_then(Value::as_str) == Some("refused")).then_some(outcome))
 }
 
 /// Resume a balance-derived operation before reading a new balance. The
@@ -474,6 +499,15 @@ pub(crate) fn recover_operation(root: &Path, path: &Path) -> Result<Value> {
         _ => return Err("unknown exact operation kind".into()),
     };
     if !present {
+        // Nothing was submitted, yet the operation may still be decided: a plan the
+        // Host refused is a decided no-append answer (`plan_refusal` retains the
+        // Host's own decoding), and it closes the record as `refused` instead of
+        // leaving a pending `not-submitted` that blocks the request's next attempt.
+        // The refusal is read from the decoding's type, never the frame's byte, so
+        // an undecided envelope keeps the record pending exactly as before.
+        if let Some(refusal) = decided_plan_refusal(&attempt)? {
+            return Ok(recovery_value(path, &record, "refused", refusal));
+        }
         return Ok(recovery_value(path, &record, "not-submitted", Value::Null));
     }
     let (outcome, submit_decision) = if kind == "fleet" {
@@ -1473,6 +1507,51 @@ esac
         // The same typed decision received from the original submit is decisive.
         retain_json(&attempt.join("outcome.json"), &refused).unwrap();
         assert_eq!(recover_operation(&f.0, &path).unwrap()["status"], "refused");
+    }
+
+    #[test]
+    fn exact_operation_plan_refused_payment_is_closed_and_the_next_attempt_proceeds() {
+        let f = Fixture::new();
+        let context = json!({"action":"pay","room":"18","account":{"target":"20","operationCapability":"21"},
+            "till":"19","amount":"100","window":null});
+        let key = &digest(&serde_json::to_vec(&context).unwrap())[..16];
+        let (path, record) = f.record(&format!("pay-{key}-1.json"), "fleet",
+            json!({"verb":"send","context":context}));
+        let attempt = PathBuf::from(field(&record, "attempt").unwrap());
+        workspace::make_private_dir(&attempt).unwrap();
+        // The plan the Host refused under NO_RECORD, and the decoding
+        // `plan_refusal` retains: the operation is closed, not left pending.
+        crate::create_private(&attempt.join("plan.frame"), &[crate::RESPONSE_NO_RECORD, 1, 2]).unwrap();
+        retain_json(&attempt.join("plan-refusal.json"),
+            &json!({"type":"refused","reason":"bookRefused","phase":"fleet-plan"})).unwrap();
+        let recovered = recover_bound_operation(&f.0, &path, &context).unwrap().unwrap();
+        assert_eq!(recovered["status"], "refused");
+        assert_eq!(recovered["outcome"]["reason"], "bookRefused");
+        assert_eq!(recovered["requiresSubmitterStopped"], false);
+        // A closed refusal does not block the request: the next attempt begins a
+        // fresh record, the refused one kept whole as the refusal's evidence.
+        let next = default_operation(&f.0, "pay", &context, false).unwrap();
+        assert_eq!(next, path.parent().unwrap().join(format!("pay-{key}-2.json")));
+        assert_eq!(recover_bound_operation(&f.0, &path, &context).unwrap().unwrap()["status"], "refused");
+    }
+
+    #[test]
+    fn exact_operation_undecided_plan_envelope_keeps_the_request_pending() {
+        let f = Fixture::new();
+        let context = json!({"action":"pay","room":"18","account":{"target":"20","operationCapability":"21"},
+            "till":"19","amount":"100","window":null});
+        let key = &digest(&serde_json::to_vec(&context).unwrap())[..16];
+        let (path, record) = f.record(&format!("pay-{key}-1.json"), "fleet",
+            json!({"verb":"send","context":context}));
+        let attempt = PathBuf::from(field(&record, "attempt").unwrap());
+        workspace::make_private_dir(&attempt).unwrap();
+        // A 255 envelope that decodes to anything but a refusal decides nothing.
+        crate::create_private(&attempt.join("plan.frame"), &[crate::RESPONSE_HOST_OUTCOME, 1, 2]).unwrap();
+        retain_json(&attempt.join("plan-refusal.json"),
+            &json!({"type":"unavailable","detail":"host session reopening"})).unwrap();
+        assert_eq!(recover_bound_operation(&f.0, &path, &context).unwrap().unwrap()["status"], "not-submitted");
+        let blocked = default_operation(&f.0, "pay", &context, false).unwrap_err();
+        assert!(blocked.contains("never submitted"), "{blocked}");
     }
 
     #[test]

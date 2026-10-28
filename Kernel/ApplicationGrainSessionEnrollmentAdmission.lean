@@ -4,9 +4,13 @@ session/descriptor mutation remains an ordinary DRC admission. The app,
 manifest and issued ticket are separately observed with current signed reads;
 their physical roots become guards of one distinct event28 intent.
 -/
-import Kernel.ApplicationGrainSessionEnrollmentConstruction
-import Kernel.PhysicalResourceReadGuard
-import Kernel.NativeHostServed
+module
+
+public import Kernel.ApplicationGrainSessionEnrollmentConstruction
+public import Kernel.PhysicalResourceReadGuard
+public import Kernel.NativeHostServed
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationGrainSessionEnrollmentAdmission
 

@@ -3,8 +3,12 @@ Read-only presentation of an application dispatch committed frame. Decoding a
 frame does not establish that it came from the exact post-CAS op34 callback;
 the physical host must retain that private transport provenance separately.
 -/
-import Kernel.ApplicationDispatchReceiver
-import Lean.Data.Json
+module
+
+public import Kernel.ApplicationDispatchReceiver
+public import Lean.Data.Json
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationDispatchInspection
 

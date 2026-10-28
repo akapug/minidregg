@@ -24,8 +24,27 @@ four-slot shard whose entries projected into that store).  Both are deleted,
 so cells written with either frame refuse to decode here
 (`retired_state_frame_refused`, `retired_page_frame_refused`).
 -/
-import Compiler.StoreCodec
-import Compiler.CredentialAuthorityEntryCodec
+module
+
+public import Compiler.StoreCodec
+public import Compiler.CredentialAuthorityEntryCodec
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.CredentialAuthorityCell
 

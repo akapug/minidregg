@@ -5,8 +5,27 @@ descriptor is installed. The native receiver must read the governed current
 package-manifest content cell, decode these bytes there, and bind its exact
 cell root before using `matches`; birth/version numbers alone do not do so.
 -/
-import Kernel.ApplicationDispatchCodec
-import Kernel.ApplicationPermissionSchema
+module
+
+public import Kernel.ApplicationDispatchCodec
+public import Kernel.ApplicationPermissionSchema
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationDispatchManifest
 

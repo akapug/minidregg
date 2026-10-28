@@ -9,8 +9,28 @@ Import order: NativeObservationController sits ABOVE DeclaredResourceController
 (NativeObservationCodec → NativeHostCodec → DeclaredResourceController, and the
 capability controllers), so this module cannot be imported by the gate; it is
 installed by the hosts that call `DeclaredResourceController.admit`. -/
-import Kernel.NativeObservationController
-import Kernel.ObjectiveBendNativeAdmission
+module
+
+public import Kernel.NativeObservationController
+public import Kernel.ObjectiveBendNativeAdmission
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Kernel.ObjectiveBendAuthenticatedInputs
 open Minidregg.Compiler Minidregg.Theory Minidregg.Theory.TypedAuthorization
 open Minidregg.Kernel.DurableDataIntent

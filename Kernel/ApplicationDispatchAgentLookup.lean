@@ -2,8 +2,12 @@
 Receipt-only recovery for event21. A retained paid-dispatch record confirms
 history; it never authorizes another fd3 send or creates a fresh permit.
 -/
-import Kernel.ApplicationDispatchAgentReceiver
-import Kernel.ApplicationDispatchAdmission
+module
+
+public import Kernel.ApplicationDispatchAgentReceiver
+public import Kernel.ApplicationDispatchAdmission
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationDispatchAgentLookup
 

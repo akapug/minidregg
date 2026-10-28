@@ -8,7 +8,7 @@ use crate::{
     asks::PhaseMessage,
     circuit_batch::{Network, Op, Plan},
     codec::{bad, bytes, Correlation, Generation, Nat},
-    consensus_wire::Cursor,
+    consensus_wire::{get_phase, put_phase, Cursor},
     custody::hash,
     reconstruction::Field,
     triple_king::{self, CheckedTriples},
@@ -267,11 +267,7 @@ pub struct Message {
     pub context: [u8; 32],
     pub body: Body,
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Send {
-    pub to: u16,
-    pub message: Message,
-}
+pub type Send = crate::codec::Packet<Message>;
 pub(crate) fn values(phase: &PhaseMessage) -> &[u8] {
     match phase {
         PhaseMessage::Init(b) | PhaseMessage::Echo(b) | PhaseMessage::Ready(b) => b,
@@ -489,20 +485,6 @@ impl Engine {
         expected_holder: u16,
         anchor: &Path,
     ) -> Result<Self> {
-        fn nat(c: &mut Cursor) -> Result<Nat> {
-            let mut ds = vec![];
-            loop {
-                let v = c.byte()?;
-                ds.push(v);
-                if v == 255 {
-                    break;
-                }
-            }
-            let mut r = crate::codec::Reader::new(&ds)?;
-            let n = r.nat()?;
-            r.finish()?;
-            Ok(n)
-        }
         let mut c = Cursor::new(b)?;
         let tag = b"DREGG.PRIVATE.FIELD.INITIAL\x01";
         if c.take(tag.len())? != tag {
@@ -510,8 +492,8 @@ impl Engine {
         }
         let plan = Plan::decode(&c.bytes()?)?;
         let me = c.u16()?;
-        let n = usize::try_from(nat(&mut c)?.value()?).map_err(|_| bad("field roster"))?;
-        let f = usize::try_from(nat(&mut c)?.value()?).map_err(|_| bad("field faults"))?;
+        let n = usize::try_from(c.nat()?.value()?).map_err(|_| bad("field roster"))?;
+        let f = usize::try_from(c.nat()?.value()?).map_err(|_| bad("field faults"))?;
         if plan != *expected_plan
             || me != expected_holder
             || f > 5
@@ -563,25 +545,6 @@ impl Engine {
     }
 }
 
-fn put_phase(p: &PhaseMessage, b: &mut Vec<u8>) {
-    let (tag, v) = match p {
-        PhaseMessage::Init(v) => (0, v),
-        PhaseMessage::Echo(v) => (1, v),
-        PhaseMessage::Ready(v) => (2, v),
-    };
-    b.push(tag);
-    bytes(v, b);
-}
-fn get_phase(c: &mut Cursor) -> Result<PhaseMessage> {
-    let t = c.byte()?;
-    let v = c.bytes()?;
-    match t {
-        0 => Ok(PhaseMessage::Init(v)),
-        1 => Ok(PhaseMessage::Echo(v)),
-        2 => Ok(PhaseMessage::Ready(v)),
-        _ => Err(bad("field phase")),
-    }
-}
 pub fn encode_message(m: &Message) -> Vec<u8> {
     let mut b = b"DREGG.PRIVATE.FIELD.WIRE\x01".to_vec();
     b.extend(m.context);
@@ -613,17 +576,7 @@ pub fn decode_message(b: &[u8]) -> Result<Message> {
     let context = c.fixed32()?;
     let body = match c.byte()? {
         0 => {
-            let mut digits = vec![];
-            loop {
-                let v = c.byte()?;
-                digits.push(v);
-                if v == 255 {
-                    break;
-                }
-            }
-            let mut r = crate::codec::Reader::new(&digits)?;
-            let gate = usize::try_from(r.nat()?.value()?).map_err(|_| bad("gate index"))?;
-            r.finish()?;
+            let gate = usize::try_from(c.nat()?.value()?).map_err(|_| bad("gate index"))?;
             Body::Opening {
                 gate,
                 holder: c.u16()?,

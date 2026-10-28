@@ -32,9 +32,28 @@ row is a subtype only of a row naming exactly the same fields (each member a
 subtype, in any order); a sum is a subtype of a sum with at least its cases
 (each payload a subtype). It is defined on first-order types only and refuses
 arrows, custody, computations, variables, specifications and prototypes. -/
-import Kernel.ObjectiveActivityWire
-import Theory.ObjectiveBendTypes
-import Theory.AssertAxioms
+module
+
+public import Kernel.ObjectiveActivityWire
+public import Theory.ObjectiveBendTypes
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ObjectStateType
 open Minidregg.Compiler.Tower256ConcreteBackend

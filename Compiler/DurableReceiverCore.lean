@@ -22,23 +22,44 @@ The physical assumptions are SQLite transaction integrity, honest byte
 transport and the OS durability floor; no Lean theorem proves those systems.
 The MAC key file's custody is the operator's (`DurableCheckpointCodec`).
 -/
-import Compiler.DurableCheckpointCodec
-import Compiler.NativeCoprocess
-import Compiler.DurableLogTags
-import Compiler.DurableHistory
-import Compiler.DurableIndex
-import Std.Data.HashMap
-import Std.Data.HashSet
-import Kernel.PresenceIndex
-import Kernel.TailBound
-import Kernel.LinkIndex
-import Kernel.SessionIndex
-import Kernel.DeployedRepresentsCheck
-import Kernel.DeployedCharge
-import Kernel.TurnLog
-import Kernel.DurableEngine
-import Kernel.DurableEngineSuffix
-import Compiler.WorldCompact
+module
+
+public import Compiler.DurableCheckpointCodec
+public import Compiler.NativeCoprocess
+public import Compiler.DurableLogTags
+public import Compiler.DurableHistory
+public import Compiler.DurableIndex
+public import Std.Data.HashMap
+public import Std.Data.HashSet
+public import Kernel.PresenceIndex
+public import Kernel.TailBound
+public import Kernel.LinkIndex
+public import Kernel.SessionIndex
+public import Kernel.DeployedRepresentsCheck
+public import Kernel.DeployedCharge
+public import Kernel.TurnLog
+public import Kernel.DurableEngine
+public import Kernel.DurableEngineSuffix
+public import Compiler.WorldCompact
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Compiler.DurableReceiverIO
 

@@ -17,11 +17,30 @@ Finite sets are written as the list of their members in the byte order of the
 members' own encodings (`sortedFinsetStream`), so every codec here is
 computable and a set has exactly one encoding order.
 -/
-import Compiler.TypedAuthorizationRequestCodec
-import Theory.HyperdocumentOperations
-import Theory.StableRanges
-import Mathlib.Data.List.Lex
-import Compiler.FiniteDependentMapCodec
+module
+
+public import Compiler.TypedAuthorizationRequestCodec
+public import Theory.HyperdocumentOperations
+public import Theory.StableRanges
+public import Mathlib.Data.List.Lex
+public import Compiler.FiniteDependentMapCodec
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.HyperdocumentCodec
 

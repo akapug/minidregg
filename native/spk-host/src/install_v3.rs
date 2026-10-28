@@ -1,6 +1,7 @@
 //! Launch-bound INSTALL in two physical phases. Historical v1 attempts stay
 //! in their own namespace and never supply a v2 launch root.
 
+use crate::io_context::IoContext;
 use super::{invalid, InstallConfig, MAX_CONFIG};
 use crate::completion_custodian::preflight_custodian;
 use crate::dispatch_native::{write_new, PrivateOperator};
@@ -166,10 +167,10 @@ fn retire_success_markers(config: &InstallConfig) -> io::Result<()> {
         .collect::<io::Result<Vec<_>>>()?;
     for ((active, _), present) in markers.iter().zip(selected) {
         if present {
-            fs::remove_file(config.artifact(active))?;
+            fs::remove_file(config.artifact(active)).ctx("remove", &(config.artifact(active)))?;
         }
     }
-    fs::File::open(&config.journal_dir)?.sync_all()?;
+    fs::File::open(&config.journal_dir).ctx("open", &config.journal_dir)?.sync_all()?;
     Ok(())
 }
 
@@ -186,10 +187,10 @@ fn archive_pure_attempt(
     }
     crate::dispatch_native::private_dir(&path)?;
     let mut bytes = [0u8; 16];
-    fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    fs::File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut bytes)?;
     let archive = config.artifact(&format!("{name}-aborted-pre-op38-{}", super::hex(&bytes)));
-    fs::rename(&path, &archive)?;
-    fs::File::open(&config.journal_dir)?.sync_all()?;
+    fs::rename(&path, &archive).ctx("rename", &path)?;
+    fs::File::open(&config.journal_dir).ctx("open", &config.journal_dir)?.sync_all()?;
     Ok(Some(archive))
 }
 
@@ -218,9 +219,9 @@ fn archive_incomplete_completion_attempt(config: &InstallConfig) -> io::Result<(
     }
     if active.is_some() {
         // This ordering makes a crash at either rename boundary recoverable.
-        fs::rename(&active_path, &embedded_path)?;
-        fs::File::open(config.artifact("completion-v2-author"))?.sync_all()?;
-        fs::File::open(&config.journal_dir)?.sync_all()?;
+        fs::rename(&active_path, &embedded_path).ctx("rename", &active_path)?;
+        fs::File::open(config.artifact("completion-v2-author")).ctx("open", &(config.artifact("completion-v2-author")))?.sync_all()?;
+        fs::File::open(&config.journal_dir).ctx("open", &config.journal_dir)?.sync_all()?;
     }
     archive_pure_attempt(config, "completion-v2-author")?
         .ok_or_else(|| invalid("v3 INSTALL incomplete completion attempt absent"))?;
@@ -345,7 +346,7 @@ pub(super) fn preflight_prepare(config: &InstallConfig) -> io::Result<()> {
 pub(super) fn preflight_complete(config: &InstallConfig) -> io::Result<()> {
     config.preflight_operator_paths()?;
     crate::dispatch_native::private_dir(&config.journal_dir)?;
-    let lock = fs::File::open(&config.journal_dir)?;
+    let lock = fs::File::open(&config.journal_dir).ctx("open", &config.journal_dir)?;
     if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
         return Err(invalid("v3 INSTALL completion already in progress"));
     }

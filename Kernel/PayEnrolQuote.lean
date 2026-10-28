@@ -7,7 +7,26 @@ Every whole membership week is consumed by the existing enrollment receiver.
 Atomic rounding or the journal floor must therefore never silently buy an
 extra week or consume the requested spendable starter remainder.
 -/
-import Kernel.PayTariff
+module
+
+public import Kernel.PayTariff
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PayEnrolQuote
 

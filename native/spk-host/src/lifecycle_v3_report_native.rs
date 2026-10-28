@@ -1,6 +1,7 @@
 //! Source-authored v2 physical report for a retained v3 BEGIN and committed claim.
 //! Rust supplies physical observations and signs only Mini's exact signing frame.
 
+use crate::io_context::IoContext;
 use crate::dispatch_author::private_signing_key;
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
 use crate::hostd::Journal;
@@ -44,7 +45,7 @@ pub(crate) struct ReportInput<'a> {
 
 fn nonce() -> io::Result<String> {
     let mut bytes = [0u8; 16];
-    File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut bytes)?;
     let value = u128::from_le_bytes(bytes);
     if value == 0 {
         return Err(invalid("v3 physical nonce zero"));

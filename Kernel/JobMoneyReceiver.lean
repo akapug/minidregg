@@ -31,11 +31,32 @@ digest commits to the command bytes and the decided plan, so the signature
 binds the job's pre-state and every amount.  The pay cell (the tariff: the
 credit asset and the slash split) and both laws' sources enter as read guards.
 -/
-import Kernel.CapabilityRevocationController
-import Kernel.ResourceBirthController
-import Kernel.PayCellDomain
-import Kernel.JobMoney
-import Kernel.ClockCellDomain
+module
+
+public import Kernel.CapabilityRevocationController
+public import Kernel.ResourceBirthController
+public import Kernel.PayCellDomain
+public import Kernel.JobMoney
+public import Kernel.ClockCellDomain
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.JobMoneyReceiver
 

@@ -1010,7 +1010,7 @@ pub(crate) fn invoke_pinned_deadline(
     if reply.len() > HOST_MAX_FRAME || reply.is_empty() {
         return Err("uncertain host response exceeds host frame bound".to_owned());
     }
-    if reply[0] == 254 {
+    if reply[0] == mini_sdk::host_operations::RESPONSE_NEVER_FORWARDED {
         return Err(format!(
             "socket rejected request: {}",
             String::from_utf8_lossy(&reply[1..])
@@ -1195,7 +1195,7 @@ fn invoke_inner(
     if reply.len() > HOST_MAX_FRAME {
         return Err("uncertain host response exceeds host frame bound".to_owned());
     }
-    if reply[0] == 254 {
+    if reply[0] == mini_sdk::host_operations::RESPONSE_NEVER_FORWARDED {
         return Err(format!(
             "socket rejected request: {}",
             String::from_utf8_lossy(&reply[1..])
@@ -1254,7 +1254,7 @@ pub(crate) fn exchange_unix(socket: &Path, frame: &[u8]) -> Result<Vec<u8>, Stri
             reader: &mut stream,
             deadline: Instant::now() + Duration::from_secs(1),
         }) {
-            if refusal.first() == Some(&254) {
+            if refusal.first() == Some(&mini_sdk::host_operations::RESPONSE_NEVER_FORWARDED) {
                 return Ok(refusal);
             }
         }

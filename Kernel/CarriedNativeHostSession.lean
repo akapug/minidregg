@@ -1,7 +1,11 @@
 /- A separately typed process-local suffix certificate. Original genesis-walked
 session evidence is never replaced or cast. The authenticated carry token mints
 the initial state; each refresh really re-admits only its newly accepted suffix. -/
-import Kernel.NativeHostReplay
+module
+
+public import Kernel.NativeHostReplay
+
+@[expose] public section
 
 namespace Minidregg.Kernel.CarriedNativeHostSession
 

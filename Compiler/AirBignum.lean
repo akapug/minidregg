@@ -15,8 +15,27 @@ integer addition when `2 * 2^limbBits <= p`; the inequality is the honest no-fie
 condition for one schoolbook equation.  The low and top carries are pinned to zero, so
 overflow is rejected rather than reduced modulo the fixed width.
 -/
-import Compiler.Emit
-import Theory.Bignum
+module
+
+public import Compiler.Emit
+public import Theory.Bignum
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.AirBignum
 

@@ -68,4 +68,6 @@ stop the run; the exit status is non-zero if any step failed, and re-running res
 2. The shape of `apps list --json` (the script finds a grain id with a recursive `jq`), and the output of
    `history all` (`attempt<TAB>ID<TAB>...`, as `j12.sh` greps it).
 3. Whether the public reader can read a chat room's per-member streams from the `lobby` grant alone.
-4. The tour's stranger is not yet in `tale`: someone must run `story invite tale SUBJECT` for them.
+4. Every member the door enrols joins `tale` as a player: the door processor runs `story invite tale SUBJECT`
+   as `box`, hands the member the invitation and runs `story join` as the member (`story` in `door.json`,
+   deploy/door/README.md). It retries each tick until the seed has made `tale`, and again after a re-genesis.

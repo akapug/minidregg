@@ -1,9 +1,29 @@
 /- Objective-only native scalar/read binding. Exact native constructors and guards;
 no old language AST, checked Book, source evaluator, or authority constructor. -/
-import Compiler.ServedBasis
-import Compiler.BendWorldPlan
-import Compiler.CredentialAuthorityDomainReceiver
-import Kernel.PhysicalResourceReadGuard
+module
+
+public import Compiler.ServedBasis
+public import Compiler.BendWorldPlan
+public import Compiler.CredentialAuthorityDomainReceiver
+public import Kernel.PhysicalResourceReadGuard
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Compiler.ObjectiveNativeScalarBinding
 open Minidregg.Compiler Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Theory Minidregg.Theory.TypedAuthorization Minidregg.Theory.EffectDeclaration

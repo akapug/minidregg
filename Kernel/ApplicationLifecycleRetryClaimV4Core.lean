@@ -2,8 +2,29 @@
 recovery are reselected at their exact prefixes; legacy first-attempt and
 created-volume markers remain unchanged. Native replay supplies both same-walk
 provenance obligations before receiving this conditional intent. -/
-import Kernel.ApplicationLifecycleRetryClaimV4Ingress
-import Kernel.ApplicationLifecycleRetryBeginV4Admission
+module
+
+public import Kernel.ApplicationLifecycleRetryClaimV4Ingress
+public import Kernel.ApplicationLifecycleRetryBeginV4Admission
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Core
 

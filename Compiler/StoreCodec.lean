@@ -64,13 +64,39 @@ This file proves round-trip, injectivity and canonicity GENERALLY, for every
 layout and every store; the worked instances at the end are evaluated
 witnesses, not the proofs.
 -/
-import Compiler.FiniteDependentMapCodec
-import Compiler.FiniteDependentMapCachedOrdering
-import Compiler.Sp800185Cshake256
-import Compiler.Sp800185Kmac256
-import Theory.CellState
-import Mathlib.Data.List.Lex
-import Mathlib.Data.Finset.Sort
+module
+
+public import Compiler.FiniteDependentMapCodec
+public import Compiler.FiniteDependentMapCachedOrdering
+public import Compiler.Sp800185Cshake256
+public import Compiler.Sp800185Kmac256
+public import Theory.CellState
+public import Mathlib.Data.List.Lex
+public import Mathlib.Data.Finset.Sort
+meta import Compiler.FiniteDependentMapCodec
+meta import Compiler.FiniteDependentMapCachedOrdering
+meta import Compiler.Sp800185Cshake256
+meta import Compiler.Sp800185Kmac256
+meta import Theory.CellState
+meta import Mathlib.Data.List.Lex
+meta import Mathlib.Data.Finset.Sort
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.StoreCodec
 

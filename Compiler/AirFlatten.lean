@@ -49,7 +49,26 @@ ONLY by the fold. Residuals that remain live upstream, unchanged: `[AIR-sumcheck
 gate constraints through `Selvage/SumcheckReduction`), `[AIR-poseidon]`/`[AIR-membership]` (the
 note-spend gadgets, grown on this rung).
 -/
-import Compiler.Air
+module
+
+public import Compiler.Air
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler
 

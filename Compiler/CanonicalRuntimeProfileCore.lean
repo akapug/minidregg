@@ -1,8 +1,27 @@
 /- Stable profile data, arithmetic premises and request projection shared by
 receivers. Current runtime markers and the only current-profile constructor
 remain in CanonicalRuntimeProfile. Native ingress cannot select a manifest. -/
-import Compiler.CanonicalPolicyAdmission
-import Compiler.ResourceBirthCodec
+module
+
+public import Compiler.CanonicalPolicyAdmission
+public import Compiler.ResourceBirthCodec
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.CanonicalRuntimeProfile
 

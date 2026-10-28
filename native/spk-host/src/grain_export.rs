@@ -11,6 +11,7 @@
 //! makes the STOP receipt a checked fact on the importing Store; until then
 //! the binding is the exporter's signature over the receipt bytes.
 
+use crate::io_context::IoContext;
 use ed25519_dalek::{Signature, Signer, VerifyingKey};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -31,7 +32,7 @@ fn unhex<const N: usize>(text: &str) -> io::Result<[u8; N]> {
 }
 
 fn sha256_file(path: &Path) -> io::Result<String> {
-    let mut file = File::open(path)?;
+    let mut file = File::open(&path).ctx("open", &path)?;
     let mut digest = Sha256::new();
     let mut chunk = vec![0u8; 1 << 20];
     loop {
@@ -46,7 +47,7 @@ fn sha256_file(path: &Path) -> io::Result<String> {
 
 fn bounded(path: &Path, max: u64) -> io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
-    File::open(path)?.take(max + 1).read_to_end(&mut bytes)?;
+    File::open(&path).ctx("open", &path)?.take(max + 1).read_to_end(&mut bytes)?;
     if bytes.len() as u64 > max {
         return Err(invalid(format!("{} exceeds its bound", path.display())));
     }
@@ -58,7 +59,7 @@ fn write_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
         .write(true)
         .create_new(true)
         .mode(0o600)
-        .open(path)?;
+        .open(&path).ctx("open", &path)?;
     file.write_all(bytes)?;
     file.sync_all()
 }
@@ -85,8 +86,8 @@ pub(crate) fn write_export(
     DirBuilder::new().mode(0o700).create(out)?;
     let image = out.join("var.ext4");
     if fs::rename(source, &image).is_err() {
-        fs::copy(source, &image)?;
-        fs::remove_file(source)?;
+        fs::copy(source, &image).ctx("copy", &source)?;
+        fs::remove_file(&source).ctx("remove", &source)?;
     }
     if sha256_file(&image)? != sha {
         return Err(invalid("exported image differs from the broker's digest"));
@@ -94,7 +95,7 @@ pub(crate) fn write_export(
     let mut manifest = base.clone();
     manifest["protocol"] = json!("mini-spk-grain-export-v1");
     manifest["image"] = json!({"file":"var.ext4","sha256":sha,
-        "bytes":fs::metadata(&image)?.len().to_string()});
+        "bytes":fs::metadata(&image).ctx("inspect", &image)?.len().to_string()});
     manifest["stopReceipt"] = receipt;
     manifest["stopReceiptSha256"] = json!(format!("{:x}", Sha256::digest(stop_receipt)));
     let bytes = serde_json::to_vec_pretty(&manifest)?;
@@ -178,10 +179,10 @@ pub(crate) fn verify_import(
     let staged = imports.join(format!("{image_sha}.ext4"));
     if !staged.exists() {
         let temp = imports.join(format!(".{image_sha}.tmp"));
-        let _ = fs::remove_file(&temp);
-        fs::copy(dir.join("var.ext4"), &temp)?;
-        File::open(&temp)?.sync_all()?;
-        fs::rename(&temp, &staged)?;
+        let _ = fs::remove_file(&temp).ctx("remove", &temp);
+        fs::copy(dir.join("var.ext4"), &temp).ctx("copy", &(dir.join("var.ext4")))?;
+        File::open(&temp).ctx("open", &temp)?.sync_all()?;
+        fs::rename(&temp, &staged).ctx("rename", &temp)?;
     }
     if sha256_file(&staged)? != image_sha {
         return Err(invalid("staged import differs from the signed manifest"));
@@ -220,11 +221,11 @@ fn recovery_read(path: &Path, max: u64) -> io::Result<Vec<u8>> {
         path.parent()
             .ok_or_else(|| invalid("recovery parent absent"))?,
     )?;
-    let named = fs::symlink_metadata(path)?;
+    let named = fs::symlink_metadata(&path).ctx("inspect", &path)?;
     let mut file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
+        .open(&path).ctx("open", &path)?;
     let before = file.metadata()?;
     if !before.is_file()
         || before.uid() != unsafe { libc::geteuid() }
@@ -267,7 +268,7 @@ fn retain_exact(dir: &Path, name: &str, bytes: &[u8]) -> io::Result<std::path::P
         }
         Err(e) => return Err(e),
     }
-    File::open(dir)?.sync_all()?;
+    File::open(&dir).ctx("open", &dir)?.sync_all()?;
     Ok(path)
 }
 
@@ -324,7 +325,7 @@ pub(crate) fn reconcile_failed_start(
     }
     let directory = journal.join("failed-start-recovery-v1");
     match DirBuilder::new().mode(0o700).create(&directory) {
-        Ok(()) => File::open(&journal)?.sync_all()?,
+        Ok(()) => File::open(&journal).ctx("open", &journal)?.sync_all()?,
         Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
             crate::dispatch_native::private_dir(&directory)?
         }
@@ -336,7 +337,7 @@ pub(crate) fn reconcile_failed_start(
         .create(true)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(directory.join(".recovery.lock"))?;
+        .open(directory.join(".recovery.lock")).ctx("open", &(directory.join(".recovery.lock")))?;
     if lock.metadata()?.uid() != unsafe { libc::geteuid() } || lock.metadata()?.nlink() != 1 {
         return Err(invalid("recovery lock identity refused"));
     }
@@ -347,7 +348,7 @@ pub(crate) fn reconcile_failed_start(
     // Every Host reply is retained under its own observation name and read
     // back through the pinned Host's own outcome inspector.
     let observe = |reply: &[u8], opcode: u8| -> io::Result<Value> {
-        let outcome = framed_payload(reply, opcode, OUTCOME)?;
+        let outcome = framed_payload("grain export submit", reply, opcode, OUTCOME)?;
         let observation = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|_| invalid("recovery clock before epoch"))?
@@ -561,7 +562,7 @@ pub(crate) fn reconcile_failed_start(
         &directory.join("request.bin"),
     )?;
     let reply = operator.invoke(routes.prepare, &custody.selector.framed(&request)?)?;
-    let plan = framed_payload(&reply, routes.prepare, PLAN)?;
+    let plan = framed_payload("grain export plan", &reply, routes.prepare, PLAN)?;
     let plan_path = retain_exact(&directory, "plan.bin", plan)?;
     let view: Value = serde_json::from_slice(&recovery_tool(
         operator,
@@ -611,7 +612,7 @@ pub(crate) fn reconcile_failed_start(
     pair.extend_from_slice(&sigs);
     retain_exact(&directory, "assemble-request.bin", &pair)?;
     let reply = operator.invoke(routes.assemble, &pair)?;
-    let ingress = framed_payload(&reply, routes.assemble, INGRESS)?;
+    let ingress = framed_payload("grain export assemble", &reply, routes.assemble, INGRESS)?;
     retain_exact(&directory, "ingress.bin", ingress)?;
     retain_exact(
         &directory,

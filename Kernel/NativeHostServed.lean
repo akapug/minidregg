@@ -12,9 +12,28 @@ authority cell and the factory pins, with the cell-law check it passed.
 pins and the same directory. The full shape (`Opened`) is the transition's
 other route; every caller of it is on `scripts/ports/full-loaded-callers.txt`.
 -/
-import Kernel.NativeHostContext
-import Compiler.CredentialAuthorityServed
-import Compiler.ServedBasis
+module
+
+public import Kernel.NativeHostContext
+public import Compiler.CredentialAuthorityServed
+public import Compiler.ServedBasis
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.NativeHostServed
 

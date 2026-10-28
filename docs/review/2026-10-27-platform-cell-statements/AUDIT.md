@@ -885,3 +885,285 @@ keystone is honest as a gate. Two notes for the proofs:
   canonical. Prove that lemma first; if it fails, the premise is false.
 - `HostTeeth`'s ghost clause needs an admitted command whose seal is non-empty, because otherwise both
   dispatchers refuse alike. Its proof therefore rests on `HostAccepted`'s owed fixture, the same object.
+
+## 2026-10-27, twentieth pass: completion custodian key from the platform cell (L1d, design, before code)
+
+**Verdict: the design is accepted, with one requirement on the light route.**
+
+The keystone is about the deployed object:
+- `keyCurrent` over each admission's private-mk `Candidate` reads the record from `ground.view`, the state
+  the completion's guards are taken on.
+- The physical report's verifying key is `custodian.key` by the type of `physical`.
+- The platform cell's exact root is in `Core.intent`'s read guards, so a key-rotating install between
+  prepare and commit makes the completion stale.
+
+`Read.stale` is general teeth: no `Read` carries a key other than the record's, which refutes the
+`config.completionCustodianKey` reader after a rotation. `select_unavailable` names absence. One shared
+module, with `platformRecordAt := recordOn … durable.snapshot` by `rfl`, avoids a four-way copy.
+Historical re-admission reading the record in force at that height is what replay agreement needs.
+
+- **(a) `platformReadOnly` as a checked refusal: accepted.** It fails safe, refusing by name rather than
+  admitting, the same shape as `packageGuardReadOnly`. The theorem form can come second. The owed
+  concrete accepted `Candidate` must also show the check passes on an honest completion, so it is not a
+  liveness trap.
+- **(b) Pre-platform worlds refuse every completion with `platformUnavailable`: accepted.** It is
+  consistent with births and with the one re-genesis.
+- **(c) Host pre-checks reading the opened image: accepted**, as diagnostics only, since admission
+  re-reads.
+- **Requirement, the light route.** A served ground's `canonicalBytes` covers the ids its basis
+  *served*. Light plans request keyed bases (`light.basis keys`, as `prepareInstallLight` does). Unless
+  the completion's basis keys include `cellIdOf deployment`, the platform cell reads as `absentBytes`,
+  `load` is `none`, and every light-route completion refuses `platformUnavailable`. State, and prove, that
+  each completion family's light key set contains the platform cell id.
+
+**Correction to the twentieth pass: the light-route requirement is withdrawn.** It rested on a wrong
+premise. Basis keys name only transactions and nullifiers (`DurableView.Keys`,
+`Kernel/DurableView.lean:143`). A basis's cell bytes are the served state's whole
+`canonicalBytes`, whatever the keys (`Basis.view_canonicalBytes … := rfl`, `Compiler/ServedBasis.lean:126`).
+`Served`'s private constructors (`ofLoaded`, `ofStateAt`, `advance`) all carry full cell state. So a
+seeded platform cell is present on every light ground. L1d's replacement is the right declaration:
+`recordOn` agrees across any two key sets over the same `served`, by `rfl`.
+
+## 2026-10-27, twenty-first pass: M2 proof phase, `Intent.credit` and the refill family (L1d, design)
+
+**Verdict: the shape is accepted, with one finding that must change before code.**
+
+The extension is right:
+- one `credit` field, threaded protocol → data intent → record;
+- `install := available - exactCharge + credit`, with no truncation, because `preflight` funds
+  `exactCharge` first;
+- `sameCheck` comparing credit;
+- the codec carrying it as a field (v3, riding the re-genesis), not derived from event bytes, so
+  "the label grants nothing" rests on a field.
+
+K1 instantiates M2-d on the real `Snapshot.install`. K2 instantiates M2-c on the deployed receiver.
+K3 instantiates M2-b over what replay can produce. The teeth (replay, overflow, forgery, tagged mint)
+are the accepted ones.
+
+**Finding: the overflow check must happen at commit, not plan.** `fitsCheck (raised remaining amount)` is
+computed against `remaining` at plan time. A second refill, or any later-charged record, can land between
+plan and commit, and no guard covers the meter: it is `Snapshot.available`, not a cell. So the committed
+`available - 0 + amount` can exceed `WordLayout`. That is the machine-width boundary `Theory.ResourceCost`
+checks at persistence, so a Store would accept a record it cannot encode. Put the fit into the
+protocol: `preflight` refuses when `available - exactCharge + credit` does not fit the layout (a named
+`creditOverflow`). Restate `overflow_refused` against the commit-time `available`. With credit 0 for
+every other family, this costs them nothing.
+
+- **(a) Authority-cell guard: right**, since it is the revocation race. Take the controller from the same
+  source as the install family: `controllerOf` of the platform cell, proved equal to genesis's by
+  `controller_stays`. Reading `config.factoryController` here would be a second source of controller
+  identity. With `controller_stays`, the platform cell needs no guard for this read.
+- **(b) Bounded only by fit: accepted.** The meter is the operator's resource, and the issuance cap stays
+  out of the lane, as recorded.
+- **(c) Quantify over the `NativeAdmission` arms: right**, because replay is the meter's source of truth.
+  It is sufficient only if replay compares each record's `credit` with its arm's re-admitted intent.
+  State that link: a record whose credit differs from its arm's intent is refused (the `sameCheck` credit
+  clause). Then an IO receiver cannot commit a credit the arm would not reproduce.
+
+**Correction to the twenty-first pass: the overflow finding is withdrawn, and option (A) is chosen.** I
+checked on main. `ResourceCost.WordLayout` is referenced nowhere in `Kernel/`, `Compiler/` or `Host/`
+except `PlatformCell.RefillContext.layout`. The meter persists only through
+`DurableReceiverCodec.chargeStream` (ten unbounded `StreamCodec.nat`). So the deployed meter is an
+unbounded `Nat` end to end, and no record becomes unencodable. A fit check would guard nothing (and
+this pass's own pass-2 overflow pole asked for one on that same false premise). Drop
+`RefillContext.layout`, the `fitsCheck` conjunct and `overflow_refused`. The remaining M2 statements
+stand. Record in `PlatformCell.lean`'s header that the meter is unbounded by design: any future
+fixed-width emitter of `available` must carry its own bound at that emitter (law 3).
+
+**Addendum, M2's deployed statements (L1d, local, unbuilt): the deployed forms are accepted. Retire the
+spec-level twin.**
+- K1, `protocol_install_matches` over the real `Snapshot.install`, with teeth against the uncredited install:
+  accepted.
+- K2, `AcceptedRefill.sound`, states the deployed facts: sponsor = `controllerOf` of the platform cell, the
+  verified envelope, the stored capability evidence, the unspent marker, and the exact intent shape
+  (no writes, zero charge, one marker nullifier, `credit = amount`, guards at the durable root). Together
+  with `intent_install_refilled` it is a stronger, more concrete M2-c than `RefillLawful ctx post`. The
+  deployed receiver is not a pure function of a meter and a refill, so a `post` would be invented for the
+  instantiation.
+- K3, the `credit_confined` disjunct naming an `AcceptedRefill` (private mk, built only by admission) with
+  `recordMatches_iff` carrying credit, is the deployed content of `CreditConfined` and needs no
+  `RefillAdmits ctx` wrapper.
+
+So the abstract `RefillContext`/`RefillAdmits`/`RefillLawful`/`CreditConfined` in `PlatformCell.lean`
+would now be parallel statements no live code instantiates (law 5). **Delete them, or relabel them as the
+shape and not keystones, pointing to K2/K3**, exactly as pass 18 did for `BirthsReadCurrent`. Then **move
+the teeth onto the deployed type**: `IsEmpty (AcceptedRefill …)` when the marker is spent (replay) and
+when the sponsor is not the platform cell's controller (forgery). K3's own statement already refutes a
+non-refill arm carrying credit.
+
+## 2026-10-28, twenty-second pass: thin-consent birth (lane/thin-birth 7410dd6d9, statement text)
+
+**Verdict: REVISE, two statements. The rest is accepted.**
+
+1. **`EffectsBinds` as a premise: change it to the compared-pair collision disjunct.** As a hypothesis,
+   `effectsDigest signed = effectsDigest d → signed = d` is supplied by the caller, and its inhabitation
+   pole `∀ d, EffectsBinds d d` is the trivial case (the conclusion is `d = d`). The case the teeth
+   need is the other one: in `SwapAfterConsentRefused` the premises `signed ≠ d'` and
+   `EffectsBinds signed d'` together just say "their digests differ", and nothing inhabits that. Use
+   the pattern already accepted for `PinCollision`/`ArgumentCollision`: drop the premise, and conclude
+   `… ∨ EffectsCollision signed d`, with `EffectsCollision := signed ≠ d ∧ effectsDigest signed =
+   effectsDigest d`. Both theorems then stand unconditionally, and the collision is a named event on
+   exactly the two descriptors compared. Stating it over descriptors rather than bytes is fine, because
+   `sourceEncoding` is canonical (the plan check already pins `encode finalized = finalBytes`).
+2. **`HonestPlanAccepted`'s pins premises: require the lemma.** `opened.pins.federation =
+   config.federation` and `opened.pins.policyId = ⟨factoryId⟩` are premises no theorem inhabits. That
+   makes the satisfiable pole conditional on unproved facts, which is the shape the satisfiable field
+   exists to rule out. `validateLoaded` builds `Opened` from `parts.pins` after `validateChecks`. Prove
+   `Opened.pins_federation`/`pins_policyId` from that construction (or the checked parts' exactness), and
+   drop the premises.
+
+Accepted:
+- **(2) Conjuncts 3 to 7** are true of every `PreparedBirth`, and they gain their force from conjunct 2
+  (`encode (userPart d) = shown.draft`) and conjunct 4 (auxiliary creates are the kernel's). That is the
+  `delegate_display_is_commit` pattern, and it is fine as stated. A one-line corollary with `userPart d`
+  rewritten to `decode shown.draft` would make "commit = f(shown, kernel-owned, pre)" literal; it is
+  optional.
+- **(3) `author` as a Host-instantiated parameter**, with Host-side completeness witnessed by the journey
+  row: accepted, provided the label says the re-authoring fixed point is a row, not a theorem.
+  Soundness of display-is-commit does not depend on `author` being correct.
+- **(5) Coordinates shown, not judged**, gated at admission (`RootGrantShape`, `BirthWindow`, policy epoch 0,
+  `BornLineage`), with the window shift named in the display: accepted.
+- `SwappedPlanRefused`'s two refusals are general and named.
+
+**Addendum, thin-birth 909de2bca: ACCEPT.** `EffectsCollision` is a compared-pair event on exactly the
+two descriptors, and it cannot be proved without an actual cSHAKE collision. Neither theorem now takes a
+hash premise, so the disjunct is no escape hatch. In `DisplayIsCommit` the consented-header premises force
+equal digests, so either `signed = d` (the conjuncts) or the collision holds. `OpenedPinsPublicStatement`
+replaces the uninhabited premises with a statement about every `Opened`. Carrying the invariant as a field
+built at `Opened`'s three construction sites is the right realisation. The re-authoring fixed point is
+labelled as jpriv2 row 19.
+
+## 2026-10-28, twenty-third pass: the World carries M2's credit (L1e, design, before proofs)
+
+**Ruling: option (A).** Option (B) (`intent.credit = 0` on the four `SnapRepresents` theorems) would cut
+whole-World equality on every log containing a refill, which passes 6 to 9 rest on. It is a weakening.
+Under (A):
+- `World.Turn.credit : Charge := 0`;
+- `meterPatch` writes `avail - charge + credit` on lanes where either term is nonzero, which is exact,
+  since `fundedCheck charge` is unchanged;
+- `turnOf` sets `credit := intent.credit`.
+
+The four refinement theorems keep their statements, plus a `credited` sibling of `charged`. This
+section corrects pass 21, which missed the World side. Conditions for the stated text:
+1. **Regression pole:** `meterPatch lanes charge 0 avail = debits lanes charge avail` (or the same as an
+   equality of `World.step` on credit-0 turns), so every pre-M2 turn provably steps as before.
+2. **Satisfiable pole:** a credited turn's post-meter on a lane is `avail - charge + credit`, with
+   `credit > 0` raising it.
+3. **Say where confinement lives.** The World admits `credit` as turn data without deciding it, as it does
+   subject and capability. Its docstring must say minting is confined only by K3 (`credit_confined` over
+   the replay arms), so no one reads the World law as a meter-safety statement. I found no World-level
+   theorem on main claiming the meter never increases. Any future one must carry the credit term.
+
+**Addendum, L1e's exact text for (A): ACCEPT.** All three conditions are met:
+- the credit-0 regression poles (`meteredLanes_uncredited`, `meterPatch_uncredited`, `sysPatch_uncredited`);
+- the satisfiable pole `step_meter` on every lane, with the concrete refill turn taking 0 to 5, which is
+  item 7's World-level half;
+- the docstring placing confinement in K3.
+
+`sysPost_allowance`'s case split agrees with `step_meter`, because an untouched lane has
+`charge = credit = 0`. `turnCheck`'s unchanged `fundedCheck` keeps the subtraction exact. `turnOf_credit`
+and `ofIntent_credit` give the `credited` sibling. The four `SnapRepresents` statements are unchanged.
+
+On the World-level tooth: `decodeTurn_encodeTurn`, with `decodeTurn` reading the credit, already makes
+`encodeTurn` injective in it. Add the one-line corollary `encodeTurn_credit_ne`, turns differing only in
+credit having different bytes, as the stated tooth. Then a future codec that drops the field fails a
+named theorem instead of passing silently through a roundtrip on a defaulted value.
+
+**Addendum, `SnapRepresents.meter` strengthened (L1e): ACCEPT.** A credited lane at an exhausted meter may
+hold `none`, so the World's guarded allowance write would refuse the very refill the 0→5 pole admits. The
+`getD 0` field cannot distinguish `none` from `some 0`. Strengthening the field in place to
+`w.allowanceOf l = some (snap.model.available l)`, with `meter_eq` as the old field for current readers,
+is the right fix. It is a stronger premise every producer inhabits, not a new hypothesis, and deployed
+genesis records every lane (`TurnLog.genesisSystem`), which writes preserve. `representsCheck_sound`
+moving to the `some` comparison keeps the open deciding it. Restating `charge_le_allowance`'s second
+conjunct as `step_meter` is required by the credit and accepted.
+
+## 2026-10-28, twenty-fourth pass: how item 7's witnesses may be evaluated (L1e)
+
+**Ruling: option 3, amended. The signature needs no native evaluation.** `CheckedSignature.source` already
+admits a recorded run of the native verifier "only in a pure evaluation" (`CredentialSignatureIO.Oracle`
+`.recorded`, `CredentialSignatureAdmission.lean:287-296`), and `scripts/check-native-transcripts.sh`
+re-submits every recorded verdict to the native process. Build the signed poles (`AcceptedBirth`, the
+completion `Candidate`) over a recorded transcript holding the fixture signer's verdict. The verdict is
+then data, and the trust boundary is the one passes 3 and 8 accepted: statements relative to the
+transcript, which the native check re-verifies. Ed25519 never enters the kernel.
+
+The remaining cost is cSHAKE over the image's roots. Measure one root under `decide +kernel` on a box
+first.
+- If it is feasible, every pole is kernel-evaluated over a minimal hand-written coherent image. A witness
+  need not be the deployed genesis, only a real coherent snapshot through the real
+  `preparePending`/admission.
+- If it is not, a separate witness module evaluated by `native_decide` is acceptable as the fallback. Its
+  axiom pin names `Lean.ofReduceBool` explicitly; no keystone module imports it; it is graded and
+  confessed per law 9.
+
+Either form meets law 2 only if the module is built by the merge gate with its pin checked, so a broken
+witness turns the gate red. An executed script does not count. `neutral-birth.lean` stays as the
+end-to-end run.
+
+## 2026-10-28, twenty-fifth pass: JDISCLOSE scalar oracle and installed-law explanation (lane/red-jdisclose-scalar, statements)
+
+**Verdict: REVISE A, accept B with one transfer lemma.**
+
+**A. Revise.**
+1. **The `none` branch keeps the oracle open.** `scalarScopeCheck` returns `true` when the authority cell
+   holds no such capability, so `prepareCell`'s guards still run before admission refuses
+   `capabilityRejected`, and `guardRejected` versus the later refusal is an equality oracle for a
+   requester with *no* grant at all. "Observation-phase authority precedes prepare" is a claim about the
+   plan channel, and no statement here proves it. Close it fail-safe: `none => .error .capabilityRejected`,
+   refused before any guard. That is the same name admission would give, only earlier. Then
+   `computeTarget_scalar_unnamed_refused` has a sibling for the `none` case, equally quantified over every
+   `pre`.
+2. **The teeth cover guards only. State the non-interference.**
+   `computeTarget_scalar_unnamed_refused` shows that a guard on an unnamed field refuses independently of
+   values. But if `prepareCell` reads any other field (a cross-field invariant, a balance check, an
+   existence test outside `guardKeys`), a fully named action can still refuse differently on unnamed
+   values. The property the row needs: when `scalarScopeCheck = true`, the *error* `computeTarget …
+   pre` returns is a function of the named fields alone, that is, `pre` and `pre'` agreeing on
+   `NamedBy stored…fields` give the same refusal. `computeTarget_scalar_named_as_before` is the accepting
+   pole, not a confinement statement.
+
+**B. Accepted.** Dropping the neutral guard in `explained` is display-only (the decision is unchanged).
+`owner_told_value_installed` is the satisfiable witness. `narrowed_hides_uncovered_installed` (4242 and 5
+both give `none`) is the right teeth, but it is a closed instance (law 9 permits it as a witness). Add
+`narrowed_installed_le : narrowed fs (Pred.all [(neutralComponent law).guarded]) old new = some r →
+narrowed fs law old new = some r` (the installed law tells nothing the raw law does not). The existing
+general non-leak results for raw laws then carry over to every installed law, and the known coverage limit
+(installed hides more) is consistent with it.
+
+**Addendum, JDISCLOSE owner's reply: A lands, A2 is owed, the B lemma is withdrawn.**
+- *A1 taken:* an unheld capability is refused `capabilityRejected` before any guard, with
+  `computeTarget_scalar_unheld_refused` over every `pre`. Accepted.
+- *A2:* my confinement as stated is false by design. `staleTarget` compares the requester's
+  `expectedTargetRoot` with the whole-cell root, which is the one bit `RefusalReason`'s header already
+  concedes. The owner's alternative ("equal roots and agreement on named fields give the same refusal")
+  would be near-vacuous, because equal roots pin the whole cell up to a collision. The non-vacuous form
+  to record as owed: `computeTarget … pre = .error e → e = .staleTarget ∨ e = f (namedPart pre)
+  declaration command` for one `f` fixed across `pre`. That covers the remaining checks (`preLaw`,
+  `admissionCheck`, `FieldClosure`, `postLaw`). Not blocking: A closes the measured oracle, and A2 is owed,
+  not claimed.
+- *B:* `narrowed_installed_le` is false (the installed leaf path differs) and unnecessary, because
+  `narrowed_congr` already quantifies over every law, installed ones included. Withdrawn.
+
+## 2026-10-28, twenty-sixth pass: thin consent over salted openings (lane/thin-birth, invocation arm, statements)
+
+**Verdict: ACCEPT, with one strengthening of the keystone.** The replacement removes the defect JP2 row 22
+measured: re-encoding a blinded cell can never reproduce its signed root, because salts derive from a key
+the Host never serves. It also removes `RootBinds`, the caller-supplied carrier of the kind refused in
+pass 22, in favour of a named collision. No twin is kept.
+
+- **(a) The sealed exclusion: strengthen it, do not just exclude.** As stated, the keystone says nothing at
+  `SealedIn` addresses, so a Host that seals more leaves those commits unconstrained by the claim. The
+  owner's own argument (patch ops carry explicit before values, so a member patch cannot write an address
+  it was not shown) proves something stronger, and that is what should be stated: for an address that is
+  `SealedIn` and not `KernelOwned`, `prepared.post address = prepared.pre.logical address`. What the member
+  did not see is left exactly as it was. Then "a Host can narrow what is shown but cannot change what
+  commits" is a theorem, not prose.
+- **(b) The collision disjunct is shaped correctly.** It is a compared-pair event at both layers of the
+  commitment, at the actual pre-state, not an arbitrary one: equal list roots over different leaves
+  (length differences included), or equal leaves over different openings at one position. Neither layer
+  can be inhabited without a hash collision.
+- **(c) The satisfiable pole at declared-object scope is accepted as the first scope.** The label must say
+  "declared-object scalar targets", and since `checkServed` is deleted for every kind, the other kinds'
+  acceptance must be listed as owed (a pole or a journey row each). They go through the same
+  `resourceView`, but that is a reading, not yet a witness.

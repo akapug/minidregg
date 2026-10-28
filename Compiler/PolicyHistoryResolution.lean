@@ -8,7 +8,11 @@ These edges authenticate old records; they are not law-inheritance edges.
 This same-profile loader does not cross a checked-carry boundary. Such a boundary
 requires the carry lane's explicit authenticated source mapping and prior codec.
 -/
-import Compiler.CredentialAuthorityPolicyRegistry
+module
+
+public import Compiler.CredentialAuthorityPolicyRegistry
+
+@[expose] public section
 
 namespace Minidregg.Compiler.PolicyHistoryResolution
 

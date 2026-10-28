@@ -5,8 +5,27 @@ receiver may join that exact birth with current app delegation and install
 the first canonical grant atom in one durable transaction. This source alone
 neither admits a grant nor extends event21's generation-bound ticket.
 -/
-import Kernel.ApplicationAgentLifetimeGrant
-import Kernel.ApplicationShareIssueSource
+module
+
+public import Kernel.ApplicationAgentLifetimeGrant
+public import Kernel.ApplicationShareIssueSource
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationAgentLifetimeGrantSource
 
@@ -67,7 +86,7 @@ def specStream : StreamCodec Spec :=
 
 def specCodec : LawfulCodec Spec :=
   NativeHostCodec.framed
-    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-SPEC/v4".toUTF8.toList specStream
+    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-SPEC/v5".toUTF8.toList specStream
 
 theorem spec_decode_encode (spec : Spec) :
     specCodec.decode (specCodec.encode spec) = some spec :=
@@ -125,7 +144,7 @@ theorem event_retains_domain (domain : Digest) (ingress : Ingress) :
 birth descriptor, so a grant payload cannot be spliced into another birth. -/
 def sourceBytes (spec : Spec)
     (descriptor : Descriptor CanonicalCellRegistry.registry) : List UInt8 :=
-  "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-SOURCE/v4".toUTF8.toList ++
+  "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-SOURCE/v5".toUTF8.toList ++
     (StreamCodec.product bytesStream bytesStream).encode
       (specCodec.encode spec,
         (ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode descriptor)
@@ -133,7 +152,7 @@ def sourceBytes (spec : Spec)
 def issueMarker (spec : Spec)
     (descriptor : Descriptor CanonicalCellRegistry.registry) : Nat :=
   (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-MARKER/v4".toUTF8.toList
+    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-MARKER/v5".toUTF8.toList
     (sourceBytes spec descriptor)).digest.value
 
 def appRequest (domain semantics : Digest) (federation : FederationId)
@@ -148,10 +167,10 @@ def appRequest (domain semantics : Digest) (federation : FederationId)
   target := ⟨spec.grant.participant.app⟩
   verb := .delegateObject
   argsDigest := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-ARGS/v4".toUTF8.toList
+    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-ARGS/v5".toUTF8.toList
     (sourceBytes spec descriptor)).digest
   effectsDigest := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-EFFECTS/v4".toUTF8.toList
+    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-EFFECTS/v5".toUTF8.toList
     (sourceBytes spec descriptor)).digest
   nonce := spec.grant.approval.nonce
   height := height

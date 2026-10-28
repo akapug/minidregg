@@ -13,13 +13,32 @@ the same function the operator and a friend run (`inspect KIND IN OUT`).
   satisfy that clause, computed from the clause and the refusal's own values.
 * `turnSlots` — a signing plan's slots with their decoded footprints.
 -/
-import Compiler.NativeHostCodec
-import Compiler.PlanFootprintCodec
-import Compiler.CredentialAuthorityCell
-import Kernel.CapabilityDelegationController
-import Kernel.CredentialSignedEnvelopeController
-import Theory.AssertAxioms
-import Mathlib.Data.List.Dedup
+module
+
+public import Compiler.NativeHostCodec
+public import Compiler.PlanFootprintCodec
+public import Compiler.CredentialAuthorityCell
+public import Kernel.CapabilityDelegationController
+public import Kernel.CredentialSignedEnvelopeController
+public import Theory.AssertAxioms
+public import Mathlib.Data.List.Dedup
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Host.InspectViews
 

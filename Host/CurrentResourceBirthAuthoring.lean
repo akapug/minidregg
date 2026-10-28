@@ -5,8 +5,12 @@ canonical cells, policies, grants and fee using current height and authority.
 The genesis description is checked against the pinned runtime seed, never
 treated as the current authority snapshot.
 -/
-import Host.Json
-import Kernel.NativeHost
+module
+
+public import Host.Json
+public import Kernel.NativeHost
+
+@[expose] public section
 
 namespace Minidregg.Host.CurrentResourceBirthAuthoring
 

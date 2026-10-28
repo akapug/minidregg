@@ -10,12 +10,33 @@ One DataIntent commits source origin, optional consumption, Book/birth/member
 and clock/tip effects. Pending value has zero Book writes. Exact replay precedes
 current expiry, freshness, pricing and authority decisions.
 -/
-import Kernel.PayEnrolReceiver
-import Kernel.PayEnrolV2Legs
-import Compiler.PhysicalLawResolution
-import Compiler.ComposedPolicyAdmission
-import Compiler.WorldKindLawDependencies
-import Kernel.ClockLaw
+module
+
+public import Kernel.PayEnrolReceiver
+public import Kernel.PayEnrolV2Legs
+public import Compiler.PhysicalLawResolution
+public import Compiler.ComposedPolicyAdmission
+public import Compiler.WorldKindLawDependencies
+public import Kernel.ClockLaw
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PayEnrolV2Receiver
 

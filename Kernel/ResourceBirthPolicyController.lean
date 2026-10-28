@@ -6,16 +6,38 @@ before adding canonical old-policy authorization. These are the existing
 `FactoryAuthorization` obligations, evaluated here rather than assumed from
 host verdicts. The complete-domain policy adapter consumes this checked result.
 -/
-import Compiler.ResourceBirthCodec
-import Compiler.DeclaredEffectCell
-import Theory.PolicyInstall
-import Kernel.ResourceBirthController
-import Compiler.CredentialAuthorityPolicyRegistry
-import Compiler.CanonicalRuntimeProfileCore
-import Compiler.CanonicalAccountView
-import Compiler.PhysicalLawResolution
-import Compiler.WorldKindLawDependencies
-import Kernel.PlatformCellDomain
+module
+
+public import Compiler.ResourceBirthCodec
+public import Compiler.DeclaredEffectCell
+public import Theory.PolicyInstall
+public import Kernel.ResourceBirthController
+public import Compiler.CredentialAuthorityPolicyRegistry
+public import Compiler.CanonicalRuntimeProfileCore
+public import Compiler.CanonicalAccountView
+public import Compiler.PhysicalLawResolution
+public import Compiler.WorldKindLawDependencies
+public import Kernel.PlatformCellDomain
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Mathlib.Tactic.DeriveFintype
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ResourceBirthPolicyController
 
@@ -2398,7 +2420,7 @@ def ownerConsentRequest
     target := ⟨item.create.cellId⟩
     verb := reserveVerb item.resourceKind
     argsDigest := CanonicalCellRegistry.sourceEncoding.hashBytes
-      ("DREGG/RESOURCE-RESERVE-BIRTH/OWNER-CONSENT/v4".toUTF8.toList ++
+      ("DREGG/RESOURCE-RESERVE-BIRTH/OWNER-CONSENT/v5".toUTF8.toList ++
         CanonicalCellRegistry.sourceEncoding.codec.encode descriptor ++
         Tower256ConcreteBackend.StreamCodec.nat.encode position.val)
     effectsDigest := CanonicalCellRegistry.sourceEncoding.effectsDigest descriptor

@@ -13,6 +13,11 @@ A module importing only the spec would compile against the list definitions:
 correct, and about three orders of magnitude slower.
 -/
 
-import Theory.Sp800185Cshake256Spec
-import Theory.Sp800185Cshake256Fast
-import Theory.Sp800185Cshake256Native
+module
+
+public import Theory.Sp800185Cshake256Spec
+public import Theory.Sp800185Cshake256Fast
+public import Theory.Sp800185Cshake256Native
+
+@[expose] public section
+

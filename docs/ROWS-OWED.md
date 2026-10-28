@@ -20,10 +20,122 @@ Notation used in the commands:
 - "template" = the fixture's per-candidate world restored (`NEWPARTICIPANT_TEMPLATE_DIR`, on by default);
   "genesis" = the row writes its own genesis.
 
-The last full journey-rows run on record is custody-drivers' on candidate `a94bed71` (dregg-build,
-2026-10-27 13:42Z, templates on; `/build/lanes/custody-drivers-journeys-1/`): J1's enrolment seal red
-(`enrollment Plan inspection changed before signing`, fixed since in custody-drivers' mini) shadowed
-journey, demo, rooms, m3, m4, m8, fleetsign, jserve. No full run exists on cuts 12-14 or on main.
+## 0. Candidates 2d8b7ed54, 76758dba6, e89fe7b8b (validator run, 2026-10-28 06:00-08:30Z)
+
+Three candidates landed during one run. Each row is quoted on the newest candidate it ran on.
+- 2d8b7ed54 (cut 14+, `2d8b7ed544100acfaeb9ff2f9b597c31b8cb81e6`): the grain-install fix (25cfb86bd),
+  prepare-refusal clients (f73893fce), split-tenancy consent (52c0eae22), frame v8.
+- 76758dba6 (`76758dba687cde9447bc45d77931bb7d57527e56`): adds the resident-start fixes (un-ns-owner
+  125927331 + 29d3152d3, and 507d6ce78's controlGroup bound) and the JDISCLOSE row fix cd79cdaa3.
+- e89fe7b8b (`e89fe7b8ba8c477d1538ed6ee1f0e7aeac70c97f`): adds the story-GM fix (a8376ce8f) and
+  thin-birth (a5343b507). Same genesis.
+
+Rows ran against each candidate's binaries:
+- hbox: journey rows, demo `--only`, app worlds, m6grain.
+- dregg-ref: the genesis writers and effects.
+Drivers come from the candidate's own source.tar, except for the overlays named in the result rows.
+On 76758dba6 and e89fe7b8b, main's `scripts/spk-platform/{grain-journey.sh,composed-inputs.sh}` were
+overlaid (50ec8de76's importProfile, 789b9b478's repeat suffix). Every harness fix from the previous
+run is on these trees. The gate and enrol-resume are the integrator's.
+
+Row-harness fix this run: lane/rows-ledger 49c70a937. JP2's thin birth now declares field 2, the field
+its later rows write. Since K-FIELD-CLOSURE, a declared cell born without a field list holds none.
+
+| group | row | result | owner of the red |
+|---|---|---|---|
+| journey rows (2d8b7ed54) | journey, rooms, activity, seats, call, send, bounty, domain, upgrade, objectrecord, welcomecontinuity, m3, m4, sshe2e, hermes, m8, fleetsign, chargedfailure, jbend, jserve (the candidate's own driver), jprivate, rate | PASS | |
+| journey rows (2d8b7ed54) | jpay | PASS: JPAY1 15/15, JPAY2 18/18, JPAY3 24/24, JPAY4 26/26, JPAY6 41/41 (red on 0ce31391) | |
+| journey rows | m6grain | PASS on 76758dba6 with 789b9b478's grain-journey.sh, 1062 s. evidence-a has 25/25 phases, including stop, start-a2, enroll-a2 and poll-a2; world b and the cross-world refusal also pass. On 2d8b7ed54 it was the resident-start red. On bare 76758dba6 enroll-a2 failed: a trailing `2` had come to mean "second session" (closed by 789b9b478, now on main) | |
+| journey rows | objective, hostupgrade, m7, exchange, births, perf | UNCONFIGURED, as before | |
+| journey rows | jbend (deputy) | 33/0 on 76758dba6 (un-bend-seed 14adcc13a) | |
+| demo row (2d8b7ed54) | the row itself | 22/45 in its 5,000 s budget (KTPL 1756 s, J17 1265 s on a loaded hbox). Every later step was run with `--only` | |
+| demo steps | J0-J8, J12X, KC, KT, K10, KIX, K10C, K12C/I/T/M/R/H, WEB 38/38 | PASS (2d8b7ed54 demo row) | |
+| demo steps | THIN, JLI, KTPL 196/196, JPRIV1 229, J17 204, J12W 81, JFEEDBACK 19, JSLK 23/23 | PASS on e89fe7b8b (JLI, KTPL and J17 were red or starved on 2d8b7ed54) | |
+| demo steps | J12 139/139 (row 87 fixed), JNAMES, JDV 143, JPD 82, M3, M4, M5, M8, JPAYE1 14/14, JPAYE2 38/38, JPAYE3 27/27, JROT 34/34, JROTL 10/10, JRLANE 14/14, JGATE 12/12, JESC 13/13, JFLEETIN 12/12, JAUDIT 11/11 | PASS (2d8b7ed54 `--only`) | |
+| demo steps | JP2 | On e89fe7b8b the remote thin birth (row 19) and its display pass. With 49c70a937, row 22 `submit first-write` is refused before signing: `thin consent refused: NativeThinConsent.Refusal.servedRootMismatch`. 11 of 66 rows, including the swapped-plan refusal, are not reached | thin-birth owner (a5343b507), via the coordinator |
+| demo steps | JDISCLOSE | FAIL 7/20 on 76758dba6, with cd79cdaa3 in it; the run dies at `submit da1`. narrow-observe-only, narrow-mutate and narrow-owner refused `DeclaredResourceScalar.Reject.guardRejected 0` where law-denied is expected. unenrolled-1..3 give one frame but not "refused at challenge, bad-signature". d8-descent-hint has no hint line. `chat invite` now needs the full v3 recipient declaration, and `doc append` needs protected-document audience enrollment | JDISCLOSE owner a8a584cfddb80cad4 (lane red-jdisclose-scalar) |
+| demo steps | JCHAT | 3/69 differ: the set has no `fake-discord` beside `mini-discord-mirror` | input |
+| demo steps | M6, M7, JR17 | UNCONFIGURED: M6 needs the operator uid, M7 a reference build, JR17 /etc/mini/keys-client.json | |
+| demo steps | J14 | L4b's | L4b |
+| genesis writers (dregg-ref) | acceptance, application, selected-release, grain plain, grain PROVIDER_BOOTSTRAP, JPAY2 18/18 | PASS on 2d8b7ed54 and on 76758dba6 | |
+| genesis writers | authority-acceptance | The prepare refusal now passes: exit 3, NO_RECORD 253, decoded law-denied naming subject 8's write clause. Then FAIL at :247-253 on both candidates: the post-denial view of resource 600 has `.cell.entries` [] where one entry, field 1 = "0", is expected. The world root, height and cell root match | a GLM, via the coordinator (not L1e) |
+| effects (dregg-ref, 2d8b7ed54) | effect 19, dues 17, bounty 21, play 27, ballot 27, story 25, commons 20 | PASS 7/7 (failed [] each), the candidate's own `world/` | |
+| apps | every app start on 2d8b7ed54 | the resident-start red (ns-owner pin, then op 7 controlGroup). Install itself passes: b1 SandMD birth/install/share exit 0 (25cfb86bd clears the install red) | un-ns-owner (fixed in 76758dba6) |
+| apps | concurrent world-ups | 5 of 6 worlds started together died in the store phase with `consent refused: native durable read failed: sqlite-store error: opaque SQLite failure 15: locking protocol`. The failed worlds left orphaned codec/consent residents with no PID file | un-ns-owner (f02507d22: close-on-exec fds, residents get PID files) |
+| apps | shared hbox world-up lock | Plain `flock /tank/lanes/world-up.lock CMD` hands its fd to world-up's long-lived servers, so a world holds the lock until it is torn down, and past world-down while residents survive. Every user switched to `flock -o` | |
+| apps | featured (76758dba6) | 9 PASS of 13. PASS: EtherCalc lifecycle and write, DokuWiki lifecycle and write, Datasette lifecycle and recorded read, and the HedgeDoc, Davros and HledgerWeb lifecycles. FAIL: HedgeDoc write (socket.io `close frame`), Davros write and HledgerWeb write (no detail line), sntfy lifecycle (`get-m exit=22` on page /). Evidence: hbox:/tank/rows-76758dba-apps/q-featured/ | deputy |
+| apps | b1 (76758dba6) | 7 PASS of 8. SandMD, Permanote and Dillinger PASS lifecycle and write; TextEditor lifecycle PASS, write FAIL (`Client did not complete authentication handshake.`, Meteor DDP) | deputy |
+| apps | b2 (e89fe7b8b) | 3/6. YetAnotherTODO PASS lifecycle and write; ExpenseOwl lifecycle PASS, write FAIL (`POST /expense 405`); OrgTodo install FAIL (spk-ingest timeout); SandCal install FAIL (`SPK staging remains after unit success`) | deputy |
+| apps | b4 (e89fe7b8b, market-large-v1) | 6/8. Hugo and HakyllCMS PASS lifecycle and write; WordPress and HackerCMS lifecycle PASS. WordPress write FAIL (`post-new.php 303, no REST nonce`); HackerCMS write FAIL (`www.sock GET /featured.html 404 after publish 200`) | deputy |
+| apps | b6 (e89fe7b8b) | 4/6. SandForms and Badgepack PASS lifecycle and write. OwnTracks install FAIL (`pinned offline Mini Host author/inspect refused`); Hummingbird lifecycle FAIL (`get-m exit=22` on page /) | deputy |
+| apps | rt (e89fe7b8b, market-large-v1) | 5/8. Gogs PASS lifecycle and write; WBO, HedgeDocRT and Wekan lifecycle PASS. WBO write FAIL (no detail line); HedgeDocRT write FAIL (socket.io `close frame`); Wekan write FAIL (DDP `loginRefused`: `Unrecognized options for login request`) | deputy |
+| apps | fixups (e89fe7b8b, market-large-v1) | 0/3: OrgTodo install timeout; HackerCMS and HakyllCMS `SPK staging remains after unit success` (as SandCal in b2). The same two installed in the b4 world at the same moment. Suspected cause: concurrent worlds share one grains root (GRAINS_ROOT /var/lib/mini-spk-worlds/0000000000000000 on the 2d8b7ed54 genesis); not a recipe red | un-ns-owner (a6603277e4ffe2d70) |
+| apps | totals | 34 PASS of 52 rows across seven tables. Owners of the reds: Hummingbird, WBO and Wekan go to B7 (abf203f357754001b); WordPress, HackerCMS write and ExpenseOwl go to B3 (a85d12892ea6de3ca); HedgeDoc/HedgeDocRT/IPython close frame goes to B8 (a13f0bc9626b1320a); OwnTracks goes to B5 (a0ef59eabda7075b4). These trees predate main's featured-qualify.sh 6b5f87872 (the owner gets allAccess, not role 0), which explained Davros, sntfy and HledgerWeb and may explain Hummingbird and WordPress. The open families are: socket.io/websocket `close frame` (HedgeDoc, HedgeDocRT, IPython), DDP login/handshake (TextEditor, Wekan), ingest timeout and staging under load, and per-recipe writes | deputy |
+| apps (deputy) | japps --box | 28/29 on 76758dba6: co-edit and lifecycle PASS. Hacker Slides `PUT /slides.md 403` is the restart-renew gap | un-stale-enrollment (a4e312352a7091f59) |
+| apps (deputy) | B8 | 0/4 on 2d8b7ed54 (resident start, plus IPython's importProfile harness bug, 50ec8de76). On 76758dba6: Mercurial lifecycle PASS and write PASS; IPython lifecycle PASS, write FAIL (kernel websocket `close frame`); MediaWiki and Firefly III rerunning | deputy |
+| apps (deputy) | DiagramsNet | unsupported: declares permissions without a signed bridge schema (refused by name, 0870373ae); out of FEATURED | |
+| apps (deputy) | B3, B5, B7 | running on 76758dba6 under `flock -o`; verdicts come from the deputy | deputy |
+| oracle | joracle, Oracle v7 fresh world | not run: needs an app world after the lock queue drains | codex |
+
+## 0a. Validator continuation (for the next validator)
+
+**Boxes.**
+- hbox (user `hbox`, full sudo, umask 002, operator account `mini-operator` uid 1001 with linger): journey
+  rows, demo `--only`, app worlds, m6grain.
+- dregg-ref (`lanes@2.31.71.194`, `~/.ssh/id_portable`, no `shasum`, no bun): the genesis writers and effects.
+Neither box is the integrator's.
+
+**Getting a candidate onto a box.** Stream it directly from dregg-build; the Mac's uplink is too slow.
+- hbox reaches dregg-build as `ssh -i ~/.ssh/id_portable -o UserKnownHostsFile=<dir>/kh lanes@178.105.4.114`.
+  Pull with `ssh ... "tar -C /build/candidates -cf - SHA" | tar -C <dir>/artifacts -xf -`, then
+  `sha256sum -c SHA256SUMS` (about 5 min).
+- Then push hbox → dregg-ref the same way: about 80 s.
+- On hbox, also `cp -a` the set to `/build/candidates/SHA`. That is the manifest's absolute path and it is
+  SHARED with the deputy's faeries: copy it in full only if it is missing, and never remove it. A faerie
+  once deleted a partial copy mid-run.
+
+**Per-candidate layout** (SHORT is the sha's first 8 characters):
+
+| path | what it holds |
+|---|---|
+| hbox:/tank/dregg-build/rows-SHORT/ | `artifacts/SHA`; `box.env`; `rerun-row.sh ROW` (journey-runner --row from the covered tree); `run-journeys.sh` (all rows, results under `journeys-all/`); `demo-only.sh TAG STEP...` (one keep-going `journey.sh --only` run, steps copied to `demo-TAG-steps/`); `app-job2.sh NAME TABLE PROFILE` and `apps-all2.sh` (world-up under `flock -o`, then qualify, then world-down); `wait-pid.sh PIDFILE MARKER` (a cross-uid waiter: `kill -0` on a mini-operator PID fails EPERM as hbox and reads as dead); `mo/` (mini-operator-owned logs and PID files); `logs/`; `*.pid` |
+| hbox:/tank/dregg-build/claude-lanes/rows-SHORT/src | the candidate's source.tar plus main's `scripts/spk-platform` overlay. This location is covered by /etc/sudoers.d/mini-operator. `deploy/spk-host/{controller-world.py,install-user-world}` are chowned root |
+| hbox:/tank/rows-SHORT-apps | worlds and qualify output, mini-operator 0755 directly under root-owned /tank (`sudo install -d -o mini-operator`) |
+| dregg-ref:/build/lanes/rows-SHORT/ | `cand/SHA`, `src` (its source.tar), `accept-job.sh` (the six writers, grain rows serial, then JPAY2 with `/build/lanes/custody-b/venv/bin` first in PATH), `effects-job.sh` (the seven effects with `--method` for dues and commons), `accept/`, `logs/` |
+
+Live roots: rows-2d8b7ed5, rows-76758dba, rows-e89fe7b8. The 0ce31391 roots are kept for evidence.
+
+**App worlds: the rules this run paid for.**
+- Start worlds one at a time.
+  - Concurrent world-ups hit `sqlite-store error: opaque SQLite failure 15: locking protocol` in the store
+    phase.
+  - Every hbox world-up, the deputy's included, takes `flock -o /tank/lanes/world-up.lock`. Plain `flock`
+    without `-o` passes the lock fd to world-up's long-lived servers, so a world holds the lock until it
+    is torn down.
+  - Until e44a4a75c / 3a8109059 is in a candidate, the codec and consent residents also survive
+    world-down, so the lock stays held. The coordinator stops those survivors by exact PID. Check with
+    `sudo lsof /tank/lanes/world-up.lock`.
+- Run the qualify phases one at a time as well, not only the world-ups: concurrent worlds are suspected of
+  sharing one grains root. Overlay ALL of main's `scripts/spk-platform` (featured-qualify.sh included).
+- The fixups (OrgTodo, HackerCMS, HakyllCMS) live in b2/b4. A separate `fixups.tsv`, relettered j/k/l,
+  runs them on their own world.
+- `QUALIFY_STOP=1` does not stop the table at the first red; featured ran all 13 rows in about 68 min.
+- Class L tables (b4, rt, b8, fixups) need 50ec8de76's importProfile. It is in e89fe7b8b; overlay it on
+  older candidates.
+
+**Demo row.** Its 5,000 s budget reaches about 22 of 45 steps on a loaded hbox, so run every later step with
+`--only`, two or three keep-going runs in parallel.
+
+**Acceptance scripts.** Use the env in docs/ONE-WIRE-STATE.md. On dregg-ref, authority-acceptance uses
+evidence.sh's `sha256`, so it runs there too.
+
+**Open at hand-off.**
+- The app tables have run (section 0). Plain-flock waiters were stopped with ember's approval.
+- Rerun JDISCLOSE once its owner pushes.
+- Rerun JP2 once thin consent's servedRootMismatch is fixed.
+- Rerun authority once the zero-field view is fixed.
+- Run joracle and the Oracle v7 fresh world on an operator-appliance-v1 world once the lock queue drains.
+- Run japps restart/renew on the candidate carrying un-enroll-renew.
 
 ## 1. The gate (integrator's; listed so nothing is lost)
 
@@ -106,12 +218,12 @@ Run on a worktree at the candidate's commit, one `swarm-build`, PID file. Eviden
 |---|---|---|
 | cohort gate | `bash scripts/check-world-cohorts.sh` (`WORLD_COHORTS_ONLY="world/dues world/bounty world/play world/ballot world/story world/commons"`) | not run since the protocol rewrite (four rows renamed) |
 | effect (satisfiable, teeth, purse-as-submitter, law-refused) | `scripts/world-native-admit.sh activity --route activity --scenario effect --method world/activity/Effects.obend --entry effects --deposit 100000000` | not run |
-| dues | `scripts/world-native-admit.sh dues --route activity --scenario dues --entry dues --deposit 300000000` | earlier dues evidence exists (`dues/`, pre-protocol); not run on the kernel protocol |
+| dues | `scripts/world-native-admit.sh dues --route activity --scenario dues --method world/dues/StandingDues.obend --entry dues --deposit 300000000` | earlier dues evidence exists (`dues/`, pre-protocol); not run on the kernel protocol |
 | bounty | `scripts/world-native-admit.sh bounty --route activity --scenario bounty --method world/bounty/BountyBoard.obend --entry bounty --deposit 300000000` | not run (scenario still to write) |
 | play | `scripts/world-native-admit.sh play --route activity --scenario play --entry play --deposit 300000000` | not run (scenario still to write) |
 | ballot | `scripts/world-native-admit.sh ballot --route activity --scenario ballot --entry ballot --deposit 100000000` | not run (scenario still to write) |
 | story | `scripts/world-native-admit.sh story --route activity --scenario story --entry tell --deposit 100000000` | not run (scenario still to write) |
-| commons | `scripts/world-native-admit.sh commons --route activity --scenario commons --entry lifecycle --deposit 100000000` | not run (scenario still to write) |
+| commons | `scripts/world-native-admit.sh commons --route activity --scenario commons --method world/commons/ResidentServiceCommons.obend --entry lifecycle --deposit 100000000` | not run (scenario still to write) |
 
 ## 5. Hermes (L4; `deploy/hermes/README.md` "State"; dregg-build sudo rule binds run dirs to `/build/lanes/hermes-live-run/`)
 

@@ -19,9 +19,28 @@ read at the store their prefix produced, and runs that patch.  There is no
 second, total store: a guard or a balance reads an absent key as `0` through
 `read`, and absence stays a value of the representation.
 -/
-import Theory.AuthorizationDeclaration
-import Theory.Store
-import Theory.TypedAuthorization
+module
+
+public import Theory.AuthorizationDeclaration
+public import Theory.Store
+public import Theory.TypedAuthorization
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Theory.EffectDeclaration
 
