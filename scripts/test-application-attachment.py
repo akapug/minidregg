@@ -73,6 +73,119 @@ class AttachmentTests(unittest.TestCase):
     def rewrite(self, path, value):
         Path(path).write_text(json.dumps(value))
 
+    def prepared_legacy_repair(self):
+        op = M.Attachment(self.path, "prepare-config")
+        op.bootstrap_name = "oracle-app-bootstrap"
+        def delegate(label, *args):
+            directory = op.calls / (label + "-attempt")
+            directory.mkdir(mode=0o700)
+            M.write(directory / "outcome.json", self.confirmed)
+            return M.receipt(self.confirmed)
+        op.delegate_observe = delegate
+        op.prepare_config()
+        previous = self.file("old-attachment.py", b"original prepared orchestration source")
+        pin = M.read(op.root / "attachment.json")
+        pin["files"]["orchestrator"] = previous
+        pin["sha256"]["orchestrator"] = M.sha(previous)
+        self.rewrite(op.root / "attachment.json", pin)
+        status = self.file("stopped.json", {"store": "0123456789abcdef", "stopped": True,
+            "controllerUid": M.os.getuid() + 10000,
+            "stoppedUnits": [f"mini-grain-controller@{self.a['controller']['task']}.service"],
+            "controllerConfigSha256": M.sha(op.controller_stage),
+            "runtimeSha256": pin["sha256"]["grainRuntime"]})
+        evidence = self.file("export.json", {"protocol": "mini-spk-controller-evidence-v1", "store": "0123456789abcdef",
+            "files": {"controller.lock": {"sha256": M.hashlib.sha256(b"").hexdigest(), "base64": ""}}})
+        request = self.file("repair.json", {"protocol": "mini-application-attachment-bootstrap-repair-v1",
+            "previousOrchestrator": previous, "controllerStatus": status,
+            "controllerEvidence": evidence, "expectedStore": "0123456789abcdef",
+            "expectedRuntimeSha256": pin["sha256"]["grainRuntime"]})
+        return op, Path(request)
+
+    def test_prepared_bootstrap_repair_preserves_delegations_and_is_exactly_reentrant(self):
+        op, request = self.prepared_legacy_repair()
+        before_config = M.read(op.controller_stage)
+        original_input = Path(self.contract["paths"]["controllerConfig"]).read_bytes()
+        native = {str(p): p.read_bytes() for p in op.calls.rglob("*") if p.is_file()}
+        with patch.object(M.subprocess, "run", side_effect=AssertionError("repair invoked native code")):
+            result = M.repair_prepared_bootstrap(Path(self.path), request)
+            self.assertEqual(M.repair_prepared_bootstrap(Path(self.path), request), result)
+        self.assertEqual(M.read(op.root / "controller-stage.json")["nextTool"]["arguments"]["application"], "oracle-bootstrap-app")
+        config = M.read(op.controller_stage)
+        config["toolTask"]["registeredSharedApplications"][-1]["name"] = "oracle-app-bootstrap"
+        self.assertEqual(config, before_config)
+        self.assertEqual(Path(self.contract["paths"]["controllerConfig"]).read_bytes(), original_input)
+        self.assertEqual({str(p): p.read_bytes() for p in op.calls.rglob("*") if p.is_file()}, native)
+        self.assertEqual(M.read(op.root / "attachment.json")["sha256"]["orchestrator"], M.sha(M.__file__))
+        self.assertTrue((Path(result["archive"]) / "source-before.py").is_file())
+        # A later ordinary phase accepts the explicitly adopted orchestrator.
+        M.Attachment(self.path, "issue-grant")
+
+    def test_prepared_bootstrap_repair_accepts_external_runtime_with_explicit_stopped_pin(self):
+        self.contract["paths"].pop("grainRuntime")
+        self.rewrite(self.path, self.contract)
+        # Build ordinary fixture with a temporary runtime pin, then represent
+        # the external controller-run contract used by the real split-UID lane.
+        self.contract["paths"]["grainRuntime"] = str(self.root / "bin/grainRuntime")
+        self.rewrite(self.path, self.contract)
+        op, request = self.prepared_legacy_repair()
+        self.contract["paths"].pop("grainRuntime")
+        self.rewrite(self.path, self.contract)
+        pin = M.read(op.root / "attachment.json")
+        pin["contract"] = self.contract
+        del pin["files"]["grainRuntime"]
+        del pin["sha256"]["grainRuntime"]
+        self.rewrite(op.root / "attachment.json", pin)
+        result = M.repair_prepared_bootstrap(Path(self.path), request)
+        self.assertEqual(result["newName"], "oracle-bootstrap-app")
+
+    def test_prepared_bootstrap_repair_refuses_later_phase_and_controller_journal(self):
+        op, request = self.prepared_legacy_repair()
+        before = op.controller_stage.read_bytes()
+        later = op.root / "native-create-session"
+        later.mkdir()
+        with self.assertRaisesRegex(ValueError, "only the completed"):
+            M.repair_prepared_bootstrap(Path(self.path), request)
+        later.rmdir()
+        evidence = M.read(request)["controllerEvidence"]
+        exported = M.read(evidence)
+        exported["files"]["journal.json"] = {"base64": "e30=", "sha256": M.hashlib.sha256(b"{}").hexdigest()}
+        self.rewrite(evidence, exported)
+        with self.assertRaisesRegex(ValueError, "never admitted"):
+            M.repair_prepared_bootstrap(Path(self.path), request)
+        self.assertEqual(op.controller_stage.read_bytes(), before)
+
+    def test_prepared_bootstrap_repair_rejects_foreign_proof_or_changed_source_inputs(self):
+        op, request = self.prepared_legacy_repair()
+        status_path = M.read(request)["controllerStatus"]
+        status = M.read(status_path)
+        for key, value in (("stopped", False), ("store", "fedcba9876543210"), ("controllerConfigSha256", "0" * 64)):
+            wrong = dict(status, **{key: value})
+            self.rewrite(status_path, wrong)
+            with self.assertRaisesRegex(ValueError, "stopped controller"):
+                M.repair_prepared_bootstrap(Path(self.path), request)
+        self.rewrite(status_path, status)
+        Path(self.contract["paths"]["mini"]).write_bytes(b"changed binary")
+        with self.assertRaisesRegex(ValueError, "repair input changed"):
+            M.repair_prepared_bootstrap(Path(self.path), request)
+
+    def test_prepared_bootstrap_repair_resumes_partial_publication_without_delegation(self):
+        op, request = self.prepared_legacy_repair()
+        replace = M.os.replace
+        count = 0
+        def interrupted(source, target):
+            nonlocal count
+            count += 1
+            if count == 2: raise OSError("simulated interrupted publication")
+            replace(source, target)
+        with patch.object(M.os, "replace", side_effect=interrupted):
+            with self.assertRaisesRegex(OSError, "interrupted publication"):
+                M.repair_prepared_bootstrap(Path(self.path), request)
+        with self.assertRaisesRegex(ValueError, "repair is incomplete"):
+            M.Attachment(self.path, "issue-grant")
+        with patch.object(M.subprocess, "run", side_effect=AssertionError("repair replayed delegate")):
+            M.repair_prepared_bootstrap(Path(self.path), request)
+        self.assertTrue((op.root / "repair-prepared-bootstrap/complete.json").is_file())
+
     def test_root_export_supports_private_controller_host_metadata(self):
         config = M.read(self.contract["paths"]["controllerConfig"])
         config["hostConfig"] = "/private/controller/host-config.json"
