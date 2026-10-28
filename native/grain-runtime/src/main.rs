@@ -4303,7 +4303,10 @@ impl Runtime {
         fixed_request: &Value,
     ) -> Result<Value> {
         let (route, retained_forward) = self.verified_reverse_lifetime_fixed_request(
-            route_name, forward_operation_id, binding_sha256, fixed_request,
+            route_name,
+            forward_operation_id,
+            binding_sha256,
+            fixed_request,
         )?;
         let effective_wall = self.checked_lifetime_dispatch_wall(worker_wall_seconds)?;
         if self.journal.dispatch_pending.is_some()
@@ -4330,26 +4333,8 @@ impl Runtime {
             .reserve_signer
             .as_ref()
             .ok_or("reserve signer absent")?;
-        let parent = self.query()?;
-        let parent_generation = parent
-            .pointer("/grain/generation")
-            .and_then(Value::as_str)
-            .ok_or("parent generation absent")?
-            .to_owned();
-        let parent_root = parent
-            .get("targetRoot")
-            .and_then(Value::as_str)
-            .ok_or("parent physical root absent")?
-            .to_owned();
-        if !matches!(
-            parent.pointer("/grain/status").and_then(Value::as_str),
-            Some("3" | "4")
-        ) || self.journal.prompt_witness.is_none()
-        {
-            return Err("lifetime parent prompt is not reserved".into());
-        }
         let authority = self.dispatch()?;
-        let mut purse = self.query_as(&authority)?;
+        let purse = self.query_as(&authority)?;
         let status = purse
             .pointer("/grain/status")
             .and_then(Value::as_str)
@@ -4363,27 +4348,10 @@ impl Runtime {
                 "agent lifetime dispatch attach",
                 vec![],
             )?;
-            purse = self.query_as(&authority)?;
         } else if status != "1" {
             return Err("dispatch purse is not available for lifetime reserve".into());
         }
-        if purse.pointer("/grain/status").and_then(Value::as_str) != Some("1")
-            || purse.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
-        {
-            return Err("lifetime purse is not running and unreserved".into());
-        }
-        let purse_generation = purse
-            .pointer("/grain/generation")
-            .and_then(Value::as_str)
-            .ok_or("purse generation absent")?
-            .to_owned();
-        let purse_root = purse
-            .get("targetRoot")
-            .and_then(Value::as_str)
-            .ok_or("purse physical root absent")?
-            .to_owned();
         let reserve_operation_id = self.next_id()?;
-        let attempt_id = self.next_id()?;
         let mut source = fixed_request.clone();
         source["fixed"]["reserveOperationId"] = json!(reserve_operation_id.to_string());
         let source_path = self.config.state_dir.join(format!(
@@ -4394,44 +4362,84 @@ impl Runtime {
             &serde_json::to_vec(&source)
                 .map_err(|error| format!("lifetime source JSON: {error}"))?,
         )?;
-        let directory = self
-            .config
-            .state_dir
-            .join(format!("agent-lifetime-reserve-{attempt_id:016}"));
         fn path(value: &Path) -> Result<&str> {
             value
                 .to_str()
                 .ok_or_else(|| format!("{} is not UTF-8", value.display()))
         }
-        self.check_not_cancelled()?;
-        let plan_stdout = self.supervised_json_command({
-            let mut command = Command::new(&self.config.mini);
-            command.args([
-                "agent-lifetime-reserve-plan",
-                "--host",
-                path(&self.config.host)?,
-                "--config",
-                path(&self.config.host_config)?,
-                "--operator-socket",
-                path(operator_socket)?,
-                "--public-socket",
-                path(&public_socket)?,
-                "--request",
-                path(&source_path)?,
-                "--dir",
-                path(&directory)?,
-            ]);
-            command
-        })?;
+        let (parent, purse, plan, (attempt_id, directory, request)) =
+            application_api_tools::lifetime_reserve_snapshot(|| {
+                self.check_not_cancelled()?;
+                // Attach may have advanced the Store. Both signed observations
+                // and the native unsigned plan must name one exact image.
+                let parent = self.query()?;
+                if !matches!(
+                    parent.pointer("/grain/status").and_then(Value::as_str),
+                    Some("3" | "4")
+                ) || self.journal.prompt_witness.is_none()
+                {
+                    return Err("lifetime parent prompt is not reserved".into());
+                }
+                let purse = self.query_as(&authority)?;
+                if purse.pointer("/grain/status").and_then(Value::as_str) != Some("1")
+                    || purse.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
+                {
+                    return Err("lifetime purse is not running and unreserved".into());
+                }
+                let attempt_id = self.next_id()?;
+                let directory = self
+                    .config
+                    .state_dir
+                    .join(format!("agent-lifetime-reserve-{attempt_id:016}"));
+                self.check_not_cancelled()?;
+                let plan_stdout = self.supervised_json_command({
+                    let mut command = Command::new(&self.config.mini);
+                    command.args([
+                        "agent-lifetime-reserve-plan",
+                        "--host",
+                        path(&self.config.host)?,
+                        "--config",
+                        path(&self.config.host_config)?,
+                        "--operator-socket",
+                        path(operator_socket)?,
+                        "--public-socket",
+                        path(&public_socket)?,
+                        "--request",
+                        path(&source_path)?,
+                        "--dir",
+                        path(&directory)?,
+                    ]);
+                    command
+                })?;
+                let read_json = |name: &str| -> Result<Value> {
+                    serde_json::from_slice(&bounded_regular_file(&directory.join(name), 2_097_152)?)
+                        .map_err(|error| format!("retained lifetime {name}: {error}"))
+                };
+                let request = read_json("request-inspected.json")?;
+                let plan = read_json("plan-inspected.json")?;
+                if plan_stdout != plan {
+                    return Err(
+                        "lifetime plan stdout differs from retained source inspection".into(),
+                    );
+                }
+                Ok((parent, purse, plan, (attempt_id, directory, request)))
+            })?;
+        let get = |object: &Value, field: &str| -> Result<String> {
+            object
+                .get(field)
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .ok_or_else(|| format!("lifetime source {field} absent"))
+        };
+        let parent_generation = get(&parent["grain"], "generation")?;
+        let purse_generation = get(&purse["grain"], "generation")?;
+        // Ordinary task transitions use the logical root; lifetime bindings
+        // below use the source author's lifecycle root for the same snapshot.
+        let parent_root = get(&parent, "targetRoot")?;
         let read_json = |name: &str| -> Result<Value> {
             serde_json::from_slice(&bounded_regular_file(&directory.join(name), 2_097_152)?)
                 .map_err(|error| format!("retained lifetime {name}: {error}"))
         };
-        let request = read_json("request-inspected.json")?;
-        let plan = read_json("plan-inspected.json")?;
-        if plan_stdout != plan {
-            return Err("lifetime plan stdout differs from retained source inspection".into());
-        }
         let fixed_selectors = json!({
             "issueIndex":route.dispatch_selectors.issue_index,
             "ticketResource":route.ticket_resource,
@@ -4459,17 +4467,12 @@ impl Runtime {
         let bindings = plan
             .get("bindings")
             .ok_or("lifetime reserve bindings absent")?;
-        let get = |object: &Value, field: &str| -> Result<String> {
-            object
-                .get(field)
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-                .ok_or_else(|| format!("lifetime source {field} absent"))
-        };
         let app_generation = get(context, "appGeneration")?;
         let session_generation = get(context, "sessionGeneration")?;
         let app_physical_root = get(bindings, "appPhysicalRoot")?;
         let session_physical_root = get(bindings, "sessionPhysicalRoot")?;
+        let parent_physical_root = get(bindings, "parentPhysicalRoot")?;
+        let purse_physical_root = get(bindings, "pursePhysicalRoot")?;
         application_api_tools::verify_lifetime_reserve_inspection(
             application_api_tools::LifetimeReserveInspection {
                 route: &route,
@@ -4478,10 +4481,8 @@ impl Runtime {
                 reserve_operation_id: &reserve_operation_id.to_string(),
                 signed_parent_generation: &parent_generation,
                 signed_purse_generation: &purse_generation,
-                signed_app_physical_root: &app_physical_root,
-                signed_session_physical_root: &session_physical_root,
-                signed_parent_physical_root: &parent_root,
-                signed_purse_physical_root: &purse_root,
+                signed_parent: &parent,
+                signed_purse: &purse,
                 request: &request,
                 plan: &plan,
             },
@@ -4514,8 +4515,8 @@ impl Runtime {
             purse_generation: purse_generation.clone(),
             app_physical_root: app_physical_root.clone(),
             session_physical_root: session_physical_root.clone(),
-            parent_physical_root: parent_root.clone(),
-            purse_physical_root: purse_root.clone(),
+            parent_physical_root: parent_physical_root.clone(),
+            purse_physical_root: purse_physical_root.clone(),
         };
         let fingerprint = application_api_tools::lifetime_operation_fingerprint(
             binding_sha256,
@@ -4593,8 +4594,8 @@ impl Runtime {
                 purse_generation,
                 app_physical_root,
                 session_physical_root,
-                parent_physical_root: parent_root,
-                pre_reserve_purse_physical_root: purse_root,
+                parent_physical_root,
+                pre_reserve_purse_physical_root: purse_physical_root,
                 reserve_index: None,
                 reserve_receipt: None,
                 post_reserve_purse_physical_root: None,
@@ -4652,8 +4653,7 @@ impl Runtime {
             || receipt.get("eventId").and_then(Value::as_str) != Some(anchor.event_id.as_str())
             || receipt.get("acceptedCount").and_then(Value::as_str)
                 != Some(anchor.accepted_count.as_str())
-            || receipt.get("worldRoot").and_then(Value::as_str)
-                != Some(anchor.world_root.as_str())
+            || receipt.get("worldRoot").and_then(Value::as_str) != Some(anchor.world_root.as_str())
             || receipt.get("reserveIndex").and_then(Value::as_str)
                 != Some(previous_accepted_index(&anchor.accepted_count)?.as_str())
         {
@@ -4720,12 +4720,9 @@ impl Runtime {
             .as_mut()
             .ok_or("lifetime attempt disappeared")?;
         saved.dispatch_generation = Some(generation);
-        saved.dispatch_post_root = Some(post_root.clone());
-        saved
-            .lifetime
-            .as_mut()
-            .ok_or("lifetime custody absent")?
-            .post_reserve_purse_physical_root = Some(post_root);
+        saved.dispatch_post_root = Some(post_root);
+        // The signed resource view exposes a logical root. The lifecycle root
+        // is obtained only from the snapshot-bound native paid plan later.
         self.save()?;
         let reserve_plan_hex =
             checked_lifetime_reserve_plan_hex(&plan, &directory.join("plan.bin"))?;
@@ -4743,6 +4740,7 @@ impl Runtime {
             "reserveIndex":receipt.get("reserveIndex"),
             "reserveReceipt":anchor}))
     }
+
 
     /// Source-owned v2 reserve for exactly the active forward API call. The
     /// private op58/59 phases expose and seal a plan; only the marked public
@@ -5402,8 +5400,8 @@ impl Runtime {
             return Err("lifetime payer attempt is already used or unresolved".into());
         }
         let reserve_dir = lifetime.reserve_dir.clone();
-        let post_purse_root = lifetime
-            .post_reserve_purse_physical_root
+        let post_purse_root = attempt
+            .dispatch_post_root
             .as_ref()
             .ok_or("lifetime signed post-reserve purse root absent")?
             .clone();
@@ -5472,7 +5470,7 @@ impl Runtime {
             4096,
         )?)
         .map_err(|error| format!("lifetime original reserve receipt JSON: {error}"))?;
-        application_api_tools::verify_lifetime_paid_inspection(
+        let post_purse_physical_root = application_api_tools::verify_lifetime_paid_inspection(
             application_api_tools::LifetimePaidInspection {
                 reserve: &reserve,
                 paid: &paid,
@@ -5486,7 +5484,10 @@ impl Runtime {
                     "acceptedCount":reserve_receipt.get("acceptedCount"),
                     "worldRoot":reserve_receipt.get("worldRoot"),
                 }),
-                signed_post_purse_physical_root: &post_purse_root,
+                signed_post_purse_world_root: state
+                    .get("worldRoot")
+                    .and_then(Value::as_str)
+                    .ok_or("signed held purse world root absent")?,
             },
         )?;
         let slots = paid
@@ -5521,6 +5522,7 @@ impl Runtime {
             .as_mut()
             .and_then(|saved| saved.lifetime.as_mut())
             .ok_or("lifetime attempt disappeared before signing")?;
+        lifetime.post_reserve_purse_physical_root = Some(post_purse_physical_root.clone());
         lifetime.paid_dir = Some(directory.clone());
         lifetime.paid_plan_sha256 = Some(sha256_file(&directory.join("plan.bin"))?);
         self.save()?;
@@ -5561,10 +5563,11 @@ impl Runtime {
             "attemptId":attempt_id,
             "bindingSha256":confirmed.get("bindingSha256"),
             "operationFingerprint":operation_fingerprint,
-            "signedPostReservePursePhysicalRoot":post_purse_root,
+            "signedPostReservePursePhysicalRoot":post_purse_physical_root,
             "planSha256":result.get("planSha256"),
             "signatures":result.get("signatures")}))
     }
+
 
     /// The resident supplies an op48 paid plan, but only the controller's
     /// retained reserve, protected signer pin, and a fresh source inspection
@@ -16093,7 +16096,9 @@ impl Runtime {
             .get("reserveIndex")
             .and_then(Value::as_str)
             .map(str::to_owned);
-        lifetime.post_reserve_purse_physical_root = saved.dispatch_post_root.clone();
+        // Recovery retains the signed logical root in dispatch_post_root.
+        // Never label it as a lifecycle root; an existing native paid-plan
+        // physical root (if any) remains unchanged.
         self.save()
     }
 
