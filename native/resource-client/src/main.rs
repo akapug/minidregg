@@ -807,8 +807,8 @@ usage:
   mini enroll --action submit|lookup --dir ATTEMPT
   mini key --action providers|choose|set|grant|revoke|ls (--dir WORKSPACE | --pool true) [--provider NAME] [--secret FILE|-] [--runner SUBJECT --per-call TOKENS --per-day CALLS --until HEIGHT --model MODEL] [--task TASK] [--broker CLIENT_CONFIG]
   mini shell --socket SOCKET --host HOST --config CONFIG.json --workspace WORKSPACE --home SESSION-HOME [--line LINE]
-  mini apps search [--term TEXT] [--category C] [--json]        the Sandstorm app market, cached by mini-market (docs/APP-MARKET-2026-10-27.md)
-  mini apps show --app APP-ID|PACKAGE-ID [--json]
+  mini apps search [--term TEXT] [--category C] [--qualification FILE] [--json]   the Sandstorm app market and recorded lifecycle verdicts
+  mini apps show --app APP-ID|PACKAGE-ID [--qualification FILE] [--json]
   mini apps install --app APP-ID|PACKAGE-ID --dir WORKSPACE [--class S|M|L] [--retry REQUEST-ID]   a member turn: birth + delegation, then the worker
   mini apps list|status|open|stop|start|share|export|delete [--grain a<APP>] [--to MEMBER] [--out FILE]   decoded outcomes over the worker socket
   mini apps index-check --in RAW.json --out INDEX.json              the fetcher's validation of the downloaded index
