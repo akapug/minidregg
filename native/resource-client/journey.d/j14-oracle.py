@@ -201,9 +201,10 @@ class Journey:
         if j.root!=expected:raise ValueError('checkpoint root differs')
         # A source update is explicit in the successor receipt. Native artifacts,
         # transports and controller custody stay pinned to the retained world.
-        prior_repo=j.c['repo'];j.c['repo']=str(REPO);j.installer=REPO/'deploy/spk-host/install-user-world'
+        j.c['repo']=str(REPO);j.installer=REPO/'deploy/spk-host/install-user-world'
         for rel in ['deploy/spk-host/install-user-world','deploy/spk-host/controller-world.py']:
-            if sha(REPO/rel)!=value['pins'][str(Path(prior_repo)/rel)]:raise ValueError('checkpoint installer custody changed')
+            selected=[digest for source,digest in value['pins'].items() if source.endswith('/'+rel)]
+            if len(selected)!=1 or sha(REPO/rel)!=selected[0]:raise ValueError('checkpoint installer custody changed')
         j.processes=[];j.world_pid=None;j.resume_phase=value['nextPhase'];j.lock_root()
         if j.frontier()[0]!=j.counter:raise ValueError('newer command exists after this checkpoint; exact phase recovery required')
         prior_daemons=j.daemons;j.daemons=[]
