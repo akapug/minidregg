@@ -347,7 +347,7 @@ pub(crate) fn reconcile_failed_start(
     // Every Host reply is retained under its own observation name and read
     // back through the pinned Host's own outcome inspector.
     let observe = |reply: &[u8], opcode: u8| -> io::Result<Value> {
-        let outcome = framed_payload(reply, opcode, OUTCOME)?;
+        let outcome = framed_payload("grain export submit", reply, opcode, OUTCOME)?;
         let observation = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|_| invalid("recovery clock before epoch"))?
@@ -561,7 +561,7 @@ pub(crate) fn reconcile_failed_start(
         &directory.join("request.bin"),
     )?;
     let reply = operator.invoke(routes.prepare, &custody.selector.framed(&request)?)?;
-    let plan = framed_payload(&reply, routes.prepare, PLAN)?;
+    let plan = framed_payload("grain export plan", &reply, routes.prepare, PLAN)?;
     let plan_path = retain_exact(&directory, "plan.bin", plan)?;
     let view: Value = serde_json::from_slice(&recovery_tool(
         operator,
@@ -611,7 +611,7 @@ pub(crate) fn reconcile_failed_start(
     pair.extend_from_slice(&sigs);
     retain_exact(&directory, "assemble-request.bin", &pair)?;
     let reply = operator.invoke(routes.assemble, &pair)?;
-    let ingress = framed_payload(&reply, routes.assemble, INGRESS)?;
+    let ingress = framed_payload("grain export assemble", &reply, routes.assemble, INGRESS)?;
     retain_exact(&directory, "ingress.bin", ingress)?;
     retain_exact(
         &directory,

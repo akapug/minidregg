@@ -111,7 +111,7 @@ pub(crate) fn lookup_view(
     DirBuilder::new().mode(0o700).create(&lookup_dir)?;
     let reply = operator.invoke(lookup, ingress)?;
     write_new(&lookup_dir, "frame.bin", &reply)?;
-    let payload = framed_payload(&reply, lookup, OUTCOME_TAG)?;
+    let payload = framed_payload("receipt lookup", &reply, lookup, OUTCOME_TAG)?;
     let payload_path = write_new(&lookup_dir, "outcome.bin", payload)?;
     let inspected = operator.tool(
         "inspect",
