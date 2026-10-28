@@ -1,6 +1,7 @@
 //! Broker-selected trusted bootstrap switches both identities before any app
 //! bytes. Resident/operator and launch/reap worker then hold zero capabilities.
 //! One private inherited channel, one spawn, actual waitpid; loss is unresolved.
+use crate::io_context::IoContext;
 use crate::spawn_gate::{AppFds, BoundedChild, SpawnSpec};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -243,7 +244,7 @@ fn receive_rights(stream: &UnixStream) -> io::Result<(u8, Vec<OwnedFd>)> {
     Ok((tag, fds))
 }
 fn start_identity(pid: u32) -> io::Result<String> {
-    let text = fs::read_to_string(format!("/proc/{pid}/stat"))?;
+    let text = { let stat_path = format!("/proc/{pid}/stat"); fs::read_to_string(&stat_path).ctx("read", &stat_path)? };
     text.rsplit_once(')')
         .and_then(|(_, tail)| tail.split_whitespace().nth(19))
         .map(str::to_owned)
@@ -389,9 +390,9 @@ pub(crate) fn check_public_data_access(fd: std::os::fd::BorrowedFd<'_>) -> io::R
 }
 fn public_data_access(fd: &OwnedFd) -> io::Result<()> {
     let proc_path = format!("/proc/self/fd/{}", fd.as_raw_fd());
-    let held = fs::metadata(&proc_path)?;
-    let resolved = fs::canonicalize(&proc_path)?;
-    let named = fs::metadata(resolved)?;
+    let held = fs::metadata(&proc_path).ctx("inspect", &proc_path)?;
+    let resolved = fs::canonicalize(&proc_path).ctx("resolve", &proc_path)?;
+    let named = fs::metadata(&resolved).ctx("inspect", &resolved)?;
     if !held.is_dir() || !named.is_dir() || (held.dev(), held.ino()) != (named.dev(), named.ino()) {
         return Err(refused("public-data backing pathname differs from pinned directory"));
     }
