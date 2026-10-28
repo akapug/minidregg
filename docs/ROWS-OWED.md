@@ -64,11 +64,17 @@ its later rows write. Since K-FIELD-CLOSURE, a declared cell born without a fiel
 | apps | concurrent world-ups | 5 of 6 worlds started together died in the store phase with `consent refused: native durable read failed: sqlite-store error: opaque SQLite failure 15: locking protocol`. The failed worlds left orphaned codec/consent residents with no PID file | un-ns-owner (f02507d22: close-on-exec fds, residents get PID files) |
 | apps | shared hbox world-up lock | Plain `flock /tank/lanes/world-up.lock CMD` hands its fd to world-up's long-lived servers, so a world holds the lock until it is torn down, and past world-down while residents survive. Every user switched to `flock -o` | |
 | apps | featured (76758dba6) | 9 PASS of 13. PASS: EtherCalc lifecycle and write, DokuWiki lifecycle and write, Datasette lifecycle and recorded read, and the HedgeDoc, Davros and HledgerWeb lifecycles. FAIL: HedgeDoc write (socket.io `close frame`), Davros write and HledgerWeb write (no detail line), sntfy lifecycle (`get-m exit=22` on page /). Evidence: hbox:/tank/rows-76758dba-apps/q-featured/ | deputy |
-| apps | b1, b2, b6, b4, rt, fixups (76758dba6) | queued behind the shared world-up lock. Their plain-flock waiters await ember's ruling; the table runs once they reach the lock | deputy |
+| apps | b1 (76758dba6) | 7 PASS of 8. SandMD, Permanote and Dillinger PASS lifecycle and write; TextEditor lifecycle PASS, write FAIL (`Client did not complete authentication handshake.`, Meteor DDP) | deputy |
+| apps | b2 (e89fe7b8b) | 3/6. YetAnotherTODO PASS lifecycle and write; ExpenseOwl lifecycle PASS, write FAIL (`POST /expense 405`); OrgTodo install FAIL (spk-ingest timeout); SandCal install FAIL (`SPK staging remains after unit success`) | deputy |
+| apps | b4 (e89fe7b8b, market-large-v1) | 6/8. Hugo and HakyllCMS PASS lifecycle and write; WordPress and HackerCMS lifecycle PASS. WordPress write FAIL (`post-new.php 303, no REST nonce`); HackerCMS write FAIL (`www.sock GET /featured.html 404 after publish 200`) | deputy |
+| apps | b6 (e89fe7b8b) | 4/6. SandForms and Badgepack PASS lifecycle and write. OwnTracks install FAIL (`pinned offline Mini Host author/inspect refused`); Hummingbird lifecycle FAIL (`get-m exit=22` on page /) | deputy |
+| apps | rt (e89fe7b8b, market-large-v1) | 5/8. Gogs PASS lifecycle and write; WBO, HedgeDocRT and Wekan lifecycle PASS. WBO write FAIL (no detail line); HedgeDocRT write FAIL (socket.io `close frame`); Wekan write FAIL (DDP `loginRefused`: `Unrecognized options for login request`) | deputy |
+| apps | fixups (e89fe7b8b, market-large-v1) | 0/3: OrgTodo install timeout; HackerCMS and HakyllCMS `SPK staging remains after unit success`. The same two installed in the b4 world at the same moment, so these look load-sensitive (five concurrent qualify runs plus the deputy's worlds) | deputy |
+| apps | totals | 34 PASS of 52 rows across seven tables. The open families are: socket.io/websocket `close frame` (HedgeDoc, HedgeDocRT, IPython), DDP login/handshake (TextEditor, Wekan), ingest timeout and staging under load, and per-recipe writes | deputy |
 | apps (deputy) | japps --box | 28/29 on 76758dba6: co-edit and lifecycle PASS. Hacker Slides `PUT /slides.md 403` is the restart-renew gap | un-stale-enrollment (a4e312352a7091f59) |
 | apps (deputy) | B8 | 0/4 on 2d8b7ed54 (resident start, plus IPython's importProfile harness bug, 50ec8de76). On 76758dba6: Mercurial lifecycle PASS and write PASS; IPython lifecycle PASS, write FAIL (kernel websocket `close frame`); MediaWiki and Firefly III rerunning | deputy |
 | apps (deputy) | DiagramsNet | unsupported: declares permissions without a signed bridge schema (refused by name, 0870373ae); out of FEATURED | |
-| apps (deputy) | B3, B5, B7 | queued behind the lock on 76758dba6 | deputy |
+| apps (deputy) | B3, B5, B7 | running on 76758dba6 under `flock -o`; verdicts come from the deputy | deputy |
 | oracle | joracle, Oracle v7 fresh world | not run: needs an app world after the lock queue drains | codex |
 
 ## 0a. Validator continuation (for the next validator)
@@ -122,9 +128,7 @@ Live roots: rows-2d8b7ed5, rows-76758dba, rows-e89fe7b8. The 0ce31391 roots are 
 evidence.sh's `sha256`, so it runs there too.
 
 **Open at hand-off.**
-- Six plain-flock waiters for the 76758dba6 app tables (b1, b2, b6, b4, rt, fixups). Their PIDs are in
-  `rows-76758dba/mo/app-*.pid` (app-job parents) plus their flock children. They wait on ember's ruling;
-  if she allows it, stop them and relaunch with `apps-all2.sh` on the newest candidate.
+- The app tables have run (section 0). Plain-flock waiters were stopped with ember's approval.
 - Rerun JDISCLOSE once its owner pushes.
 - Rerun JP2 once thin consent's servedRootMismatch is fixed.
 - Rerun authority once the zero-field view is fixed.
