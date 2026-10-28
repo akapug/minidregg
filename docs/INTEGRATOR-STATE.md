@@ -166,6 +166,10 @@ gates main and fixes reds itself.
   (a58f907aef8926430). After that, the umbrellas stage blocks again (reds the candidate) from the next build on.
 - Held until their owners report (codex workers, shas via the coordinator): cx-oracle, cx-store-sweep,
   un-route-latency. oracle-grant-factory b81a38663 came in by codex's own push to main (9bed7b1e0 row).
+- Held: lane/cx-app-interface (codex lead still running). The coordinator reviews the design and shows ember
+  before anything lands or fans out; the sha comes from the coordinator.
+- Not landed, by ruling: lane/un-consent-reconnect 02a03960f (the deputy's duplicate POLLRDHUP gating).
+  b71898658 on main is the one kept; the deputy drops its copy.
 - Held for the build after the conversion candidate (one .lean file): lane/app-market-b5 84938f78c
   (Kernel/ApplicationSpkPackageIdentity.lean, safeApiTail admits a final segment with no trailing slash; OwnTracks
   re-qualifies on the candidate carrying it; deputy a308118209b4a48ea). Land after the conversion, re-converted if
