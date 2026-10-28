@@ -17,13 +17,12 @@ static DELEGATED_SESSION: OnceLock<Option<crate::consent_proxy::Selection>> = On
 /// Pure codec operations always use a separately selected local native image.
 /// A remote Host digest is not an executable or a local semantic authority.
 pub(crate) fn pure_host(host: &Path) -> Result<PathBuf> {
-    let selected = PINS.get().map(|pins|pins.semantic.clone()).or_else(||std::env::var_os("MINI_LOCAL_HOST").map(PathBuf::from))
-        .or_else(|| (!host.as_os_str().is_empty()).then(|| host.to_path_buf()))
-        .ok_or("local author/inspect/signatures/assembly requires MINI_LOCAL_HOST")?;
-    if !selected.is_absolute() { return Err("local semantic Host must be an absolute path".into()); }
-    let metadata = fs::metadata(&selected).map_err(|e| format!("local semantic Host: {e}"))?;
-    if !metadata.is_file() { return Err("local semantic Host must be a regular file".into()); }
-    Ok(selected)
+    let environment = std::env::var_os("MINI_LOCAL_HOST");
+    Ok(mini_sdk::local::select_semantic_host(
+        PINS.get().map(|pins| pins.semantic.as_path()),
+        environment.as_deref(),
+        host,
+    )?)
 }
 
 /// Set only from a provider's observation (221) refusal carrying

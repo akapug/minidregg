@@ -233,6 +233,36 @@ fn file_pin(path: &Path) -> Result<FilePin> {
     })
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct CodecHostPin {
+    selected_path: PathBuf,
+    configured: FilePin,
+    selected: FilePin,
+    sha256: String,
+}
+
+fn codec_host_pin(config: &Config, environment: Option<&std::ffi::OsStr>) -> Result<CodecHostPin> {
+    // Runtime Mini calls supply no explicit --local-host/toolchain override.
+    // Follow the same environment/fallback resolver as the launched client.
+    let selected_path = mini_sdk::local::select_semantic_host(None, environment, &config.host)
+        .map_err(|e| e.to_string())?;
+    let configured = file_pin(&config.host)?;
+    let selected = file_pin(&selected_path)?;
+    let sha256 = sha256_file(&config.host)?;
+    if selected.size != configured.size || sha256_file(&selected_path)? != sha256 {
+        return Err("selected local codec Host differs from configured Host bytes".into());
+    }
+    if file_pin(&config.host)? != configured || file_pin(&selected_path)? != selected {
+        return Err("local codec Host changed during byte-equivalence inspection".into());
+    }
+    Ok(CodecHostPin {
+        selected_path,
+        configured,
+        selected,
+        sha256,
+    })
+}
+
 fn process_ids(root: &File) -> Result<Vec<u32>> {
     let text = read(root, "cgroup.procs")?;
     let mut ids = text
@@ -326,6 +356,7 @@ fn validate_codec_pair(
     config: &Config,
     mini: &FilePin,
     host: &FilePin,
+    selected_host: &Path,
     group: &str,
 ) -> Result<()> {
     use std::os::unix::ffi::OsStrExt;
@@ -337,12 +368,12 @@ fn validate_codec_pair(
         bytes(&config.mini),
         b"codec-resident".to_vec(),
         b"--host".to_vec(),
-        bytes(&config.host),
+        bytes(selected_host),
         b"--settings".to_vec(),
         bytes(&config.host_config),
     ];
     let host_args = vec![
-        bytes(&config.host),
+        bytes(selected_host),
         bytes(&config.host_config),
         b"codec".to_vec(),
     ];
@@ -394,7 +425,8 @@ pub(super) fn prove_quiescent_controller(config: &Config) -> Result<()> {
         return Err("controller cgroup holds processes beyond one stateless codec pair".into());
     }
     let mini = file_pin(&config.mini)?;
-    let host = file_pin(&config.host)?;
+    let local_host_environment = std::env::var_os("MINI_LOCAL_HOST");
+    let host = codec_host_pin(config, local_host_environment.as_deref())?;
     let settings = file_pin(&config.host_config)?;
     let settings_hash = sha256_bytes(&bounded_regular_file(&config.host_config, 1_048_576)?)?;
     let observe = || -> Result<Vec<CodecProcess>> {
@@ -404,12 +436,20 @@ pub(super) fn prove_quiescent_controller(config: &Config) -> Result<()> {
             .collect()
     };
     let original = observe()?;
-    validate_codec_pair(&original, config, &mini, &host, &group)?;
+    validate_codec_pair(
+        &original,
+        config,
+        &mini,
+        &host.selected,
+        &host.selected_path,
+        &group,
+    )?;
     prove_tree_with(&path, RootPopulation::QuiescentController(&ids), || {
         prove_controller_unit(&config.task)?;
         if identity(&open_root(&path)?)? != expected_root
             || file_pin(&config.mini)? != mini
-            || file_pin(&config.host)? != host
+            || std::env::var_os("MINI_LOCAL_HOST") != local_host_environment
+            || codec_host_pin(config, local_host_environment.as_deref())? != host
             || file_pin(&config.host_config)? != settings
             || sha256_bytes(&bounded_regular_file(&config.host_config, 1_048_576)?)?
                 != settings_hash
@@ -588,11 +628,22 @@ mod tests {
     #[test]
     fn quiescent_codec_accepts_only_exact_pure_pair_and_refuses_effect_roles() {
         let (root, config, mini, host, pair) = codec_fixture("codec-role-proof");
-        validate_codec_pair(&pair, &config, &mini, &host, "/controller").unwrap();
-        assert!(validate_codec_pair(&pair[..1], &config, &mini, &host, "/controller").is_err());
+        validate_codec_pair(&pair, &config, &mini, &host, &config.host, "/controller").unwrap();
+        assert!(validate_codec_pair(
+            &pair[..1],
+            &config,
+            &mini,
+            &host,
+            &config.host,
+            "/controller"
+        )
+        .is_err());
         let mut extra = pair.clone();
         extra.push(pair[0].clone());
-        assert!(validate_codec_pair(&extra, &config, &mini, &host, "/controller").is_err());
+        assert!(
+            validate_codec_pair(&extra, &config, &mini, &host, &config.host, "/controller")
+                .is_err()
+        );
         for change in 0..9 {
             let mut bad = pair.clone();
             match change {
@@ -607,10 +658,106 @@ mod tests {
                 _ => bad[1].start = 0,
             }
             assert!(
-                validate_codec_pair(&bad, &config, &mini, &host, "/controller").is_err(),
+                validate_codec_pair(&bad, &config, &mini, &host, &config.host, "/controller")
+                    .is_err(),
                 "mutation {change}"
             );
         }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn installed_codec_home_copy_matches_configured_base_host_by_bytes() {
+        use std::os::unix::ffi::OsStrExt;
+        let (root, mut config, _, _, mut pair) = codec_fixture("installed-codec-host");
+        // Captured q2 diagnostic229/230: the installer emits MINI_LOCAL_HOST
+        // under HOME while controller config retains BASE/bin/minidregg-host.
+        // The supervisor uses BASE Mini; both processes use HOME settings.
+        let base = root.join("base/bin");
+        let home = root.join("home");
+        fs::create_dir_all(&base).unwrap();
+        fs::create_dir_all(home.join("bin")).unwrap();
+        config.mini = base.join("mini");
+        config.host = base.join("minidregg-host");
+        config.host_config = home.join("host-config.json");
+        let local_host = home.join("bin/minidregg-host");
+        for path in [&config.mini, &config.host, &local_host] {
+            fs::write(path, b"same reviewed executable").unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o500)).unwrap();
+        }
+        fs::write(&config.host_config, b"{}").unwrap();
+        fs::set_permissions(&config.host_config, fs::Permissions::from_mode(0o600)).unwrap();
+        let host = codec_host_pin(&config, Some(local_host.as_os_str())).unwrap();
+        let mini = file_pin(&config.mini).unwrap();
+        assert_eq!(host.selected_path, local_host);
+        assert_ne!(host.configured.identity, host.selected.identity);
+        let bytes = |path: &Path| path.as_os_str().as_bytes().to_vec();
+        pair[0].executable = mini.identity.clone();
+        pair[0].arguments = vec![
+            bytes(&config.mini),
+            b"codec-resident".to_vec(),
+            b"--host".to_vec(),
+            bytes(&local_host),
+            b"--settings".to_vec(),
+            bytes(&config.host_config),
+        ];
+        pair[1].executable = host.selected.identity.clone();
+        pair[1].arguments = vec![
+            bytes(&local_host),
+            bytes(&config.host_config),
+            b"codec".to_vec(),
+        ];
+        validate_codec_pair(
+            &pair,
+            &config,
+            &mini,
+            &host.selected,
+            &host.selected_path,
+            "/controller",
+        )
+        .unwrap();
+        assert!(validate_codec_pair(
+            &pair,
+            &config,
+            &mini,
+            &host.configured,
+            &config.host,
+            "/controller"
+        )
+        .is_err());
+        assert_eq!(
+            codec_host_pin(&config, Some(local_host.as_os_str())).unwrap(),
+            host
+        );
+
+        // A copied replacement with identical bytes is still a new file epoch.
+        let replacement = home.join("bin/replacement");
+        fs::copy(&local_host, &replacement).unwrap();
+        fs::rename(&replacement, &local_host).unwrap();
+        let replaced = codec_host_pin(&config, Some(local_host.as_os_str())).unwrap();
+        assert_ne!(replaced, host);
+        assert!(validate_codec_pair(
+            &pair,
+            &config,
+            &mini,
+            &replaced.selected,
+            &replaced.selected_path,
+            "/controller"
+        )
+        .is_err());
+
+        fs::set_permissions(&local_host, fs::Permissions::from_mode(0o700)).unwrap();
+        // Same length defeats an accidental size-only equivalence check.
+        fs::write(&local_host, b"evil reviewed executable").unwrap();
+        assert!(codec_host_pin(&config, Some(local_host.as_os_str()))
+            .unwrap_err()
+            .contains("differs from configured Host bytes"));
+        fs::write(&local_host, b"same reviewed executable").unwrap();
+        fs::set_permissions(&local_host, fs::Permissions::from_mode(0o722)).unwrap();
+        assert!(codec_host_pin(&config, Some(local_host.as_os_str())).is_err());
+        fs::remove_file(&local_host).unwrap();
+        std::os::unix::fs::symlink(&config.host, &local_host).unwrap();
+        assert!(codec_host_pin(&config, Some(local_host.as_os_str())).is_err());
         fs::remove_dir_all(root).unwrap();
     }
 
