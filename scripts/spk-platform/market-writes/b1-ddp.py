@@ -18,26 +18,8 @@ import importlib.util, os, sys, time
 here = os.path.dirname(os.path.abspath(__file__))
 spec = importlib.util.spec_from_file_location("ddpcoedit", os.path.join(here, "..", "ddp-coedit.py"))
 ddp = importlib.util.module_from_spec(spec); spec.loader.exec_module(ddp)
-
-
-def post_login_token(route, token):
-    """The rendezvous POST, over the route's socket with the browser session's cookie and Origin."""
-    import socket
-    cookie = open(os.path.join(route, "browser.token")).read().strip()
-    body = token.encode()
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    s.settimeout(60)
-    s.connect(os.path.join(route, "http.sock"))
-    s.sendall(("POST /.sandstorm-login HTTP/1.1\r\nHost: grain.test\r\nOrigin: https://grain.test\r\n"
-               "Cookie: __Host-mini_spk_session=%s\r\nContent-Type: application/x-sandstorm-login-token\r\n"
-               "Content-Length: %d\r\nConnection: close\r\n\r\n" % (cookie, len(body))).encode() + body)
-    reply = b""
-    while True:
-        chunk = s.recv(4096)
-        if not chunk:
-            break
-        reply += chunk
-    return reply.split(b"\r\n", 1)[0].decode("latin1") + " " + reply.split(b"\r\n\r\n", 1)[-1][:120].decode("latin1")
+spec2 = importlib.util.spec_from_file_location("sandstormlogin", os.path.join(here, "sandstorm-login.py"))
+sl = importlib.util.module_from_spec(spec2); spec2.loader.exec_module(sl)
 
 
 def main():
@@ -45,11 +27,7 @@ def main():
     text = "written by a resident %d" % int(time.time())
     try:
         a = ddp.connect(route); a.ddp()
-        token = "login-%d" % int(time.time() * 1000)
-        a.send({"msg": "method", "method": "loginWithSandstorm", "id": "0", "params": [token]})
-        time.sleep(0.5)
-        posted = post_login_token(route, token)
-        logged = a.until(lambda m: m.get("msg") == "result" and m.get("id") == "0", 30)
+        logged, posted = sl.login(a.send, a.until, route)
         if not logged or "error" in logged:
             print("0 loginWithSandstorm refused: %s; POST /.sandstorm-login: %s" % (str(logged)[:160], posted[:100])); return
         a.send({"msg": "method", "method": "/Data/update", "id": "1",
