@@ -975,6 +975,17 @@ def charge (snap : DataSnapshot ResourceBirthCodec.rootBytes) (ingress : Decoded
   | .proofWork => 2
   | .feeDebit | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0
 
+/-- `charge` as compiled: every lane evaluated once into a table when the seal
+is applied, so the storage lane (each post's root, the written cells' storage)
+is never re-derived per lane query. -/
+def chargeFast (snap : DataSnapshot ResourceBirthCodec.rootBytes) (ingress : DecodedIngress)
+    (posts : List Post) (guards : List ReadGuard) (retained : StableEvent) : ResourceCost.Charge :=
+  (ResourceCost.Charge.materialize (charge snap ingress posts guards retained)).toCharge
+
+@[csimp] theorem charge_eq_fast : @charge = @chargeFast := by
+  funext snap ingress posts guards retained
+  exact (ResourceCost.Charge.materialize_eq _).symm
+
 /-- This receiver's sealing on a turn: the authority guard, the signed marker, the replay event
 carrying the signed ingress, the signer. -/
 def sealAt (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot) (command : Command)

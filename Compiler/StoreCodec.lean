@@ -68,6 +68,7 @@ module
 
 public import Compiler.FiniteDependentMapCodec
 public import Compiler.FiniteDependentMapCachedOrdering
+public import Compiler.CompiledListOps
 public import Compiler.Sp800185Cshake256
 public import Compiler.Sp800185Kmac256
 public import Theory.CellState
@@ -304,15 +305,15 @@ theorem addressKey_injective : Function.Injective (addressKey W) := by
 
 /-- Byte order on addresses, pulled back along the injective address codec. -/
 @[reducible] def addressOrder : LinearOrder (Address L) :=
-  LinearOrder.lift' (addressKey W) (addressKey_injective W)
+  FiniteDependentMapCachedOrdering.FastKeyOrder.lift (addressKey W) (addressKey_injective W)
 
 /-- Strict byte order of two entries' addresses. -/
 def AddressLT (left right : Entry L) : Prop :=
   addressKey W left.1 < addressKey W right.1
 
-instance (left right : Entry L) : Decidable (AddressLT W left right) := by
-  unfold AddressLT
-  infer_instance
+instance (left right : Entry L) : Decidable (AddressLT W left right) :=
+  decidable_of_iff (FiniteDependentMapCachedOrdering.lexLt (addressKey W left.1) (addressKey W right.1) = true)
+    (FiniteDependentMapCachedOrdering.lexLt_iff _ _)
 
 end Wire
 

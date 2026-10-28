@@ -238,6 +238,17 @@ CAS already binds them. -/
 def readOnly (rootBytes : Bytes → Digest) (posts : List Post) (guards : List ReadGuard) : List ReadGuard :=
   guards.filter fun guard => decide (guard.cellId ∉ (posts.map (Post.write rootBytes)).map DataWrite.cellId)
 
+/-- `readOnly` as compiled: a write's cell is its post's cell, so the written
+cells are read off the posts once, never by re-hashing every post per guard. -/
+def readOnlyFast (rootBytes : Bytes → Digest) (posts : List Post) (guards : List ReadGuard) : List ReadGuard :=
+  let written := posts.map Post.cell
+  guards.filter fun guard => decide (guard.cellId ∉ written)
+
+@[csimp] theorem readOnly_eq_fast : @readOnly = @readOnlyFast := by
+  funext rootBytes posts guards
+  simp only [readOnly, readOnlyFast, List.map_map]
+  rfl
+
 /-- What the admitting receiver adds to a kernel turn: the guards of the
 authority it checked (authority cell, capability laws), its own claims (the
 signed marker), the replay event that carries the signed ingress, the signer,
