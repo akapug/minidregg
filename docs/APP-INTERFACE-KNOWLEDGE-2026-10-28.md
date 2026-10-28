@@ -56,8 +56,8 @@ extracts an HTML form token and hidden fields; it is not a semantic API adapter.
 The read-only declaration makes no write claim. This is a package configuration
 limitation, not evidence that DokuWiki crashes or can never support XML-RPC.
 A manager may change configuration; that needs separately observed configuration
-and XML-RPC qualification. Existing recipes remain until a qualified replacement
-can remove them in the same commit.
+and XML-RPC qualification. The former HTML recipe is replaced with a named unsupported-write row;
+raw reads cannot pass typed write qualification.
 
 ## Source evidence
 
@@ -142,3 +142,69 @@ Six focused wiki/document/site/calendar fixtures pass on the Mac after shared
 contract `c84d4f305`. The calendar fixture tests ETag refusal without retry and
 checks that ignored time filters are absent from the declaration. All
 second-batch live browser/native/Hermes rows remain NOT_RUN.
+
+## Tiny Tiny RSS and link directory extension
+
+`ttrss.json` pins `ac6dfded255f6ea86172fb62064772fc`. Both signed manifest action
+and continue command set `TTRSS_SINGLE_USER_MODE=true`. Its packaged
+`UserHelper::authenticate` directly selects account 1 in that mode; the
+internal API login does not guess a private password. Each tool obtains its
+own session ID through read-only authentication preparation; that ID never
+enters a public tool argument or another member's state. The API intentionally
+serves `text/json`, explicitly allowlisted alongside JSON, rather than globally
+relaxing MIME checks. Status-1 API envelopes fail the declared status-0 schema.
+
+The typed scenario creates a local published reading item using
+`shareToPublished`, queries its title in virtual feed -2, annotates the returned
+article ID, and independently reads the note. No external feed/network fetch is
+needed. Article ownership is checked by the app query's current session owner;
+the annotation preflight requires one visible article. Query offsets are
+zero-based, limit1..200, and no stable cross-page snapshot is claimed. An
+annotation response reports actual changed-row count, including zero for a
+no-op; readback establishes the intended text. One focused synthetic fixture
+passes, including foreign/absent article refusal before mutation and an empty
+offset page. This remains separate from the running live browser-route row.
+
+Linksholder `d11845a484a0a03767676c3c31c032e6` is a customized EtherCalc. Its
+packaged human UI `hackfoldr/js/index.js` fixes the data source to
+`/sheet1.csv`; the declaration must operate on that directory, not an unrelated
+new sheet. Source confirms CSV POST `/_/sheet1` appends rows and returns 202.
+The typed link append uses the shared RFC4180 CSV expression, so commas,
+quotes and newlines are encoded correctly without app-specific transport code.
+Full-directory replacement is not substituted for link append. The focused
+fixture preserves pre-existing rows and reads the exact appended URL/title.
+
+The isolated hbox world is now running at Store `f9ecf47b7d6be2db` on candidate
+`b26630168b63024c9c46311745fa0b25fa09c13f`. Seven typed rows are running serially
+(MediaWiki, Etherpad, EtherCalc, Radicale, Hugo, WordPress, Tiny Tiny RSS).
+World startup and each write/readback result will be reported separately.
+Native-agent/Hermes evidence remains NOT_RUN until explicitly recorded.
+
+`market-writes/knowledge-interface.sh` now routes eight writable app names to
+their declarations and names refusal reasons for DokuWiki, SandCal, Permanote
+and HedgeDoc. Their former HTML/form/socket recipe branches are removed; a
+read-only export cannot be reported as a write PASS. The new `knowledge.tsv`
+batch makes these app decisions executable by the existing qualification entry.
+The live run already in progress uses the same declared HTTP tools via a private
+alias table; deleting recipes does not turn its pending results into success.
+
+The first receiving row stopped before MediaWiki dispatch: `install-a` failed
+with the ingest unit's runtime limit. Raw package bytes are 74,388,876; decoded
+archive bytes 380,171,264, within even the standard byte bounds. The chosen
+large profile is confirmed in the physical invocation; runtime class M is a
+separate parameter. Pinned candidate `import-limits market-large-v1 74388876`
+returns raw cap 536,870,912, decoded cap 2,147,483,648 and 273 seconds. The helper
+matches current source. Journal times 12:57:59→13:02:32 UTC show that exact limit,
+CPU 5.732 seconds and peak memory 666.5 MiB. No timeout was widened or install
+rerun; this is an intake failure, not a MediaWiki API verdict.
+
+The archive contains 23,540 regular/executable files, including 17,699 files no
+larger than 4 KiB, plus 1,691 directories. Candidate materialization calls
+`sync_all` for each file and each directory before stage publication. A read-only
+one-second host sample during the next intake saw the tank disks at 88–92%
+utilization with write waits 46–53 ms and queue depth about 4; IO pressure's
+60-second full average was about 54%. This supports investigating serial
+per-file durability barriers under shared HDD latency. It does not establish
+that byte limits, package validity or an app protocol is defective. Any fix must
+preserve complete durable staging before immutable publication; enlarging a
+recipe timeout does not address that mechanism.

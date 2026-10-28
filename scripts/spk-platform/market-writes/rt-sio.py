@@ -3,9 +3,8 @@
 
 ROUTE_DIR holds http.sock and browser.token (the custodian-minted participant session).
   wbo      ROUTE_DIR BOARD     a Rectangle item as a socket.io `broadcast` on WBO's /socket.io/
-  hedgedoc ROUTE_DIR NOTE_ID   a text insert as a socket.io `operation` (OT, base revision from `doc`)
-Prints one JSON line; exit 0 only when the server acknowledged the write. The read-back is the
-caller's (HTTP GET) for both modes.
+Prints one JSON line after independent getboard memory readback. The caller also checks
+the saved HTTP download; send delivery alone is not an application acknowledgement.
 """
 import base64, json, os, socket, struct, sys, time
 
@@ -124,26 +123,9 @@ def wbo(route, board):
     return 1
 
 
-def hedgedoc(route, note):
-    s = SIO(route, f"noteId={note}")
-    doc = None
-    for ev in s.events(60):
-        if ev[0] == "doc":
-            doc = ev[1]; break
-    if doc is None:
-        print(json.dumps({"ok": False, "refused": "noDocEvent"})); return 1
-    text = "# featured\nwritten by a resident over socket.io\n"
-    ops = [text] + ([len(doc.get("str", ""))] if doc.get("str") else [])
-    s.emit("operation", doc.get("revision", 0), ops, None)
-    for ev in s.events(30):
-        if ev[0] == "ack":
-            print(json.dumps({"ok": True, "revision": doc.get("revision", 0)})); return 0
-    print(json.dumps({"ok": False, "refused": "noAck"})); return 1
-
-
 if __name__ == "__main__":
     mode, route, arg = sys.argv[1:4]
     try:
-        sys.exit({"wbo": wbo, "hedgedoc": hedgedoc}[mode](route, arg))
+        sys.exit({"wbo": wbo}[mode](route, arg))
     except Exception as e:  # noqa: BLE001
         print(json.dumps({"ok": False, "refused": str(e)[:300]})); sys.exit(1)
