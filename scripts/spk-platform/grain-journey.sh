@@ -798,14 +798,16 @@ write_profile() {
     --arg public "$(od -An -tx1 -v "$WR/tool.pub" | tr -d ' \n')" \
     --arg seed "$WR/tool.key" --arg completion "$STORE/custody/completion.seed" \
     --arg semantics "$semantics" --arg bwrap "$BWRAP" --arg bwrapSha "$(sha "$BWRAP")" \
-    --arg spkHost "$SPK_HOST" --arg spkHostSha "$(sha "$SPK_HOST")" '
+    --arg spkHost "$SPK_HOST" --arg spkHostSha "$(sha "$SPK_HOST")" \
+    --arg importProfile "${MINI_IMPORT_PROFILE:-standard-v1}" '
     {protocol:"mini-spk-grain-host-v2",stateRoot:$root,grainsRoot:$grains,
      miniHost:$host,miniHostSha256:$hostSha,miniConfig:$config,miniConfigSha256:$configSha,
      miniOperatorSocket:$socket,managementSubject:"8",managementKeyEpoch:"2",
      managementPublicKeyHex:$public,managementSeed:$seed,
      completionCustodianSeed:$completion,completionSemantics:$semantics,
      bwrap:$bwrap,bwrapSha256:$bwrapSha,spkHost:$spkHost,spkHostSha256:$spkHostSha} +
-    {brokerSocket:$broker}' >"$PROFILE"
+    {brokerSocket:$broker} +
+    (if $importProfile == "standard-v1" then {} else {importProfile:$importProfile} end)' >"$PROFILE"
   chmod 600 "$PROFILE"
   jq -n --arg profile "$PROFILE" --arg state "$STATE" --arg grains "$GRAINS_ROOT" --arg broker "$broker" \
     --arg config "$CONFIG" --arg configSha "$(sha "$CONFIG")" \
