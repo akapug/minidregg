@@ -582,6 +582,10 @@ fn allowed_operator_operation(request: &[u8]) -> bool {
         [151, payload @ ..] => continuity_request(payload),
         [153, payload @ ..] => carried_lookup_request(payload),
         [156, ingress @ ..] => !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME,
+        // The detached author/inspect/signatures verbs as in-session calls: bytes in, bytes out,
+        // no service-side path, no Store effect. Framing only; the verb itself refuses what it
+        // cannot decode.
+        [195..=197, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
         // STOP inspection only joins retained bytes to current verified history.
         [155, pair @ ..] => pair.len() < HOST_MAX_FRAME && exact_pair(pair).is_some(),
         // Read-only signed stream authority checks remain operator-private.
