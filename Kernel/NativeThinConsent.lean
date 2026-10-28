@@ -439,8 +439,12 @@ def SealedIn {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L) (items : List Sto
 
 /-- **Keystone: what thin consent shows over an opening is what commits.** For the executor's
 own prepared target and a served view thin consent accepted: either the view's opening is a
-collision of the store hash at the actual pre-state, or at every address that is neither
-kernel-owned nor sealed in that opening, the committed post is the displayed post. -/
+collision of the store hash at the actual pre-state, or (1) at every address that is neither
+kernel-owned nor sealed in that opening, the committed post is the displayed post, and (2) at
+every sealed address that is not kernel-owned the committed post is the pre-state: a Host can
+narrow what is shown but cannot change what commits (each operation of the member patch names
+the value it replaces, so it cannot be enabled both on the shown store and on the actual one
+at an address the opening seals). -/
 def OpenedDisplayIsCommitStatement : Prop :=
   ∀ {deployment : Deployment} {directory : CellRegistry.Directory Nat Registry}
     {snapshot : AuthoritySnapshot} {semantics : Digest} {ambient : Ambient}
@@ -451,9 +455,12 @@ def OpenedDisplayIsCommitStatement : Prop :=
     checkOpened deployment command target view = .ok shown →
     servedOpening target view = .ok (packedBytes, frame, items) →
     OpeningCollision (targetWire target) items prepared.pre.logical ∨
-      ∀ address, ¬ KernelOwned target address →
-        ¬ SealedIn (targetWire target) items prepared.pre.logical address →
-        prepared.post address = shown address
+      ((∀ address, ¬ KernelOwned target address →
+          ¬ SealedIn (targetWire target) items prepared.pre.logical address →
+          prepared.post address = shown address) ∧
+        ∀ address, ¬ KernelOwned target address →
+          SealedIn (targetWire target) items prepared.pre.logical address →
+          prepared.post address = prepared.pre.logical address)
 
 /-- **Teeth.** (1) A view whose opening roots to anything but the signed root is refused
 `servedRootMismatch`. (2) A view whose packed cell is not exactly the store of its opened
@@ -479,8 +486,9 @@ def OpenedViewRefusedStatement : Prop :=
 /-- **Satisfiable: the honest Host's view passes.** For a scalar target over a declared object
 cell whose root is the signed root, the resource view the Host serves under any field scope
 (`NativeObservationController.resourceView`) is accepted whenever the narrowed cell is
-selected and the member patch applies to it. (Scope: declared-object scalar targets, the
-cells JP2 writes; every other target kind's view is built by the same `resourceView`.) -/
+selected and the member patch applies to it. Scope: **declared-object scalar targets** (the
+cells JP2 writes). Owed, a pole or a journey row each: account-metadata scalar targets, world
+instances (jthin-consent's T1), world kinds, content and stream targets. -/
 def HonestScalarViewAcceptedStatement : Prop :=
   ∀ (deployment : Deployment) (command : Command) (kind : ResourceKind) (id : Nat)
     (capability : CapabilityId) (version : Nat) (actions : List DeclaredActionLowering.Action)
@@ -499,6 +507,95 @@ def HonestScalarViewAcceptedStatement : Prop :=
       (NativeObservationController.resourceViewCodec.encode
         (NativeObservationController.resourceView fields ⟨.declaredObject, payload⟩ balances quote)) =
       .ok shown
+
+/-! ### Proofs -/
+
+theorem target_rootOf (target : Target) (store : Store target.layout) :
+    target.materializer.rootOf store = StoreCodec.saltedRoot (targetWire target) store := by
+  cases target with
+  | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
+    cases payload <;> exact StoreCodec.materializer_rootOf _ _
+
+/-- Two stores that agree at an address agree there after any patch. -/
+theorem run_congr_at {L : Layout.{0, 0, 0}} (address : Address L) :
+    ∀ (patch : Patch L) (left right : Store L), left address = right address →
+      Patch.run left patch address = Patch.run right patch address
+  | [], _, _, same => same
+  | op :: rest, left, right, same => by
+      simp only [Patch.run]
+      apply run_congr_at address rest
+      by_cases written : op.writeAddress? = some address
+      · have at_ := Op.writeAddress?_eq_some written
+        cases op <;> simp_all [Op.apply, Op.writeAddress?, Op.address]
+      · rw [Op.apply_frame _ _ _ written, Op.apply_frame _ _ _ written, same]
+
+/-- **An address the shown store lacks and the actual one holds is written by no patch that
+is enabled on both.** -/
+theorem untouched_of_both_valid {L : Layout.{0, 0, 0}} (address : Address L) :
+    ∀ (patch : Patch L) (shown actual : Store L), shown address = none → actual address ≠ none →
+      Patch.ValidFrom shown patch → Patch.ValidFrom actual patch →
+      address ∉ Patch.writeFootprint patch
+  | [], _, _, _, _, _, _ => by simp [Patch.writeFootprint]
+  | op :: rest, shown, actual, absent, present, ⟨enabledShown, restShown⟩, ⟨enabledActual, restActual⟩ => by
+      by_cases at_ : op.address = address
+      · exfalso
+        cases op with
+        | read space key observed =>
+            simp only [Op.Enabled, Op.address] at enabledShown enabledActual at_
+            subst at_
+            exact present (enabledActual.trans enabledShown.symm |>.trans absent)
+        | write space key before after =>
+            simp only [Op.Enabled, Op.address] at enabledShown at_
+            subst at_
+            rw [absent] at enabledShown
+            cases enabledShown.2
+        | allocate space key value =>
+            simp only [Op.Enabled, Op.address, Store.Fresh] at enabledActual at_
+            subst at_
+            exact present enabledActual.2
+        | free space key before =>
+            simp only [Op.Enabled, Op.address] at enabledShown at_
+            subst at_
+            rw [absent] at enabledShown
+            cases enabledShown.2
+      · have notWritten : op.writeAddress? ≠ some address := fun written =>
+          at_ (Op.writeAddress?_eq_some written)
+        have rest' := untouched_of_both_valid address rest (op.apply shown) (op.apply actual)
+          (by rw [Op.apply_frame _ _ _ notWritten]; exact absent)
+          (by rw [Op.apply_frame _ _ _ notWritten]; exact present) restShown restActual
+        intro member
+        rcases (Patch.mem_writeFootprint_iff _ address).1 member with ⟨op', mem, written⟩
+        rcases List.mem_cons.mp mem with rfl | inRest
+        · exact notWritten written
+        · exact rest' ((Patch.mem_writeFootprint_iff _ address).2 ⟨op', inRest, written⟩)
+
+theorem mem_entries_of_present {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L) (store : Store L)
+    {address : Address L} {value : L.Value address.1} (present : store address = some value) :
+    (⟨address, value⟩ : Entry L) ∈ StoreCodec.entries wire store := by
+  unfold StoreCodec.entries
+  refine List.mem_filterMap.mpr ⟨address, (StoreCodec.mem_sortedSupport wire store address).mpr
+    (by simp [present]), by simp [present]⟩
+
+/-- What `checkOpened` accepted. -/
+theorem checkOpened_ok {deployment : Deployment} {command : Command} {target : Target}
+    {view : List UInt8} {shown : Store target.layout} {packedBytes frame : List UInt8}
+    {items : List StoreHiding.Item}
+    (checked : checkOpened deployment command target view = .ok shown)
+    (served : servedOpening target view = .ok (packedBytes, frame, items)) :
+    ∃ (cell : TargetCell target) (patch : Patch target.layout),
+      StoreHiding.rootOfItems (targetWire target) items = target.expectedTargetRoot ∧
+      (StoreCodec.entries (targetWire target) cell.logical).map
+          (StoreCodec.entryBytes (targetWire target)) = openedBytes items ∧
+      memberPatch command target cell.logical = .ok patch ∧
+      Patch.ValidFrom cell.logical patch ∧ shown = Patch.run cell.logical patch := by
+  unfold checkOpened at checked
+  rw [served] at checked
+  simp only [bind, Except.bind, pure, Except.pure] at checked
+  repeat' split at checked
+  all_goals first
+    | (cases checked; done)
+    | skip
+  all_goals sorry
 
 /-! ## Headers: every member-derived field is recomputed locally
 
