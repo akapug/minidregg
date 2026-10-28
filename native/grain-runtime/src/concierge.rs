@@ -1,4 +1,4 @@
-//! The room CONCIERGE (PLACE §2.10, §5 row 6): a deterministic program the
+//! The room CONCIERGE (docs/PLACE.md §2.10, §5 item 6): a deterministic program the
 //! controller binary runs as a runner holding `delegate` under a room R.
 //!
 //! Program: read the till's incoming ledger (Host op 180: fleet turns that
@@ -25,7 +25,7 @@
 //! window is enforced by the kernel (`Admissible.validUntil`), and the
 //! delegation is admitted only under the founder's grant to the concierge.
 //! What the kernel does not yet check is that each delegation followed a
-//! payment (K-BOOK-SLOTS, PLACE §4.8); until then the concierge answers for
+//! payment (K-BOOK-SLOTS, docs/PLACE.md §4.8); until then the concierge answers for
 //! that with its JOURNAL: one line per decision naming the ledger entry
 //! (height, transaction, payer, signer, amount) it acted on. Every decision
 //! is keyed on the entry's ledger `transactionId` (`ledger-tx:T`); the

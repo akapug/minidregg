@@ -10,7 +10,7 @@ use mini_sdk::local::{Codec, CodecError};
 
 const CAP: usize = mini_sdk::local::CAP;
 static SESSION: Mutex<Option<Consent>> = Mutex::new(None);
-/// The delegated connection's liveness, beside the session it belongs to (same lock order: SESSION first).
+/// The provider connection's liveness (delegated worker or resident), beside the session it belongs to (same lock order: SESSION first).
 static LIFELINE: Mutex<Option<crate::consent_proxy::Lifeline>> = Mutex::new(None);
 static DELEGATED_SESSION: OnceLock<Option<crate::consent_proxy::Selection>> = OnceLock::new();
 
@@ -66,7 +66,7 @@ fn with_consent<T>(host: &Path, config: &Path, frame: impl FnOnce(&mut Consent) 
     } else {DELEGATED_SESSION.set(delegated.clone()).map_err(|_|"consent transport selection raced")?;}
     let mut slot=SESSION.lock().map_err(|_|"local consent session lock poisoned")?;
     let mut lifeline=LIFELINE.lock().map_err(|_|"consent lifeline lock poisoned")?;
-    drop_dead_delegated_session(&mut slot,&mut lifeline);
+    drop_dead_session(&mut slot,&mut lifeline);
     if let Some(consent)=slot.as_ref() {
         if consent.0.executable()!=executable||consent.0.settings()!=settings_bytes {
             return Err("local consent executable or settings changed within signing session".into());
@@ -79,15 +79,17 @@ fn with_consent<T>(host: &Path, config: &Path, frame: impl FnOnce(&mut Consent) 
         let mini=std::env::current_exe().map_err(|e|format!("resident consent provider: {e}"))?;
         let mut launch=Command::new(mini);
         launch.arg("consent-resident").arg("--consent").arg(&executable).arg("--settings").arg(&settings);
-        *slot=Some(Consent(mini_sdk::consent::connect_resident(&executable,settings_bytes,launch)?));
+        let (session,watch)=mini_sdk::consent::connect_resident_watched(&executable,settings_bytes,launch)?;
+        *slot=Some(Consent(session));
+        *lifeline=Some(crate::consent_proxy::Lifeline::watching(watch));
     } else {
         let anchors=mini_sdk::consent::anchor_dir()?;
         *slot=Some(Consent(mini_sdk::consent::start(&anchors,executable,&settings,settings_bytes)?));
     }
     let answer=frame(slot.as_mut().unwrap());
-    // A request that met a dead delegated transport is undecided: it is never replayed here, and the
-    // next request opens a fresh connection through the socket-activated unit.
-    let lost=answer.is_err()&&drop_dead_delegated_session(&mut slot,&mut lifeline);
+    // A request that met a dead provider connection is undecided: it is never replayed here, and the
+    // next request opens a fresh connection (the socket-activated unit's, or a new resident's).
+    let lost=answer.is_err()&&drop_dead_session(&mut slot,&mut lifeline);
     answer.map_err(|error| {
         if error.is_stale_observation() {
             STALE_OBSERVATION.store(true,std::sync::atomic::Ordering::Relaxed);
@@ -96,11 +98,12 @@ fn with_consent<T>(host: &Path, config: &Path, frame: impl FnOnce(&mut Consent) 
     })
 }
 
-/// Drop a delegated session whose connection can no longer carry a request, so the next request
-/// reconnects instead of failing "consent transport is poisoned" for ever. True when it dropped one.
-/// A local (non-delegated) session has no lifeline and is never dropped: its provider's frontier
-/// is in that process.
-pub(crate) fn drop_dead_delegated_session(slot:&mut Option<Consent>,lifeline:&mut Option<crate::consent_proxy::Lifeline>)->bool {
+/// Drop a session whose provider connection can no longer carry a request, so the next request
+/// reconnects instead of failing for ever: a delegated worker that idled out or restarted, or a
+/// resident provider that ended (both keep the frontier in their retained anchor, so the next one
+/// resumes it). True when it dropped one. An in-process provider has no lifeline and is never
+/// dropped: its frontier is in this process.
+pub(crate) fn drop_dead_session(slot:&mut Option<Consent>,lifeline:&mut Option<crate::consent_proxy::Lifeline>)->bool {
     if lifeline.as_ref().is_some_and(|live|!live.alive()) {
         *slot=None;
         *lifeline=None;

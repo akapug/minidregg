@@ -28,8 +28,12 @@ Time: about 8 to 12 minutes without apps (roughly 120 shell calls, a few seconds
   `summon` budget). It founds and owns everything and holds the Hacker Slides, Etherpad and EtherCalc grains.
 - Seed member **`sage`**: NEW, a second hosted member (roster entry, `mini-reenroll sage`, provisioned,
   initialised). Names are overridable with `SEED_HOST` / `SEED_GUEST`.
-- The `public` reader and `/etc/mini/public-subject`. The Hermes resident registered so that
-  `summon lobby as librarian` finds exactly one (otherwise pass nothing; the script does not choose).
+- The `public` reader and `/etc/mini/public-subject`. The lobby's Hermes resident, installed first
+  by `deploy/hermes/demo/install-hermes` with `FOUNDER_MEMBER=box ROOM=lobby` (the example in its
+  header): its `room` step founds the lobby as `box`, its `summon` step summons Hermes there, and
+  the registry it writes to `box`'s `HOME/hermes/registry.json` is what `summon lobby` finds.
+- The door's `room` setting, `{"founder": "box", "name": "lobby"}` (beside `story`), so every member
+  joins the lobby at enrolment.
 - The front page should render the published document named `welcome`; the script publishes it but
   does not set any front-page pointer.
 
@@ -42,6 +46,9 @@ Time: about 8 to 12 minutes without apps (roughly 120 shell calls, a few seconds
   an account: https://aN-www.demo.dregg.online".
 - Room `lobby` (founder `box`, member `sage`) with signed posts, published to the public reader, and the
   Hermes librarian summoned with budget 100 and an intro post that says `ask lobby your question`.
+  The lobby is the house's shared room: every member the door enrols joins it, and Hermes there
+  answers all of them. A member's `summon lobby as librarian` says Hermes is already there and how
+  to ask it; only `box` summons, funds and dismisses. This is the tour's Hermes step (step 6).
 - Story `tale` installed under the sealed law, GM `sage`, first scene narrated. `box` is the author.
 - Bend `tally` published from `world/activity/Tally.obend` and run on object `lobby-tally`.
 - Delegation: `field-notes` is `box`'s with `observe,mutate` to `sage` (one admitted note); `house-rules`

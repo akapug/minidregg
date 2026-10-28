@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# journey.d/j11-kernel.sh — per-author streams in a room (K-STREAM, PLACE §2.3/§4.4),
+# journey.d/j11-kernel.sh — per-author streams in a room (K-STREAM, docs/PLACE.md §2.3/§4.4),
 # the kernel rows of J11, on the journey's fresh Store after J5 (three keys:
 # A the sponsor, B the newcomer, C the third key).
 #

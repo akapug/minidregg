@@ -4,7 +4,7 @@
 
 use serde_json::Value;
 use std::io;
-use crate::canonical::{decimal as canonical_decimal, hex, lower_hex};
+use crate::canonical::{decimal as canonical_decimal, hex_matches};
 
 const MAX_INSPECTION_BYTES: usize = 96_822_080;
 const MAX_PERMIT_BYTES: usize = 12_102_759; // Host frame also has opcode 34.
@@ -167,7 +167,7 @@ pub(crate) fn match_inspection(
     let parsed: Value = serde_json::from_slice(inspection_json)?;
     if string(&parsed, "type")? != "application-dispatch-committed-inspection-v2"
         || decimal(&parsed, "frameByteCount")? != committed_payload.len().to_string()
-        || string(&parsed, "frameHex")? != hex(committed_payload)
+        || !hex_matches(string(&parsed, "frameHex")?, committed_payload)
     {
         return Err(invalid(
             "Mini inspection does not echo exact private op34 payload",
@@ -214,10 +214,10 @@ pub(crate) fn match_inspection(
     if member(request, "streamed")?.as_bool() != Some(http.method == STREAMED_OPEN_METHOD) {
         return Err(invalid("Mini streamed-dispatch mark differs from the HTTP open"));
     }
-    if string(request, "methodHex")? != hex(http.method.as_bytes())
-        || string(request, "pathHex")? != hex(app_path.as_bytes())
-        || string(request, "queryHex")? != hex(query.as_bytes())
-        || string(request, "bodyHex")? != hex(http.body)
+    if !hex_matches(string(request, "methodHex")?, http.method.as_bytes())
+        || !hex_matches(string(request, "pathHex")?, app_path.as_bytes())
+        || !hex_matches(string(request, "queryHex")?, query.as_bytes())
+        || !hex_matches(string(request, "bodyHex")?, http.body)
     {
         return Err(invalid(
             "Mini committed request differs from authenticated HTTP bytes",
@@ -231,8 +231,8 @@ pub(crate) fn match_inspection(
     }
     for (inspected, (name, value)) in inspected_headers.iter().zip(http.ordered_headers) {
         if member(inspected, "generated")?.as_bool() != Some(false)
-            || string(inspected, "nameHex")? != hex(name.as_bytes())
-            || string(inspected, "valueHex")? != hex(value.as_bytes())
+            || !hex_matches(string(inspected, "nameHex")?, name.as_bytes())
+            || !hex_matches(string(inspected, "valueHex")?, value.as_bytes())
         {
             return Err(invalid("Mini committed ordered header differs from HTTP"));
         }
@@ -310,6 +310,7 @@ pub(crate) fn match_inspection(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::canonical::hex;
     use serde_json::json;
 
     fn fixture(payload: &[u8]) -> Value {

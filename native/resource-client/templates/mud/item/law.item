@@ -1,8 +1,8 @@
 -- kind: item
--- MUD §2.2 unique item: one cell, one owner. Installed as `law.management ; law.item`
+-- docs/MUD.md §2.2 unique item: one cell, one owner. Installed as `law.management ; law.item`
 -- (+ `; law.item-reward` for an item area.json places as a quest reward).
 -- A give is the holder's `write owner NEW expected OLD`; the expected value is the stale-read guard that
--- refuses the second of two concurrent gives (guardFailed, DATAMODEL 4.3) -- a CAS, not a clause.
+-- refuses the second of two concurrent gives (guardFailed, docs/DATAMODEL.md §4.3) -- a CAS, not a clause.
 -- Joint indices: drop/take: 0 = this item, 1 = the dropper's / taker's sheet. NEEDS K-JOINT-INDEX there.
 -- 1 holder [J-MUD-2 row 4]: only the current owner writes, or the referee (clause 4 bounds it).
 any [ not (verb == 2), eqSlots subject field owner before, subject == {REF} ];

@@ -5,6 +5,8 @@ mod deadline;
 #[cfg(test)]
 mod startup_budget_tests;
 mod controller_digest;
+#[path = "../../file_identity.rs"]
+mod file_identity;
 mod public_status;
 mod application_api_tools;
 mod oracle_tools;
@@ -181,7 +183,7 @@ struct ToolTask {
     /// image. The family allowlists alone never enable op30/31 delivery.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     current_birth_host_sha256: Option<String>,
-    /// The room this grain's Hermes was summoned into (PLACE §2.7): the room
+    /// The room this grain's Hermes was summoned into (docs/PLACE.md §2.7): the room
     /// tools (`resource_tools::room_tool_specs`) run the pinned client's shell
     /// under this workspace; each write pays the room's `hermes/turn` first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2559,6 +2561,24 @@ fn bounded_policy_bytes(path: &Path) -> Result<Vec<u8>> {
     fs::read(path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// The digest of a pinned executable: hashed once per file identity (dev, ino, size, mode, owner,
+/// mtime, ctime), so a per-call pin check costs an open and an fstat, not a read of the image.
+fn sha256_pinned_file(path: &Path) -> Result<String> {
+    file_identity::cached_file_sha256(path).map_err(|e| format!("file digest: {e}"))
+}
+
+/// `sha256_bytes(&bounded_regular_file(path, maximum)?)` without reading an unchanged file again:
+/// the same symlink/type/length refusal, then the digest kept per file identity.
+fn sha256_bounded_regular_file(path: &Path, maximum: usize) -> Result<String> {
+    let metadata =
+        fs::symlink_metadata(path).map_err(|e| format!("bounded {}: {e}", path.display()))?;
+    if !metadata.file_type().is_file() || metadata.len() > maximum as u64 {
+        return Err(format!("bounded {} has the wrong type or length", path.display()));
+    }
+    file_identity::cached_regular_file_sha256(path, maximum as u64)
+        .map_err(|e| format!("bounded {}: {e}", path.display()))
+}
+
 fn sha256_file(path: &Path) -> Result<String> {
     controller_digest::file(path).map_err(|e| format!("file digest: {e}"))
 }
@@ -3314,7 +3334,7 @@ fn validate_with_workspace(c: &Config, prospective_workspace: Option<&[u8]>) -> 
                 .agent_api_host_sha256
                 .as_deref()
                 .ok_or("application API routes require a source-qualified event21 Mini Host pin")?;
-            if c.host_socket.is_none() || sha256_file(&c.host)? != expected {
+            if c.host_socket.is_none() || sha256_pinned_file(&c.host)? != expected {
                 return Err(
                     "application API Mini Host or persistent socket differs from pin".into(),
                 );
@@ -3342,7 +3362,7 @@ fn validate_with_workspace(c: &Config, prospective_workspace: Option<&[u8]>) -> 
                 .lifetime_api_host_sha256
                 .as_deref()
                 .ok_or("lifetime API routes require an event26 Mini Host pin")?;
-            if c.host_socket.is_none() || sha256_file(&c.host)? != expected {
+            if c.host_socket.is_none() || sha256_pinned_file(&c.host)? != expected {
                 return Err("lifetime API Mini Host or persistent socket differs from pin".into());
             }
         } else if t.lifetime_api_host_sha256.is_some() {
@@ -3430,7 +3450,7 @@ fn validate_with_workspace(c: &Config, prospective_workspace: Option<&[u8]>) -> 
             let expected = t.current_birth_host_sha256.as_deref().ok_or(
                 "current application birth requires an operator-pinned qualified Host image",
             )?;
-            if c.host_socket.is_none() || expected != sha256_file(&c.host)? {
+            if c.host_socket.is_none() || expected != sha256_pinned_file(&c.host)? {
                 return Err(
                     "current application birth Host image or socket differs from operator pin"
                         .into(),
@@ -7076,9 +7096,9 @@ impl Runtime {
         Ok(Some(BornResourceRecord {
             pending: origin.clone(),
             attempt: pending.attempt.clone(),
-            call_sha256: sha256_bytes(&bounded_regular_file(&call, 4_194_304)?)?,
+            call_sha256: sha256_bounded_regular_file(&call, 4_194_304)?,
             outcome_path: outcome_path.to_owned(),
-            outcome_sha256: sha256_bytes(&bounded_regular_file(&binary, 4_194_304)?)?,
+            outcome_sha256: sha256_bounded_regular_file(&binary, 4_194_304)?,
             transaction_id: field("transactionId")?,
             event_id: field("eventId")?,
             accepted_count: field("acceptedCount")?,
@@ -8530,7 +8550,7 @@ impl Runtime {
             .agent_api_host_sha256
             .as_deref()
             .ok_or("application API event21 Host pin is absent; agent delivery is unavailable")?;
-        if self.config.host_socket.is_none() || sha256_file(&self.config.host)? != expected_host {
+        if self.config.host_socket.is_none() || sha256_pinned_file(&self.config.host)? != expected_host {
             return Err("application API event21 Host image or socket differs from pin".into());
         }
         let routes = &tool.allowed_application_api_routes;
@@ -8644,7 +8664,7 @@ impl Runtime {
             .lifetime_api_host_sha256
             .as_deref()
             .ok_or("lifetime application Host pin absent")?;
-        if self.config.host_socket.is_none() || sha256_file(&self.config.host)? != expected_host {
+        if self.config.host_socket.is_none() || sha256_pinned_file(&self.config.host)? != expected_host {
             return Err("lifetime application Host image or socket differs from pin".into());
         }
         let registered = tool
@@ -10869,7 +10889,7 @@ impl Runtime {
                 .current_birth_host_sha256
                 .as_deref()
                 .ok_or("current application birth is not enabled by operator Host pin")?;
-            if self.config.host_socket.is_none() || sha256_file(&self.config.host)? != expected {
+            if self.config.host_socket.is_none() || sha256_pinned_file(&self.config.host)? != expected {
                 return Err(
                     "current application birth Host image or socket differs from operator pin"
                         .into(),
@@ -13057,7 +13077,7 @@ impl Runtime {
                     .current_birth_host_sha256
                     .as_deref()
                     .ok_or("current application birth is not enabled by operator Host pin")?;
-                if self.config.host_socket.is_none() || sha256_file(&self.config.host)? != pin {
+                if self.config.host_socket.is_none() || sha256_pinned_file(&self.config.host)? != pin {
                     return Err(
                         "current application birth Host image or socket differs from operator pin"
                             .into(),
@@ -13144,7 +13164,7 @@ impl Runtime {
                         "application API event21 Host pin is absent; agent delivery is unavailable",
                     )?
                 };
-                if self.config.host_socket.is_none() || sha256_file(&self.config.host)? != pin {
+                if self.config.host_socket.is_none() || sha256_pinned_file(&self.config.host)? != pin {
                     return Err(
                         "application API event21 Host image or socket differs from pin".into(),
                     );
@@ -14643,7 +14663,7 @@ impl Runtime {
                 .current_birth_host_sha256
                 .as_deref()
                 .ok_or("current application birth Host pin absent")?;
-            if self.config.host_socket.is_none() || sha256_file(&self.config.host)? != expected {
+            if self.config.host_socket.is_none() || sha256_pinned_file(&self.config.host)? != expected {
                 return Err(
                     "current application birth Host image or socket differs from operator pin"
                         .into(),

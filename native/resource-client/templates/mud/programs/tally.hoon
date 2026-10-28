@@ -1,4 +1,4 @@
-::  tally.hoon: plurality tally of a closed ballot, MUD §2.7
+::  tally.hoon: plurality tally of a closed ballot, docs/MUD.md §2.7
 ::  TEXT, NOT COMPILED: pseudocode for the NOCK lanes. Sample layout and key convention: programs/README.md.
 ::
 ::  sample   [ctx=[height=@ caller=@ room=@ now=@] inv=(list [key=@t val=@s])]
@@ -7,7 +7,7 @@
 ::  regime   plurality; a tie goes to the lowest candidate number (deterministic, stated in the charter:
 ::           charter.md {REGIME}). Another regime (approval, ranked) is another program with another id,
 ::           and so another {TALLY} runner or another `witnessed` identifier. DreggSolve helps a guild CHOOSE a
-::           regime; it is not a kernel object (MUD §2.7).
+::           regime; it is not a kernel object (docs/MUD.md §2.7).
 ::  output law (grammar), law.ballot:
 ::    6 result       field result delta == 0, or (subject == {TALLY} and field open before == 0)
 ::    7 result-once  field result writeOnce

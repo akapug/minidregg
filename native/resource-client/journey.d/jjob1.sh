@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# journey.d/jjob1.sh — COMPUTE C1 JOB-LAW: the job law installs on fresh cells, and every edge of the
-# lifecycle (COMPUTE.md §2.3) is driven with the right subject and with a wrong subject or a wrong
+# journey.d/jjob1.sh — docs/COMPUTE.md §8 C1 JOB-LAW: the job law installs on fresh cells, and every edge of the
+# lifecycle (docs/COMPUTE.md §2.3) is driven with the right subject and with a wrong subject or a wrong
 # time; every refusal is asserted by the CLAUSE the Host names: the refusal must carry the clause
 # exactly as native/resource-client/templates/job/law.job.shell spells it, with the write guard dropped (the
 # Host's `LawLeaf.explained`).

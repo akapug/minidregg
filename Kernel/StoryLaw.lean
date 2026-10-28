@@ -1,7 +1,7 @@
 /-
 # Kernel.StoryLaw -- the table-to-law generator of a sealed story
 
-A story (PLACE section 2.8) is a transition table a friend writes and then seals; after `story seal` the
+A story (docs/PLACE.md §2.8) is a transition table a friend writes and then seals; after `story seal` the
 client (`native/resource-client/src/story.rs`, `table_law`) installs one law on every player's cell,
 generated from the table. This module is that generator in Lean (`law`), the embed of the client's
 own output for the tale (between the markers, written by `scripts/gen-storylaw.py`, with the `rfl`

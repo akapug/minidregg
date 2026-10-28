@@ -1388,7 +1388,7 @@ fn first_write(
             Ok(count) => return Ok(count),
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                thread::sleep(Duration::from_millis(2));
+                wait_ready(stream, libc::POLLOUT, deadline);
             }
             Err(error) => {
                 return Err(TransportError::BeforeSend(format!(
@@ -1397,6 +1397,17 @@ fn first_write(
             }
         }
     }
+}
+
+/// Wait until `stream` is ready for `events` (or hung up), for at most 2 ms and never past
+/// `deadline`. The caller re-tries its nonblocking call and re-checks cancellation on every
+/// return, so the 2 ms cap keeps the cancellation latency of the former fixed sleep while a
+/// ready peer wakes the loop at once.
+fn wait_ready(stream: &UnixStream, events: libc::c_short, deadline: Instant) {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    let millis = remaining.as_micros().div_ceil(1000).clamp(1, 2) as libc::c_int;
+    let mut fd = libc::pollfd { fd: stream.as_raw_fd(), events, revents: 0 };
+    unsafe { libc::poll(&mut fd, 1, millis) };
 }
 
 fn transfer(
@@ -1445,7 +1456,7 @@ fn transfer(
             Ok(count) => offset += count,
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                std::thread::sleep(Duration::from_millis(2));
+                wait_ready(stream, if write { libc::POLLOUT } else { libc::POLLIN }, deadline);
             }
             Err(error) => {
                 return (

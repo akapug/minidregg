@@ -45,6 +45,8 @@ pub struct DevConfig {
     pub public_subject: Option<String>,
     /// The published document the public front page shows (`frontDoc`).
     pub front_doc: Option<String>,
+    /// Which member's publication each house name is (`housePublications`: NAME -> member).
+    pub house_publications: BTreeMap<String, String>,
 }
 
 /// A front-page document name as the body accepts it: a workspace reference name (1-64 of
@@ -52,6 +54,44 @@ pub struct DevConfig {
 pub fn front_doc_name(raw: &str) -> Option<String> {
     let name = raw.trim();
     (!name.is_empty() && name.len() <= 64 && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')).then(|| name.to_owned())
+}
+
+/// The public body's operations room: the reference name its front page reads as the box's own
+/// signed turns (`web/body.rs` `operations`).
+pub const OPERATIONS_ROOM: &str = "operations";
+
+/// One house publication: a reference name and the hosted member whose publication it is.
+fn house_entry(name: &str, member: &str) -> Option<(String, String)> {
+    let name = front_doc_name(name)?;
+    (is_account_name(member) && member != PUBLIC_NAME).then(|| (name, member.to_owned()))
+}
+
+/// `/etc/mini/house-publications`: one `NAME MEMBER` per line; anything else on a line drops
+/// that line (its name then stays reserved for nobody).
+pub fn house_publications(text: &str) -> BTreeMap<String, String> {
+    text.lines()
+        .filter_map(|line| {
+            let mut words = line.split_whitespace();
+            match (words.next(), words.next(), words.next()) {
+                (Some(name), Some(member), None) => house_entry(name, member),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
+/// The name a publication of DOC by MEMBER is handed to the public reader under. The public body
+/// shows a house name (the front page's document, the operations room, every name the operator
+/// lists) as the box's own, and binds a name to whichever publication it imports first, so a
+/// house name is handed over only from the member the operator named for it; anyone else's
+/// document of that name is handed over as `DOC-MEMBER` and reads at that name like any other.
+pub fn handed_name(doc: &str, member: &str, front_doc: Option<&str>, house: &BTreeMap<String, String>) -> String {
+    let reserved = doc == OPERATIONS_ROOM || front_doc == Some(doc) || house.contains_key(doc);
+    if !reserved || house.get(doc).map(String::as_str) == Some(member) {
+        return doc.to_owned();
+    }
+    let qualified = format!("{doc}-{member}");
+    if qualified.len() <= 64 { qualified } else { format!("m-{member}") }
 }
 
 impl DevConfig {
@@ -85,7 +125,10 @@ impl DevConfig {
         let public = if v["public"].is_object() { Some(pair(&v["public"], "public")?) } else { None };
         let public_subject = v["publicSubject"].as_str().map(str::to_owned).filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()));
         let front_doc = v["frontDoc"].as_str().and_then(front_doc_name);
-        Ok(DevConfig { mini: abs("mini")?, host: abs("host")?, config: abs("config")?, socket: abs("socket")?, wrapper: abs("wrapper")?, sessions, public, public_subject, front_doc })
+        let house_publications = v["housePublications"].as_object().map(|map| {
+            map.iter().filter_map(|(name, member)| house_entry(name, member.as_str()?)).collect()
+        }).unwrap_or_default();
+        Ok(DevConfig { mini: abs("mini")?, host: abs("host")?, config: abs("config")?, socket: abs("socket")?, wrapper: abs("wrapper")?, sessions, public, public_subject, front_doc, house_publications })
     }
 }
 
@@ -111,6 +154,9 @@ impl BoxLayout {
     /// The published document the public front page shows, one name, written by the operator (run-sheet
     /// step 9c: `welcome`). Absent, empty or not a reference name: the front page is the index.
     pub fn front_doc_file(&self) -> PathBuf { self.p("/etc/mini/front-doc") }
+    /// Whose publication each house name is, written by the operator (`welcome house`,
+    /// `operations box`). Absent: every house name is reserved for nobody.
+    pub fn house_publications_file(&self) -> PathBuf { self.p("/etc/mini/house-publications") }
 }
 
 pub enum Layout {
@@ -185,12 +231,34 @@ impl Spawner {
         }
     }
 
+    /// Whose publication each house name is (`/etc/mini/house-publications`, or
+    /// `housePublications` in the dev config).
+    pub fn house_publications(&self) -> BTreeMap<String, String> {
+        match &self.layout {
+            Layout::Dev(dev) => dev.house_publications.clone(),
+            Layout::Box(layout) => fs::read_to_string(layout.house_publications_file()).map(|t| house_publications(&t)).unwrap_or_default(),
+        }
+    }
+
     /// The public front page's document (`/etc/mini/front-doc`, or `frontDoc` in the dev config).
     pub fn front_doc(&self) -> Option<String> {
         match &self.layout {
             Layout::Dev(dev) => dev.front_doc.clone(),
             Layout::Box(layout) => fs::read_to_string(layout.front_doc_file()).ok().as_deref().and_then(front_doc_name),
         }
+    }
+
+    /// What a public body is started from, as one comparable line: the reader's subject and front
+    /// document (both passed as arguments), the identity of its `workspace.json` (rewritten only by
+    /// a lifecycle step: init, adoption, re-enrolment), the pinned config's (a re-genesis writes a
+    /// new one) and the candidate the `mini` path resolves to. The helper warms the public body
+    /// before any visitor, so a body started between a ship and the reader's re-initialisation must
+    /// not outlive it: when the basis changes, the helper replaces the body.
+    pub fn public_basis(&self, member: &Member) -> String {
+        let (mini, _, config, _, _) = self.paths();
+        let identity = |path: &Path| fs::metadata(path).map(|m| format!("{}:{}:{}.{}", m.dev(), m.ino(), m.mtime(), m.mtime_nsec())).unwrap_or_default();
+        let candidate = fs::canonicalize(&mini).map(|p| p.display().to_string()).unwrap_or_default();
+        format!("{:?} {:?} {} {} {candidate}", self.public_subject(), self.front_doc(), identity(&member.workspace.join("workspace.json")), identity(&config))
     }
 
     /// Every hosted member's home (the hand-off sweep reads their published references).
@@ -488,6 +556,34 @@ mod tests {
         fs::write(layout.front_doc_file(), "../welcome").unwrap();
         assert_eq!(spawner.front_doc(), None, "not a reference name: the index");
         assert_eq!(dev(&dir).front_doc(), None, "dev config without frontDoc");
+    }
+
+    #[test]
+    fn a_house_name_is_handed_over_only_from_its_member() {
+        let house = house_publications("welcome house\noperations box\n# a comment line\nbad name x\nnews public\nlobby Alice\n");
+        assert_eq!(house.len(), 2, "{house:?}");
+        let front = Some("welcome");
+        assert_eq!(handed_name("welcome", "house", front, &house), "welcome");
+        assert_eq!(handed_name("operations", "box", front, &house), "operations");
+        // Teeth: another member's document of a house name is its own name.
+        assert_eq!(handed_name("welcome", "sage", front, &house), "welcome-sage");
+        assert_eq!(handed_name("operations", "house", front, &house), "operations-house");
+        assert_eq!(handed_name("notes", "sage", front, &house), "notes");
+        // No operator file: the front page's document and the operations room are nobody's.
+        let none = BTreeMap::new();
+        assert_eq!(handed_name("welcome", "house", front, &none), "welcome-house");
+        assert_eq!(handed_name("operations", "box", None, &none), "operations-box");
+        assert_eq!(handed_name("welcome", "house", None, &none), "welcome");
+        let long = "d".repeat(64);
+        let house = house_publications(&format!("{long} house"));
+        assert_eq!(handed_name(&long, "sage", None, &house), "m-sage");
+        let dir = scratch();
+        let layout = BoxLayout { root: dir.clone() };
+        let spawner = Spawner { layout: Layout::Box(layout.clone()) };
+        assert!(spawner.house_publications().is_empty(), "absent file");
+        fs::create_dir_all(layout.house_publications_file().parent().unwrap()).unwrap();
+        fs::write(layout.house_publications_file(), "welcome house\n").unwrap();
+        assert_eq!(spawner.house_publications().get("welcome").map(String::as_str), Some("house"));
     }
 
     #[test]

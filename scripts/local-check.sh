@@ -496,7 +496,7 @@ fi
 
 [[ -d "$seed" && ! -L "$seed" && -d "$seed/packages" && ! -L "$seed/packages" ]] ||
   die "dependency seed is absent or unsafe"
-[[ -z "$(find "$seed" ! -type l -perm +222 -print -quit)" ]] || die "dependency seed is writable"
+[[ -z "$(find "$seed" ! -type l \( -perm -0200 -o -perm -0020 -o -perm -0002 \) -print -quit)" ]] || die "dependency seed is writable"
 [[ "$(cat "$seed/.complete")" == "$seed_key" ]] || die "dependency seed completion marker is invalid"
 [[ "$(sha256_file "$seed/dependency-revisions.tsv")" == "$dependency_manifest_sha" ]] ||
   die "dependency seed revision manifest identity is invalid"
@@ -683,7 +683,7 @@ dependency_integrity_exit=0
   else
     seed_identity_status=1
   fi
-  if [[ -z "$(find "$seed" ! -type l -perm +222 -print -quit)" ]]; then
+  if [[ -z "$(find "$seed" ! -type l \( -perm -0200 -o -perm -0020 -o -perm -0002 \) -print -quit)" ]]; then
     seed_permissions_status=0
   else
     seed_permissions_status=1

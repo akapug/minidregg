@@ -1,4 +1,4 @@
-::  market.hoon: order matching v1, MUD §2.8
+::  market.hoon: order matching v1, docs/MUD.md §2.8
 ::  TEXT, NOT COMPILED: pseudocode for the NOCK lanes. Sample layout and key convention: programs/README.md.
 ::
 ::  sample   [ctx=[height=@ caller=@ room=@ now=@] inv=(list [key=@t val=@s])]
@@ -16,7 +16,7 @@
 ::    3 seq      field seq monotone
 ::    4..7 slot  side in {0,1,2}; open in {0,1}; leSlots field oK-filled field oK-qty; filled monotone unless
 ::               the slot is reused (who changed) or emptied (side 0)
-::    after K-BOOK-SLOTS (MUD §2.8): every out-transfer joined to an in-transfer,
+::    after K-BOOK-SLOTS (docs/MUD.md §2.8): every out-transfer joined to an in-transfer,
 ::      not (slot joint/target/{BOOK}/balance/{A_MKT}/{ASSET}/delta <= -(held+1))
 ::
 ::  v1 rule: price-time priority, one pass. A new sell at price p fills against open buys with price >= p,

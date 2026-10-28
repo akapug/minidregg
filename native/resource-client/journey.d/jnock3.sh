@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# J-NOCK-3 (NOCK.md K-RAN): the kernel checks a run by re-executing it.
+# J-NOCK-3 (docs/NOCK.md §2.4, K-RAN): the kernel checks a run by re-executing it.
 #
 # Journey hook contract (journey.sh header): HOST, MINI, STORE, VERIFIER and
 # JOURNEY_STEP_DIR exported; it bootstraps its OWN fresh Store and service under

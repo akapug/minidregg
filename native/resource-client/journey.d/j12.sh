@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# J12 (PLACE §2.2, §2.4, §5 item 1): two friends co-write a document through
+# J12 (docs/PLACE.md §2.2, §2.4, §5 item 1): two friends co-write a document through
 # `mini shell`, on this journey's live Store.
 #
 # Every friend is enrolled and provisioned the way OPERATOR.md does it (the
@@ -257,7 +257,7 @@ check J12 "task 0 is done (field 2 = 2) and owned by bob (field 3)" \
 # (control: the forward moves m1 and m2 were admitted)
 ok J12 bob "board move m3 tasks 0 done todo"
 refused J12 bob "submit m3" law-denied "$LAWPLAN"
-# a declared cell is one unbounded store (DATAMODEL B1): task 1's owner
+# a declared cell is one unbounded store (docs/DATAMODEL.md §5 B1): task 1's owner
 # (field 5) is a fifth entry and is admitted (the page era refused it, overflow)
 ok J12 alice "board add t1 tasks 1"
 ok J12 alice "submit t1"

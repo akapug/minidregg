@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# journey.d/jchan-epoch.sh — a channel domain's epoch records on the kernel (CH-EPOCH, CHANNELS.md
+# journey.d/jchan-epoch.sh — a channel domain's epoch records on the kernel (CH-EPOCH, docs/CHANNELS.md
 # §2.4 / §9 row 8), on the journey's fresh Store after J5.
 #
 # A (the sponsor) is the domain's relay and sequencer. A opens the room `chroom` and births the

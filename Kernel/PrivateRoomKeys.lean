@@ -1,5 +1,5 @@
 /-
-# Kernel.PrivateRoomKeys -- the `keys` cell of a private room (PRIVACY §3.1, row 7)
+# Kernel.PrivateRoomKeys -- the `keys` cell of a private room (docs/PRIVATE-CELL.md)
 
 A private room `R` keeps its room key `k_R^e` off the node: each member's client
 holds it, and the node holds only WRAPS -- `k_R^e` encrypted to one member's
@@ -56,16 +56,16 @@ outcome is stated as a model below (`rotation_preserves_room_access`, with
 its poles): a theorem of the model, not of the Rust.
 
 Every member may read every wrap and every record. That is the cheaper choice
-and it is the deployed one: per-address observation is not on this tree (PRIVACY
-row 10, K-FIELDS-OBSERVE), and a wrap is useless without its member's X25519
+and it is the deployed one: per-address observation (K-FIELDS-OBSERVE) is not on this
+tree, and a wrap is useless without its member's X25519
 secret -- its key-encryption key is cSHAKE256 of the X25519 shared secret, the
 room, the epoch, the member, the ephemeral key and the member's public key, so
 it opens for exactly one secret. That last sentence is a cryptographic
 assumption (X25519 + XChaCha20-Poly1305), stated, not proved here.
 
 `no_wrap_for_kicked` (a kicked member gets no wrap at the next epoch) is a
-client invariant; `future_unreadable` is IND-CPA of the primitives. Both are
-said in PRIVACY §3.1; neither is dressed as a theorem.
+client invariant; `future_unreadable` is IND-CPA of the primitives. Neither is
+dressed as a theorem.
 
 The deployed law is the JSON template
 `native/resource-client/templates/room/private/law.keys.json` (the client installs that

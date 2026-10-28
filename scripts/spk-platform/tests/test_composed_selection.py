@@ -51,7 +51,7 @@ def run(program, args):
 
 SELECTION = {"evidence": "/w/inputs/evidence", "grains": "/var/lib/mini-spk-worlds/0123456789abcdef", "broker": "/x/broker.sock",
              "spk": "/cache/ethercalc.spk", "sha": "93bd2c296692368252ea7b5610a7930db60e5b283340a60b6be8a812c7e309ee",
-             "owner": "member-1", "member": "member-2", "op": "jd3"}
+             "owner": "member-1", "member": "member-2", "op": "jd3", "sizeClass": "M"}
 CONNECTOR = {"subject": "member-3", "host": "connector.grains.test:8443", "ca": "/w/front/ca.pem"}
 
 

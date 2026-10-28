@@ -187,12 +187,16 @@ while IFS= read -r name; do
   connector_name=$name; break
 done <<<"$names"
 [[ -n $connector_name ]] || connector_reasons+=("connectorParticipantRequired: no inventory member is independent of the app owner $owner, session member $member, the operator custody ($management_subject) and the churned member $churned; a world with at least $((n > 4 ? n : 4)) hosted members is needed (jworld-scratch MEMBERS)")
-spk=${MINI_TEST_SPK:-$("$here/fetch-test-spk.sh")}
+# The app is the qualified EtherCalc: its csv export is what the connector phase captures, so the apps
+# and connector phases share one app (deputy's ruling, 2026-10-28). MINI_TEST_SPK overrides the path.
+spk=${MINI_TEST_SPK:-$(TEST_SPK=ethercalc "$here/fetch-test-spk.sh")}
 spk_sha=$(sha256sum "$spk" | cut -d ' ' -f1)
 # The connector's capture is EtherCalc's `_/SHEET/csv` export under its signed read-only role 1
 # (app-document.md; native/resource-client/src/app_document.rs). The qualified EtherCalc package is
 # docs/evidence/2026-09-27-spk-app-selection's (SHA-256 93bd2c29..., 11,983,992 B).
 ethercalc_sha=93bd2c296692368252ea7b5610a7930db60e5b283340a60b6be8a812c7e309ee
+# The size class the 2026-10-01 SPK survey measured: EtherCalc M, the others S.
+size_class=S; [[ $spk_sha != "$ethercalc_sha" ]] || size_class=M
 [[ $spk_sha == "$ethercalc_sha" ]] || connector_reasons+=("connectorPackageRequired: the app is $(basename "$spk") ($spk_sha), the connector captures EtherCalc's _/SHEET/csv export and needs the qualified EtherCalc SPK ($ethercalc_sha, market package 9b3b76152e7d8db9f54dba7455ea9239) as the app (MINI_TEST_SPK); the apps and connector phases share one app: harness (composed-inputs package choice, with the apps-phase owner)")
 # The capture fetches https://HOST/_/SHEET/csv with verified TLS through ordinary DNS (no --resolve), so
 # the world must front its grain routes over https and declare it: WORLD-IDENTITY.json
@@ -218,7 +222,7 @@ else
   for reason in "${connector_reasons[@]}"; do unavailable CONNECTOR "$reason"; done
 fi
 # ── the selection: owner, members, package, unused ids, and the connector when the world has one ───
-jq -n -f "$here/composed-selection.jq" --arg evidence "$out/evidence" --arg grains "$grains" --arg broker "$broker" --arg spk "$spk" --arg sha "$spk_sha" \
+jq -n -f "$here/composed-selection.jq" --arg evidence "$out/evidence" --arg grains "$grains" --arg broker "$broker" --arg spk "$spk" --arg sha "$spk_sha" --arg sizeClass "$size_class" \
   --arg owner "$owner" --arg member "$member" --arg op "$op" --argjson connector "$connector" >"$out/app-selection.json"
 python3 -I -c 'import importlib.util,json,sys; s=importlib.util.spec_from_file_location("i",sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); m.selection_shape(json.load(open(sys.argv[2])))' \
   "$here/same-store-inputs.py" "$out/app-selection.json" || refuse "the written selection does not satisfy same-store-inputs.py selection_shape"

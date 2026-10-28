@@ -478,7 +478,7 @@ fn room_plan(session: &Session, w: &[String], _u: &str) -> std::result::Result<P
     })
 }
 
-/// The board law (PLACE §2.2): task `n` has its state in field `2n+2`
+/// The board law (docs/PLACE.md §2.2): task `n` has its state in field `2n+2`
 /// (0 todo, 1 doing, 2 done) and its owner in field `2n+3`. A state never
 /// goes backwards (a present delta is never negative; a field created in this
 /// turn has no delta) and an owner, once taken, is never replaced. The law
@@ -570,7 +570,7 @@ fn enc_argument(session: &Session, word: &str) -> std::result::Result<String, St
 /// The birth options of a `create` or `doc new` line, removed from it:
 /// `--in ROOM` (born in the room a reference names; the Host's birth gate
 /// decides) and, on `create`, `--owner SUBJECT` (born owned by another
-/// subject: a room founder birthing a member's stream, PLACE §2.3 (a)). Each
+/// subject: a room founder birthing a member's stream, docs/PLACE.md §2.3 (a)). Each
 /// is a pair of words after the name, in any order.
 #[derive(Debug, Default, PartialEq)]
 struct Birth {

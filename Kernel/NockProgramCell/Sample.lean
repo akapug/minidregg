@@ -1,7 +1,7 @@
 /-
 # Kernel.NockProgramCell.Sample — the program's sample
 
-`sampleOf` is NOCK §2.3's subject: the kernel, not the runner, builds the noun
+`sampleOf` is docs/NOCK.md §2.3's sample: the kernel, not the runner, builds the noun
 a program is slammed with, from the command's projected participant slots and
 the program's `Abi`. Layout (the one `nock-run --sample-json` builds, so a runner
 and the kernel agree byte for byte):
@@ -17,7 +17,7 @@ same in both, so one program runs under either.
 
 The target entries are the command's target cell ids in the signed target
 order: two sheets given to one program yield different samples
-(`sampleOf_targets_injective`), which the §2.3 draft could not tell apart. The
+(`sampleOf_targets_injective`), which the design's address-sorted sample could not tell apart. The
 slot entries follow `Abi.sample` in order; a missing slot, or a negative value in
 a `nat` slot, refuses (`none`) rather than defaulting — absence is not zero.
 
@@ -309,7 +309,7 @@ def contextOf : ContextMode → Context → Context
   | .live, ctx => ctx
   | .pinned, _ => ⟨0, 0, 0⟩
 
-/-! ## The sample record (evaluator-generic, EVAL §1.1) and Nock's encoding of it
+/-! ## The sample record (evaluator-generic, docs/EVAL.md §1.1) and Nock's encoding of it
 
 `Sample` is what the kernel hands ANY evaluator: the context the ABI lets the program
 see (`contextOf`: the kernel's own under `live`, `[0 0 0]` under `pinned`), the command's
@@ -769,7 +769,7 @@ theorem encodeSample_keys_injective {layout layout' : List SampleSlot} {s s' : S
       exact ⟨contextNoun_injective hc, targetEntries_injective ht,
         encodeSlots_keys nulFree nulFree' hs hs'⟩
 
-/-- **`sampleOf_injective`** (NOCK §3.3) — EVAL §1.1's corollary: the generic record is
+/-- **`sampleOf_injective`** (docs/NOCK.md §3.3) — docs/EVAL.md §1.1's corollary: the generic record is
 injective in what it reads (`sampleRecord_injective`) and Nock's encoding is injective
 under the layout (`encodeSample_injective`). -/
 theorem sampleOf_injective {abi : Abi} {ctx ctx' : Context} {targets targets' : List Nat}

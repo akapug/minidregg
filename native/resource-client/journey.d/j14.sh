@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# journey.d/j14.sh — P-HERMES-ROOM (PLACE §2.7 J14, §2.10 budgets): Hermes as
+# journey.d/j14.sh — P-HERMES-ROOM (docs/PLACE.md §2.7 J14, §2.10 budgets): Hermes as
 # librarian.
 #
 # On this journey's live Store (after J5). Friends are enrolled, provisioned
@@ -45,12 +45,20 @@
 #             performed and paid; no operator path in any brief the model was shown.
 #   budget    more says and a question: a digest, then the next turn is refused
 #             bookRefused at plan; Hermes says "out of budget"; `topup` resumes.
+#   house     lab as the house's shared room (the tour's Hermes step): carl and dave
+#             join as the door joins every member (the founder's default invite);
+#             carl's `summon` says Hermes is already there and costs him nothing;
+#             carl asks, Hermes answers him in its own pass, and dave's own tail
+#             shows that reply.
 #   dismiss   alice: `dismiss lab` revokes; Hermes returns the remainder; its
 #             read of lab is refused.
 #   balances  Hermes's account: 100 + topup - (10 + fee)*turns - returned - fee = 0;
 #             the till holds 10*turns, one `hermes` ledger entry per turn.
 #   audit     stop, cold audit re-admits every record (exit 0), serve; Hermes
 #             sends nothing more.
+#   resummon  alice summons again: a new budget account; the controller config is
+#             re-provisioned with it and restarted, the second hand-off dispatched;
+#             bob asks and Hermes answers from the new account on a fresh state.
 #
 # Hook contract: journey.sh (executed). Needs GRAIN_RUNTIME (grain-runtime,
 # with grain-provider-bridge beside it or GRAIN_PROVIDER_BRIDGE), TEST_PROVIDER
@@ -383,10 +391,11 @@ printf '%s\n' '{"type":"all","predicates":[]}' >"$SD/permit-all.json"
 
 # ------------------------------------------------ friends and Hermes: enroll, provision, init
 declare -A SUBJ FUND
-FUND[alice]=5000; FUND[bob]=100; FUND[hermes]=0; FUND[con]=100
+FUND[alice]=5000; FUND[bob]=100; FUND[hermes]=0; FUND[con]=100; FUND[carl]=100; FUND[dave]=100
 # Two Tally births escrow seven envelope prices each.
 [ -z "$J14_AWAIT" ] || FUND[alice]=${J14_AWAIT_FUNDING:-200000000}
-FRIENDS="alice bob hermes"; [ -n "$J14_TIER" ] && FRIENDS="$FRIENDS con"
+# carl and dave are strangers the door enrols into the shared house room (step house).
+FRIENDS="alice bob hermes"; [ -n "$J14_TIER" ] && FRIENDS="$FRIENDS con" || FRIENDS="$FRIENDS carl dave"
 for f in $FRIENDS; do
   mkdir -p -m 700 "$H/$f"
   ok setup "$f" "keygen mini.key"
@@ -725,6 +734,7 @@ operator hermes "DISPATCH: the sealed hand-off into Hermes's registered inbox (v
   "$MINI" hermes-handoff --action dispatch --registration "$REG" --bundle "$OUTBOX/handoff.json" --socket "$SOCKET"
 RINBOX=$(jq -r '.inbox // empty' "$(find "$H/hermes" -name current.json | head -1)" 2>/dev/null)
 checkp hermes "the delivered assignment inbox is current ($RINBOX)" test -d "$RINBOX"
+RINBOX0=$RINBOX
 [ "$FAILED" = 0 ] || finish
 
 # ------------------------------------------------ attach 1: two docs, three things said
@@ -1020,6 +1030,29 @@ RT_CATALOGUE='"mini_room_ls","mini_room_status","mini_stream_tail","mini_say","m
 checkp redteam "every offer to the model was the room catalogue${J14_TOOLS:+ (and the granted sandbox tools)}" \
   sh -c "jq -e -s '[.[].tools[] | ltrimstr(\"mcp__mini_grain__\")] | unique - [$RT_CATALOGUE] | length == 0' '$SHOWN' >/dev/null"
 
+# ------------------------------------------------ house: the shared room every member asks Hermes in
+if [ -z "$J14_TIER" ]; then
+  C=${SUBJ[carl]}
+  for f in carl dave; do
+    ok house alice "chat invite lab ${SUBJ[$f]} $f"
+    operator house "DELIVER: $f's invitation (the door's room step hands it to HOME/requests)" \
+      install_private 0600 "$H/alice/chat/invites/lab-${SUBJ[$f]}.json" "$H/$f/requests/lab-invite.json"
+    ok house "$f" "chat join lab @lab-invite.json"
+  done
+  C0=$(credit_of carl)
+  ok house carl "summon lab as librarian"
+  checkp house "a member's summon says Hermes is already the room's resident" grep -q "already this room's resident" "$OUT"
+  check house "carl's summon funded nothing (his signed balance)" "$C0" "$(credit_of carl)"
+  ok house carl "ask lab what changed since $H0"
+  hermes house "answers carl, a member who did not summon it"
+  own_pass house "$C"
+  ok house dave "tail --in lab --json -n 200"
+  cp "$OUT" "$SD/tail-house-dave.jsonl"
+  CASK=$(jq -s --arg h "$HS" --arg c "$C" '[.[] | select(.author == $c and .to == $h)] | .[-1].n // 0' "$SD/tail-house-dave.jsonl")
+  checkp house "dave's own tail shows Hermes's answer to carl (entry #$CASK), addressed to carl" \
+    jq -s -e --arg h "$HS" --arg c "$C" --argjson n "${CASK:-0}" 'any(.[]; .author == $h and .re == $n and .to == $c and .kind == "say")' "$SD/tail-house-dave.jsonl"
+fi
+
 # ------------------------------------------------ the program document (after the resident rows, so a
 # document-rendering row cannot hide the resident run)
 # the program is a document members read and the founder edits
@@ -1099,6 +1132,43 @@ cp "$OUT" "$SD/tail-final.txt"
 # Hermes is dismissed by now, so the tail names it by its subject's short
 # form (s…LAST6), not by its member name.
 checkp audit "bob's tail after the audit shows Hermes's entries" grep -q "$HS\|hermes\|s…${HS: -6}" "$OUT"
+
+if [ -z "$J14_TIER" ]; then
+  # ---------------------------------------------- resummon: the founder summons again after a dismissal
+  # The new assignment funds a new budget account (its name is per assignment);
+  # the operator re-provisions the controller config with it, restarts the
+  # controller, dispatches the new hand-off, and the resident runs on a fresh
+  # state for the new assignment (install-hermes `resummon`).
+  ok resummon alice "summon lab as librarian --budget $BUDGET"
+  OUTBOX2=$(sed -n 's/.*hand-off in //p' "$OUT" | tail -1)
+  ACCT2=$(jq -r .account.name "$OUTBOX2/summon-lab.json" 2>/dev/null)
+  checkp resummon "the second assignment funds a new budget account ($ACCT2, was $ACCT)" sh -c "[ -n '$ACCT2' ] && [ '$ACCT2' != '$ACCT' ] && [ '$ACCT2' != null ]"
+  operator resummon "STOP: the controller (its config names the dismissed assignment's account)" systemctl --user stop "$UNIT.service"
+  operator resummon "PROVISION: the controller config names the new budget account $ACCT2" \
+    sh -c "jq --arg a '$ACCT2' '.toolTask.room.account = \$a' '$G/controller.json' >'$G/controller.json.new' && chmod 600 '$G/controller.json.new' && mv '$G/controller.json.new' '$G/controller.json'"
+  rm -f "$G/state/control.sock"
+  operator resummon "CONTROLLER: start $UNIT again" \
+    systemd-run --user --unit="$UNIT" --description="j14:$SD" \
+      --setenv=MINI_GRAIN_CONTROLLER_MANAGER=user --setenv=MINI_GRAIN_WORKER_MANAGER=user \
+      --setenv="MINI_GRAIN_CONTROLLER_UNIT=$UNIT.service" \
+      --property=Restart=on-failure --property=RestartSec=2s --property=KillMode=control-group \
+      --property=RuntimeMaxSec=7200s --property="StandardError=append:$SD/controller.stderr" \
+      --setenv="MINI_TRACE=$SD/trace-controller.jsonl" \
+      "$GRAIN_RUNTIME" serve "$G/controller.json"
+  for i in $(seq 1 600); do [ -S "$G/state/control.sock" ] && break; sleep 0.1; done
+  checkp resummon "the controller listens again" test -S "$G/state/control.sock"
+  operator resummon "DISPATCH: the second sealed hand-off" \
+    "$MINI" hermes-handoff --action dispatch --registration "$REG" --bundle "$OUTBOX2/handoff.json" --socket "$SOCKET"
+  CUR=$(find "$H/hermes" -name current.json | head -1)
+  RINBOX=$(jq -r '.inbox // empty' "$CUR" 2>/dev/null)
+  RSTATE=$G/state/resident-a$(jq -r '.assignment // "none"' "$CUR" 2>/dev/null)
+  checkp resummon "the current assignment inbox is the new one ($RINBOX)" sh -c "[ -d '$RINBOX' ] && [ '$RINBOX' != '$RINBOX0' ]"
+  ok resummon bob "ask lab what changed since $H0"
+  hermes resummon "answers bob under the second assignment"
+  own_pass resummon "$B"
+  check resummon "the pass paid from the new account (Hermes's signed read: below $BUDGET)" 1 \
+    "$( b=$(credit_of hermes "$ACCT2"); [ -n "$b" ] && [ "$b" -lt "$BUDGET" ] && echo 1 || echo 0 )"
+fi
 
 
 if [ -n "$J14_TIER" ]; then

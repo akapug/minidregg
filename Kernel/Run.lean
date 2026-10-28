@@ -1,7 +1,7 @@
 /-
 # Kernel.Run — the kernel checks a run by re-executing it, on any registered evaluator
 
-(K-RAN, NOCK §2.4–§2.5; made generic by K-EVAL E2, EVAL §1.4.) A runner submits
+(K-RAN, docs/NOCK.md §2.4–§2.5; made generic by K-EVAL E2, docs/EVAL.md §1.4.) A runner submits
 field writes together with a `RunClaim`: the program it ran, the sample it ran on
 (the evaluator's input bytes), the output it got (the evaluator's output bytes) and
 the metered step count. The program record names its evaluator
@@ -328,7 +328,7 @@ def dryRun (disabled : List Digest) (domain : Digest)
 
 /-! ## Theorems, once for every evaluator -/
 
-/-- **`checkRun_sound`** (NOCK §3.3, over any evaluator): an accepted claim names the
+/-- **`checkRun_sound`** (docs/NOCK.md §3.3, over any evaluator): an accepted claim names the
 kernel's own sample; the writes are EXACTLY the writes the program's product names,
 and that product is a derivation (`E.Spec`) of the kernel's run; the steps are the
 oracle's and within the ABI fuel. -/
@@ -395,7 +395,7 @@ theorem checkRun_sound {E : Evaluator} {program : Program} {libraries : List Pro
               rw [List.all_eq_true] at hwr hdw
               exact ⟨fun m => by simpa using hwr w m, fun m => by simpa using hdw w m⟩
 
-/-- **`no_accepted_of_output_mismatch`** (NOCK §3.3, the T8 statement, over any
+/-- **`no_accepted_of_output_mismatch`** (docs/NOCK.md §3.3, the T8 statement, over any
 evaluator): a successful evaluation authorizes nothing by itself. If the command's
 writes differ from the writes the program's actual product names, no claim —
 whatever output, steps or sample it asserts — is accepted. -/

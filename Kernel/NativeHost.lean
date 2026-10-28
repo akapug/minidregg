@@ -54,7 +54,7 @@ set_option autoImplicit false
 attribute [local irreducible] Config.profile CanonicalRuntimeProfile.Profile.compilerProfile
 
 /-- Ordinary open only reads and validates; it never installs a missing seed.
-It trusts the host's own MAC'd checkpoint and log (DATAMODEL §6 Q1): the latest
+It trusts the host's own MAC'd checkpoint and log (docs/DATAMODEL.md §6 Q1): the latest
 checkpoint is materialized and only the records after it are replayed through
 the shared executor (`DurableCheckpoint.resume`, sound by `resume_sound`). No
 signed ingress is re-admitted here; `audit` does that. -/
@@ -1200,7 +1200,7 @@ def receiptRoot (config : Config) (durable : Durable) (index : Nat) : Digest :=
     | _ => worldRoot config ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩
 
 /-- Every root the log keeps is its prefix's specification root. This is the
-trust the host places in its own past execution under its MAC key (DATAMODEL
+trust the host places in its own past execution under its MAC key (docs/DATAMODEL.md
 §6 Q1 (ii)), the trust its checkpoints already carry: `load` reads the roots
 from MAC-verified tags and refuses a head root that differs from the replayed
 one; `extend` keeps the root it served (`RootLogHonest.extend`). -/
@@ -1314,7 +1314,7 @@ the cache; the selection is `findIdx?`'s, by `Loaded.firstIndex_eq`. -/
 
 #assert_axioms historicalReceipt_eq_cached
 
-/-- **Receipt binding (DATAMODEL §3.4).**  A sealed receipt names its
+/-- **Receipt binding (docs/DATAMODEL.md §3.4).**  A sealed receipt names its
 transaction's accepted prefix, and carries exactly that prefix's world root and
 height. -/
 theorem historicalReceipt_bound (config : Config) (durable : Durable)
@@ -1816,7 +1816,7 @@ so a payee cannot read who paid it from any topic of its own. Its ledger is a
 read of the accepted journal: every fleet turn whose transfer names the
 observed account as its destination, at the height that record took, released
 behind a current signed observation of that account (the same gate as poll and
-head). A room's concierge renews member windows from this view (PLACE §2.10:
+head). A room's concierge renews member windows from this view (docs/PLACE.md §2.10:
 the room account's `renew` ledger). It is a read; nothing is admitted here. -/
 
 /-- One accepted fleet turn that paid the observed account. `topic` and
