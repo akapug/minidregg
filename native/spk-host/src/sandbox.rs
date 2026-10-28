@@ -3,6 +3,7 @@
 //! The caller must first obtain Mini's app-lifecycle admission. This module does
 //! not decide whether an app may start or whether an RPC request may be delivered.
 
+use crate::io_context::IoContext;
 use std::ffi::CString;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
@@ -143,7 +144,7 @@ pub(crate) fn app_output(path: &Path) -> io::Result<(OwnedFd, AppOutput)> {
         .create_new(true)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(path)?;
+        .open(&path).ctx("open", &path)?;
     let mut pipe = [0_i32; 2];
     if unsafe { libc::pipe2(pipe.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
         return Err(io::Error::last_os_error());
