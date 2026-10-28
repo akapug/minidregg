@@ -44,29 +44,27 @@ platform cell (lane/lean-audit-c), and carries M2, `Intent.credit` and the refil
 on main. The integrator (a34bdb948f1cf4796) lands one green sha after the module conversion.
 The auditor is af7a93e7b8ba729d4; passes 16–23 are on lane/audit-platform.
 
-### Green
+### Green: the one landing sha
 
-- **lane/lean-audit-c 82c17c448** is green warm on dregg-ref (build 6, closure-lock, peak
-  23.7 GB) and cold on hbox. The targets were the twenty modules in
-  /build/lanes/lean-audit-c-build.sh, plus the lifetime-grant and share-issue Host files and
-  tests/lean/LifetimeGrantSourceAdversary.lean (lane-check). The integrator has it, held.
-- **lane/lean-audit-c-m2, tip 31b3db1c8**, is green on hbox at 1a29e71af, on top of 82c17c448's
-  tree (build-m2d). Targets: the same plus Kernel.MeterRefillReceiver, Kernel.NativeHostReplay
-  and Assurance.DeployedCredentialLifecycle. 3fa536765 adds the World refill pole, built per
-  module.
-
-### Umbrella on lane + M2 (hbox, warm)
-
-Built: `lake build Minidregg Fixtures ObjectiveProofs CensusChecks +Host.Main:leanArts
-+Host.ClientConsentSession:leanArts` (build-umb.sh) over lane/lean-audit-c cdda94d42 + M2
-31b3db1c8. Remaining reds, none of them this lane's to fix before the merge:
-- Fixtures.NativeAcceptedFixture and NativeDocWriteFixture: recorded runs, stale under M2's turn
-  digest and frames. They are re-recorded with the regen.
-- Compiler.PersistedCodecTagCensus: the tag set is equal (refill tags registered, 31b3db1c8).
-  The shape pins move (DURABLE.IMAGE, DURABLE.SEED and identities hashing through them). That is
-  the integrator's codec-shapes regen.
-- Assurance.StoryLaw: a `#guard_msgs` namespace pin at the base's main (43074c134), not from
-  this lane. Re-check after merging main.
+**lane/lean-audit-c 18ade1e4a** is sent to the integrator for landing. It is the module conversion
+(main b26630168) merged with lean-audit-c and M2 (lane/lean-audit-c-m2 31b3db1c8).
+- Built cold on hbox (/othersys/lanes/lean-audit-c/src, build-umb.sh, SWARM_MEM_MAX=64G; 40G
+  OOMed): `Minidregg Fixtures ObjectiveProofs CensusChecks +Host.Main:leanArts
+  +Host.ClientConsentSession:leanArts`.
+- Everything elaborates except four reds, none of them this lane's to fix:
+  - **the codec shape pins:** the integrator's regen, which is the single epoch move;
+  - **NativeAcceptedFixture and NativeDocWriteFixture:** re-record from the candidate at this sha;
+  - **Assurance.StoryLaw:486:** a namespace pin, in files this lane does not touch; reported.
+- Merge decisions:
+  - **Headers:** rebuilt from the lane's plain imports and re-converted by
+    lean-modularize.py. Against main, each differs by exactly the lane's import.
+  - **SourceAgreementJson:** thin-birth's `BirthEpochs`/`birthAt` combined with `BirthTerms`
+    (owner budget, lifetime, fee quote). Thin consent re-authors at the terms the draft carries
+    (`BirthCoordinates.ownerBudget/lifetime/fee`). The auditor accepted this, on condition the
+    consent display renders the terms: 42fb35d29 `birthJson` "terms", asserted by jpriv2 row 20.
+  - **DURABLE.LOG frame byte 4:** A11 had used byte 3 for the subject-only record.
+    `v3_record_refused` was added.
+  - **NativeThinBirth's pins lemmas** take the platform record.
 
 ### Item 7's plan poles (audit pass 24): landed on the branch
 
@@ -114,29 +112,6 @@ Built: `lake build Minidregg Fixtures ObjectiveProofs CensusChecks +Host.Main:le
   edit as cdda94d42). Expect overlap with this lane in
   Host/SourceAgreementJson.lean (`birthCurrent`) and Host/HostOperations.lean when merging the
   converted main.
-
-### Order with the module conversion (agreed with iter-speed a0fd127abfb9aac75; the integrator confirms)
-
-1. The conversion lands on main (iter-speed re-derives it on main after the A11 candidate).
-2. Merge it into lane/lean-audit-c. Header conflicts come in the seven files whose imports
-   this lane changed: the four completion admissions, ParticipantFactoryProvisioning,
-   NativeHostContext and ResourceBirthPolicyController. The two Host lifecycle operators may
-   conflict too (main's storeIdentity change). Take the lane's side of the HEADER hunks only and
-   merge bodies. Then `python3 scripts/lean-modularize.py <those files>
-   Kernel/CompletionCustodianKey.lean`. Never hand-edit a converted header.
-3. Merge lane/lean-audit-c-m2 on top (the only conflict is this file). Modularize
-   Kernel/MeterRefillReceiver.lean and NativeHostReplay. In converted NativeHostReplay every
-   `Derived` literal names each defaulted field (`… := none`), so M2's `meterRefill` literal must
-   too (Lean 4.30 private-ctor-plus-defaults bug).
-4. Check each changed file and its direct importers with `scripts/pipeline/lane-check` on a box
-   tree. A hidden-body failure means: run `scripts/module-hidden-bodies.sh FILE`, add its lines to
-   PER_FILE in lean-modularize.py, and re-convert.
-5. Build the merged tree on a box and send the integrator ONE green sha. It lands with the
-   integrator's codec-shapes regen, in the conversion's single re-genesis (one StoreEpoch move).
-   M2 moves, all in that one re-genesis:
-   - durable log frame v3 and DREGG.DURABLE.IMAGE v3 (credit in IntentRecord);
-   - the turn-digest preimage (`turnFields` + DeployedTurnCompact carry `credit`);
-   - the representsCheck meter comparison.
 
 ### Box trees
 
