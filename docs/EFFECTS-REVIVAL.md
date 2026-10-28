@@ -74,8 +74,8 @@ so it belongs to the controller once:
 |---|---|---|
 | `computeTarget` arm | yes | `sem : Ctx → O → State → Except R (List Prim)` |
 | `targetPatch` arm | yes, a twin of the above | nothing: the descriptor `sem` emits is the patch (`emitted`) |
-| blinding ratchet appended in both | yes (content, scalar) | `seal`, `sealed` |
-| `targetField`, `targetAmount`, `targetRatchet` | yes | `field`, `amount`, `sealed` |
+| blinding ratchet appended in both | yes (content, scalar) | `rotate`, `rotated` |
+| `targetField`, `targetAmount`, `targetRatchet` | yes | `field`, `amount`, `rotated` |
 | `targetFullFootprint`/`targetFootprint` | no: `footprintOf` over the three above | derived |
 | `payloadVerb` | yes | `verb` (the authority demand) |
 | `targetProjection` | yes | `view` (what the cell's law reads) |
@@ -94,8 +94,8 @@ so it belongs to the controller once:
   `Framed`.  `storeSubstrate L` is the deployed one (`Theory.Store.Op`, guard
   `Op.Enabled`, footprint `writeAddress?`).  The Book's posting algebra is the second one,
   for transfer.
-* `EffectSpec Ctx S O R`: `opStream`, `refusalName`, `accepts`, `version`, `sem`, `seal`,
-  `sealed`, `field`, `amount`, `frame`, `verb`, `view`.  Derived from it: `emitted` (the
+* `EffectSpec Ctx S O R`: `opStream`, `refusalName`, `accepts`, `version`, `sem`, `rotate`,
+  `rotated`, `field`, `amount`, `frame`, `verb`, `view`.  Derived from it: `emitted` (the
   full descriptor) and `exec` (sem, then a loud frame check `outOfFrame`, then the replay
   with every guard, loud `guardFailed`).  `Complete` is its proof obligation: neither
   dispatcher refusal is reachable, so every refusal is one the declaration names.
@@ -271,19 +271,19 @@ closure (law 5) in the commit after it elaborates.
 - Audit: **CLEARED.**  The auditor (`af7a93e7b8ba729d4`) wrote pass 19 on
   `lane/audit-platform` (`3fc181cae`) and an addendum (`260fceaed`).  It accepted
   `3dac92b91`.
-- Elaboration: **PENDING.**  The integrator (`a34bdb948f1cf4796`) runs
-  `swarm-build lake lean Effects/Revival/Statements.lean` in `/build/lanes/integ8/src` on
-  dregg-build after its codec regen (A7d) ends, and sends the errors or a clean result.
-  Do not run anything in that tree while the regen runs.  A warm copy reaches dregg-ref
-  through infra later.  Never run Lean on the Mac, and never start a cold closure.  Fix
-  elaboration errors without changing what a statement means; if a meaning has to change,
-  send it back to the auditor.
+- Elaboration: **CLEARED** (rc=0, no diagnostics, 22 s).  It ran in dregg-ref
+  `/build/minidregg` (infra's warm copy of main `da4a7645e`) under `/build/lock/closure.lock`,
+  through the script `/build/lanes/effects-revival-scratch/check.sh`, which writes its own
+  PID file and puts `/build/home-lanes/.elan/bin` on PATH.  It checks the file copied to
+  that directory, so infra's tree is never edited.  The first check found two syntax
+  problems, both fixed with no change in meaning: `seal` is a Lean keyword (the fields are
+  now `rotate`/`rotated`), and `_` cannot be a binder in a `where` field (those fields are
+  now `fun _ => …`).  Never run Lean on the Mac, and never start a cold closure.
 
 **Branch.**  `lane/effects-revival` in the worktree
 `/Users/ember/dev/minidregg-lanes/effects-revival`.  Main has the statements at
-`f3361d17`.  The tip `8bf02d6b7` is docs only.  `Effects.lean` does NOT import
-`Effects/Revival/Statements.lean`; add that import in the first commit after it
-elaborates (law 5).
+`f3361d17`.  `Effects.lean` now imports `Effects.Revival.Statements` (law 5: it is in the
+CI closure).
 
 **Keystones and their witnesses** (all `def … : Prop` in `Statements.lean`; nothing proved):
 
