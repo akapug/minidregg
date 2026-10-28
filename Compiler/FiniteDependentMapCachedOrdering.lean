@@ -53,6 +53,10 @@ theorem lexLt_iff : ∀ (a b : List Nat), lexLt a b = true ↔ a < b
         · subst e; simp
         · simp [h, e]
 
+/-- Any key order decides `<` by its own instance; byte keys override it below. -/
+instance (priority := low) {O : Type} [LinearOrder O] : FastKeyOrder O :=
+  ⟨fun a b => decide (a < b), fun _ _ => decide_eq_true_iff⟩
+
 instance : FastKeyOrder (List Nat) := ⟨lexLt, lexLt_iff⟩
 
 /-- `LinearOrder.lift'` along an injective key, deciding only on keys: `<` is one
