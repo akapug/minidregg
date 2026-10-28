@@ -74,7 +74,7 @@ and hermes ea8a991e (e2374f120, the await bridge; any full build from main >= d3
 the coordinator at once; L4b runs J14_TOOLS and J14_AWAIT as one run against it (3315a908 refuses the v8 genesis). Unit
 mini-grain-controller@9870001 is free (it was L4's orphan). Also after A3's tip: e7958d3b9 (NativeHost.birthRejection/birthReason arms for
 f2010f574's platformUnavailable/platformStale; A3 is expected to red at Kernel.NativeHost and its dependents,
-elaboration of the fix pending NativeHostReplay.olean). L1c (lean-audit-c a281e53b8, e59846239; deletes those two
+elaboration of the fix pending NativeHostReplay.olean). L1d (formerly L1c; lean-audit-c a281e53b8, e59846239; deletes those two
 constructors with pricedAt, drops e7958d3b9's arms on merge; unbuilt, not to merge until its warm-tree build
 elaborates) seeds its dregg-ref tree from the integ8 copy; tell it when the copy lands.
 
@@ -82,10 +82,10 @@ Next steps: A10 → regen patch onto main → full build at main's tip (it carri
 delegated consent, hermes-b 5422506f, the world/ pack 1b870fbdd). On READY the chain runs gate + enrol-resume;
 report "candidate <sha> at <path>: gate <verdict>, reds by name" to the coordinator, and the sha + path to the rows
 validator (aeee8349c191e8506, the app tables wait on 25cfb86bd) and L4b (ad81db6d6fd317d3a). Pending lands:
-lean-audit-c only on L1c's warm-tree green sha; iter-speed successor's census re-pin (a0fd127abfb9aac75) only
+lean-audit-c only on L1d's warm-tree green sha; iter-speed successor's census re-pin (a0fd127abfb9aac75) only
 after that candidate is reported. Transitive bumps through registry constants: closed by ruling (no).
 
-Red routing: lean-audit-c reds go to L1c (acf52d65283ef4ebc) directly; Hermes to L4b (ad81db6d6fd317d3a); L13 a1618140607ac439b; un-stream-continuity reds
+Red routing: lean-audit-c is L1d's (ad6d6eff243f32816): its green sha comes from and its reds go to L1d directly; Hermes to L4b (ad81db6d6fd317d3a); L13 a1618140607ac439b; un-stream-continuity reds
 (ApplicationStreamContinuityFresh pole proofs, NativeHostReplay.lean:3816) to the deputy a308118209b4a48ea; all
 others through the coordinator. Expected reds, not new: the eight hand-rolled genesis writers (acceptance.sh,
 application-acceptance.sh, authority-acceptance.sh, selected-release-acceptance.sh, grain-runtime/acceptance.sh,
