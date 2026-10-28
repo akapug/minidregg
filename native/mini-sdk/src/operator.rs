@@ -453,7 +453,7 @@ impl Operator {
             // Only the socket's own 254 makes a failed write certain.
             let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
             if let Ok(reply) = read_frame(&mut stream) {
-                if reply.first() == Some(&254) {
+                if reply.first() == Some(&crate::host_operations::RESPONSE_NEVER_FORWARDED) {
                     return Err(Failure::Unsent(format!("socket rejected request: {}", String::from_utf8_lossy(&reply[1..]))));
                 }
             }

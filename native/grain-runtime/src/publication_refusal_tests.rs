@@ -67,7 +67,7 @@ if [ -f "$state/pre-submit" ] && grep -q '"type": "settle"' "$intent" &&
   cp "$config" "$dir/config.json"
   printf 'signed observation' > "$dir/signed-observation.bin"
   printf '{"format":"minidregg-resource-client-attempt-v1","operation":"submit","host":"%s","config":"%s/config.json","socket":"%s"}\n' "$host" "$dir" "$socket" > "$dir/attempt.json"
-  printf '\377canonical refused outcome' > "$dir/pre-submit-refusal.frame"
+  printf '\__NO_RECORD_OCTAL__canonical refused outcome' > "$dir/pre-submit-refusal.frame"
   digest() { /usr/bin/openssl dgst -sha256 "$1" | awk '{print $NF}'; }
   printf '{"type":"minidregg-pre-submit-refusal-v1","stage":"prepare","operation":1,"frameSha256":"%s","requestSha256":"%s","hostConfigSha256":"%s","attemptManifestSha256":"%s"}\n' \
     "$(digest "$dir/pre-submit-refusal.frame")" "$(digest "$dir/signed-observation.bin")" \
@@ -96,7 +96,9 @@ elif grep -q '"type": "settle"' "$intent"; then
 fi
 printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300","transactionId":"11","eventId":"12","acceptedCount":"13"}' > "$dir/outcome.json"
 "#
-    .replace("__STATE__", state.to_str().unwrap());
+    .replace("__STATE__", state.to_str().unwrap())
+    // A prepare refusal is a NO_RECORD frame (c5e268ebd): the marker byte from the one wire.
+    .replace("__NO_RECORD_OCTAL__", &format!("{:o}", mini_sdk::host_operations::RESPONSE_NO_RECORD));
     fs::write(&mini, script).unwrap();
     fs::set_permissions(&mini, fs::Permissions::from_mode(0o700)).unwrap();
     let host = root.join("host");

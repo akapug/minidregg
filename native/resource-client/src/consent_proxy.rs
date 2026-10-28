@@ -312,7 +312,7 @@ impl Worker {
         }
         self.internal(mini_sdk::host_operations::CONSENT_STORE_RECHECK, &[])?;
         let answer = self.exchange(frame)?;
-        if answer.first() != frame.first() && answer.first() != Some(&255) {
+        if answer.first() != frame.first() && answer.first() != Some(&mini_sdk::consent::CONSENT_REFUSAL) {
             self.failed = true;
             return Err("unexpected consent verifier response".into());
         }
