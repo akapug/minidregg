@@ -635,3 +635,14 @@ in controller-entry.py) is with infra a298031c78e86d651. install-hermes reds fix
 `subscribers`. A hard `/workspace` quota is an infra item; the code refuses a prompt over the class
 volume. The redteam rows (lane/redteam-q2 REDTEAM.md) are re-judged on the next run, now that the
 pass runs on its own ask.
+
+A failed initial worker-tree copy can continue with
+`controller-worker-prepare-resume` and its original preparation request. The
+installer accepts only an unchanged, unpublished stage with exact retained files;
+it refuses a controller which has advanced to native birth or publication.
+The J14 driver accepts a retained `mini-j14-worker-preparation-checkpoint-v1`
+for this boundary. Later failures require their native exact-attempt recovery.
+For an explicitly qualified controller binary successor before birth,
+`J14_ORACLE_CONTROLLER_UPGRADE` names a private JSON file containing `runtime`,
+`sha256`, and `sourceCommit`; the driver retains the stopped installer's upgrade
+receipt. Ordinary runs should start with the final selected runtime.

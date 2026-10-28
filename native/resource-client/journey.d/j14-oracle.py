@@ -190,15 +190,20 @@ class Journey:
         meta=path.stat()
         if meta.st_uid!=os.getuid() or meta.st_mode&0o077:raise ValueError('checkpoint must be private operator custody')
         value=read(path)
-        if value.get('protocol')!='mini-j14-checkpoint-v1' or value['nextPhase'] not in RESUMABLE:
+        preparation=(value.get('protocol')=='mini-j14-worker-preparation-checkpoint-v1' and value.get('nextPhase')=='worker_preparation')
+        if not preparation and (value.get('protocol')!='mini-j14-checkpoint-v1' or value['nextPhase'] not in RESUMABLE):
             raise ValueError('unsupported journey checkpoint phase')
+        if preparation:
+            source=Path(value['workerPreparation'])
+            if source!=expected/'worker-prepare.json' or value['state'].get('controller'):
+                raise ValueError('worker preparation continuation differs from initial native-free boundary')
         for name,digest in value['pins'].items():
             if sha(name)!=digest:raise ValueError('checkpoint input changed: '+name)
         for proof in value['basis']:
             if sha(proof['path'])!=proof['sha256']:raise ValueError('checkpoint native basis changed')
         j=cls.__new__(cls)
         for name,data in value['state'].items():
-            setattr(j,name,Path(data) if name in {'root','logs','sockets','bins','installer','homes','workspaces','contract'} else data)
+            setattr(j,name,Path(data) if name in {'root','logs','sockets','bins','installer','homes','workspaces','contract','keyroot'} else data)
         if j.root!=expected:raise ValueError('checkpoint root differs')
         # A source update is explicit in the successor receipt. Native artifacts,
         # transports and controller custody stay pinned to the retained world.
@@ -588,7 +593,30 @@ class Journey:
             'files':files,'directories':['bootstrap/namespace','requests','requests/inbox','requests/registrations','worker-work/.hermes','worker-work/.cache','worker-work/.config','worker-work/.local/share'],
             'launcherDirectory':str(launcher),'runtimeRoot':str(runtime)})
         self.fixed('controller-worker-prepare',prepare,self.bins,self.c['operatorSocket'],self.c['publicSocket'])
+        self.finish_worker(source,runtime)
+
+    def worker_preparation(self):
+        prepare=self.root/'worker-prepare.json';request=read(prepare)
+        self.keyroot=self.sockets/'provider'
+        self.fixed('controller-worker-prepare-resume',prepare,self.bins,self.c['operatorSocket'],self.c['publicSocket'])
+        self.finish_worker(self.root/'grain-spec.json',Path(request['runtimeRoot']))
+
+    def finish_worker(self,source,runtime):
+        home=Path(self.layout['controllerHome'])
+        brokerconfig=self.keyroot/'broker.json';keysocket=self.keyroot/'keys.sock';keyclient=runtime/'keys-client.json'
         self.controller=True
+        successor=os.environ.get('J14_ORACLE_CONTROLLER_UPGRADE')
+        if successor:
+            release=Path(successor);metadata=release.stat();selected=read(release)
+            if metadata.st_uid!=os.getuid() or metadata.st_mode&0o077 or release.is_symlink():
+                raise ValueError('controller runtime successor must be private operator custody')
+            if (set(selected)!={'runtime','sha256','sourceCommit'} or not re.fullmatch('[0-9a-f]{40}',selected['sourceCommit'])
+                    or sha(selected['runtime'])!=selected['sha256']):
+                raise ValueError('controller runtime successor pins differ')
+            self.fixed('controller-stop')
+            receipt=self.fixed('controller-runtime-upgrade',selected['runtime'])
+            if read(receipt)['runtimeSha256']!=selected['sha256']:raise ValueError('installed controller successor differs')
+            self.c['controllerRuntimeSuccessor']={**selected,'release':str(release),'releaseSha256':sha(release),'receipt':str(receipt)}
         self.fixed('controller-worker-birth',source)
         self.controller_run('grain-runtime',['create',home/'requests/create.json'])
         self.fixed('controller-worker-publish')
@@ -771,18 +799,19 @@ def main():
     resume=os.environ.get('J14_ORACLE_RESUME_WORLD')=='1'
     selected=os.environ.get('J14_ORACLE_RESUME_CHECKPOINT')
     checkpoint=Path(selected) if selected else None
-    generic=checkpoint is not None and read(checkpoint).get('protocol')=='mini-j14-checkpoint-v1'
+    generic=checkpoint is not None and read(checkpoint).get('protocol') in ('mini-j14-checkpoint-v1','mini-j14-worker-preparation-checkpoint-v1')
     j=Journey.from_checkpoint(checkpoint) if generic else Journey.resume_transport(checkpoint) if checkpoint else Journey.resume_transport() if resume else Journey()
     phase='transport';start_counter=j.counter
     try:
         if generic:j.restore_services()
         elif checkpoint:j.restart_transport()
-        phases=PHASES[PHASES.index(j.resume_phase):] if generic else PHASES[1:] if checkpoint else PHASES
+        phases=(['worker_preparation',*PHASES[PHASES.index('room'):]] if generic and j.resume_phase=='worker_preparation'
+                else PHASES[PHASES.index(j.resume_phase):] if generic else PHASES[1:] if checkpoint else PHASES)
         for phase in phases:
             if phase=='worker':j.await_worker_release()
             (j.resume_world if resume and phase=='world' else getattr(j,phase))()
             write(j.root/('context-after-'+phase+'.json'),j.c)
-            next_index=PHASES.index(phase)+1
+            next_index=PHASES.index('worker' if phase=='worker_preparation' else phase)+1
             if next_index<len(PHASES) and PHASES[next_index] in RESUMABLE:j.checkpoint(PHASES[next_index])
     except Exception as error:
         write(j.root/(f'failure-checkpoint-{start_counter:04d}.json' if checkpoint else 'failure-transport-continuation.json' if resume else 'failure.json'),{'phase':phase,'error':str(error),'passed':False,'lastCommand':j.counter,

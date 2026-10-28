@@ -114,6 +114,78 @@ class ControllerWorldTests(unittest.TestCase):
             with self.subTest(destination=destination), self.assertRaises(ValueError): c.worker_inputs(changed, self.uid)
         with self.assertRaises(ValueError): c.worker_inputs({**request, 'files': request['files'] * 2}, self.uid)
 
+    def test_runtime_names_are_data_but_control_paths_remain_strict(self):
+        for name in ('pytz/Etc/GMT+0', 'contributors/felix@opper.ai', 'tests/a b.txt', 'data/λ.json'):
+            self.assertEqual(str(c.runtime_relative(name)), name)
+        with self.assertRaises(ValueError): c.worker_relative('pytz/GMT+0')
+        for name in ('../escape', '/absolute', 'a//b', 'a/./b', 'a/../b', 'a\x00b', 'a\nb'):
+            with self.subTest(name=name), self.assertRaises(ValueError): c.runtime_relative(name)
+
+    def test_runtime_inventory_rejects_links_and_pins_all_bytes(self):
+        source = self.root / 'runtime'; source.mkdir()
+        (source / 'GMT+0').write_bytes(b'timezone')
+        (source / 'person@example.org').write_bytes(b'author')
+        inventory = c.worker_tree_inventory(source, self.uid)
+        self.assertEqual(inventory['files']['GMT+0']['sha256'], c.sha(b'timezone'))
+        (source / 'linked').symlink_to(source / 'GMT+0')
+        with self.assertRaises((ValueError, OSError)): c.worker_tree_inventory(source, self.uid)
+        (source / 'linked').unlink(); os.link(source / 'GMT+0', source / 'linked')
+        with self.assertRaises((ValueError, OSError)): c.worker_tree_inventory(source, self.uid)
+
+    def test_runtime_partial_copy_only_accepts_exact_members(self):
+        source = self.root / 'runtime'; source.mkdir()
+        (source / 'GMT+0').write_bytes(b'timezone'); (source / 'next@file').write_bytes(b'next')
+        expected = c.worker_tree_inventory(source, self.uid)
+        dest = self.root / 'copy'; dest.mkdir(mode=0o755); dest.chmod(0o755)
+        copied = dest / 'GMT+0'; copied.write_bytes(b'timezone'); copied.chmod(0o444)
+        original_read, original_metadata = c.read_file, c.metadata
+        def owned_read(path, owner, *args, **kwargs): return original_read(path, self.uid if owner == 0 else owner, *args, **kwargs)
+        def owned_metadata(path, owner=None, mode=None): return original_metadata(path, self.uid if owner == 0 else owner, mode)
+        with patch.object(c, 'read_file', side_effect=owned_read), patch.object(c, 'metadata', side_effect=owned_metadata):
+            c.validate_retained_runtime(dest, expected)
+            copied.chmod(0o600); copied.write_bytes(b'wrong'); copied.chmod(0o444)
+            with self.assertRaises(ValueError): c.validate_retained_runtime(dest, expected)
+            copied.chmod(0o600); copied.write_bytes(b'timezone'); copied.chmod(0o444)
+            (dest / 'unexpected').write_bytes(b'foreign')
+            with self.assertRaises(ValueError): c.validate_retained_runtime(dest, expected)
+            (dest / 'unexpected').unlink(); copied.unlink(); copied.symlink_to(source / 'GMT+0')
+            with self.assertRaises(ValueError): c.validate_retained_runtime(dest, expected)
+
+    def test_worker_stage_resume_refuses_changed_inputs_and_later_publication(self):
+        base = self.root / 'base'; base.mkdir(); home = self.root / 'home'; home.mkdir()
+        pending = {'sourceBundle': '/original/input.json', 'files': {'host-config.json': c.sha(b'{}')},
+                   'binaries': {}, 'upstreamIdentity': [1, 2], 'acl': [], 'worker': {'task': '123'}}
+        retained = base / 'stage-pending.json'; retained.write_bytes(c.encoded(pending)); retained.chmod(0o600)
+        data = {'host-config.json': b'{}'}; target = home / 'host-config.json'; target.write_bytes(b'{}'); target.chmod(0o600)
+        original_read, original_write = c.read_file, c.write_new
+        def owned_read(path, owner, *args, **kwargs): return original_read(path, self.uid if owner == 0 else owner, *args, **kwargs)
+        def owned_write(path, content, *args, **kwargs): return original_write(path, content, self.uid, self.gid)
+        def check(value=pending): c.resume_worker_inputs(base, home, {'uid': self.uid}, value, data, {}, set(), {'directories': [], 'files': {}})
+        with patch.object(c, 'read_file', side_effect=owned_read), patch.object(c, 'write_new', side_effect=owned_write):
+            check({**pending, 'upstreamIdentity': [1, 3]})
+            self.assertEqual(retained.read_bytes(), c.encoded(pending))
+            self.assertEqual(len(list(base.glob('stage-resume-*.json'))), 1)
+            with self.assertRaises(ValueError): check({**pending, 'sourceBundle': '/changed/input.json'})
+            target.write_bytes(b'changed')
+            with self.assertRaises(ValueError): check()
+            target.write_bytes(b'{}'); (home / 'unexpected').write_bytes(b'foreign')
+            with self.assertRaises(ValueError): check()
+            (home / 'unexpected').unlink(); (base / 'worker-birth-spec.json').write_bytes(b'{}')
+            with self.assertRaises(ValueError): check()
+
+    def test_api_recovery_and_reconciliation_are_fixed_native_admin_commands(self):
+        r = self.record(); base = self.root / 'base'; request = 'ab' * 16
+        with patch.object(c, 'load', return_value=({}, base, r)), patch.object(c, 'checked_units'), patch.object(c, 'controller_child', return_value=0) as child:
+            self.assertEqual(c.recover_api_unreserved(r['store'], 'helper', request), 0)
+            self.assertEqual(child.call_args.args[1][-1], 'recover foreground api-unreserved ' + request)
+            for selector, command in (('parent', 'reconcile parent'), ('effects', 'reconcile effects'), ('foreground-audited', 'reconcile foreground audited')):
+                c.reconcile_controller(r['store'], 'helper', selector)
+                self.assertEqual(child.call_args.args[1][-1], command)
+            for bad in ('', '../x', request + ' reconcile', 'AB' * 16):
+                with self.assertRaises(ValueError): c.recover_api_unreserved(r['store'], 'helper', bad)
+            for bad in ('foreground', 'attach', 'parent;stop', ''):
+                with self.assertRaises(ValueError): c.reconcile_controller(r['store'], 'helper', bad)
+
     def test_worker_configuration_rejects_launcher_scope_or_custody_changes(self):
         r = self.worker_record(); base, config = self.worker_config_value(r)
         c.validate_worker_config(config, base, r)

@@ -75,6 +75,21 @@ class CheckpointTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,'unsupported'):
                     driver.Journey.from_checkpoint(checkpoint)
 
+class WorkerPreparationTests(unittest.TestCase):
+    def test_partial_copy_continuation_keeps_original_spec_and_waits_for_installer(self):
+        with tempfile.TemporaryDirectory(prefix='j14-preparation-',dir='/tmp') as temp:
+            root=Path(temp);runtime=root/'original-runtime'
+            driver.write(root/'worker-prepare.json',{'runtimeRoot':str(runtime)})
+            j=driver.Journey.__new__(driver.Journey);j.root=root;j.sockets=root/'sockets';j.bins=root/'bin'
+            j.c={'operatorSocket':'/private/operator.sock','publicSocket':'/public/participant.sock'}
+            with patch.object(j,'fixed',side_effect=ValueError('partial copy changed')), patch.object(j,'finish_worker') as finish:
+                with self.assertRaisesRegex(ValueError,'partial copy changed'): j.worker_preparation()
+                finish.assert_not_called()
+            with patch.object(j,'fixed') as fixed, patch.object(j,'finish_worker') as finish:
+                j.worker_preparation()
+                self.assertEqual(fixed.call_args.args,('controller-worker-prepare-resume',root/'worker-prepare.json',root/'bin','/private/operator.sock','/public/participant.sock'))
+                finish.assert_called_once_with(root/'grain-spec.json',runtime)
+
 class WorkspaceTransportTests(unittest.TestCase):
     def test_only_socket_changes_and_original_pins_remain_retained(self):
         with tempfile.TemporaryDirectory(prefix='j14-routing-',dir='/tmp') as temp:
