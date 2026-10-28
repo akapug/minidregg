@@ -16,7 +16,8 @@ class RSSFeed(TestCase):
             'enclosure': {'url': 'https://grain.test/v/one.mp4', 'bytes': 2600, 'type': 'video/mp4'}}])
 
     def test_no_entity_html_or_namespace_confusion(self):
-        samples = [b'<!DOCTYPE rss [<!ENTITY x "hidden">]><rss version="2.0"><channel/></rss>',
+        samples = ['<!DOCTYPE rss [<!ENTITY x "hidden">]><rss version="2.0"><channel/></rss>'.encode('utf-16'),
+                   b'<!DOCTYPE rss [<!ENTITY x "hidden">]><rss version="2.0"><channel/></rss>',
                    b'<html><body>not a feed</body></html>',
                    b'<rss xmlns="urn:forged" version="2.0"><channel/></rss>',
                    b'<rss version="2.0"><channel/><channel/></rss>',
