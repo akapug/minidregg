@@ -1130,3 +1130,17 @@ both give `none`) is the right teeth, but it is a closed instance (law 9 permits
 narrowed fs law old new = some r` (the installed law tells nothing the raw law does not). The existing
 general non-leak results for raw laws then carry over to every installed law, and the known coverage limit
 (installed hides more) is consistent with it.
+
+**Addendum, JDISCLOSE owner's reply: A lands, A2 is owed, the B lemma is withdrawn.**
+- *A1 taken:* an unheld capability is refused `capabilityRejected` before any guard, with
+  `computeTarget_scalar_unheld_refused` over every `pre`. Accepted.
+- *A2:* my confinement as stated is false by design. `staleTarget` compares the requester's
+  `expectedTargetRoot` with the whole-cell root, which is the one bit `RefusalReason`'s header already
+  concedes. The owner's alternative ("equal roots and agreement on named fields give the same refusal")
+  would be near-vacuous, because equal roots pin the whole cell up to a collision. The non-vacuous form
+  to record as owed: `computeTarget … pre = .error e → e = .staleTarget ∨ e = f (namedPart pre)
+  declaration command` for one `f` fixed across `pre`. That covers the remaining checks (`preLaw`,
+  `admissionCheck`, `FieldClosure`, `postLaw`). Not blocking: A closes the measured oracle, and A2 is owed,
+  not claimed.
+- *B:* `narrowed_installed_le` is false (the installed leaf path differs) and unnecessary, because
+  `narrowed_congr` already quantifies over every law, installed ones included. Withdrawn.
