@@ -55,7 +55,13 @@ Each step looks for its object first (`doc show`, an attempt id in `history all`
 `story list`, `bend show`, `apps list`) and prints one `seed: ok|skip|FAIL <what>` line. A FAIL does not
 stop the run; the exit status is non-zero if any step failed, and re-running resumes.
 
-## Unverified, for the validator (the lane ran nothing)
+## Door members join the story
+
+Every member the door enrols joins `tale` as a player: the door processor runs `story invite tale SUBJECT`
+as `box`, hands the member the invitation and runs `story join` as the member (`story` in `door.json`,
+`deploy/door/README.md`). It retries each tick until the seed has made `tale`, and again after a re-genesis.
+
+## Assumptions no recorded run has exercised
 
 1. The app writes beneath the HTML are not shell verbs. The script does them as the member over the grain's own
    origin: `apps open GRAIN --json`, POST the printed token to `/__mini/bootstrap`, then plain HTTP with the
@@ -68,6 +74,3 @@ stop the run; the exit status is non-zero if any step failed, and re-running res
 2. The shape of `apps list --json` (the script finds a grain id with a recursive `jq`), and the output of
    `history all` (`attempt<TAB>ID<TAB>...`, as `j12.sh` greps it).
 3. Whether the public reader can read a chat room's per-member streams from the `lobby` grant alone.
-4. Every member the door enrols joins `tale` as a player: the door processor runs `story invite tale SUBJECT`
-   as `box`, hands the member the invitation and runs `story join` as the member (`story` in `door.json`,
-   deploy/door/README.md). It retries each tick until the seed has made `tale`, and again after a re-genesis.

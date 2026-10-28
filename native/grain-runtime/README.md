@@ -433,3 +433,14 @@ never transparent re-signing. A before-signing guard refusal can retire only its
 exact unsubmitted Pending after fresh sender-stop proof and retained artifact
 validation; the financial hold and response remain. These source consumers require
 the corresponding native feature bundle and native qualification before deployment.
+
+## Other documents in this directory
+
+- [TERMINAL.md](TERMINAL.md): `grain-runtime terminal`, one controller as a text conversation (hard or soft attach).
+- [SYSTEMD-MANAGERS.md](SYSTEMD-MANAGERS.md): the root-owned controller registration
+  (`mini-controller-registration-v1`) and which systemd manager runs the controller and its workers.
+- [BYOK.md](BYOK.md): member provider keys and the member's choice of controller route.
+- [RESIDENT-REQUESTS.md](RESIDENT-REQUESTS.md): custody of a room resident's accepted assignments
+  (`grain-runtime hermes-room resident`).
+- [RESIDENT-DELIVERY.md](RESIDENT-DELIVERY.md): a completed model turn versus a delivered room reply.
+- [fixture/RECEIPT-RECOVERY.md](fixture/RECEIPT-RECOVERY.md): the `publicationReceipts` lost-reply fixture.

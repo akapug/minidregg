@@ -60,7 +60,7 @@ upstream. The Cap'n Proto schema has no separate raw-query or arbitrary-header
 field: request/response additional headers are limited to Sandstorm's
 whitelists, and response status codes are limited by its response union. This
 crate rejects unsupported request headers rather than silently dropping them.
-`open_web_socket` (`src/web.rs:685`) calls `openWebSocket` on an admitted
+`open_web_socket` (`src/web.rs`) calls `openWebSocket` on an admitted
 WebSession: relative path with query, the client's subprotocols (the app may
 choose only among them), a bounded 1 MiB message from the app
 (`MAX_WEBSOCKET_MESSAGE`), and `send_to_app` for client-to-app bytes. The bytes
@@ -77,7 +77,7 @@ same supplied session parameters; it does not authenticate those parameters.
 The exported `SandstormApi` serves three methods, all for identity capabilities
 a grain keeps under `BridgeConfig.saveIdentityCaps`: `save`, `restore` and
 `drop`, against an `IdentityCustody` the owning service supplies
-(`src/protocol.rs:236`; `MemoryIdentityCustody` is the in-process default, the
+(the `IdentityCustody` trait in `src/protocol.rs`; `MemoryIdentityCustody` is the in-process default, the
 Mini-backed custody is `native/spk-host/src/identity_custody.rs`). App-object
 persistence is not offered: such a token is `unknownToken`.
 The pinned packaged HTTP bridge accepts `ApiSession` only when its

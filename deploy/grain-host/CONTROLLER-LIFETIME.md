@@ -31,35 +31,23 @@ can also use the monitor. The `--controller-manager-protocol` handshake returns
 controller registration, not probe-and-fallback. The gate's tuple is durable;
 worker execution does not trust a fresh environment to replace it.
 
-## Linux receiving, 2026-10-02
+## Checking it
 
-On persvati, `probe-controller-lifetime.py SOURCE_DIR NEW_PRIVATE_SCRATCH` uses a
-new transient SYSTEM controller (`Type=exec`, service UID = caller), actual USER
-worker units and the production bubblewrap launcher. It retains all command
-outputs and cleans only its own units. Run with a compiled `launch-gate` beside
-`bwrap`. This is lifecycle/confinement component evidence, not a native grain
-budget or provider-effect journey.
+On a Linux host with a SYSTEM manager, `probe-controller-lifetime.py SOURCE_DIR NEW_PRIVATE_SCRATCH`
+starts a transient SYSTEM controller (`Type=exec`, service UID = caller), actual USER worker units and
+the production bubblewrap launcher, with a compiled `launch-gate` beside `bwrap`. It retains every
+command's output in `commands.jsonl`, writes `result.json`, and cleans only its own units. Its eight
+checks: wrong PID and wrong invocation refuse before arming; gate lock contention cannot extend sandbox
+lifetime (the gate flock is held through the controller SIGKILL until every sandbox descendant is gone);
+a controller crash fences the gate and kills sandbox descendants; a queued old launch refuses after
+controller restart; a new controller cannot adopt an armed prior incarnation; restart cannot rearm a
+fenced operation; a monitor crash kills the sandbox and its setsid descendants; an ordinary controller
+stop kills the current worker. Each held sandbox includes a child and a setsid grandchild.
 
-`/home/ember/workbox/controller-lifetime-r3/result.json` records seven checks:
-wrong PID/invocation refusal; controller SIGKILL fencing and recursive cgroup
-empty after six captured sandbox processes; queued old launch refusal across
-restart; old armed operation refusal by the new invocation; no rearming of a
-fenced operation; monitor SIGKILL descendant cleanup; ordinary controller stop
-cleanup. Each held sandbox includes a child and setsid grandchild.
+The canonical template must use `Type=exec`: under systemd's default `Type=simple` the reported
+MainPID may not yet have dropped to the configured UID, and the gate correctly refuses it.
 
-The earlier r1 fixture failed while using systemd's default `Type=simple`: its
-reported active MainPID had not yet dropped to the configured UID. Refusal was
-correct. The actual canonical template uses `Type=exec`; r2 and r3 use that
-contract. Original r1 evidence is retained.
+`scripts/overnight-tests/launch-gate-probe.sh` covers the single-manager cases: a late queued launch
+after fence, fence before init, and exact running-unit kill with retry refusal.
 
-The existing `scripts/overnight-tests/launch-gate-probe.sh` also passed unchanged
-at `/home/ember/workbox/controller-lifetime-legacy-r1`, covering late queued launch
-after fence, fence-before-init, and exact running-unit kill plus retry refusal.
-`bash -n` passed. ShellCheck was unavailable on the build host.
-
-Review found that the original death branch fenced before killing, so ordinary
-lock or fsync delay could prolong sandbox execution. The corrected ordering was
-received in `/home/ember/workbox/controller-lifetime-r4/result.json`: all eight
-checks pass, including holding the gate flock during controller SIGKILL and
-observing all five sandbox descendants gone before releasing that lock. The
-monitor then persists the fence and the entire worker cgroup empties.
+This is lifecycle and confinement evidence, not a native grain budget or provider-effect journey.
