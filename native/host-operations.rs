@@ -471,3 +471,13 @@ pub const DAV_HEADER_NAMES: &[&str] = &["depth", "destination", "overwrite", "lo
 pub fn dav_header_name(name: &str) -> bool {
     DAV_HEADER_NAMES.contains(&name)
 }
+
+pub fn dav_header_allowed(method: &str, name: &str, value: &str) -> bool {
+    DAV_HEADER_RULES.iter().any(|(n, methods, values)| *n == name && methods.contains(&method) && if values.is_empty() { !value.is_empty() } else { values.contains(&value) })
+}
+pub const DAV_HEADER_RULES: &[(&str, &[&str], &[&str])] = &[
+    ("depth", &["PROPFIND", "COPY", "LOCK", "REPORT"], &["0", "1", "infinity"]),
+    ("destination", &["COPY", "MOVE"], &[]),
+    ("overwrite", &["COPY", "MOVE"], &["T", "F", "t", "f"]),
+    ("lock-token", &["UNLOCK"], &[]),
+];
