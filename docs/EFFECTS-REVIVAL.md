@@ -412,9 +412,12 @@ Engine/Statements split).
    superseding the fixture route: `contentAccepted : ContentAccepted` and
    `hostAccepted : HostAccepted` (a link admitted at a content cell holding only its blinding,
    through `contentAgreement` and the host dispatch), `contentTeeth : ContentTeeth` (at that
-   blinded cell the live patch carries the rotation, so `contentGhost` disagrees).  Still owed:
-   `HostTeeth` (`Effects/Revival/HostTeethProofs.lean`, in progress).  Its ghost half needs one
-   hash fact (a ratchet step moves the zero blinding), the single compiled evaluation.  The
+   blinded cell the live patch carries the rotation, so `contentGhost` disagrees), and
+   `hostTeeth : HostTeeth` (`Effects/Revival/HostTeethProofs.lean`): its twin half is
+   `noTwin`.  Its ghost half compares post blindings at the blinded cell.  The dispatch's is
+   one ratchet step (`run_leg_blinding`); the ghost's is the pre blinding.  It rests on one
+   compiled evaluation, `ratchet_moves` (a step at height 0 moves the zero blinding, a cSHAKE256
+   fact, `#assert_compiled`), law 9's confessed form.  The
    doc-write fixture is red (its recorded frames no longer decode).  Its regeneration is owed
    to the integrator's umbrellas stage, from the first READY candidate carrying the conversion
    plus M2, which the integrator names.  It is no longer a witness for this lane.
