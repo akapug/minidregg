@@ -150,6 +150,9 @@ Its hbox worlds: /tank/rows-2d8b7ed5-apps/w-{featured,b1,b2,b4,b6,rt,fixups}. Mi
 - Process slip, recorded so a resume does not repeat it: after a resume I spawned a duplicate japps-rows faerie (ada42728d224bfeba) before reading this file; it stood down having only read (worktree and branch were the japps faerie's, 4269f67e4). Read this file before dispatching anything.
 - B8 a13f0bc9626b1320a confirmed running on b26630168 (IPython diagnostics, then MediaWiki/Firefly III alone). OwnTracks (3a943f85e) is NOT in b26630168: B5 re-qualifies it on the first candidate carrying it.
 
+- B7 (abf203f357754001b) on b26630168: 14/14 lifecycle+write (2048, Perplexity Sudoku, 3D Blockstack, Simple Chat, Davros, sntfy, HledgerWeb). FEATURED is 25 on main (lane/app-market-b7 4ce6c29a3 is an ancestor of main). TextEditor write is blocked only on the grain-route latency (GET / ttfb 12.7 s with no websocket, so the delay is per request); owner a6603277e4ffe2d70. Next for B7: the rt world (market-large-v1) for Wekan and WBO only.
+- Public reader: the shell's `delegate … observe 0` refusal by name is on main (2add39053), so nothing is left on that item.
+
 ## Next three
 1. Read the runs on candidate b26630168 (/build/candidates/b26630168b63024c9c46311745fa0b25fa09c13f, fresh genesis): the japps rows (a16c6e6a2655a4ca9, lane/un-japps-rows), B3 a85d12892ea6de3ca, B7 abf203f357754001b (TextEditor blocked on the grain-route latency red), B8 a13f0bc9626b1320a (IPython diagnostics, then MediaWiki/Firefly III on a quiet box). Fix reds; greens into FEATURED (21 on main after B5's four, if b5-featured lands); target 2-3 dozen.
 2. Next candidate (regen build from main's tip, M2): B5 a0ef59eabda7075b4 re-qualifies OwnTracks alone (3a943f85e not in b26630168), plus its ExpenseOwl/WordPress/HackerCMS/Hummingbird recipe fixes one world at a time. Then the rehearsal follow-up candidate (public-reader + birthStale).
