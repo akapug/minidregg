@@ -209,7 +209,7 @@ def Ready.initialPolicies {F : Type} [Field F]
   (ready.policyRecords profile config).map initialPolicy
 
 /-- The complete three-resource birth draft uses the same identity and fee
-calculation as Host.Json.birth. The existing birth receiver, not this helper,
+calculation as Host.SourceAgreementJson.birth. The existing birth receiver, not this helper,
 checks current factory law, exact grants, source bytes and physical placement. -/
 def Ready.descriptor {F : Type} [Field F]
     (ready : Ready) (profile : CanonicalRuntimeProfile.Profile F)

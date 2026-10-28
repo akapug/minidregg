@@ -1421,10 +1421,10 @@ structure BirthParts where
   controlGrant : ResourceBirth.AuthorityGrant
   policy : ResourceBirth.InitialPolicy
 
-private def grainWorkerClause (subject : Nat) (generation : Int) : Minidregg.Pred.Pred :=
+def grainWorkerClause (subject : Nat) (generation : Int) : Minidregg.Pred.Pred :=
   .all [.eq "request/subject" (Int.ofNat subject), AgentGrain.witnessCaveat generation]
 
-private def grainPolicy (owner : Nat) (worker : Option (List Nat × Int)) : Minidregg.Pred.Pred :=
+def grainPolicy (owner : Nat) (worker : Option (List Nat × Int)) : Minidregg.Pred.Pred :=
   let base := AgentGrain.policy (.eq "request/subject" (Int.ofNat owner))
   match worker with
   | none => base
@@ -1438,7 +1438,7 @@ private def grainPolicy (owner : Nat) (worker : Option (List Nat × Int)) : Mini
         AgentGrain.refillPolicy] ++
         subjects.map (fun subject => grainWorkerClause subject generation)]
 
-private def grainWorker (path : String)
+def grainWorker (path : String)
     (obj : Std.TreeMap.Raw String Lean.Json compare) : Result (Option AgentGrain.GrainWitness) := do
   match obj.get? "workerSubject", obj.get? "workerSubjects", obj.get? "workerGeneration",
       obj.get? "holderWitnessGeneration" with
@@ -1458,18 +1458,185 @@ private def grainWorker (path : String)
   | _, _, _, _ =>
       failAt path "workerSubject or workerSubjects with workerGeneration, or holderWitnessGeneration, exclusively"
 
-private def grainTaskPolicy (owner : Nat) : Option AgentGrain.GrainWitness → Minidregg.Pred.Pred
+/-- Every named worker in a plural policy gets the same pinned-generation,
+no-op witness clause. This is a construction fact, not an IO admission claim. -/
+theorem grainPolicy_plural_worker_clause (owner : Nat) (subjects : List Nat)
+    (generation : Int) (subject : Nat) (named : subject ∈ subjects) :
+    grainWorkerClause subject generation ∈
+      ([.eq "request/subject" (Int.ofNat owner), .memberOf "request/verb" [1, 3],
+        AgentGrain.refillPolicy] ++
+        subjects.map (fun worker => grainWorkerClause worker generation)) := by
+  apply List.mem_append.mpr
+  right
+  exact List.mem_map.mpr ⟨subject, named, rfl⟩
+
+/-- info: 'Minidregg.Host.SourceAgreementJson.grainPolicy_plural_worker_clause' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms grainPolicy_plural_worker_clause
+
+/-- Plural authoring with one subject retains the exact historical policy
+bytes, so adding a provider cannot silently alter the existing tool rule. -/
+theorem grainPolicy_singleton_bytes (owner subject : Nat) (generation : Int) :
+    NativeHostGenesis.predicateStream.encode
+      (grainPolicy owner (some ([subject], generation))) =
+    NativeHostGenesis.predicateStream.encode
+      (.all [AgentGrain.policy (.eq "request/subject" (Int.ofNat owner)), .any [
+        .eq "request/subject" (Int.ofNat owner),
+        .memberOf "request/verb" [1, 3],
+        AgentGrain.refillPolicy,
+        .all [.eq "request/subject" (Int.ofNat subject),
+          AgentGrain.witnessCaveat generation]]]) := rfl
+
+/-- info: 'Minidregg.Host.SourceAgreementJson.grainPolicy_singleton_bytes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms grainPolicy_singleton_bytes
+
+/-- A worker witness with a different old generation cannot satisfy even its
+own clause. This uses the deployed predicate evaluator, not list membership. -/
+theorem grainWorkerClause_wrong_generation (subject : Nat) (generation actual : Int)
+    (old new : Minidregg.Pred.State)
+    (before : new.get "resource/field/0/before" = some actual)
+    (stale : actual ≠ generation) :
+    Minidregg.Pred.eval (grainWorkerClause subject generation) old new = false := by
+  have witnessFalse : Minidregg.Pred.eval (AgentGrain.witnessCaveat generation)
+      old new = false := by
+    simp [AgentGrain.witnessCaveat, Minidregg.Pred.eval_all,
+      Minidregg.Pred.eval, Minidregg.Pred.evalWith, before, stale]
+  simp [grainWorkerClause, Minidregg.Pred.eval_all, witnessFalse]
+
+/-- The subject check refuses a caller absent from a worker clause. -/
+theorem grainWorkerClause_wrong_subject (subject caller : Nat) (generation : Int)
+    (old new : Minidregg.Pred.State)
+    (requestSubject : new.get "request/subject" = some (Int.ofNat caller))
+    (different : caller ≠ subject) :
+    Minidregg.Pred.eval (grainWorkerClause subject generation) old new = false := by
+  simp [grainWorkerClause, Minidregg.Pred.eval_all,
+    Minidregg.Pred.eval, Minidregg.Pred.evalWith, requestSubject,
+    Nat.cast_inj, different]
+
+/-- The managed law's refill alternative is the refill edge itself, which
+needs the slot only the purse-refill receiver projects. -/
+private theorem refillPolicy_needs_slot (old new : Minidregg.Pred.State)
+    (noRefill : new.get AgentGrain.refillSlot ≠ some 1) :
+    Minidregg.Pred.evalWith Minidregg.Pred.failClosed AgentGrain.refillPolicy old new = false := by
+  simp [AgentGrain.refillPolicy, Minidregg.Pred.Pred.all, Minidregg.Pred.PredList.ofList,
+    Minidregg.Pred.evalWith, Minidregg.Pred.evalWithAll, noRefill]
+
+/-- For a mutation, no worker can reuse a previous pinned generation, even
+if that worker can observe a newer state. Owner and management branches are
+explicitly excluded by the request subject and verb, and the refill edge by
+the absent refill slot (no receiver but the purse refill projects it). -/
+theorem grainPolicy_stale_worker_refused (owner : Nat) (subjects : List Nat)
+    (generation actual : Int) (caller : Nat)
+    (old new : Minidregg.Pred.State)
+    (verb : new.get "request/verb" = some 2)
+    (requestSubject : new.get "request/subject" = some (Int.ofNat caller))
+    (notOwner : caller ≠ owner)
+    (noRefill : new.get AgentGrain.refillSlot ≠ some 1)
+    (before : new.get "resource/field/0/before" = some actual)
+    (stale : actual ≠ generation) :
+    Minidregg.Pred.eval (grainPolicy owner (some (subjects, generation))) old new = false := by
+  have workerFalse : ∀ worker ∈ subjects,
+      Minidregg.Pred.eval (grainWorkerClause worker generation) old new = false := by
+    intro worker _
+    exact grainWorkerClause_wrong_generation worker generation actual old new before stale
+  have workerFalseWith : ∀ worker ∈ subjects,
+      Minidregg.Pred.evalWith Minidregg.Pred.failClosed
+        (grainWorkerClause worker generation) old new = false := workerFalse
+  cases subjects with
+  | nil =>
+      simp [grainPolicy, Minidregg.Pred.eval_all, Minidregg.Pred.eval_any,
+        Minidregg.Pred.eval, Minidregg.Pred.evalWith, requestSubject, verb,
+        Nat.cast_inj, notOwner, refillPolicy_needs_slot old new noRefill]
+  | cons first rest =>
+      cases rest with
+      | nil =>
+          have firstFalse := workerFalseWith first (by simp)
+          simp [grainPolicy, Minidregg.Pred.eval_all, Minidregg.Pred.eval_any,
+            Minidregg.Pred.eval, Minidregg.Pred.evalWith, requestSubject, verb,
+            Nat.cast_inj, notOwner, firstFalse, refillPolicy_needs_slot old new noRefill]
+      | cons second tail =>
+          simp [grainPolicy, Minidregg.Pred.eval_all, Minidregg.Pred.eval_any,
+            Minidregg.Pred.eval, Minidregg.Pred.evalWith, requestSubject, verb,
+            Nat.cast_inj, notOwner, refillPolicy_needs_slot old new noRefill]
+          intro _
+          refine ⟨workerFalseWith first (by simp), workerFalseWith second (by simp), ?_⟩
+          intro worker named
+          exact workerFalseWith worker (by simp [named])
+
+/-- info: 'Minidregg.Host.SourceAgreementJson.grainPolicy_stale_worker_refused' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms grainPolicy_stale_worker_refused
+
+/-- A non-owner subject absent from the bounded worker list cannot mutate
+through the plural resource policy, even when it presents a valid generation. -/
+theorem grainPolicy_unnamed_worker_refused (owner : Nat) (subjects : List Nat)
+    (generation : Int) (caller : Nat)
+    (old new : Minidregg.Pred.State)
+    (verb : new.get "request/verb" = some 2)
+    (requestSubject : new.get "request/subject" = some (Int.ofNat caller))
+    (notOwner : caller ≠ owner)
+    (noRefill : new.get AgentGrain.refillSlot ≠ some 1)
+    (unnamed : caller ∉ subjects) :
+    Minidregg.Pred.eval (grainPolicy owner (some (subjects, generation))) old new = false := by
+  have workerFalseWith : ∀ worker ∈ subjects,
+      Minidregg.Pred.evalWith Minidregg.Pred.failClosed
+        (grainWorkerClause worker generation) old new = false := by
+    intro worker named
+    have different : caller ≠ worker := by
+      intro same
+      exact unnamed (by simpa [same] using named)
+    exact grainWorkerClause_wrong_subject worker caller generation old new
+      requestSubject different
+  cases subjects with
+  | nil =>
+      simp [grainPolicy, Minidregg.Pred.eval_all, Minidregg.Pred.eval_any,
+        Minidregg.Pred.eval, Minidregg.Pred.evalWith, requestSubject, verb,
+        Nat.cast_inj, notOwner, refillPolicy_needs_slot old new noRefill]
+  | cons first rest =>
+      cases rest with
+      | nil =>
+          have firstFalse := workerFalseWith first (by simp)
+          simp [grainPolicy, Minidregg.Pred.eval_all, Minidregg.Pred.eval_any,
+            Minidregg.Pred.eval, Minidregg.Pred.evalWith, requestSubject, verb,
+            Nat.cast_inj, notOwner, firstFalse, refillPolicy_needs_slot old new noRefill]
+      | cons second tail =>
+          simp [grainPolicy, Minidregg.Pred.eval_all, Minidregg.Pred.eval_any,
+            Minidregg.Pred.eval, Minidregg.Pred.evalWith, requestSubject, verb,
+            Nat.cast_inj, notOwner, refillPolicy_needs_slot old new noRefill]
+          intro _
+          refine ⟨workerFalseWith first (by simp), workerFalseWith second (by simp), ?_⟩
+          intro worker named
+          exact workerFalseWith worker (by simp [named])
+
+/-- info: 'Minidregg.Host.SourceAgreementJson.grainPolicy_unnamed_worker_refused' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms grainPolicy_unnamed_worker_refused
+
+/-! ### Any holder of a delegated grant may make the birth witness (ruling Option A)
+
+The holder form is `AgentGrain.holderPolicy` (its theorems are there); the grain author
+selects it with `holderWitnessGeneration`. -/
+
+
+def grainTaskPolicy (owner : Nat) : Option AgentGrain.GrainWitness → Minidregg.Pred.Pred
   | none => grainPolicy owner none
   | some (.workers subjects generation) => grainPolicy owner (some (subjects, generation))
   | some (.holders generation) => AgentGrain.holderPolicy owner generation
 
-private def grainWorkerFields (obj : Std.TreeMap.Raw String Lean.Json compare) : List String :=
+/-- Teeth of the ruling: the witness touch `AgentGrain.holderPolicy_member_witness_admitted`
+admits for a member (99) is refused under the named-worker form (worker 8): the refusal L13
+measured on the parent task. -/
+theorem grainPolicy_member_witness_refused :
+    Minidregg.Pred.eval (grainPolicy 7 (some ([8], 1))) (AgentGrain.witnessTouchState 99)
+      (AgentGrain.witnessTouchState 99) = false := by
+  decide +kernel
+
+#assert_axioms grainPolicy_member_witness_refused
+
+def grainWorkerFields (obj : Std.TreeMap.Raw String Lean.Json compare) : List String :=
   if (obj.get? "workerSubject").isSome then ["workerSubject", "workerGeneration"]
   else if (obj.get? "workerSubjects").isSome then ["workerSubjects", "workerGeneration"]
   else if (obj.get? "holderWitnessGeneration").isSome then ["holderWitnessGeneration"]
   else []
 
-private def factoryTemplate (path : String) (json : Lean.Json) :
+def factoryTemplate (path : String) (json : Lean.Json) :
     Result CanonicalRuntimeProfile.FactoryTemplate := do
   let raw ← object path json
   let slackField := if (raw.get? "birthSlack").isSome then ["birthSlack"] else []
@@ -1481,7 +1648,7 @@ private def factoryTemplate (path : String) (json : Lean.Json) :
     ← nat (path ++ ".ownerBudget") (← field path "ownerBudget" templateObj),
     ← nat (path ++ ".lifetime") (← field path "lifetime" templateObj), birthSlack⟩
 
-private def birthRootCapability {kind : ResourceKind}
+def birthRootCapability {kind : ResourceKind}
     (profile : CanonicalRuntimeProfile.Profile NativeHostProfile.Field)
     (source : NativeHostGenesis.Config) (height : Nat)
     (identifier : CapabilityId) (owner : SubjectId) (target : Nat)
@@ -1520,7 +1687,7 @@ authoring substitutes the two epochs from the verified authority image the recei
 and the owner budget and lifetime from that image's platform record (`current`), the
 template the receiver binds the birth by
 (`ResourceBirthPolicyController.Concrete.birthTemplate`). -/
-private def birthRootCapabilityAt {kind : ResourceKind}
+def birthRootCapabilityAt {kind : ResourceKind}
     (profile : CanonicalRuntimeProfile.Profile NativeHostProfile.Field)
     (source : NativeHostGenesis.Config) (height : Nat)
     (authority : Option BirthEpochs) (current : Option BirthTerms)
@@ -1539,7 +1706,17 @@ private def birthRootCapabilityAt {kind : ResourceKind}
       { grant with issuerEpoch := current.issuerEpoch profile.template.issuer
                    policyEpoch := current.policyEpoch ⟨target⟩ }
 
-private def withBlinding (path : String) (blinding : Option Nat)
+private theorem birthRootCapability_time_window {kind : ResourceKind}
+    (profile : CanonicalRuntimeProfile.Profile NativeHostProfile.Field)
+    (source : NativeHostGenesis.Config) (height : Nat)
+    (identifier : CapabilityId) (owner : SubjectId) (target : Nat)
+    (verbs : Finset (Verb kind)) :
+    (birthRootCapability profile source height identifier owner target verbs).notBefore = height ∧
+    (birthRootCapability profile source height identifier owner target verbs).notAfter =
+      height + profile.template.lifetime := by
+  constructor <;> rfl
+
+def withBlinding (path : String) (blinding : Option Nat)
     (cell : PackedCell CanonicalCellRegistry.registry) :
     Result (PackedCell CanonicalCellRegistry.registry) := do
   let some value := blinding | pure cell
@@ -1556,7 +1733,7 @@ private def withBlinding (path : String) (blinding : Option Nat)
       (payload.logical.set ⟨.blinding, ()⟩ (some (⟨value⟩ : Digest)))⟩
   | _ => throw s!"{path}.blinding: this storage carries no blinding"
 
-private def birthParts (path : String)
+def birthParts (path : String)
     (profile : CanonicalRuntimeProfile.Profile NativeHostProfile.Field)
     (source : NativeHostGenesis.Config) (height : Nat) (json : Lean.Json)
     (authority : Option BirthEpochs := none)
@@ -1707,7 +1884,7 @@ private def birthParts (path : String)
   pure ⟨item, ownerGrant, ⟨.program, ⟨control, []⟩⟩,
     ⟨rule.policyId, PolicyRecordCodec.digest rule, PolicyRecordCodec.encode rule⟩⟩
 
-private def birth (path : String) (json : Lean.Json)
+def birth (path : String) (json : Lean.Json)
     (grainBirthTariff : Option NativeHost.GrainBirthTariffPin := none)
     (deployed : Option NativeHost.Config := none)
     (currentHeight : Option Nat := none)
@@ -2297,6 +2474,17 @@ def birthCurrent (path : String) (json : Lean.Json)
     (current : PlatformCellLayout.Platform) :
     Result Draft :=
   birthAt path json deployed height (.ofAuthority authority) lineage (.ofRecord current)
+
+/-- **One birth author.** The loaded authors (`Host.CurrentResourceBirthAuthoring`,
+`Host.SourceAgreementBirth`) and the thin-consent provider (`Host.ThinBirthConsent.author`) call
+the same `birthAt`; the loaded image's epochs and record are its coordinates. So an honest thin
+birth re-authors to the box's own bytes by construction (no twin to drift: the Host.Json copy is
+deleted, law 1). -/
+theorem birthCurrent_eq_birthAt (path : String) (json : Lean.Json) (deployed : NativeHost.Config)
+    (height : Nat) (authority : AuthState) (lineage : CapabilityId → Option (Finset CapabilityId))
+    (current : PlatformCellLayout.Platform) :
+    birthCurrent path json deployed height authority lineage current =
+      birthAt path json deployed height (.ofAuthority authority) lineage (.ofRecord current) := rfl
 
 def subjectKeyStatusJson (subject : Nat) (status : SubjectKeyRotation.Status) : Lean.Json := .mkObj
   [("type", "subject-key-status-v1"),

@@ -570,7 +570,7 @@ theorem policy_mutation_nonincrease_without_refill (management : Pred)
 A shared parent task (the workroom's metered parent, 7901 on the demo) is touched by every
 composite grain birth under it: the birth carries the parent as a joint exact-state witness,
 the no-op `witnessCaveat` at the parent's pinned generation. The named-worker form of a task's
-law (`Host.Json.grainPolicy`) names the subjects that may make that touch; a member installing
+law (`Host.SourceAgreementJson.grainPolicy`) names the subjects that may make that touch; a member installing
 an app holds a grant on the parent (delegated by the operator) but is not named, so its birth
 was refused by the parent's law (L13, 2026-10-27). Ruled Option A: the delegated grant IS the
 authority, so the holder form names no subject. A law cannot see grants: the generic receiver
