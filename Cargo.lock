@@ -916,10 +916,13 @@ dependencies = [
 name = "minidregg-mini-sdk"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "blake3",
  "ed25519-dalek",
  "fips204",
  "libc",
+ "regex-lite",
+ "roxmltree",
  "serde_json",
  "sha2",
  "wasm-bindgen",
@@ -1286,6 +1289,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "regex-lite"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cab834c73d247e67f4fae452806d17d3c7501756d98c8808d7c9c7aa7d18f973"
+
+[[package]]
 name = "ring"
 version = "0.17.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1297,6 +1306,15 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "roxmltree"
+version = "0.21.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1964b10c76125c36f8afe190065a4bf9a87bf324842c05701330bba9f1cacbb"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]
