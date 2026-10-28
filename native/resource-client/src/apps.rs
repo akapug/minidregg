@@ -280,7 +280,7 @@ pub(crate) const FEATURED: &[(&str, &str)] = &[
     ("uawacvvx9f9ncex1sqj8njwpujf8s9fkmg7wmp55hg6xetrd45w0", "SQL over HTTP: /<db>.json?sql=... answers JSON"),
     ("c6rk81r4qk6dm3k04x1kxmyccqewhh4npuxeyg1xrpfypn2ddy0h", "POST /<topic> with a body publishes; GET /<topic>/json?poll=1 reads"),
     ("nx3dqcmz2sjjz939vkg4847vvxrzqsatqfjrt3ea50z3jac5kv7h", "flat-text pages: GET doku.php?id=<page>&do=export_raw, POST do=save"),
-    ("rhtntjye2n7p71vrcq0ae4f6n9nr139fdk4n884tw55k40vy4uph", "board events as JSON over its WebSocket; GET /download/<board> reads the saved board"),
+    ("rhtntjye2n7p71vrcq0ae4f6n9nr139fdk4n884tw55k40vy4uph", "board events as JSON over socket.io (broadcast adds an item, getboard lists them); unproven beneath the HTML: the websocket closes before the first message reaches the app, and whether the board saves is unchecked"),
     ("f5z8uwz7ynf89c286f9d5tse5dwjknv32nyd78qzsyema3zf9m8h", "events as forms and iCalendar over HTTP (CalDAV when the bridge grows REPORT/PROPFIND)"),
     ("d9ygf47xrtnw12j92cyt6cu8ut75esx01u4q3kcrn8415w9qzzgh", "REST /api/v1 (repos, issues); git smart-HTTP when the bridge streams bodies"),
     ("8x12h6p0x0nrzk73hfq6zh2jxtgyzzcty7qsatkg7jfg2mzw5n90", "a plain-text journal: POST /add a transaction, GET /accounts and the JSON API"),
