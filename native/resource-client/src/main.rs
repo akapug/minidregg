@@ -1309,8 +1309,13 @@ fn local_process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<Out
         .output()
         .map_err(|error| format!("cannot run {}: {error}", host.display()))?;
     if !output.status.success() {
-        // Pure codec verbs never reach here (`process` sends them to the codec child), so no
-        // failing exit is a decision: the status stays uncertain.
+        // A decided refusal arrives as exit 3 with the Host's outcome frame on stdout, and is
+        // handled as the socket route handles it. Pure codec verbs never reach here (`process`
+        // sends them to the codec child); any other failing exit is not a decision, so the
+        // status stays uncertain.
+        if let Some(decided) = local_outcome_frame(host, config, arguments, &output) {
+            return decided;
+        }
         return Err(format!(
             "{} exited {}; request status uncertain: {}",
             host.display(),
@@ -1319,6 +1324,71 @@ fn local_process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<Out
         ));
     }
     Ok(output)
+}
+
+/// One Host outcome frame (marker byte 253 or 255, then the encoded Outcome), from either
+/// route: the socket session's reply, or the one-shot Host's stdout when it exits 3 (a decided
+/// refusal of a Store-reading verb). The decision is noted as the Host's (a refusal exits 3),
+/// a prepare refusal is retained for `why` (`prepare_refusal::retain`), and the returned
+/// message names the refusal, or says the effect is undecided. Never "uncertain" for a frame.
+fn host_outcome_frame(
+    command: &str,
+    arguments: &[&OsStr],
+    payload: &[u8],
+    config: &Path,
+    reply: &[u8],
+    decoded: Option<Value>,
+) -> Result<String> {
+    let line = Some(no_record_line(decoded.as_ref()));
+    let decision = HostDecision::Frame {
+        command: command.to_owned(),
+        byte: reply[0],
+        encoded: reply[1..].to_vec(),
+        decoded,
+    };
+    let refusal = decision.is_refusal();
+    let kind = outcome_type(decision.outcome()).to_owned();
+    note_host_decision(decision);
+    let destination = match command {
+        "prepare" | "submit" | "lookup" | "query" | "query-batch" => arguments.get(2).map(Path::new),
+        _ => None,
+    };
+    if command == "prepare" {
+        let destination = Path::new(arguments.get(2).ok_or("prepare has no destination")?);
+        prepare_refusal::retain(destination, payload, config, reply)?;
+    }
+    if command == "query" || command == "query-batch" {
+        let destination = Path::new(arguments.get(2).ok_or("query has no destination")?);
+        query_refusal::retain(destination, payload, config, reply)?;
+    }
+    if !refusal {
+        return Ok(undecided_frame_message(command, &kind, destination, &reply[1..]));
+    }
+    Ok(refused_frame_message(command, &reply[1..], line))
+}
+
+/// The one-shot Host's decided refusal of `prepare`: exit 3 with its outcome frame on stdout
+/// (`Host.Main`, the `prepare` verb). The frame is decoded by the Host's own codec (`inspect
+/// outcome`) and handled exactly as the socket route handles it. Anything else is not a frame.
+fn local_outcome_frame(host: &Path, config: &Path, arguments: &[&OsStr], output: &Output) -> Option<Result<Output>> {
+    let command = arguments.first().and_then(|word| word.to_str())?;
+    if output.status.code() != Some(3) || command != "prepare" || arguments.len() != 3 {
+        return None;
+    }
+    let reply = &output.stdout;
+    if reply.len() < 2 || reply.len() > transport::HOST_MAX_FRAME + 1 || !is_outcome_frame(reply[0]) {
+        return None;
+    }
+    let payload = match fsio::read_bounded_or_empty(Path::new(arguments[1]), transport::HOST_MAX_FRAME) {
+        Ok(payload) => payload,
+        Err(error) => return Some(Err(error)),
+    };
+    let decoded = mini_sdk::local::kind("outcome", &reply[1..])
+        .ok()
+        .and_then(|request| client_consent::codec_frame(host, config, mini_sdk::host_operations::INSPECT, &request).ok())
+        .filter(|inspected| inspected.first() == Some(&mini_sdk::host_operations::INSPECT))
+        .and_then(|inspected| serde_json::from_slice::<Value>(&inspected[1..]).ok());
+    Some(host_outcome_frame(command, arguments, &payload, config, reply, decoded).and_then(Err))
 }
 
 /// A 255 frame whose decoded outcome is not a refusal (or that the Host could not decode): the
@@ -1418,27 +1488,7 @@ fn socket_process(
             .ok()
             .filter(|inspected| inspected.first() == Some(&8))
             .and_then(|inspected| serde_json::from_slice::<Value>(&inspected[1..]).ok());
-        let line = Some(no_record_line(decoded.as_ref()));
-        let decision = HostDecision::Frame {
-            command: command.to_owned(),
-            byte: reply[0],
-            encoded: reply[1..].to_vec(),
-            decoded,
-        };
-        let refusal = decision.is_refusal();
-        let kind = outcome_type(decision.outcome()).to_owned();
-        note_host_decision(decision);
-        if command == "prepare" {
-            let destination = Path::new(arguments[2]);
-            prepare_refusal::retain(destination, &payload, config, &reply)?;
-        }
-        if command == "query" || command == "query-batch" {
-            query_refusal::retain(Path::new(arguments[2]), &payload, config, &reply)?;
-        }
-        if !refusal {
-            return Err(undecided_frame_message(command, &kind, destination.map(Path::new), &reply[1..]));
-        }
-        return Err(refused_frame_message(command, &reply[1..], line));
+        return Err(host_outcome_frame(command, arguments, &payload, config, &reply, decoded)?);
     }
     if let Some(destination) = destination {
         write_new(Path::new(destination), &reply[1..])?;

@@ -8266,9 +8266,24 @@ def run (arguments : List String) : IO UInt32 := do
           writeBytes output (signingPlanCodec.encode plan)
           pure 0
       | "prepare", [input, output] =>
-          let plan ← IO.ofExcept (← NativeHost.prepare config (← readBytes input))
-          writeBytes output (signingPlanCodec.encode plan)
-          pure 0
+          match ← NativeHost.prepare config (← readBytes input) with
+          | .ok plan =>
+              writeBytes output (signingPlanCodec.encode plan)
+              pure 0
+          | .error refusal =>
+              -- A decided refusal, never an uncertain exit 1: the frame the session writes
+              -- for it (its marker, NO_RECORD for a refusal, then the encoded outcome) on
+              -- stdout, its decoding on stderr, exit 3. The client handles it as the socket
+              -- route does (named refusal, retained frame for `why`).
+              let frame := refusalFrame "prepare" refusal
+              let marker := RequestRefusal.returnedMarker HostOperations.hostOutcomeMarker frame
+              let stdout ← IO.getStdout
+              stdout.write (ByteArray.mk #[marker] ++ frame.toByteArray)
+              stdout.flush
+              match Json.inspect "outcome" frame with
+              | .ok decoded => (← IO.getStderr).putStrLn decoded.compress
+              | .error _ => (← IO.getStderr).putStrLn s!"minidregg-host: {refusal}"
+              pure 3
       | "enroll-key-plan", [observationPath, commandPath, output] =>
           withPinnedSignature config fun pinnedConfig => do
             let observation ← readBoundedBytes observationPath maxFrame
