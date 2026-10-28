@@ -1,39 +1,39 @@
 # Application protocol allocations
 
-Coordination record, September 27, 2026. These allocations prevent concurrent
-application and publication implementations from choosing the same tags. A
-reservation does not establish an implemented or accepted native path.
+The `StableEvent.codecVersion` tags of the application and publication families, and the
+contracts behind them. A new family takes its tag here before code uses it, so two
+implementations never choose the same one.
 
 ## Stable event tags
 
-| `StableEvent.codecVersion` | Family | State at allocation |
+| `StableEvent.codecVersion` | Family | Defined in |
 | --- | --- | --- |
-| 10 | Selected release, original v1 | Earlier source implementation; no qualified native v1 acceptance |
-| 11 | Application dispatch | Existing candidate ingress |
-| 12 | Application lifecycle BEGIN | New receiver; native routing in progress |
-| 13 | Selected release, atom-bound v2 | Assigned replacement for the colliding proposed tag 11 |
-| 14 | Source publication authorization | Reserved for source-side admission |
-| 15 | Application share issuance | Reserved for special issuance admission |
-| 16 | Application lifecycle current claim | Reserved for durable claim admission |
-| 17 | Selected fn poll coverage | Reserved for bounded local scan coverage tied to an admitted selected release; no remote completeness claim |
-| 18 | Checked application lifecycle completion | Reserved for configured-host attestation and atomic app/manifest completion |
-| 19 | Ordered empty-page consumer progress | Reserved for v2 special admission sharing the selected-coverage frontier; legacy content atom tag 9 remains a distinct namespace |
-| 20 | Consumer namespace registration | Reserved for a gateway-authorized durable namespace, gateway-independent uniqueness nullifier, and explicit authenticated initial anchor; not native-qualified |
-| 21 | Agent dispatch with a claimed reservation | Reserved for replayable dispatch binding the exact delegated purse reservation and consuming its one-use claim; not native-qualified |
-| 22 | Grain-backed application share issuance | Reserved for atomic ticket issuance with composite grain birth, current app delegation authority and grain settlement; distinct from bare event15 |
-| 23 | Source-bound launch BEGIN v3 | Reserved for signed package launch descriptor and per-grain volume/action binding; old event12 unchanged |
-| 24 | Source-bound launch claim v3 | Reserved for exact BEGIN/action claim and atomic first-create attempt marker; old event16 unchanged |
-| 25 | Source-bound launch completion v2 | Reserved for exact physical action/volume attestation and completed-create evidence; old event18 unchanged |
-| 26 | Paid agent dispatch under an explicit persistent agent grant | Reserved for current execution-generation witness joined to separately app-authorized task-level access; old event21 generation-bound semantics unchanged |
-| 27 | Persistent agent grant issuance | Reserved for atomic grant-content installation and current app delegation authorization, retained as an original-prefix certificate for event26 |
-| 28 | Checked application session enrollment | Reserved for a participant-signed joint session/descriptor mutation, original ticket selection, current app observation read guard and exact stable enrollment atom; ordinary invoke remains distinct |
+| 10 | Selected release, original v1 | none: retired |
+| 11 | Application dispatch | `Kernel/ApplicationDispatchIngress`, `ApplicationDispatchAdmissionIngress` |
+| 12 | Application lifecycle BEGIN | `Kernel/ApplicationLifecycleBegin{,Ingress,V2Ingress}` |
+| 13 | Selected release, atom-bound v2 | `Kernel/FnSelectiveReleaseIngress` |
+| 14 | Source publication authorization | `Kernel/FnSelectiveReleaseSourcePublication` |
+| 15 | Application share issuance | `Kernel/ApplicationShareIssueReceiver` |
+| 16 | Application lifecycle current claim | `Kernel/ApplicationLifecycleClaim{,Ingress,V2Ingress}` |
+| 17 | Selected fn poll coverage | `Kernel/FnSelectedPollCoverage`, `FnConsumerFrontierCore` |
+| 18 | Checked application lifecycle completion | `Kernel/ApplicationLifecycleCompletionIngress` |
+| 19 | Ordered empty-page consumer progress | `Kernel/FnEmptyPollProgressV2` |
+| 20 | Consumer namespace registration | `Kernel/FnConsumerNamespaceRegistration`, `FnConsumerFrontierCore` |
+| 21 | Agent dispatch with a claimed reservation | `Kernel/ApplicationDispatchAgentIngress`, `ApplicationDispatchAgentReserveCore` |
+| 22 | Grain-backed application share issuance | `Kernel/ApplicationShareIssueGrainReceiver` |
+| 23 | Source-bound launch BEGIN v3 | `Kernel/ApplicationLifecycleBeginV3Ingress` |
+| 24 | Source-bound launch claim v3 | `Kernel/ApplicationLifecycleClaimV3Ingress` |
+| 25 | Source-bound launch completion v2 | `Kernel/ApplicationLifecycleCompletionV2Ingress` |
+| 26 | Paid agent dispatch under an explicit persistent agent grant | `Kernel/ApplicationAgentLifetimeDispatchIngress` |
+| 27 | Persistent agent grant issuance | `Kernel/ApplicationAgentLifetimeGrantSource` |
+| 28 | Checked application session enrollment | `Kernel/ApplicationGrainSessionEnrollmentSource` |
 
 Wire frame revisions, content-object type tags, nullifier codec versions, and
 event tags are separate namespaces. Changing a wire frame to v2 does not mean
 incrementing its event tag into another family's allocation. Each family must
 retain its domain-separated canonical bytes and exact decoding checks.
 
-Event26 is reserved for persistent agent access across prompt generations.
+Event26 carries persistent agent access across prompt generations.
 Existing ticket/enrollment origin equality and event21 replay remain unchanged.
 The new grant lives in an ordinary content resource, but its birth or payload
 alone does not authorize app access. Event27 must atomically join installation
@@ -47,14 +47,12 @@ must refuse. Current parent generation, reserved state, physical root and
 signed DRC witness remain per-dispatch fences, distinct from historical issue
 origin. Hard disconnect invalidates those in-flight witnesses without silently
 turning an old generation-bound ticket into a persistent grant. Operations
-72–79 are reserved below; this allocation alone does not establish a native
-route. A host-side generation projection is not sufficient authority.
+72–79 carry it. A host-side generation projection is not sufficient authority.
 Issuance signatures retain their exact historical
 authority root, registry commitment, app root and policy revision. Do not
 recheck an old signature as if signed for the current snapshot, waive those
 equalities, or require a new owner signature on every ordinary prompt. Current
-rule checks are separate from historical signature verification. This is a
-construction contract, not a qualified implementation.
+rule checks are separate from historical signature verification.
 
 Event 21 is distinct from ordinary event 11: a private physical permit cannot
 add payment authority absent from the admitted durable intent. Its claim must
@@ -77,74 +75,11 @@ rule. A new namespace alone does not implement rotation or justify a cursor rese
 
 ## Native stdio operations
 
-| Opcode | Operation |
-| --- | --- |
-| 20 | Selected-release submit |
-| 21 | Selected-release lookup |
-| 22 | Lifecycle BEGIN submit (reserved) |
-| 23 | Lifecycle BEGIN lookup (reserved) |
-| 24 | Source-publication submit (reserved) |
-| 25 | Source-publication lookup (reserved) |
-| 26 | Current lifecycle launch claim (reserved) |
-| 27 | Current lifecycle launch claim lookup (reserved) |
-| 28 | Application share-issue submit (reserved) |
-| 29 | Application share-issue lookup (reserved) |
-| 30 | Current-image application birth intent authoring (reserved; no commit) |
-| 31 | Current-image application-session birth intent authoring (reserved; no commit) |
-| 32 | Current-image application share-issue signing plan (reserved; no commit) |
-| 33 | Application share-issue detached signature assembly (reserved; no commit) |
-| 34 | Fresh checked application dispatch (source route; native qualification pending) |
-| 35 | Historical dispatch receipt-only lookup (never a delivery permit) |
-| 36 | Application dispatch signing plan (reserved private authoring; no commit) |
-| 37 | Application dispatch detached signature assembly (reserved private authoring; no commit) |
-| 38 | Checked lifecycle completion submit (reserved) |
-| 39 | Checked lifecycle completion receipt-only lookup (reserved) |
-| 40 | Consumer namespace registration submit (reserved) |
-| 41 | Consumer namespace registration receipt-only lookup (reserved) |
-| 42 | Consumer namespace registration signing plan (reserved private authoring; no commit) |
-| 43 | Consumer namespace registration detached signature assembly (reserved private authoring; no commit) |
-| 44 | Verified-current-image lifecycle completion signing plan (reserved private authoring; no commit) |
-| 45 | Lifecycle completion detached signature assembly (reserved private authoring; no commit) |
-| 46 | Fresh event21 agent dispatch with one-use reserve claim (reserved private admission) |
-| 47 | Event21 historical receipt-only lookup (reserved; never a delivery permit) |
-| 48 | Verified-current-image event21 agent dispatch signing plan (reserved private authoring; no commit) |
-| 49 | Event21 agent dispatch detached signature assembly (reserved private authoring; no commit) |
-| 50 | Current-image resident lifecycle BEGIN signing plan (private authoring) |
-| 51 | Resident lifecycle BEGIN detached signature assembly (private authoring) |
-| 52 | Current-image lifecycle claim signing plan (private authoring) |
-| 53 | Lifecycle claim detached signature assembly (private authoring) |
-| 54 | Grain-backed application share-issue submit (reserved) |
-| 55 | Grain-backed share-issue historical receipt-only lookup (reserved) |
-| 56 | Current-image grain-backed share-issue signing plan (reserved private authoring) |
-| 57 | Grain-backed share-issue detached signature assembly (reserved private authoring) |
-| 58 | Current-image event21 full-context purse reserve signing plan (reserved private authoring) |
-| 59 | Event21 full-context purse reserve detached signature assembly (reserved private authoring) |
-| 60 | Event17 selected fn coverage submit (reserved operator-private admission) |
-| 61 | Event17 historical coverage receipt-only lookup (reserved operator-private) |
-| 62 | Event19 ordered empty fn progress submit (reserved operator-private admission) |
-| 63 | Event19 historical progress receipt-only lookup (reserved operator-private) |
-| 64 | Verified-current-image fn progress signing plan, selected or empty variant (reserved operator-private authoring) |
-| 65 | Fn progress detached gateway-signature assembly (reserved operator-private authoring) |
-| 66 | Source-bound launch BEGIN signing plan (reserved operator-private authoring) |
-| 67 | Source-bound launch BEGIN detached signature assembly (reserved operator-private authoring) |
-| 68 | Source-bound launch claim signing plan (reserved operator-private authoring) |
-| 69 | Source-bound launch claim detached signature assembly (reserved operator-private authoring) |
-| 70 | Source-bound launch completion signing plan (reserved operator-private authoring) |
-| 71 | Source-bound launch completion detached signature assembly (reserved operator-private authoring) |
-| 72 | Event27 persistent agent grant submit (reserved private admission) |
-| 73 | Event27 historical grant receipt-only lookup (reserved private) |
-| 74 | Verified-current-image event27 grant signing plan (reserved private authoring) |
-| 75 | Event27 grant detached signature assembly (reserved private authoring) |
-| 76 | Fresh event26 grant-bound agent dispatch (reserved private admission) |
-| 77 | Event26 historical receipt-only lookup (reserved; never a delivery permit) |
-| 78 | Verified-current-image event26 grant-bound dispatch signing plan (reserved private authoring) |
-| 79 | Event26 grant-bound dispatch detached signature assembly (reserved private authoring) |
-| 80 | Verified-current-image event26 grant-bound purse reserve signing plan (reserved private authoring) |
-| 81 | Event26 grant-bound purse reserve detached signature assembly (reserved private authoring) |
-| 82 | Verified-current-image session enrollment signing plan (reserved private authoring) |
-| 83 | Session enrollment detached signature assembly (reserved private authoring) |
-| 84 | Checked session enrollment submit (reserved private admission) |
-| 85 | Session enrollment historical receipt-only lookup (reserved private; never a dispatch permit) |
+Opcodes 20–85 are this family's operations, and all are active. Their symbols, routes and
+receivers are in `protocol/host-operations.json`, which `scripts/host-operations.py` checks
+against `Host/Main.lean`. Each family has a submit, a receipt-only lookup (never a delivery
+permit), and where a participant signs, a current-image signing plan plus a detached-signature
+assembly that commits nothing.
 
 Event28 uses the participant's existing session and descriptor mutation rights,
 and a separately signed app observation with a physical read guard. The app is
@@ -160,13 +95,11 @@ old record on renewal. Operations82/83 construct and assemble the current
 signed proposal; 84 alone submits through event28, and 85 is receipt-only.
 
 Operations80/81 prepare the separately signed reserve before the ordinary
-native invoke. Operations78/79 cover only the post-reserve dispatch plan. The
-reservation does not qualify either route or authorize Rust to encode Mini's
-ordinary invoke frame.
+native invoke. Operations78/79 cover only the post-reserve dispatch plan. Neither
+authorizes Rust to encode Mini's ordinary invoke frame.
 
-Events23–25 and operations66–71 are reserved for the source-bound first-create
-and continued-launch contract. They are not implemented by this reservation.
-Submit/lookup pairs22/23,26/27,38/39 may accept the new ingress only through
+Events23–25 and operations66–71 carry the source-bound first-create and
+continued-launch contract. Submit/lookup pairs22/23,26/27,38/39 may accept the new ingress only through
 strict version dispatch preserving old canonical bytes and original replay.
 The reusable signed package descriptor commits creation actions and the
 continue command; per-grain volume identity belongs to the launch binding,
@@ -177,8 +110,7 @@ verified creation lineage for the same grain volume plus current lifecycle
 authority. Rust maps the admitted volume/action to protected physical custody;
 an empty directory or operator flag cannot choose the semantic action.
 
-Operations60–65 are reserved for the fn integration continuation. They are not
-implemented or native-qualified by this allocation. The selected variant must
+Operations60–65 carry the fn integration continuation. The selected variant must
 bind both the originally admitted event13 release and its event17 coverage;
 the empty variant uses event19 and the same verifier-derived frontier. ACK
 requires the accepted progress receipt and exact retained local poll evidence,
@@ -206,7 +138,7 @@ bounded first-match scan, exact projected article and an originally admitted
 selected-release transaction. A transport cursor alone is not authority to
 advance Mini progress or install content. Coverage says what the pinned local
 consumer observed; it does not prove that a remote provider delivered every
-article. The precise signed carrier and native route remain under construction.
+article.
 
 Replay must decode the original ingress, admit it against its original verified
 prefix, and compare the entire derived intent, including writes, read guards,
