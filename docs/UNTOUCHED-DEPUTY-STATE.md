@@ -10,7 +10,7 @@ Each lane: /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>.
 - Statements go directly to the statements auditor (af7a93e7b8ba729d4), copying the deputy.
 - Integration is continuous (no cuts). Re-genesis is free (flag days are not held).
 - Never kill by pattern; no PID file: tell the coordinator.
-- Context (ember, COORDINATION 22f5a3cc3): a continuation file by about 450k tokens, distill or hand off at about 470k, for the deputy and every faerie it briefs.
+- Context (ember, COORDINATION 3a6aafdca): a continuation file by about 580k tokens, distill or hand off at about 600k, for the deputy and every faerie it briefs.
 
 ## Landed (all on main as of e05a19fe)
 un-verify (Generic Simplex gate), un-bend (bend verb + lost reply), un-world (Tally/call/send native; DOMAINS.md), un-assurance (census, Door 11, StoryHistory, Kernel/StoryLaw), un-native-rows, un-moves, un-fixtures, un-seats, un-pb-codec (R8), un-pb-exec (R7/P9), un-pb-seal (R3 whole), un-pb-wal (R2 + five two-step dealers), un-pb-twins 134535c2 (§5.3 deletions, Pool/Cut, AnchorFixture -> real serve, P6 verifier), un-pb-helpers 353a6d11d (Lagrange, Horner, PRG/urandom, Nat cursors, outbox/phase codecs), un-web-front 0da04999, un-effects 2acd8acf (effect Plan kernel, keystone 5e116ec9, pass-11 additions, world apps on the kernel protocol), un-pred-census 44479e30 (Vouchers sweep: every receiver a Kernel.Receiving.Family at receiverVerifier, Ran private with one mint, gate rows receiver-verifier and ran-mint), un-stream-continuity 6544ea37 (hot-route op154 fixed at the cause; statement accepted e0916a53).
