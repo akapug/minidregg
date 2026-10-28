@@ -14,10 +14,10 @@
 //! N, and otherwise prints the view and succeeds: the timer's cadence is then a height
 //! cadence, and an idle node does not accrue one certify record per tick.
 //!
-//! The command names the head and chain it observed and pins the factory, authority and
-//! system roots (`CertifyReceiver.prepare`). Since the certify-prefix rule
-//! (`Kernel.ChainHistory.certifiable`) a held prefix stays certifiable after later
-//! writes; a moved root still refuses it stale. Certifying the newer head is the same act, so such a refusal is run
+//! The command names the exact head and chain it observed and pins the factory,
+//! authority and system roots (`CertifyReceiver.prepare`, `decideCertify`), so every
+//! write that lands between the view and the submit refuses it (`headMismatch`, or a
+//! stale root). Certifying the newer head is the same act, so such a refusal is run
 //! again through the client's one re-plan loop (`replan::replan`, `--replan-max`):
 //! nothing was admitted and nothing is retained, so a fresh observation authors a
 //! fresh command. The reply lists each raced refusal under `racedRefusals`; when the
@@ -123,7 +123,9 @@ fn view(ws: &Workspace) -> Result<Value> {
 /// (`ResourceTargetAdmission.observe` at the pinned root); `notAdvancing` with the
 /// observed head means another certify landed first, and the re-observation is then
 /// `not-due`.
-const RACED: [&str; 4] = ["staleAuthority", "staleSystem", "factoryUnavailable", "notAdvancing"];
+const RACED: [&str; 6] = [
+    "staleAuthority", "staleSystem", "headMismatch", "chainMismatch", "factoryUnavailable", "notAdvancing",
+];
 const RACED_PREFIX: &str = "certify refused raced ";
 
 fn raced(outcome: &Value) -> Option<&'static str> {
@@ -261,14 +263,12 @@ mod tests {
             assert_eq!(raced(&refused("certify", &reject(name))), Some(name));
         }
         // Teeth: a refusal that is not a race is final for the run.
-        // A held prefix's chain value is permanent: chainMismatch and heightUnavailable are final.
-        for other in ["capabilityRejected", "replayedMarker", "validation", "systemUnavailable", "policyRejected",
-            "chainMismatch", "heightUnavailable"] {
+        for other in ["capabilityRejected", "replayedMarker", "validation", "systemUnavailable", "policyRejected"] {
             assert_eq!(raced(&refused("certify", &reject(other))), None, "{other}");
         }
-        assert_eq!(raced(&refused("clock-tick", &reject("staleSystem"))), None);
+        assert_eq!(raced(&refused("clock-tick", &reject("headMismatch"))), None);
         assert_eq!(raced(&refused("certify", "Minidregg.Kernel.ClockTickReceiver.Reject.staleAuthority")), None);
-        assert_eq!(raced(&refused("certify", &format!("{} extra", reject("staleSystem")))), None);
+        assert_eq!(raced(&refused("certify", &format!("{} extra", reject("headMismatch")))), None);
         assert_eq!(raced(&json!({"type": "not-due"})), None);
         assert_eq!(raced(&json!({"type": "contention"})), None);
     }
