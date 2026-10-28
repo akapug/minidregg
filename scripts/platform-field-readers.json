@@ -16,15 +16,13 @@
  "Host/ApplicationCurrentBirthAuthoring.lean": {
   "config.tariff": {
    "count": 1,
-   "status": "owed"
-  },
-  "grainBirthTariffValue": {
-   "count": 1,
-   "status": "owed"
+   "reason": "checkSource: the supplied genesis description must equal the pinned runtime's genesis parameters and rebuild the pinned seed; prices and the grant window come from the loaded platform record",
+   "status": "genesis"
   },
   "profile.template": {
    "count": 2,
-   "status": "owed"
+   "reason": "checkSource: the supplied genesis description must equal the pinned runtime's genesis parameters and rebuild the pinned seed; prices and the grant window come from the loaded platform record",
+   "status": "genesis"
   }
  },
  "Host/BirthRuntimeProfile.lean": {
@@ -107,26 +105,6 @@
   "config.tariff": {
    "count": 2,
    "status": "other"
-  }
- },
- "Kernel/ApplicationGrainBirth.lean": {
-  "config.tariff": {
-   "count": 4,
-   "status": "owed"
-  },
-  "template.lifetime": {
-   "count": 3,
-   "status": "owed"
-  }
- },
- "Kernel/ApplicationGrainSessionBirth.lean": {
-  "config.tariff": {
-   "count": 4,
-   "status": "owed"
-  },
-  "template.lifetime": {
-   "count": 3,
-   "status": "owed"
   }
  },
  "Kernel/NativeHostBookInvariant.lean": {

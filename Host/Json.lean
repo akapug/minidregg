@@ -2573,8 +2573,9 @@ private def applicationBirth (path : String) (json : Lean.Json)
   let (context, specJson) ← applicationBirthContext path "application" json grainBirthTariff none deployed
   let spec ← applicationSpec (path ++ ".application") specJson
   let ready ← ApplicationGrainBirth.prepare spec
-  let descriptor := ready.descriptor context.profile context.source context.height
-    context.creator context.nonce context.feePayer context.funding
+  let descriptor := ready.descriptor context.profile context.source
+    (NativeHostGenesis.genesisRecord context.source) context.height context.creator context.nonce
+    context.feePayer context.funding
   pure (.birth ((ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode descriptor)
     context.sourceCapabilities)
 
@@ -2584,8 +2585,9 @@ private def applicationSessionBirth (path : String) (json : Lean.Json)
   let (context, specJson) ← applicationBirthContext path "session" json grainBirthTariff none deployed
   let spec ← applicationSessionSpec (path ++ ".session") specJson
   let ready ← ApplicationGrainSessionBirth.prepare spec
-  let descriptor := ready.descriptor context.profile context.source context.height
-    context.creator context.nonce context.feePayer context.funding
+  let descriptor := ready.descriptor context.profile context.source
+    (NativeHostGenesis.genesisRecord context.source) context.height context.creator context.nonce
+    context.feePayer context.funding
   pure (.birth ((ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode descriptor)
     context.sourceCapabilities)
 
