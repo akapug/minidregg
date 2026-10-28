@@ -32,6 +32,9 @@
 //! custody store, and the signing path itself ([`flow`]), which the `mini` CLI signs with.
 #![forbid(unsafe_op_in_unsafe_fn)]
 
+pub mod app_interface;
+pub mod app_interface_ddp;
+mod app_interface_cookie;
 pub mod confirm;
 pub mod contracts;
 pub mod custody;
