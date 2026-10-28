@@ -1837,7 +1837,9 @@ mod tests {
         let auth: Vec<_> = (0..4).map(|i| vec![i + 1; 32]).collect();
         let target = root.join("native.sock");
         let listener = UnixListener::bind(&target).unwrap();
-        let body = [vec![1, 2, 0, 0, 0], b"{}".to_vec(), vec![12]].concat();
+        // envelope v2: config "{}", a Host image pin (the public envelope check leaves the
+        // pin to the socket), operation 12
+        let body = [vec![2, 2, 0, 0, 0], b"{}".to_vec(), vec![0; 32], vec![12]].concat();
         let expected = body.clone();
         let (started, observed) = mpsc::channel();
         let (release, hold) = mpsc::channel();
@@ -1971,7 +1973,9 @@ mod tests {
         let (secret, public) = keys();
         let target = root.join("host.sock");
         let listener = UnixListener::bind(&target).unwrap();
-        let body = [vec![1, 2, 0, 0, 0], b"{}".to_vec(), vec![12]].concat();
+        // envelope v2: config "{}", a Host image pin (the public envelope check leaves the
+        // pin to the socket), operation 12
+        let body = [vec![2, 2, 0, 0, 0], b"{}".to_vec(), vec![0; 32], vec![12]].concat();
         let calls = Arc::new(AtomicUsize::new(0));
         let counted = calls.clone();
         let expected = body.clone();
