@@ -47,56 +47,22 @@ done
 [[ ! -x $own/spk-data-publish ]] || install -m 755 "$own/spk-data-publish" "$run/bin/spk-data-publish"
 install -m 755 "$repo/deploy/spk-host/spk-ingest" "$run/bin/spk-ingest"
 sha256sum "$run/bin/"* >"$run/binary-sha256.txt"
-runid=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
-helper=/usr/local/libexec/mini-spk-volume-helper-$runid
 # The Store first: its native profile names the store tag the world is keyed by.
 BIN="$run/bin" GRAINS_ROOT=/var/lib/mini-spk-worlds/0000000000000000 \
   BROKER_SOCKET=/var/lib/mini-spk-worlds/0000000000000000/runtime-0000000000000000/broker.sock \
   "$here/grain-journey.sh" phase "$run/w" store | tee "$run/w/store-phase.log"
 config=$run/w/store/base/workroom/deployment/pinned-config.json
-"$run/bin/minidregg-host" "$config" profile >"$run/w/native-profile.json"
-store=$(jq -er '.storeTag | select(test("^[0-9a-f]{16}$"))' "$run/w/native-profile.json")
-root=/var/lib/mini-spk-worlds/$store
-# A free 16-ID slice of the operator's subordinate allocation: a lane box carries several standing
-# worlds, and the installer refuses a slice another world's registry already names.
-read -r start count < <(awk -F: -v user="$op_name" '$1==user && $3>=16 {print $2,$3;exit}' /etc/subuid)
-[[ $start =~ ^[0-9]+$ && $count =~ ^[0-9]+$ ]] || { echo "no /etc/subuid range for $op_name" >&2; exit 1; }
-end=$((start + count))
-while ((start + 16 <= end)); do
-  occupied=0
-  for registry in /etc/mini-spk-volumes/*.json; do
-    [[ -f $registry ]] || continue
-    if jq -e --argjson first "$start" --argjson last "$((start + 16))" '.appUids | any(. >= $first and . < $last)' "$registry" >/dev/null 2>&1; then occupied=1; break; fi
-  done
-  [[ $occupied == 1 ]] || break
-  start=$((start + 16))
-done
-((start + 16 <= end)) || { echo "no unused 16-ID subordinate slice for $op_name" >&2; exit 1; }
-bwrap=$(sh "$repo/deploy/grain-host/resolve-bwrap") || exit 1
-deployment=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
-host=$(sha256sum /etc/machine-id | cut -d ' ' -f1)
-printf 'ROOT SETUP BEGIN store=%s\n' "$store" | tee -a "$run/root-setup.log"
-sudo -n -- "$installer" install "$run/bin/mini-spk-volume-helper" "$helper" "$store" "$deployment" "$host" "$op_uid" "$start" 16 >>"$run/root-setup.log" 2>&1
-printf 'ROOT SETUP store=%s helper=%s\n' "$store" "$helper" | tee -a "$run/root-setup.log"
-registry=/etc/mini-spk-volumes/$store.json
-# MINI_IMPORT_PROFILE is the operator's physical intake budget for materialising a package:
-# standard-v1 (256 MiB raw, 768 MiB decoded), market-large-v1 (512 MiB, 2 GiB: the market's
-# class L apps) or operator-appliance-v1 (the oracle runtime). The wall clock scales with each
-# package's size (spk-host import-limits).
-import_profile=${MINI_IMPORT_PROFILE:-standard-v1}
-case $import_profile in standard-v1|market-large-v1|operator-appliance-v1) ;; *) echo "unknown MINI_IMPORT_PROFILE $import_profile" >&2; exit 2;; esac
-jq -n --slurpfile registry "$registry" --arg binary "$run/bin/spk-host" --arg sha "$(sha256sum "$run/bin/spk-host" | cut -d ' ' -f1)" --arg ingest "$run/bin/spk-ingest" --arg op "$op_name" \
-  --arg bwrap "$bwrap" --arg bwrapSha "$(sha256sum "$bwrap" | cut -d ' ' -f1)" --arg importProfile "$import_profile" '
-  $registry[0] as $r | {protocol:"mini-spk-broker-config-v3",store:$r.store,grainsRoot:$r.grainsRoot,spkRoot:($r.grainsRoot+"/spk"),brokerSocket:($r.grainsRoot+"/runtime-"+$r.store+"/broker.sock"),operatorUser:$op,unitPrefix:"mini",spkHost:$binary,spkHostSha256:$sha,bwrap:$bwrap,bwrapSha256:$bwrapSha,ingestHelper:$ingest,volumeHelper:$r.helper,appUids:$r.appUids,residentHomeReadOnlyPaths:[],importProfile:$importProfile}' >"$root/broker/config.json"
-chmod 600 "$root/broker/config.json"
-sed "s|%h/.local/libexec/mini-spk-broker|$run/bin/mini-spk-broker|" "$repo/deploy/spk-host/mini-spk-broker@.service" >"$units/mini-spk-broker@$store.service"
-systemctl --user daemon-reload
-systemctl --user start "mini-spk-broker@$store.service"
-socket=$root/runtime-$store/broker.sock
-# A loaded box starts the broker slowly: wait up to two minutes for its socket.
-# The broker binds its socket and then sets its mode: wait for the finished state, not the bind.
-for attempt in $(seq 1 1200); do [[ -S $socket && $(stat -c '%u:%a' "$socket" 2>/dev/null) == "$op_uid:600" ]] && break; sleep 0.1; done
-[[ -S $socket && $(stat -c '%u:%a' "$socket") == "$op_uid:600" ]] || { echo 'operator broker socket custody failed' >&2; exit 1; }
+broker_status=0
+"$here/broker-world-up.sh" "$run/bin" "$config" "$run/broker-setup" >"$run/broker-setup.stdout" || broker_status=$?
+# Root installation can succeed before a later broker check fails. Preserve
+# the recovery locator in the old caller-visible place on either outcome.
+[[ ! -f $run/broker-setup/root-setup.log ]] || cp "$run/broker-setup/root-setup.log" "$run/root-setup.log"
+[[ ! -f $run/broker-setup/native-profile.json ]] || cp "$run/broker-setup/native-profile.json" "$run/w/native-profile.json"
+((broker_status == 0)) || exit "$broker_status"
+store=$(jq -er .store "$run/broker-setup/broker.json")
+root=$(jq -er .grainsRoot "$run/broker-setup/broker.json")
+socket=$(jq -er .brokerSocket "$run/broker-setup/broker.json")
+helper=$(jq -er .helper "$run/broker-setup/broker.json")
 # The Store's services, the workroom's metered tasks and the grain-host profile.
 BIN="$run/bin" GRAINS_ROOT="$root" BROKER_SOCKET="$socket" "$here/grain-journey.sh" phase "$run/w" services workroom profile
 profile=$(jq -er .profilePath "$run/w/evidence/profile-result.json")
