@@ -1,4 +1,4 @@
-# Untouched-areas deputy: state (rewritten whole; 2026-10-28 small hours)
+# Untouched-areas deputy: state (rewritten whole; 2026-10-28 03:45Z)
 
 Inputs: docs/review/2026-10-27-untouched-areas/{LEAN,NATIVE}.md, docs/review/2026-10-27-blind-spots/BLIND-SPOTS.md Sweep 1.
 Each lane: /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>.
@@ -29,10 +29,18 @@ un-verify (Generic Simplex gate), un-bend (bend verb + lost reply), un-world (Ta
 ## Web item (done)
 - un-web-front 0da04999: the public front page renders the operator's published document. mini-web-spawn reads /etc/mini/front-doc and passes --front-doc to the public body only; it falls back to the index. Infra writes `welcome` there (demo-vm 3b8e729, run-sheet step 9c); its check line: an anonymous GET / renders welcome. Sha sent to the integrator.
 
+## App market (taken over from L13, 2026-10-28; lane/app-market db312c6f is on main)
+Sources: docs/APP-MARKET-2026-10-27.md "State at hand-off"; docs/ROWS-OWED.md §0 and §3.
+- Every install on 0ce31391 was refused (op69 claim plan vs BEGIN); the fix 25cfb86bd is on main (81bca08c6), not in 1af366fe9; the first candidate carrying it is the build after 1af366fe9. On it: the batch tables run on fresh worlds (validator), and I own the reds.
+- app-writes-2 (Kimi) landed only Etherpad 956b91bff and Hacker Slides 8a3682c3e (merged); HakyllCMS, HackerCMS and OrgTodo are covered by faerie app-market-fixups. "tale invite": asked the coordinator what it names.
+- Faeries (Sonnet, recipes now, one run on the candidate): lane/app-market-b3 (diagrams.net, EtherDraw, Scrumblr, Swagger Editor), lane/app-market-b7 (2048, Sudoku, Blockstack, Simple Chat direct-capnp), lane/app-market-fixups (OrgTodo manifest, HakyllCMS START exit, HackerCMS write). Shared brief: scratchpad market-common.txt (copied into each prompt by reference).
+- japps co-edit row: faerie a4e312352a7091f59 runs it on the same candidate (stream-continuity 6544ea37 + 25cfb86bd), then L13's DDP rerun is mine to report.
+- Later: B5 (FileDrop, Kiwix; Groove Basin and Tube need streaming), B8 rest (Mercurial, MediaWiki, Firefly III; IPython recipe written), bodies > 8 MiB (designed §2b), the member install debit (apps-e2e.sh) into INSTALL.md §4. Each green app (lifecycle + write) goes into FEATURED in native/resource-client/src/apps.rs; target 2-3 dozen.
+
 ## Decided
 fn out; private-backend stays; Effects/ registry is Phase 3 (EFFECTS.md); dues and six more ride the effect Plan; DreggNet lease cluster parked; Contracts Cuts/Snapshot/Refinements/Futures kept; Pred BoundedQuantifiedView/CoordinationDial kept; twin conflict on un-pb-twins resolved to un-pb-wal 68d9f28e's design (82f3710b).
 
 ## Next three
-1. Watch the integrator's candidate after e05a19fe: route reds on un-effects / un-pred-census / un-stream-continuity to the faerie or fix by reasoning; confirm the ACTIVITY-RECORD v9 pins re-emitted.
-2. When a candidate carries the stream-continuity fix, get the japps co-edit row run and tell the coordinator so L13 reruns DDP.
+1. On the first candidate carrying 25cfb86bd: tell the three market faeries and a4e312352a7091f59 to run; read the validator's batch tables; fix reds; add every green app to FEATURED.
+2. Review b3/b7/fixups recipes as they land; then B5 and B8 faeries (2-3 at a time).
 3. Owed after the demo: revive Effects/ so transfer/commit come from the derivation engine (EFFECTS.md); private-backend P6 lost reply; the child() twin check.
