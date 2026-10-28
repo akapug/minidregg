@@ -1,53 +1,84 @@
-# lane/custody-b (successor of custody-drivers, L2): state (2026-10-28)
+# lane/custody-b (successor of custody-drivers, L2): state (2026-10-28, lane stopped)
 
-Branch `lane/custody-b`, Mac worktree `/Users/ember/dev/minidregg-lanes/custody-b`. Rows run on dregg-ref
-(`lanes@2.31.71.194`, key `~/.ssh/id_portable`) from `/build/lanes/custody-b/src`: cut 14's source.tar
-(0ce31391) with this lane's changed scripts copied over, and the binaries in
-`/build/lanes/rows-0ce31391/cand/0ce31391…/bin`. Runners: `/build/lanes/custody-b/job1.sh N` (all six rows)
-and `trace.sh RUN NAME…` (sh -x). PID files sit beside each runner and every one names an exited process.
-Linux cargo runs on dregg-build in worktree `/build/lanes/custody-b`, with target
-`/build/lanes/custody-drivers-target2`.
+Branch `lane/custody-b`, merged into main through 97aab6054. A successor starts here. What is left is a
+rerun of the rows below on the first candidate carrying 25cfb86bd and f73893fce (the integrator names
+it). A red there is fixed at its cause, never by weakening an assertion.
 
-## Now
+## State on cut 14 (0ce31391, dregg-ref, run 7 and the JPAY2 run)
 
-Genesis writers on cut 14 (dregg-ref, run 6 at f79044d79):
-- **green**: `acceptance.sh`, `application-acceptance.sh`, `selected-release-acceptance.sh`, grain-runtime
-  plain, and grain-runtime `PROVIDER_BOOTSTRAP=1 BOOTSTRAP_ONLY=1`.
-- **authority-acceptance.sh**: asserts the prepare-refusal contract (exit 3, pre-submit-refusal.json, a
-  NO_RECORD frame decoded as law-denied), which needs f73893fce (on main). It goes green on the first
-  candidate that carries that commit; cut 14's mini exits 1 there.
-- **fn-e1e2 setup-mini**: out of scope (fn).
-- **jserve**: PASS on cut 14 with beb108d5f (validator, hbox).
-- **JPAY2**: PASS 18/18 on cut 14 (standalone hook, dregg-ref, lane venv for PyNaCl).
-- JPAY6 and its extractors belong to the GLM sniper (glm-red-jpay6). The profiled grain bootstrap is
-  deleted: it had no producer (see the deletion commit).
+| row | cut 14 | note |
+|---|---|---|
+| native/resource-client/acceptance.sh | PASS | |
+| native/resource-client/application-acceptance.sh | PASS | |
+| native/resource-client/selected-release-acceptance.sh | PASS | |
+| native/grain-runtime/acceptance.sh (plain) | PASS | about 2 min; uses the user systemd manager |
+| native/grain-runtime/acceptance.sh, PROVIDER_BOOTSTRAP=1 BOOTSTRAP_ONLY=1 | PASS | |
+| native/resource-client/authority-acceptance.sh | red, expected | asserts the prepare-refusal contract (exit 3, pre-submit-refusal.json, a NO_RECORD frame that `inspect outcome` decodes as law-denied naming subject 8's write clause); cut 14's mini exits 1 there. Green needs f73893fce in the candidate |
+| journey.d/jpay2.sh (JPAY2, standalone) | PASS 18/18 | needs PyNaCl: see below |
+| jserve | PASS | validator, hbox, beb108d5f |
 
-Causes found (each fixed at the cause; no assertion weakened):
-- content targets carried schemaVersion "1"; `journey.d/lib/wire.sh` reads `ContentResource.commandVersion`
-  from the Lean.
-- Store images used the legacy `read-to`; `journey.d/lib/evidence.sh` holds the one `durable_image` (head
-  plus log, read under `profile`'s storeAnchorIdentity; the checkpoint cache is excluded). It also holds a
-  portable `sha256`. The four `durable_image` copies are deleted.
-- grain's clock-subject capabilities 71-74 collided with the birth's 71/72/73 (`authorityBatch`). grain plain
-  also lacked: the controller unit's user manager selection, a launcher with the candidate's launch gate,
-  the worker's Hermes MCP-timeout profile, and a declared field 0 on the publication target. It also
-  asserted the old operator-directed reconcile, where the runtime now settles by itself.
+Out of scope: scripts/fn-e1e2/setup-mini.sh (fn); JPAY6 and its extractors (the GLM sniper, glm-red-jpay6).
+Deleted: grain's profiled bootstrap (97aab6054, no producer).
+
+## Exact commands
+
+The candidate set `C=/build/candidates/<sha>` (or a copy) and a tree carrying main's scripts. On
+dregg-ref the lane used `/build/lanes/custody-b/src`: the candidate's source.tar with this lane's
+scripts copied over. With a candidate cut from main, use its own source.tar unmodified.
+
+```sh
+B=$C/bin
+export CANDIDATE=$C/provenance.json XDG_RUNTIME_DIR=/run/user/$(id -u) \
+  MINI=$B/mini STORE_BINARY=$B/minidregg-link-sqlite-store \
+  SIGNATURE_BINARY=$B/minidregg-credential-signature-verifier GRAIN=$B/grain-runtime
+H=$B/minidregg-host; E=<new evidence root>; cd <tree>
+swarm-build native/resource-client/acceptance.sh                 $H $E/acceptance
+swarm-build native/resource-client/application-acceptance.sh     $H $E/application
+swarm-build native/resource-client/authority-acceptance.sh       $H $E/authority
+swarm-build native/resource-client/selected-release-acceptance.sh $H $E/selected-release
+swarm-build native/grain-runtime/acceptance.sh                   $H $E/grain-plain
+swarm-build env PROVIDER_BOOTSTRAP=1 BOOTSTRAP_ONLY=1 native/grain-runtime/acceptance.sh $H $E/grain-provider
+# JPAY2: the hook's own env names; PyNaCl must import
+PATH=/build/lanes/custody-b/venv/bin:$PATH HOST=$H MINI=$B/mini STORE=$B/minidregg-link-sqlite-store \
+  VERIFIER=$B/minidregg-credential-signature-verifier JOURNEY_STEP_DIR=$E/jpay2 \
+  swarm-build bash native/resource-client/journey.d/jpay2.sh
+```
+
+The lane's runners on dregg-ref do exactly this: `/build/lanes/custody-b/job1.sh N` (all six, logs in
+`logs/runN/`, evidence in `accept/runN/`) and `jpay2.sh N`. Start each detached with a PID file; wait
+with `scripts/pipeline/box-wait --host lanes@2.31.71.194 --key ~/.ssh/id_portable --pid <pidfile>`.
+
+Box notes:
+- dregg-ref has no PyNaCl. `/build/lanes/custody-b/venv` is a lane venv with pynacl; put its bin first in
+  PATH for JPAY2.
+- dregg-ref has no `shasum`; the scripts use `sha256` from journey.d/lib/evidence.sh.
+- The grain row runs the unit mini-grain-controller@7001 under the user manager. Only one run of it can be
+  live per account at a time; it refuses a busy unit.
+- grain's worker launcher needs the candidate's bin/launch-gate (LAUNCH_GATE defaults to the gate beside
+  GRAIN).
+
+## What this lane changed, by cause (all on main)
+
+- Shared helpers: `journey.d/lib/wire.sh` reads `ContentResource.commandVersion` from the Lean and reply
+  markers from protocol/host-operations.json. `journey.d/lib/evidence.sh` holds the one `durable_image`
+  (head and log, under `profile`'s storeAnchorIdentity, checkpoint excluded) and a portable `sha256`.
+- Assertions moved to plan-time NO_RECORD refusals (c5e268ebd, law 10): authority, application
+  (`no-grant`), jserve. The content tree in acceptance gains the atom element.
+- grain:
+  - the clock capabilities moved off the birth's 71-73;
+  - the controller unit selects the user manager;
+  - the launcher is materialized with the launch gate;
+  - the worker writes a Hermes MCP-timeout profile;
+  - field 0 is declared on the publication target;
+  - the runtime settles after the breaker by itself, and the row checks that.
 - grain-runtime itself recognised prepare and query refusals only under 255. 629aff40f moves both to
-  NO_RECORD, and host-operations.py check now refuses that form (`x[0] == marker`, `.first() == Some(&m)`).
-- plan-time refusals (law 10, c5e268ebd NO_RECORD) replaced submitted ones in authority, application
-  (`no-grant`) and jserve. Marker bytes come from protocol/host-operations.json (`response_marker`).
-
-Split-tenancy signing (coordinator's top priority; working in infra's demo-dry on 0ce31391):
-- Cause: full consent replays the Store; split-tenancy members (mini-s-NAME) cannot read mini-core's Store.
-  R2's members ran as `mini`. No Mini commit introduced it.
-- Fix: delegated full consent, one socket-activated `mini serve-controller-consent` per member running as
-  mini-core. Mini side: 51e9ca5a9 (idle exit), 7c76b6ad8 (USAGE), 52c0eae22 (mini-web-spawn gives web
-  bodies the selection). Frame side: dregg-infra demo-vm 742446c (this lane's member-consent e344a5e,
-  merged by infra with fixes forward 66ed7fb and 1c4a79d); rows S2b-S2e are in jsplit-tenancy.sh.
-
-Owed:
-- A rerun of the six writers on the first candidate after 1af366fe9 (authority goes green there).
-- The web body fix confirmed in demo-dry (infra reruns the seed).
+  NO_RECORD, and host-operations.py check now refuses `x[0] == marker` and `.first() == Some(&marker)`.
+- Split-tenancy signing: delegated full consent, one socket-activated `serve-controller-consent` per member
+  running as mini-core.
+  - Mini side: 51e9ca5a9 (idle exit), 7c76b6ad8 (USAGE), 52c0eae22 (web bodies get the selection).
+  - Frame side: dregg-infra demo-vm 742446c, with fixes 66ed7fb and 1c4a79d, and jsplit rows S2b-S2e.
+  - Infra (now ae95a4eac63b0715e) reruns the demo-dry seed on a candidate carrying 52c0eae22; that run is
+    the first to check the front page.
 
 ## Earlier work by custody-drivers (shas)
 
