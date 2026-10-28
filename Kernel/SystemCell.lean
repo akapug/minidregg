@@ -157,7 +157,7 @@ def keyStream : (space : Namespace) → StreamCodec (Namespace.Key space)
 def valueStream : (space : Namespace) → StreamCodec (Namespace.Value space)
   | .system => systemStream
 
-def wireName : String := "DREGG/SYSTEM/v4"
+def wireName : String := "DREGG/SYSTEM/v5"
 
 def wire : Wire layout where
   name := wireName
@@ -169,7 +169,7 @@ def wire : Wire layout where
   keyCodecId
     | .system => "unit"
   valueCodecId
-    | .system => "DREGG/SYSTEM/CERTIFIED-HEIGHT-DIGEST-TAIL-BOUND/v4"
+    | .system => "DREGG/SYSTEM/CERTIFIED-HEIGHT-DIGEST-TAIL-BOUND/v5"
 
 def materializer : Materializer layout Digest := StoreCodec.materializer wire
 

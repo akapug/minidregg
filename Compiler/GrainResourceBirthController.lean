@@ -80,7 +80,7 @@ def Source.userDraft (source : Source) :
 
 def Source.grainNonce (source : Source) : Nat :=
   (Sp800185Cshake256.hash
-    "DREGG/GRAIN-RESOURCE-BIRTH/USER-DRAFT-NONCE/v4".toUTF8.toList
+    "DREGG/GRAIN-RESOURCE-BIRTH/USER-DRAFT-NONCE/v5".toUTF8.toList
     ((StreamCodec.product StreamCodec.nat bytesStream).encode
       (source.birth.nonce,
         (ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode
@@ -134,7 +134,7 @@ not merely the birth descriptor or a Rust-selected task ID. Both components
 use the existing canonical codecs; the outer length framing prevents an
 ambiguous concatenation. -/
 def Source.canonicalBytes (tariff : Tariff) (source : Source) : List UInt8 :=
-  "DREGG/GRAIN-RESOURCE-BIRTH/SOURCE/v4".toUTF8.toList ++
+  "DREGG/GRAIN-RESOURCE-BIRTH/SOURCE/v5".toUTF8.toList ++
     (StreamCodec.product bytesStream bytesStream).encode
       ((ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode source.birth,
         DeclaredResourceController.commandCodec.encode (source.grainCommand tariff))
@@ -149,9 +149,9 @@ def Source.factoryRequest (tariff : Tariff) (source : Source)
     Request .object :=
   { ResourceBirth.factoryRequest pins encoding oldAuthority factoryPreRoot height source.birth with
     argsDigest := encoding.hashBytes
-      ("DREGG/GRAIN-RESOURCE-BIRTH/ARGS/v4".toUTF8.toList ++ source.canonicalBytes tariff)
+      ("DREGG/GRAIN-RESOURCE-BIRTH/ARGS/v5".toUTF8.toList ++ source.canonicalBytes tariff)
     effectsDigest := encoding.hashBytes
-      ("DREGG/GRAIN-RESOURCE-BIRTH/EFFECTS/v4".toUTF8.toList ++ source.canonicalBytes tariff) }
+      ("DREGG/GRAIN-RESOURCE-BIRTH/EFFECTS/v5".toUTF8.toList ++ source.canonicalBytes tariff) }
 
 theorem Source.factoryRequest_subject (tariff : Tariff) (source : Source)
     (pins : FactoryPins) (encoding : SourceEncoding CanonicalCellRegistry.registry)

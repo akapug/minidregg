@@ -687,7 +687,7 @@ def readRequest {F : Type} [Field F]
       (grain.targets index).before.payload.root with
     verb := DeclaredResourceController.observeVerb command.targets[index].kind
     effectsDigest := (Sp800185Cshake256.hash
-      "DREGG.RESOURCE.TRANSACTION.OBSERVE/v6".toUTF8.toList
+      "DREGG.RESOURCE.TRANSACTION.OBSERVE/v7".toUTF8.toList
       ((Tower256ConcreteBackend.StreamCodec.product
         Tower256ConcreteBackend.bytesStream Tower256ConcreteBackend.StreamCodec.nat).encode
         (DeclaredResourceController.commandBytes birth.prepared.pre.authority.snapshot.domain

@@ -62,9 +62,9 @@ def roleStream : StreamCodec Role :=
 abbrev spec : ProtectedCell.Spec where
   Role := Role
   roleStream := roleStream
-  idCustomization := "DREGG.OBJECTIVE.ACTIVITY.CELL.ID/v4".toUTF8.toList
-  rootCustomization := "DREGG.OBJECTIVE.ACTIVITY.CELL.STATE/v4".toUTF8.toList
-  wireFrame := "DREGG/OBJECTIVE/ACTIVITY-CELL/v4".toUTF8.toList
+  idCustomization := "DREGG.OBJECTIVE.ACTIVITY.CELL.ID/v5".toUTF8.toList
+  rootCustomization := "DREGG.OBJECTIVE.ACTIVITY.CELL.STATE/v5".toUTF8.toList
+  wireFrame := "DREGG/OBJECTIVE/ACTIVITY-CELL/v5".toUTF8.toList
   wireVersion := wireVersion
 
 abbrev Payload := ProtectedCell.Payload spec

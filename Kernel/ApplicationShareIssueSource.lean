@@ -327,7 +327,7 @@ descriptors stay opaque bytes authenticated by their original profile's record.
 Hash collision resistance is external; digest equality is not byte equality. -/
 def sourceBytesFromDescriptorBytes (spec : Spec) (descriptorBytes : List UInt8) :
     List UInt8 :=
-  "DREGG/APPLICATION/SHARE-ISSUE-SOURCE/v5".toUTF8.toList ++
+  "DREGG/APPLICATION/SHARE-ISSUE-SOURCE/v6".toUTF8.toList ++
     (StreamCodec.product bytesStream bytesStream).encode (specCodec.encode spec, descriptorBytes)
 
 def sourceBytes (spec : Spec) (descriptor : Descriptor CanonicalCellRegistry.registry) :
@@ -337,7 +337,7 @@ def sourceBytes (spec : Spec) (descriptor : Descriptor CanonicalCellRegistry.reg
 
 def issueMarker (spec : Spec) (descriptor : Descriptor CanonicalCellRegistry.registry) : Nat :=
   (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/SHARE-ISSUE-MARKER/v5".toUTF8.toList
+    "DREGG/APPLICATION/SHARE-ISSUE-MARKER/v6".toUTF8.toList
     (sourceBytes spec descriptor)).digest.value
 
 def appRequestFromSourceBytes (domain semantics : Digest) (federation : FederationId)

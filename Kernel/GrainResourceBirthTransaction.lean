@@ -263,7 +263,7 @@ def plan {F : Type} [Field F]
     PreparationPlan (layout birth grain) Unit where
   leg := rawLeg birth grain height
   jointDigest := fun _ => CanonicalCellRegistry.sourceEncoding.hashBytes
-    ("DREGG/GRAIN-RESOURCE-BIRTH/JOINT/v4".toUTF8.toList ++ source.canonicalBytes tariff)
+    ("DREGG/GRAIN-RESOURCE-BIRTH/JOINT/v5".toUTF8.toList ++ source.canonicalBytes tariff)
   legEffectsDigest := fun _ incidence =>
     (rawLeg birth grain height () incidence).request.2.effectsDigest
   bindFamily := bindFamily birth grain height
