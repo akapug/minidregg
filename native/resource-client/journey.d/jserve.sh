@@ -33,14 +33,15 @@ D=$JOURNEY_STEP_DIR/jserve
 mkdir -p -m 700 "$D"
 export D HERE_HOOKS=$(cd "$(dirname "$0")" && pwd)
 python3 - <<'PY'
-import json, os, socket, struct, subprocess, sys, threading, time
+import hashlib, json, os, socket, struct, subprocess, sys, threading, time
 
 D = os.environ["D"]; MINI = os.environ["MINI"]; HOST = os.environ["HOST"]
 CONFIG = os.environ["CONFIG"]; SOCKET = os.environ["SOCKET"]
 NEWCOMER = os.environ["NEWCOMER_WS"]; WORLD = os.environ["JOURNEY_WORLD"]
-TAG = b"DREGG/NATIVE-HOST/OUTCOME/v7"
+TAG = b"DREGG/NATIVE-HOST/OUTCOME/v8"
 rows = []; failed = []; latencies = []
 config = open(CONFIG, "rb").read()
+HOST_PIN = hashlib.sha256(open(HOST, "rb").read()).digest()  # envelope v2: the Host image pin (v1 is refused)
 
 def server_pid():
     return open(os.path.join(WORLD, "public", "server.pid")).read().strip()
@@ -61,8 +62,8 @@ def frame_of(sock):
     if head is None: return None
     return exact(struct.unpack("<I", head)[0])
 
-def envelope(request, version=1):
-    return bytes([version]) + struct.pack("<I", len(config)) + config + request
+def envelope(request, version=2):
+    return bytes([version]) + struct.pack("<I", len(config)) + config + (HOST_PIN if version == 2 else b"") + request
 
 def raw(request, body=None, timeout=600, delivered=None):
     s = socket.socket(socket.AF_UNIX); s.settimeout(timeout); s.connect(SOCKET)
