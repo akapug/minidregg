@@ -416,6 +416,9 @@ def checkOpened (deployment : Deployment) (command : Command) (target : Target)
           | some cell =>
             if (StoreCodec.entries (targetWire target) cell.logical).map
                 (StoreCodec.entryBytes (targetWire target)) = openedBytes items then
+              if patchReadsPre target && items.any Sum.isRight then
+                .error (.unsupportedPayload target.target "world: the patch reads entries the opening seals")
+              else
               match memberPatch command target cell.logical with
               | .error refusal => .error refusal
               | .ok patch =>
@@ -424,6 +427,14 @@ def checkOpened (deployment : Deployment) (command : Command) (target : Target)
             else .error (.openingMismatch target.target)
       else .error (.servedRootMismatch target.target)
     else .error (.viewMalformed target.target)
+
+/-- Payloads whose member patch is computed from the pre-state (`WorldKindCell.preparePatch`,
+`prepareDefinition`). Thin consent shows those only over an opening that seals nothing; every
+other payload's member patch is the command's alone. -/
+def patchReadsPre (target : Target) : Bool :=
+  match target.payload with
+  | .world _ | .kindDefinition _ => true
+  | _ => false
 
 /-- A collision of the store hash at the actual pre-state: the items' leaves are not the
 actual store's leaves yet root to the same digest, or an opened item is not the actual
@@ -599,6 +610,7 @@ theorem checkOpened_ok {deployment : Deployment} {command : Command} {target : T
       StoreHiding.rootOfItems (targetWire target) items = target.expectedTargetRoot ∧
       (StoreCodec.entries (targetWire target) cell.logical).map
           (StoreCodec.entryBytes (targetWire target)) = openedBytes items ∧
+      (patchReadsPre target = true → ∀ item ∈ items, item.isRight = false) ∧
       memberPatch command target cell.logical = .ok patch ∧
       Patch.ValidFrom cell.logical patch ∧ shown = Patch.run cell.logical patch := by
   unfold checkOpened at checked
@@ -616,15 +628,26 @@ theorem checkOpened_ok {deployment : Deployment} {command : Command} {target : T
       · rename_i opened
         split at checked
         · cases checked
+        rename_i noSealed
+        split at checked
+        · cases checked
         rename_i patch member
         split at checked
         · rename_i valid
           cases checked
-          exact ⟨cell, patch, rooted, opened, member, valid, rfl⟩
+          exact ⟨cell, patch, rooted, opened, by simpa using noSealed, member, valid, rfl⟩
         · cases checked
       · cases checked
     · cases checked
   · cases checked
+
+/-- A member patch that does not read the pre-state is the same over any two stores. -/
+theorem memberPatch_pre_independent (command : Command) (target : Target)
+    (left right : Store target.layout) (reads : patchReadsPre target = false) :
+    memberPatch command target right = memberPatch command target left := by
+  cases target with
+  | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
+    cases payload <;> simp_all [patchReadsPre, memberPatch]
 
 theorem entries_keys_nodup {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L) (store : Store L) :
     ((StoreCodec.entries wire store).map Sigma.fst).Nodup := by
@@ -688,7 +711,8 @@ theorem shown_agrees {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L)
     have boundI : position < items.length := by simp at bound; omega
     rw [List.getElem_zip] at found
     subst found
-    exact aligned position opened E[position] (by simp [List.getElem?_eq_getElem boundI, isOpened])
+    have item : items[position] = .inl opened := by simpa using isOpened
+    exact aligned position opened E[position] (by simp [List.getElem?_eq_getElem boundI, item])
       (List.getElem?_eq_getElem boundE)
   have entriesShown : StoreCodec.entries wire shown = openedEntries wire items actual := by
     apply List.map_injective_iff.mpr (StoreCodec.entryBytes_injective wire)
@@ -696,11 +720,12 @@ theorem shown_agrees {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L)
     rfl
   have shownStore : shown = StoreCodec.fromEntries (openedEntries wire items actual) := by
     rw [← entriesShown, StoreCodec.fromEntries_entries]
-  have sublist : openedEntries wire items actual <+ E := by
+  have sublist : List.Sublist (openedEntries wire items actual) E := by
     have mapped : ((E.zip items).map Prod.fst) = E := List.map_fst_zip (by omega)
-    calc openedEntries wire items actual <+ (E.zip items).map Prod.fst :=
-          (List.filter_sublist _).map _
-      _ = E := mapped
+    have filtered := (List.filter_sublist (p := fun pair : Entry L × StoreHiding.Item => pair.2.isLeft)
+      (E.zip items)).map Prod.fst
+    rw [mapped] at filtered
+    exact filtered
   have keysNodup : ((openedEntries wire items actual).map Sigma.fst).Nodup :=
     (sublist.map Sigma.fst).nodup (entries_keys_nodup wire actual)
   -- the opened positions' entries are exactly the entries of `openedEntries`
@@ -775,7 +800,7 @@ theorem shown_agrees {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L)
 theorem opened_display_is_commit : OpenedDisplayIsCommitStatement := by
   intro deployment directory snapshot semantics ambient command target prepared view shown
     packedBytes frame items checked served
-  obtain ⟨cell, patch, rooted, bytes, member, valid, rfl⟩ := checkOpened_ok checked served
+  obtain ⟨cell, patch, rooted, bytes, noSealed, member, valid, rfl⟩ := checkOpened_ok checked served
   have supported := memberPatch_supported command target cell.logical patch member
   have signedRoot := computeTarget_root snapshot semantics ambient command target prepared.pre
     prepared.post prepared.candidate.modeEvidence.down supported
@@ -798,11 +823,24 @@ theorem opened_display_is_commit : OpenedDisplayIsCommitStatement := by
     have leafAt := congrArg (fun leaves => leaves[position]?) sameLeaves
     simp only [List.getElem?_map, isOpened, Option.map_some, StoreCodec.leaves, atEntry] at leafAt
     exact Option.some.inj leafAt
-  push_neg at misaligned
+  push Not at misaligned
   obtain ⟨agrees, sealedEmpty⟩ := shown_agrees (targetWire target) items prepared.pre.logical
     cell.logical sameLeaves misaligned bytes
+  have memberActual : memberPatch command target prepared.pre.logical = .ok patch := by
+    cases reads : patchReadsPre target
+    · rw [← member]
+      exact memberPatch_pre_independent command target _ _ reads
+    · have same : cell.logical = prepared.pre.logical := by
+        ext address
+        apply agrees address
+        rintro ⟨position, entry, leaf, _, _, sealedAt⟩
+        have inItems := List.mem_of_getElem? sealedAt
+        have := noSealed reads _ inItems
+        simp at this
+      rw [← same]
+      exact member
   obtain ⟨tail, split, frameTail⟩ :=
-    targetPatch_split snapshot semantics ambient command target prepared.pre patch member
+    targetPatch_split snapshot semantics ambient command target prepared.pre patch memberActual
   have actualValid : Patch.ValidFrom prepared.pre.logical patch := by
     have whole := prepared.candidate.validated.valid
     change Patch.ValidFrom prepared.pre.logical
@@ -816,9 +854,10 @@ theorem opened_display_is_commit : OpenedDisplayIsCommitStatement := by
     have present : prepared.pre.logical address ≠ none := by
       obtain ⟨position, entry, leaf, atEntry, keyed, _⟩ := sealed
       have inE := List.mem_of_getElem? atEntry
-      have := StoreHiding.mem_entries (targetWire target) inE
-      rw [keyed] at this
-      simp [this]
+      have stored := StoreHiding.mem_entries (targetWire target) inE
+      intro absent
+      rw [← keyed, absent] at stored
+      cases stored
     exact Patch.run_frame _ _ _ (untouched_of_both_valid address patch cell.logical
       prepared.pre.logical (sealedEmpty address sealed) present valid actualValid)
 
