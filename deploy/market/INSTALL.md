@@ -271,7 +271,7 @@ curl -sS -I https://demo.dregg.online/ | head -1                                
 openssl s_client -connect demo.dregg.online:443 -servername a1.demo.dregg.online -groups X25519MLKEM768 </dev/null 2>&1 | grep -E 'Verification|Negotiated'
 openssl s_client -connect demo.dregg.online:443 -servername a1.demo.dregg.online -groups X25519 </dev/null 2>&1 | grep -E 'Verification|Negotiated'
 sudo -u mini-market /usr/local/lib/mini/market/mini-market-fetch refresh && head -c 200 /var/lib/mini-market/index.json
-sudo -u mini-s-NAME mini apps search --term slides                                 # the catalogue, with verdicts
+sudo -u mini-s-NAME mini apps search slides                                          # the catalogue, with verdicts (`--term slides` is the same)
 ```
 
 The journey row is `native/resource-client/journey.d/japps.sh` (`--dry` anywhere, `--box` on a

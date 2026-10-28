@@ -38,8 +38,25 @@ const MAX_REPLY: usize = 64 * 1024;
 pub(crate) const STANDARD_RAW_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_TEXT: usize = 512;
 const WORKER_VERBS: &[&str] = &[
-    "list", "status", "install", "retry", "open", "stop", "start", "share", "export", "delete",
+    "list", "status", "install", "retry", "open", "stop", "start", "share", "export", "delete", "renew",
+    "identities", "revoke-identity",
 ];
+
+/// The flag a grammar positional is spelled as on the CLI (`mini apps share a4501 bob` is
+/// `--grain a4501 --to bob`): one table for the CLI's positional reader, so the shell and the
+/// command line take the same words.
+pub(crate) fn positional_flag(argument: &str) -> &'static str {
+    match argument {
+        "TERM" => "term",
+        "APP-ID|PACKAGE-ID" => "app",
+        "REQUEST-ID" => "request-id",
+        "GRAIN" => "grain",
+        "MEMBER" => "to",
+        "FILE" => "out",
+        "TOKEN" => "token",
+        _ => "arg",
+    }
+}
 
 /// One catalogue entry: the index's claims about one app, bounded and typed.
 #[derive(Clone, Debug, PartialEq)]
@@ -496,13 +513,13 @@ fn request_id() -> Result<String> {
 
 /// `install`: the member's choice, retained under the workspace before it is
 /// sent, so a lost reply is answered by the exact retry of the same id.
-fn install(mut args: Args, paths: &Paths, as_json: bool) -> Result<()> {
+fn install(mut args: Args, paths: &Paths, as_json: bool, dir: Option<std::ffi::OsString>) -> Result<()> {
     let selector = text_flag(&mut args, "app")?.ok_or("install requires --app APP-ID|PACKAGE-ID")?;
     let class = text_flag(&mut args, "class")?.unwrap_or_else(|| "auto".into());
     if !matches!(class.as_str(), "S" | "M" | "L" | "auto") {
         return Err("classRefused: --class takes S, M or L".into());
     }
-    let root = absolute(&path(args.required("dir")?))?;
+    let root = absolute(&path(dir.ok_or("missing --dir")?))?;
     // The member's session home (the shell passes it): HOME/inbox holds the delegated
     // references the frame leaves at enrolment.
     let home = args.optional("home").map(|v| absolute(&path(v))).transpose()?
@@ -605,12 +622,15 @@ fn install(mut args: Args, paths: &Paths, as_json: bool) -> Result<()> {
 
 
 fn catalogue(action: &str, mut args: Args, paths: &Paths, as_json: bool) -> Result<()> {
+    // Every flag is consumed before the index is read: an unconsumed one is a usage error first.
+    let (term, category, selector) = match action {
+        "search" => (text_flag(&mut args, "term")?.unwrap_or_default(), text_flag(&mut args, "category")?, None),
+        _ => (String::new(), None, Some(text_flag(&mut args, "app")?.ok_or("show requires --app APP-ID|PACKAGE-ID")?)),
+    };
+    args.finish()?;
     let entries = load_index(&paths.index)?;
     match action {
         "search" => {
-            let term = text_flag(&mut args, "term")?.unwrap_or_default();
-            let category = text_flag(&mut args, "category")?;
-            args.finish()?;
             let found = search(&entries, &term, category.as_deref());
             if as_json {
                 let list: Vec<Value> = found
@@ -643,8 +663,7 @@ fn catalogue(action: &str, mut args: Args, paths: &Paths, as_json: bool) -> Resu
             Ok(())
         }
         "show" => {
-            let selector = text_flag(&mut args, "app")?.ok_or("show requires --app APP-ID|PACKAGE-ID")?;
-            args.finish()?;
+            let selector = selector.unwrap_or_default();
             let entry = resolve(&entries, &selector)?;
             let v = verdict(&paths.verdicts, &paths.meta, &entry.package_id);
             let value = entry_json(entry, &v);
@@ -714,10 +733,13 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         .map_err(|_| "action must be UTF-8".to_owned())?;
     let as_json = args.optional("json").is_some();
     let paths = paths(&mut args);
+    // The shell passes the member's workspace to every apps verb; only bootstrap and install use it,
+    // and no verb may leave it unconsumed (`unknown or duplicate option --dir`).
+    let dir = args.optional("dir");
     match action.as_str() {
         "index-check" => index_check(args),
         "bootstrap" => {
-            let root = absolute(&path(args.required("dir")?))?;
+            let root = absolute(&path(dir.ok_or("missing --dir")?))?;
             let budget = text_flag(&mut args, "budget")?.unwrap_or_else(|| "100000".into());
             let tool_ref = text_flag(&mut args, "tool-ref")?.unwrap_or_else(|| "tool".into());
             let parent_ref = text_flag(&mut args, "parent-ref")?.unwrap_or_else(|| "parent".into());
@@ -732,12 +754,12 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             Ok(())
         }
         "search" | "show" => catalogue(&action, args, &paths, as_json),
-        "install" => install(args, &paths, as_json),
+        "install" => install(args, &paths, as_json, dir),
         verb if WORKER_VERBS.contains(&verb) => {
             let mut request = Map::new();
             request.insert("protocol".into(), json!(WORKER_PROTOCOL));
             request.insert("verb".into(), json!(verb));
-            for flag in ["grain", "to", "out", "request-id"] {
+            for flag in ["grain", "to", "out", "request-id", "token"] {
                 if let Some(value) = text_flag(&mut args, flag)? {
                     if flag == "grain" && !valid_grain(&value) {
                         return Err(format!("grainRefused: {value:?} is not a grain id of the form a<app>"));
@@ -746,8 +768,11 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 }
             }
             args.finish()?;
-            if matches!(verb, "open" | "stop" | "start" | "share" | "export" | "delete" | "status") && !request.contains_key("grain") {
+            if matches!(verb, "open" | "stop" | "start" | "share" | "export" | "delete" | "status" | "renew" | "identities" | "revoke-identity") && !request.contains_key("grain") {
                 return Err(format!("{verb} requires --grain a<app>"));
+            }
+            if verb == "revoke-identity" && !request.contains_key("token") {
+                return Err("revoke-identity requires --token TOKEN".into());
             }
             if verb == "share" && !request.contains_key("to") {
                 return Err("share requires --to MEMBER".into());
