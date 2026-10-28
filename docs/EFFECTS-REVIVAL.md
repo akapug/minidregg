@@ -311,19 +311,15 @@ detached.  It writes `rebuild.pid` and `rebuild.log`, builds kernels, then `lake
 Lean never runs on the Mac.
 
 **Owed, in order.**
-1. **Doc-write fixture regeneration** (the integrator's assignment; it is no longer a witness
-   here).  `Fixtures/NativeDocWriteFixture*` is red: its recorded seed and record frames no
-   longer decode (first evidence 10-28), and the integrator's new umbrellas stage reds a
-   candidate on it.  Regenerate from the FIRST READY candidate carrying the module conversion
-   plus lean-audit-c's M2 (it moves the turn digest).  The integrator names that candidate.
-   Steps:
-   1. On dregg-build, in your own run directory, run
-      `native/resource-client/doc-write-native-acceptance.py --bin <cand>/bin --root <new dir>`.
-      It stops its own servers at exit; check none are left running.
-   2. Copy the world to the hbox tree, merged to that main.
-   3. Run `scripts/native-doc-write-fixture/generate.sh WORLD` there (the verifier comes from
-      the candidate's bin).
-   4. Build `Fixtures.NativeDocWriteFixture`, and send the integrator the sha.
+1. **After the A12c regen build lands on main.**  The integrator re-records both recorded
+   fixtures (`NativeAcceptedFixture`, `NativeDocWriteFixture`) from it (coordinator,
+   10-28).  No Revival proof imports a fixture: the ghost half of `ContentTeeth` and every
+   other pole are kernel proofs on hand-built cells.  So this lane's job then is only:
+   1. merge main;
+   2. re-sync the hbox tree and run `rebuild.sh Effects`;
+   3. fix anything red in `Effects/`, plus any Revival red the integrator's umbrellas stage
+      reports with file:line;
+   4. send the integrator one sha.
 2. **The migration commit** (§5 step 1; post-demo; prepare, never land without the
    coordinator's word).  The gate is `HostKeystone` and `HostLegacyCensus` (both provable
    only after it) plus the already-proved `PrepareFactors`.  Its shape:

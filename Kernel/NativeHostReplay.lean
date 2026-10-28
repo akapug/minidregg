@@ -3405,7 +3405,7 @@ theorem validateLoaded_headTag (config : Config) (durable : Durable) (headTag : 
     (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
     (·.directory) (·.snapshot.logical)
     (fun loaded => cellsLawful config { durable with headTag := headTag } loaded.directory)
-    (platformRecordIn config.deployment durable.snapshot.canonicalBytes)
+    (PlatformCellDomain.recordAt config.deployment durable.snapshot.canonicalBytes)
     directories lawfuls rfl
   unfold validateLoaded validateParts validatePartsWith validatePartsVia
   revert core
@@ -3413,13 +3413,13 @@ theorem validateLoaded_headTag (config : Config) (durable : Durable) (headTag : 
     (CredentialAuthorityDomainReceiver.loadDirectory durable)
     (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
     (·.directory) (·.snapshot.logical) (fun loaded => cellsLawful config durable loaded.directory)
-    (platformRecordIn config.deployment durable.snapshot.canonicalBytes) = right
+    (PlatformCellDomain.recordAt config.deployment durable.snapshot.canonicalBytes) = right
   generalize validateCore config durable.image.seed durable.logStart
     (CredentialAuthorityDomainReceiver.loadDirectory { durable with headTag := headTag })
     (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
     (·.directory) (·.snapshot.logical)
     (fun loaded => cellsLawful config { durable with headTag := headTag } loaded.directory)
-    (platformRecordIn config.deployment durable.snapshot.canonicalBytes) = left
+    (PlatformCellDomain.recordAt config.deployment durable.snapshot.canonicalBytes) = left
   intro core
   cases left <;> cases right <;> simp_all [Except.map]
 

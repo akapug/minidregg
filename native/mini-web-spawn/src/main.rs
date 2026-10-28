@@ -330,7 +330,12 @@ impl Helper {
                 continue;
             }
             let Ok(proposals) = fs::read_dir(home.join("workspace/proposals")) else { continue };
-            for proposal in proposals.flatten() {
+            // Several publications of one document (published, revoked, published again) share the
+            // inbox name NAME.TARGET: the newest one is handed over, whatever order the directory lists.
+            let mut proposals: Vec<_> = proposals.flatten().collect();
+            proposals.sort_by_key(|p| fs::metadata(p.path().join("recipient-reference.json")).and_then(|m| m.modified()).ok());
+            let mut chosen: std::collections::BTreeMap<PathBuf, (String, String, Vec<u8>)> = std::collections::BTreeMap::new();
+            for proposal in proposals {
                 let reference = proposal.path().join("recipient-reference.json");
                 let Ok(meta) = fs::symlink_metadata(&reference) else { continue };
                 if !meta.is_file() || meta.len() > 65536 {
@@ -347,6 +352,9 @@ impl Helper {
                     .unwrap_or_else(|| "doc".into());
                 let dest = inbox.join(format!("{doc}.{target}.json"));
                 let bytes = fs::read(&reference).unwrap_or_default();
+                chosen.insert(dest, (doc, target.to_owned(), bytes)); // oldest first: the newest stays
+            }
+            for (dest, (doc, target, bytes)) in chosen {
                 if fs::read(&dest).ok().as_deref() == Some(bytes.as_slice()) {
                     continue;
                 }
