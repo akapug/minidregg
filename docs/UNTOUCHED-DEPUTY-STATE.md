@@ -1,4 +1,4 @@
-# Untouched-areas deputy: state (2026-10-28 midday: public-reader + poisoned-consent are PRIORITY; module conversion b26630168 on main, its candidate building; market runs park for it)
+# Untouched-areas deputy: state (2026-10-28 afternoon; resumed on Opus from a distilled copy; public-reader fix 6d59cde34 reviewed and accepted, follow-up owed)
 
 Inputs: docs/review/2026-10-27-untouched-areas/{LEAN,NATIVE}.md, docs/review/2026-10-27-blind-spots/BLIND-SPOTS.md Sweep 1.
 Each lane: /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>.
@@ -131,7 +131,7 @@ Its hbox worlds: /tank/rows-2d8b7ed5-apps/w-{featured,b1,b2,b4,b6,rt,fixups}. Mi
 - FEATURED target 2-3 dozen: B7's four (2048, Perplexity Sudoku, 3D Blockstack, Simple Chat; Davros and sntfy were already in) at lane/app-market-b7 d6243efa8 -> 25, test green on hbox, sent to the integrator. HledgerWeb/TextEditor rerun pending; more FEATURED commits follow from it.
 
 ## Next three
-0. PRIORITY: the public-reader 403 and the poisoned consent transport (abe65d70bd4f62538): review each sha against the code, send it to the integrator and infra.
+0. PRIORITY: public reader. 6d59cde34 (ON MAIN) REVIEWED, ACCEPTED: the cause was the publish grant `observe 0` (cost = intent length > 0 covers no read -> noGrant); 50000 ceiling in body.rs/seed.sh, import replaces a same-target hint, newest publication per NAME.TARGET handed over, seed republishes under pubr-. Follow-up owed by abe65d70bd4f62538 (one commit on lane/un-public-read): its g2 red/green lines; drop the committed scratch/DIAG-un-public-read.md; the shell refuses `delegate … observe 0` by name (filtered test) and seed/INSTALL reference PUBLIC_READ_MAX_COST instead of a second 50000. Poisoned consent: on main (0b88b837f + b71898658); infra confirms 200 -> idle -> 200 on the rehearsal candidate.
 1. Read B3/B5/B7/B8 on 76758dba6 (each serial under the world-up flock); fix reds (recipes or spk-host); every app green on lifecycle + write into FEATURED in apps.rs (B3 does its own commit; DiagramsNet stays out); target 2-3 dozen.
 2. Candidates, in order (coordinator): b26630168 (the conversion; finishing its native build, gate follows) -> a regen build from main's tip (fresh genesis, M2) -> a quick follow-up carrying the public-reader and birthStale fixes = the REHEARSAL candidate. There is NO f1b7add21 candidate. When the integrator names each, starting with b26630168: hand it to a4e312352a7091f59 (one japps run on hbox per JAPPS-STATE.md; context ~500k, hands off by its file near 580k) and to B3/B7/B8; verdicts -> validator for ROWS-OWED §0. The japps run confirms restart -> renew -> write and a fresh-world bootstrap -> install (the parent's `reserve 1` checked).
 3. Owed after the demo: revive Effects/ so transfer/commit come from the derivation engine (EFFECTS.md).
