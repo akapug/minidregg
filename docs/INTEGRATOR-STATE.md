@@ -61,7 +61,8 @@ the newest built main that passed the gate; each is reported in one line, and in
 | bd37686c0 | — | follow-on host stage rc=1 in 3 s: registry check, literal op 68 at native/spk-host/src/lifecycle_v3_native.rs:728 (7b3564733's test). Fixed f1ecba539 |
 | A9 | f8c17f0f5 | host clean 03:14 (397 s); regen rc=2 03:18: the bare prefixes DREGG/NATIVE-HOST/LOG-TAG and DREGG/OBJECTIVE-BEND/ADMITTED-INPUT-CONTEXT moved in the same round their children were bumped (the tool judged them before the build that births the new name; LOG-TAG was also not declared `prefix_`). Fixed a62cab510 (deferred to the next round; selftest case) |
 | A10 | a62cab510 | host clean 03:54 (1984 s); regen rc=1 04:01: Compiler/DurableCheckpointCodec.lean:530 `native_decide` false, seedEpoch_spentMap_refused spelled "this Host DREGG/NATIVE-HOST/LOG-TAG/v4" beside logTagLabel and the regen bumped the tag to v5. Fixed on main a5f0e8c89 (the theorems interpolate logTagLabel and StoreEpoch.current.accumulator). Partial diff integ8/regen-A10.patch |
-| A11 | c99af001d | `integ4/regen-A11.sh` (pid file integ4/regen-A11.pid) from 04:03: host, regen, consent; diff in integ8/regen-A11.patch. Next: commit it to main, then `integ4/main-full.sh <tip>` after moving integ8/{native-out,consent-out,artifacts,fixtures} aside |
+| A11 | c99af001d | host clean 04:31 (1663 s); regen rc=0 05:27 (3328 s, two rounds, 644 pins; SEAT/TX, SEAT/TX/PUBLISH, SYSTEM to v5); consent rc=65 only the companion check on host artifacts older than the pins. Diff is main 2d8b7ed54 |
+| full | 2d8b7ed54 | `integ4/main-full.sh` started 05:29 (main-full.pid 3664533; build.pid, then gate.pid + enrol-resume.pid under integ8). Carries everything in the A11 next-steps list below |
 
 A3's tree (main 8103b29a4) holds everything since aa9366f8: pd-host-rate, oracle-lifetime-grant, oracle-grant-factory,
 lean-audit-c, un-effects 2acd8acf (effect Plan; its codec pins re-emit with this regen), un-pb-twins 134535c2,
@@ -79,14 +80,18 @@ elaboration of the fix pending NativeHostReplay.olean). L1d (formerly L1c; lean-
 constructors with pricedAt, drops e7958d3b9's arms on merge; unbuilt, not to merge until its warm-tree build
 elaborates) seeds its dregg-ref tree from the integ8 copy; tell it when the copy lands.
 
-Next steps: A10 → regen patch onto main → full build at main's tip (it carries 25cfb86bd, custody-b's
+Next steps: the full build at 2d8b7ed54 (it carries 25cfb86bd, custody-b's
 delegated consent, f79044d79 and c11b235ee (grain-runtime NO_RECORD refusals; a0d58aaef), hermes-b 5422506f, custody-b 97aab6054 (55e8a05d9; the profiled grain bootstrap twin deleted), un-tale-welcome bc6c837ba (docs), the world/ pack 1b870fbdd, red-jli-refname 81349cec2 (JLI reruns on it), un-tale-welcome 19bb968e0 (f5602a8cd; the door joins members to door.json's story), and since A11 started: un-shared-names 179494a88, app-market-b3 6f2bfd3bc, app-market-b7 d8ee43cdb (spk-rpc empty ViewInfo), un-deputy, audit-platform (main 2a15c1839), the six red-* snipers (main 7265c5fc6), app-market-b5 e1458689a, app-market-b8 bec955336, un-deputy bc0267a8e (main 3e045b32d), app-market-w11 d5b8b7ac6 (main 1b2764235), un-deputy 7a0aca783 and red-jdisclose-scalar cd79cdaa3 (main 0b1f42daa)). un-shared-names landed at e4acc9df0 (main 18f44f8db; 9eeda6092 never merged). The birth-acceptance twin is collapsed (78fe8e63d). The regen tool's literal-survivor check after A10 is on main (9e3d67e43). On READY the chain runs gate + enrol-resume;
 report "candidate <sha> at <path>: gate <verdict>, reds by name" to the coordinator (who starts a fresh rows
 validator from docs/ROWS-OWED.md section 0a with it: the old one, aeee8349c191e8506, stopped at its ceiling; never send
 it a candidate), and the sha + path to infra (ae95a4eac63b0715e; reruns the seed in the demo-dry container on the first candidate carrying 25cfb86bd, f73893fce, 52c0eae22 and 19bb968e0), L4b (ad81db6d6fd317d3a) and the deputy
 (a308118209b4a48ea, owns the app market; wants the first candidate carrying 25cfb86bd). Pending lands:
-lean-audit-c only on L1e's warm-tree green sha (e2dae30ee queued on dregg-ref; b7412f32a and three more unbuilt behind it); iter-speed successor's census re-pin (a0fd127abfb9aac75) only
-after that candidate is reported.
+lean-audit-c is green at 82c17c448 (L1e, tip de1375846 doc-only) but lands after the module conversion: order agreed
+between L1e and iter-speed (a0fd127abfb9aac75): (1) this candidate reported; (2) iter-speed re-derives the conversion on
+main's tip with land.py and sends its sha (one planned StoreEpoch move; the next candidate needs a fresh genesis);
+(3) L1e merges the conversion into lean-audit-c and lean-audit-c-m2 (M2 adds World.Turn.credit and the v3 frames) and
+sends a green sha; all of it rides one codec regen. The uncommitted `ownerless` census check merges 3-way onto
+iter-speed's PersistedCodecTagCensus.lean, never overwriting it. lane/thin-birth 8901a2caf: no landing request yet.
 
 Red routing: lean-audit-c and lean-audit-c-m2 are L1e's (a58f907aef8926430; L1d ad6d6eff243f32816 has stopped): its green sha comes from and its reds go to L1e directly; when the module conversion lands on main, tell L1e (it merges the conversion into lean-audit-c and sends a green sha) and L1d's old address; Hermes to L4b (ad81db6d6fd317d3a); L13 a1618140607ac439b; un-stream-continuity reds
 (ApplicationStreamContinuityFresh pole proofs, NativeHostReplay.lean:3816) to the deputy a308118209b4a48ea; all
