@@ -69,9 +69,8 @@ init_ws() { # NAME SUBJECT KEY CONTEXT  (the workroom's records commit to no nex
     --birth-context "$4" --namespace-root "$out/ns-$1" --no-prerotation >"$out/init-$1.out" 2>"$out/init-$1.err"
   [[ -f $ws/workspace.json ]]
 }
-# The manager's genesis-authored capabilities (55, 42) are birth-stale by the time a bootstrap births
-# anything (birthStale: notBefore + birthSlack < height), so with APPS_E2E_BOOTSTRAP the manager is
-# initialised after the sponsor provisions it a fresh funded account, as for the member below.
+# With APPS_E2E_BOOTSTRAP the manager pays the bootstrap birth from a funded account of its own, provisioned
+# by the sponsor the way the member's is below, so the manager workspace is initialised after that.
 manager_row() { row "manager workspace (subject 8) over the workroom's tool key" "$([ -f "$out/ws-manager/workspace.json" ] && echo 1 || echo 0)" "$(tail -1 "$out/init-manager.err" 2>/dev/null | cut -c1-120)"; }
 if [ "${APPS_E2E_BOOTSTRAP:-0}" != 1 ]; then init_ws manager 8 "$WR/tool.key" "$(context 8 55 42)"; manager_row; fi
 init_ws controller 7 "$WR/controller.key" "$(context 7 54 41)"; row "controller workspace (subject 7, the parent task's owner) over the workroom's controller key" "$([ -f "$out/ws-controller/workspace.json" ] && echo 1 || echo 0)" "$(tail -1 "$out/init-controller.err" 2>/dev/null | cut -c1-120)"

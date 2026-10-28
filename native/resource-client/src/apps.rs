@@ -1258,8 +1258,30 @@ pub(crate) fn bootstrap(root: &Path, ws: &Value, budget: &str, tool_ref: &str, p
             if attempt.exists() {
                 crate::retry(&attempt, "lookup", false)?;
             } else {
+                // The Host authors the birth at the current height against a sponsor-signed read of
+                // the factory (`current-resource-intent`, as `workspace create` does): a birth-intent
+                // authored from the genesis is refused birthStale once the World is past genesis plus
+                // the 64-height window, which any world a few transactions old is.
+                let socket = crate::SOCKET.get().ok_or("apps bootstrap requires a pinned persistent Host socket")?;
+                let factory = member(&context["genesis"], "factoryId")?;
+                let observe_capability = context["grants"].as_array().into_iter().flatten()
+                    .find(|grant| grant["kind"] == "object" && grant["target"] == factory)
+                    .and_then(|grant| grant["capability"].as_str())
+                    .ok_or("birth context needs one factory resource observation grant")?;
+                let factory_ref = json!({"kind":"object","target":factory,"observeCapability":observe_capability});
+                let authoring = root.join("sources").join("apps-bootstrap.authoring");
+                let author_dir = w::author_generations(&authoring, &reservation,
+                    || Ok(w::signed_view(root, ws, &factory_ref, "resource")?.2),
+                    |generation, observation| crate::current_birth::author(&host, &host_config, socket, &source_path, observation, generation, crate::current_birth::Route::Resource),
+                    |generation| crate::observation_stale(&host, &host_config, generation))?;
+                let intent_path = crate::current_birth::retained_intent(&author_dir, crate::current_birth::Route::Resource)?;
+                let source_sha = {
+                    use sha2::Digest;
+                    hex(&sha2::Sha256::digest(fs::read(&intent_path).map_err(|e| format!("cannot hash the retained intent: {e}"))?))
+                };
+                participant_namespace::bind_attempt(&reservation, &attempt, &source_sha)?;
                 eprintln!("apps bootstrap attempt: {}", attempt.display());
-                crate::submit(&host, &host_config, &source_path, std::ffi::OsStr::new("birth-intent"), &member_path(ws, "key")?, &attempt, false)?;
+                crate::submit(&host, &host_config, &intent_path, std::ffi::OsStr::new("binary"), &member_path(ws, "key")?, &attempt, false)?;
             }
             w::accepted_outcome(&attempt)?.ok_or("apps bootstrap birth is not confirmed; retained for exact recovery")?
         }
