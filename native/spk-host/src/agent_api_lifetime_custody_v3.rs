@@ -6,7 +6,7 @@ use crate::agent_api_lifetime_wire_v3::Request;
 use crate::dispatch_author::private_signing_key;
 use crate::dispatch_author::SignerPin;
 use crate::hostd::Record;
-use ed25519_dalek::{Signature, Signer, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, Signer, VerifyingKey};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::io;
@@ -257,7 +257,12 @@ impl LifetimeCustodyV3 {
             let signature_bytes: [u8; 64] = unhex(signature)?
                 .try_into()
                 .map_err(|_| refused("lifetime payer signature length"))?;
-            key.verify(&header, &Signature::from_bytes(&signature_bytes))
+            // Plain `verify` accepts a signature made without any secret under a small-order key (identity
+            // key, R = identity, S = 0): refuse a weak pin by name, then verify strictly.
+            if key.is_weak() {
+                return Err(refused("weak lifetime payer public key"));
+            }
+            key.verify_strict(&header, &Signature::from_bytes(&signature_bytes))
                 .map_err(|_| refused("lifetime payer signature differs from source slot"))?;
         }
         Ok(())
@@ -358,6 +363,7 @@ impl LifetimeCustodyV3 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ed25519_dalek::Verifier;
     use crate::agent_api_lifetime_wire_v3::OrdinaryHeader;
     use std::fs::{self, DirBuilder, OpenOptions};
     use std::io::Write;
@@ -523,5 +529,28 @@ mod tests {
         assert!(custody.sign_grant_slot(&inspection, plan).is_err());
         fs::remove_file(seed).unwrap();
         fs::remove_dir(dir).unwrap();
+    }
+
+    #[test]
+    fn weak_lifetime_payer_key_forgery_is_refused_by_name() {
+        let mut custody = custody();
+        let mut identity = [0u8; 32];
+        identity[0] = 1;
+        let mut forged = [0u8; 64];
+        forged[0] = 1; // R = identity, S = 0
+        custody.payer_pins[0].public_key_hex = hex(&identity);
+        let plan = b"source paid plan";
+        let inspection = json!({
+            "type":"application-agent-lifetime-paid-plan-v3",
+            "canonicalPlanHex":hex(plan),
+            "payerSlots":[
+                {"role":"4","index":"0","headerHex":hex(b"any header at all"),
+                    "signing":{"decoded":true,"keyId":"5","keyEpoch":"6","algorithm":"1"}},
+            ],
+        });
+        let error = custody
+            .verify_payer_slots(&inspection, plan, &[hex(&forged)])
+            .expect_err("a signature under a weak payer key must not approve a header");
+        assert!(error.to_string().contains("weak lifetime payer public key"), "{error}");
     }
 }

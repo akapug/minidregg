@@ -1,7 +1,7 @@
 //! Signed member request used only to provision a fresh controller. It carries
 //! no bearer, endpoint, filesystem path or authority to change a running task.
 use super::*;
-use ring::signature::{Ed25519KeyPair, KeyPair, UnparsedPublicKey, ED25519};
+use ring::signature::{Ed25519KeyPair, KeyPair};
 use sha2::{Digest, Sha256};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -124,8 +124,22 @@ impl Choice {
         if choice.table_sha256.len() != 64 || choice.signature.len() != 128 {
             return Err("invalid choice digest or signature width".into());
         }
-        UnparsedPublicKey::new(&ED25519, unhex(&choice.owner.public_key)?)
-            .verify(&choice.signing_bytes(), &unhex(&choice.signature)?)
+        // ring's Ed25519 verify accepts a small-order public key: with the identity point as key,
+        // R = identity and S = 0 approve every message. The owner key is parsed again here so a weak key is
+        // refused by name and the check is verify_strict (which also refuses a small-order R).
+        let owner_key: [u8; 32] = unhex(&choice.owner.public_key)?
+            .try_into()
+            .map_err(|_| "provider choice owner key width")?;
+        let owner_key = ed25519_dalek::VerifyingKey::from_bytes(&owner_key)
+            .map_err(|_| "provider choice owner key is not a curve point")?;
+        if owner_key.is_weak() {
+            return Err("weak provider choice owner key".into());
+        }
+        let signature: [u8; 64] = unhex(&choice.signature)?
+            .try_into()
+            .map_err(|_| "provider choice signature width")?;
+        owner_key
+            .verify_strict(&choice.signing_bytes(), &ed25519_dalek::Signature::from_bytes(&signature))
             .map_err(|_| "provider choice signature refused")?;
         Ok(choice)
     }
@@ -144,5 +158,32 @@ impl Choice {
         hex(&Sha256::digest(
             serde_json::to_vec(&self.to_json()).expect("choice JSON"),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hexs(bytes: &[u8]) -> String {
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    /// The identity point as the owner key with R = identity, S = 0 signs every choice without a secret.
+    #[test]
+    fn weak_owner_key_forgery_is_refused_by_name() {
+        let mut identity = [0u8; 32];
+        identity[0] = 1;
+        let mut forged = [0u8; 64];
+        forged[0] = 1;
+        let value = json!({
+            "type":"mini-provider-choice-v1",
+            "owner":{"subject":"20","publicKey":hexs(&identity)},
+            "runner":"21","task":"22","provider":"openrouter","model":"some-model",
+            "tableSha256":"a".repeat(64),
+            "signature":hexs(&forged),
+        });
+        let error = Choice::from_json(&value).expect_err("a forged choice under a weak owner key must not verify");
+        assert!(error.contains("weak provider choice owner key"), "{error}");
     }
 }
