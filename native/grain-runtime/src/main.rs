@@ -18411,6 +18411,12 @@ fn serve(mut rt: Runtime) -> Result<()> {
                     });
                     continue;
                 }
+                if let Some(id)=request.command.strip_prefix("reconcile prompt audited ") {
+                    let result=rt.reconcile_prompt_audited(id);
+                    request.phase.store(2, Ordering::SeqCst);
+                    let _=request.reply.send(match result {Ok(value)=>value.to_string(),Err(error)=>format!("error: {error}")});
+                    continue;
+                }
                 if let Some(id)=request.command.strip_prefix("recover foreground api-unreserved ") {
                     let result=rt.recover_foreground_api_unreserved(id);
                     request.phase.store(2, Ordering::SeqCst);
