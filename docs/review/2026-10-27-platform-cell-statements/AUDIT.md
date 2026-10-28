@@ -1053,3 +1053,18 @@ section corrects pass 21, which missed the World side. Conditions for the stated
    subject and capability. Its docstring must say minting is confined only by K3 (`credit_confined` over
    the replay arms), so no one reads the World law as a meter-safety statement. I found no World-level
    theorem on main claiming the meter never increases. Any future one must carry the credit term.
+
+**Addendum, L1e's exact text for (A): ACCEPT.** All three conditions are met:
+- the credit-0 regression poles (`meteredLanes_uncredited`, `meterPatch_uncredited`, `sysPatch_uncredited`);
+- the satisfiable pole `step_meter` on every lane, with the concrete refill turn taking 0 to 5, which is
+  item 7's World-level half;
+- the docstring placing confinement in K3.
+
+`sysPost_allowance`'s case split agrees with `step_meter`, because an untouched lane has
+`charge = credit = 0`. `turnCheck`'s unchanged `fundedCheck` keeps the subtraction exact. `turnOf_credit`
+and `ofIntent_credit` give the `credited` sibling. The four `SnapRepresents` statements are unchanged.
+
+On the World-level tooth: `decodeTurn_encodeTurn`, with `decodeTurn` reading the credit, already makes
+`encodeTurn` injective in it. Add the one-line corollary `encodeTurn_credit_ne`, turns differing only in
+credit having different bytes, as the stated tooth. Then a future codec that drops the field fails a
+named theorem instead of passing silently through a roundtrip on a defaulted value.
