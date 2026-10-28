@@ -681,7 +681,9 @@ def unit_bytes(r, base, upstream, consent=None):
     if r.get('workerTask'):
         runtime += ''.join(f'Environment={key}={value}\n' for key, value in worker_environment(base, r).items())
     sock = (f'[Unit]\nDescription=Mini controller operator activation {r["store"]}\n[Socket]\n'
-            f'ListenStream={home}/operator/mini.sock\nSocketUser={r["uid"]}\nSocketGroup={r["gid"]}\n'
+            f'ListenStream={home}/operator/mini.sock\n' +
+            (f'ListenStream={home}/operator/mini.control\n' if r.get('workerTask') else '') +
+            f'SocketUser={r["uid"]}\nSocketGroup={r["gid"]}\n'
             f'SocketMode=0600\nDirectoryMode=0700\nRemoveOnStop=yes\nAccept=no\nService={stem}.service\n')
     proxy = (f'[Unit]\nDescription=Mini fixed operator proxy {r["store"]}\nRequires={stem}.socket\n'
              f'[Service]\nUser={r["operatorUid"]}\nGroup={r["operatorGid"]}\n'
@@ -1260,7 +1262,7 @@ def stage(store, helper, bundle_arg, bins_arg, upstream_arg, public_arg, worker=
     return {**r, 'stage': str(base / 'stage.json'), **({'consent': consent_record(base, r, pending)} if has_consent(r) else {})}
 
 
-def checked_units(base, r, partial=False, consent_upgrade_hashes=(), runtime_upgrade_hashes=(), proxy_upgrade_hashes=()):
+def checked_units(base, r, partial=False, consent_upgrade_hashes=(), runtime_upgrade_hashes=(), proxy_upgrade_hashes=(), socket_upgrade_hashes=()):
     stage_path = base / 'stage.json'
     if partial and not stage_path.exists():
         stage_path = base / 'stage-pending.json'
@@ -1273,7 +1275,15 @@ def checked_units(base, r, partial=False, consent_upgrade_hashes=(), runtime_upg
             continue
         actual = sha(read_file(UNITS / n, 0, 16384))
         require(actual == stage['units'][n] or (has_consent(r) and n == r['units'][4]
-                and actual in consent_upgrade_hashes) or (n == r['units'][2] and actual in proxy_upgrade_hashes), 'controller unit changed')
+                and actual in consent_upgrade_hashes) or (n == r['units'][2] and actual in proxy_upgrade_hashes)
+                or (n == r['units'][1] and actual in socket_upgrade_hashes), 'controller unit changed')
+    if 'statusProxy' in stage:
+        pin = stage['statusProxy']
+        require(isinstance(pin, dict) and set(pin) == {'binary', 'sha256'}
+                and isinstance(pin['sha256'], str) and re.fullmatch('[0-9a-f]{64}', pin['sha256'])
+                and pin['binary'] == 'mini-status-' + pin['sha256'], 'status proxy pin malformed')
+        require(sha(read_file(base / 'bin' / pin['binary'], 0, 256 * 1024 * 1024,
+                              executable=True, required_mode=0o755)) == pin['sha256'], 'status proxy binary changed')
     for n in binary_names(r):
         if partial and not (base / 'bin' / n).exists() and not (base / 'bin' / n).is_symlink():
             continue
@@ -1483,6 +1493,89 @@ def runtime_upgrade(store, helper, source_arg):
     checked_units(base, r)
     return {'store': store, 'runtimeUpgrade': str(intent_path), 'runtimeSha256': source_sha,
             'previousRuntimeSha256': intent['oldBinarySha256'], 'stageSha256': intent['newStageSha256']}
+
+
+def status_proxy_transition(stage, r, base, service, sock, digest):
+    """Add only the status listener and a pinned auxiliary transport executable."""
+    require(r.get('workerTask'), 'status proxy upgrade requires a worker controller')
+    require(re.fullmatch('[0-9a-f]{64}', digest), 'status proxy digest malformed')
+    old_name = stage.get('statusProxy', {}).get('binary', 'mini')
+    require(old_name == 'mini' or re.fullmatch('mini-status-[0-9a-f]{64}', old_name), 'old status proxy name malformed')
+    name = 'mini-status-' + digest
+    old = f'ExecStart={base}/bin/{old_name} serve-agent-operator-proxy '.encode()
+    new = f'ExecStart={base}/bin/{name} serve-agent-operator-proxy '.encode()
+    require(service.count(old) == 1, 'status proxy service command differs')
+    next_service = service.replace(old, new)
+    first = f'ListenStream={r["home"]}/operator/mini.sock\n'.encode()
+    second = f'ListenStream={r["home"]}/operator/mini.control\n'.encode()
+    listeners = [line + b'\n' for line in sock.splitlines() if line.startswith(b'ListenStream=')]
+    require(listeners in ([first], [first, second]), 'status proxy listener layout differs')
+    next_socket = sock.replace(first, first + second) if listeners == [first] else sock
+    changed = strict_json(encoded(stage))
+    changed['statusProxy'] = {'binary': name, 'sha256': digest}
+    changed['units'][r['units'][1]] = sha(next_socket)
+    changed['units'][r['units'][2]] = sha(next_service)
+    return changed, next_service, next_socket
+
+
+def status_proxy_upgrade(store, helper, source_arg):
+    """Stopped, resumable transport-only publication; native bindings stay fixed."""
+    _, base, r = load(store, helper)
+    stopped_controller_units(r)
+    require(r.get('workerTask'), 'status proxy upgrade requires a worker controller')
+    source = read_file(canonical(source_arg), r['operatorUid'], 256 * 1024 * 1024, executable=True)
+    digest = sha(source)
+    prefix = 'status-proxy-upgrade-' + digest
+    intent_path = base / (prefix + '.json')
+    stage_path = base / 'stage.json'
+    service_path, socket_path = UNITS / r['units'][2], UNITS / r['units'][1]
+    def archive(value, kind):
+        require(isinstance(value, str) and re.fullmatch('[0-9a-f]{64}', value), 'status proxy archive hash malformed')
+        return base / 'configs' / (prefix + '-' + value + '.' + kind)
+    if not intent_path.exists() and not intent_path.is_symlink():
+        stage = checked_units(base, r)
+        old_stage = read_file(stage_path, 0, 65536, required_mode=0o600)
+        require(strict_json(old_stage) == stage, 'status proxy stage changed')
+        old_service = read_file(service_path, 0, 16384, required_mode=0o644)
+        old_socket = read_file(socket_path, 0, 16384, required_mode=0o644)
+        next_stage, next_service, next_socket = status_proxy_transition(stage, r, base, old_service, old_socket, digest)
+        new_stage = encoded(next_stage)
+        intent = {'protocol': 'mini-controller-status-proxy-upgrade-v1', 'store': store, 'binarySha256': digest}
+        for name, kind, raw in (('oldStage', 'stage', old_stage), ('newStage', 'stage', new_stage),
+                                ('oldService', 'service', old_service), ('newService', 'service', next_service),
+                                ('oldSocket', 'socket', old_socket), ('newSocket', 'socket', next_socket)):
+            intent[name + 'Sha256'] = sha(raw)
+            publish_exact(archive(sha(raw), kind), raw)
+        publish_exact(intent_path, encoded(intent))
+    intent = strict_json(read_file(intent_path, 0, 4096, required_mode=0o600))
+    fields = {'protocol', 'store', 'binarySha256'} | {name + 'Sha256' for name in
+              ('oldStage', 'newStage', 'oldService', 'newService', 'oldSocket', 'newSocket')}
+    require(set(intent) == fields and intent['protocol'] == 'mini-controller-status-proxy-upgrade-v1'
+            and intent['store'] == store and intent['binarySha256'] == digest, 'status proxy upgrade intent differs')
+    kept = {}
+    for name, kind in (('oldStage', 'stage'), ('newStage', 'stage'), ('oldService', 'service'),
+                       ('newService', 'service'), ('oldSocket', 'socket'), ('newSocket', 'socket')):
+        value = intent[name + 'Sha256']
+        kept[name] = read_file(archive(value, kind), 0, 65536, required_mode=0o600)
+        require(sha(kept[name]) == value, 'status proxy archived bytes differ')
+    expected_stage, expected_service, expected_socket = status_proxy_transition(
+        strict_json(kept['oldStage']), r, base, kept['oldService'], kept['oldSocket'], digest)
+    require(encoded(expected_stage) == kept['newStage'] and expected_service == kept['newService']
+            and expected_socket == kept['newSocket'], 'status proxy upgrade exceeds transport change')
+    require(sha(read_file(stage_path, 0, 65536, required_mode=0o600)) in
+            (intent['oldStageSha256'], intent['newStageSha256']), 'stage is outside status proxy upgrade')
+    checked_units(base, r,
+                  proxy_upgrade_hashes=(intent['oldServiceSha256'], intent['newServiceSha256']),
+                  socket_upgrade_hashes=(intent['oldSocketSha256'], intent['newSocketSha256']))
+    binary = base / 'bin' / ('mini-status-' + digest)
+    publish_exact(binary, source, mode=0o755, bound=256 * 1024 * 1024)
+    replace_root_record(service_path, kept['newService'], 0o644)
+    replace_root_record(socket_path, kept['newSocket'], 0o644)
+    replace_root_record(stage_path, kept['newStage'], 0o600)
+    run(['/usr/bin/systemctl', 'daemon-reload'])
+    checked_units(base, r)
+    return {'store': store, 'statusProxyUpgrade': str(intent_path), 'binarySha256': digest,
+            'stageSha256': intent['newStageSha256'], 'nativeOperationSubmitted': False}
 
 
 def relocated_operator_stage(stage, unit, proxy_unit, upstream, identity):
@@ -2271,6 +2364,7 @@ def main(args):
             result = upgrade_public_listener(store,helper,*extra)
         elif action == 'controller-consent-storage' and not extra: result = consent_storage_upgrade(store, helper)
         elif action == 'controller-runtime-upgrade' and len(extra) == 1: result = runtime_upgrade(store, helper, extra[0])
+        elif action == 'controller-status-proxy-upgrade' and len(extra) == 1: result = status_proxy_upgrade(store, helper, extra[0])
         elif action == 'controller-operator-endpoint' and len(extra) == 1: result = operator_endpoint_upgrade(store, helper, extra[0])
         elif action == 'controller-enroll' and len(extra) == 1:
             fcntl.flock(lock, fcntl.LOCK_UN)

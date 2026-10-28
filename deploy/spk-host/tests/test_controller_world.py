@@ -92,7 +92,10 @@ class ControllerWorldTests(unittest.TestCase):
     def test_worker_paths_and_units_bind_task_and_private_native_environment(self):
         r = self.worker_record(); base = self.root / 'base'
         pins = {'providerSha256': '12'*32, 'configSha256': '34'*32, 'storage': {'writableParent': '/private/store'}}
-        runtime = c.unit_bytes(r, base, Path('/operator.sock'), pins)[r['units'][0]].decode()
+        units = c.unit_bytes(r, base, Path('/operator.sock'), pins)
+        runtime = units[r['units'][0]].decode()
+        self.assertEqual([line for line in units[r['units'][1]].decode().splitlines() if line.startswith('ListenStream=')],
+                         [f'ListenStream={r["home"]}/operator/mini.sock', f'ListenStream={r["home"]}/operator/mini.control'])
         self.assertEqual(r['units'][0], 'mini-grain-controller@9870001.service')
         self.assertIn(' serve ' + str(Path(r['home']) / 'grain/controller.json'), runtime)
         self.assertIn('MINI_GRAIN_CONTROLLER_MANAGER=system', runtime)
@@ -1174,6 +1177,61 @@ class ControllerWorldTests(unittest.TestCase):
                 # binary can be adopted by replaying the retained transaction.
                 (home/'bin/grain-runtime').chmod(0o700);(home/'bin/grain-runtime').write_bytes(b'foreign');(home/'bin/grain-runtime').chmod(0o500)
                 with self.assertRaises(ValueError):c.runtime_upgrade(r['store'],'/unused',str(source))
+
+    def test_status_proxy_upgrade_recovers_units_without_changing_controller_bindings(self):
+        for fault in (1, 2, 3):
+            with self.subTest(fault=fault), self.storage_upgrade_fixture('status'+str(fault)) as (base,r,units,old_stage,_):
+                r['workerTask'] = '9870001'
+                source = self.file('status-mini-'+str(fault), b'qualified status-only transport', 0o700)
+                old_mini = (base/'bin/mini').read_bytes()
+                old_runtime = (units/r['units'][0]).read_bytes()
+                old_service = (units/r['units'][2]).read_bytes()
+                old_socket = (units/r['units'][1]).read_bytes()
+                original = c.replace_root_record; count = [0]
+                def interrupt(*args):
+                    original(*args); count[0] += 1
+                    if count[0] == fault: raise OSError('interrupted unit publication')
+                with patch.object(c, 'replace_root_record', side_effect=interrupt), self.assertRaises(OSError):
+                    c.status_proxy_upgrade(r['store'], '/unused', str(source))
+                result = c.status_proxy_upgrade(r['store'], '/unused', str(source))
+                self.assertFalse(result['nativeOperationSubmitted'])
+                self.assertEqual(c.status_proxy_upgrade(r['store'], '/unused', str(source)), result)
+                stage = c.checked_units(base, r)
+                self.assertEqual(stage['binaries'], json.loads(old_stage)['binaries'])
+                self.assertEqual((base/'bin/mini').read_bytes(), old_mini)
+                self.assertEqual((units/r['units'][0]).read_bytes(), old_runtime)
+                listeners = [line for line in (units/r['units'][1]).read_text().splitlines() if line.startswith('ListenStream=')]
+                self.assertEqual(listeners, [f'ListenStream={r["home"]}/operator/mini.sock',
+                                             f'ListenStream={r["home"]}/operator/mini.control'])
+                auxiliary = base/'bin'/stage['statusProxy']['binary']
+                self.assertEqual(auxiliary.read_bytes(), source.read_bytes())
+                prefix = 'status-proxy-upgrade-'+c.sha(source.read_bytes())+'-'
+                self.assertEqual((base/'configs'/(prefix+c.sha(old_service)+'.service')).read_bytes(), old_service)
+                self.assertEqual((base/'configs'/(prefix+c.sha(old_socket)+'.socket')).read_bytes(), old_socket)
+                # A mismatched auxiliary or a foreign unit is never adopted on retry.
+                auxiliary.write_bytes(b'foreign transport')
+                with self.assertRaisesRegex(ValueError, 'status proxy binary changed'):
+                    c.status_proxy_upgrade(r['store'], '/unused', str(source))
+                auxiliary.write_bytes(source.read_bytes())
+                (units/r['units'][1]).write_bytes(old_socket+b'ListenStream=/foreign\n')
+                with self.assertRaisesRegex(ValueError, 'controller unit changed'):
+                    c.status_proxy_upgrade(r['store'], '/unused', str(source))
+
+    def test_status_proxy_transition_refuses_extra_or_reordered_listeners(self):
+        with self.storage_upgrade_fixture('status-layout') as (base,r,units,raw,_):
+            r['workerTask'] = '9870001'
+            stage = json.loads(raw)
+            service = (units/r['units'][2]).read_bytes(); sock = (units/r['units'][1]).read_bytes()
+            first = f'ListenStream={r["home"]}/operator/mini.sock\n'.encode()
+            second = f'ListenStream={r["home"]}/operator/mini.control\n'.encode()
+            for bad in (sock+b'ListenStream=/foreign\n', sock.replace(first, second+first), sock.replace(first, first+first)):
+                with self.assertRaisesRegex(ValueError, 'listener layout differs'):
+                    c.status_proxy_transition(stage, r, base, service, bad, 'ab'*32)
+            new_stage, _, new_socket = c.status_proxy_transition(stage, r, base, service, sock, 'ab'*32)
+            self.assertEqual(new_socket.count(second), 1)
+            with self.assertRaisesRegex(ValueError, 'service command differs'):
+                c.status_proxy_transition(stage, r, base, b'ExecStart=/foreign\n', sock, 'ab'*32)
+            self.assertEqual(new_stage['binaries'], stage['binaries'])
 
     def test_enroll_runs_fixed_native_command_once_and_brackets_only_inactive_helpers(self):
         with self.storage_upgrade_fixture('enroll') as (base,r,units,old_stage,old_unit):
