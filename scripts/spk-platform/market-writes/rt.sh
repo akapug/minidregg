@@ -3,16 +3,22 @@
 rt_py="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/rt-sio.py"
 
 # WBO 1.20 (github.com/lovasoa/whitebophir): server.js `socket.on("getboard")` joins the board,
-# `socket.on("broadcast")` applies {board, data:{tool,type,id,...}}; GET /boards/<name>.json is
-# boardData.getAll() (routes in server/sockets.js and server/server.js).
+# `socket.on("broadcast")` applies {board, data:{tool,type,id,...}}. The board is saved to
+# $WBO_HISTORY_DIR/board-<name>.json after SAVE_INTERVAL (2 s) of inactivity, and server/server.js serves it at
+# GET /download/<board> (case "download"; there is no /boards/<name>.json route: that path is the board page
+# or a static file, and answered 404 in the b26630168 run).
 write_WBO() {
   local board=featured res
   res=$(python3 -I "$rt_py" wbo "$dir" "$board" 2>&1 | tail -1)
   [[ $res == *'"ok": true'* ]] || { echo "0 socket.io broadcast: ${res:0:160}"; return; }
   local id; id=$(sed 's/.*"id": "\([^"]*\)".*/\1/' <<<"$res")
-  local got; got=$(req GET "/boards/$board.json")
-  [[ $got == 200 ]] && grep -q "$id" "$body" && { echo "1 socket.io broadcast Rectangle $id; GET /boards/$board.json $got"; return; }
-  echo "0 socket.io broadcast sent as $id; GET /boards/$board.json $got without it [$(head -c 160 "$body" | tr '\r\n\t' '   ')]"
+  local got try
+  for try in 1 2 3 4 5; do
+    got=$(req GET "/download/$board")
+    [[ $got == 200 ]] && grep -q "$id" "$body" && { echo "1 socket.io broadcast Rectangle $id; GET /download/$board $got (try $try)"; return; }
+    sleep 3
+  done
+  echo "0 socket.io broadcast sent as $id; GET /download/$board $got without it [$(head -c 160 "$body" | tr '\r\n\t' '   ')]"
 }
 
 # HedgeDoc 1.9.8: GET /new makes a note (303 to /<id>, row evidence from the featured table's
