@@ -190,7 +190,7 @@ rc=0; env MINI_THIN_CONSENT=1 MINI_LOCAL_HOST="$HOST" MINI_CONSENT_HOST="$PROXY"
   "$MINI" workspace --action submit --dir "$NEWCOMER_WS" --intent "$NEWCOMER_WS/proposals/n1/intent.json" \
   --attempt "$NEWCOMER_WS/attempts/n1" >"$D/log/n1-submit.out" 2>"$D/log/n1-submit.err" || rc=$?
 [ "$rc" = 0 ] || fail n1-narrowed 0 "$rc" x "$(tail -3 "$D/log/n1-submit.err")"
-check n1-thin-frames grep -q 'frame 232' "$D/proxy-n1.log"
+check n1-thin-shown grep -q '^thin consent shows: ' "$D/log/n1-submit.err"
 check n1-shown-opened jq -e '.[0].postBytes != null and (.[0] | has("postRoot") | not)' \
   "$NEWCOMER_WS/attempts/n1/thin-display.json"
 check n1-signed test -s "$NEWCOMER_WS/attempts/n1/transaction-signatures.json"
