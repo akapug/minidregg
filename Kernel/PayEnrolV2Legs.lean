@@ -155,6 +155,10 @@ inductive Reject where
   | economics | owner | membership | birthFee
   | grantBatch | birthShape | keyTaken | observeGrantTaken | authorityEntries
   | validation | allocation | bookAdmission
+  /-- The image holds no platform record to price the payment from. -/
+  | platformUnavailable
+  /-- The ambient's tariff or template is not the platform record's. -/
+  | platformStale
   deriving DecidableEq, Repr
 
 def requireSome {A : Type} (reason : Reject) : Option A → Except Reject A
@@ -163,6 +167,15 @@ def requireSome {A : Type} (reason : Reject) : Option A → Except Reject A
 def require (condition : Prop) [Decidable condition] (reason : Reject) :
     Except Reject (PLift condition) :=
   if holds : condition then .ok ⟨holds⟩ else .error reason
+
+/-- The check every v2 plan and claim makes before it prices: the ambient's tariff and
+template are the image's platform record's (`PayEnrolReceiver.AmbientCurrent`). -/
+def requireCurrent {F : Type} [Field F] (deployment : Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (durable : Durable) (ambient : Ambient) :
+    Except Reject (PLift (PayEnrolReceiver.AmbientCurrent deployment profile durable ambient)) :=
+  match ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable with
+  | none => .error .platformUnavailable
+  | some _ => require (PayEnrolReceiver.AmbientCurrent deployment profile durable ambient) .platformStale
 
 /-- Stable identity derives all resource identifiers, even after pending rotation. -/
 def enrolIds (deployment : Deployment) (input : EnrolInput) : PayEnrolReceiver.Ids :=
@@ -198,12 +211,12 @@ variable {F : Type} [Field F] (deployment : Deployment)
 
 def enrolObserve (authority : Loaded deployment durable.snapshot) (input : EnrolInput) :
     AuthorityGrant :=
-  PayEnrolReceiver.observeGrant deployment profile.template authority.snapshot.cell ambient.height
+  PayEnrolReceiver.observeGrant deployment ambient.template authority.snapshot.cell ambient.height
     (enrolIds deployment input)
 
 def enrolDraft (authority : Loaded deployment durable.snapshot) (input : EnrolInput) :
     Descriptor Registry :=
-  PayEnrolReceiver.draft deployment profile.semantics profile.template ambient.tariff
+  PayEnrolReceiver.draft deployment profile.semantics ambient.template ambient.tariff
     authority.snapshot.cell ambient.height (enrolIds deployment input) input.economic.float
     input.economic.consumption.creditedRemainder
 
@@ -226,7 +239,7 @@ structure EnrolLegs (directory : LoadedDirectory durable)
   grants : PreparedGrantBatch profile.compilerProfile deployment authority descriptor
   auxiliaryExact : descriptor.auxiliaryCreates = grants.auxiliaryCreates
   initials : CanonicalCellRegistry.BirthsAdmissible deployment descriptor
-  templateBound : ResourceBirthPolicyController.Concrete.TemplateBound profile.template
+  templateBound : ResourceBirthPolicyController.Concrete.TemplateBound ambient.template
     authority.snapshot.authState ambient.height descriptor
   keyFresh : PayEnrolReceiver.KeyFresh authority.snapshot
     (enrolKey deployment authority.snapshot.revision input)
@@ -276,7 +289,7 @@ def prepareEnrolLegs (directory : LoadedDirectory durable)
   let aux ← require (ResourceBirthController.Concrete.sameCreates descriptor.auxiliaryCreates
     grants.auxiliaryCreates = true) .grantBatch
   let initials ← require (CanonicalCellRegistry.BirthsAdmissible deployment descriptor) .birthShape
-  let template ← require (ResourceBirthPolicyController.Concrete.TemplateBound profile.template
+  let template ← require (ResourceBirthPolicyController.Concrete.TemplateBound ambient.template
     authority.snapshot.authState ambient.height descriptor) .birthShape
   let key ← require (PayEnrolReceiver.KeyFresh authority.snapshot
     (enrolKey deployment authority.snapshot.revision input)) .keyTaken

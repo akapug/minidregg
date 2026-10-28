@@ -170,8 +170,8 @@ an owner grant and a control grant, both held by the new subject. -/
 theorem enrol_descriptor_exact
     (legs : EnrolLegs deployment profile ambient directory authority book tariff price plan) :
     legs.descriptor.grants =
-        [ownerGrant profile.template authority.snapshot.cell ambient.height (enrolIds deployment plan),
-          controlGrant profile.template authority.snapshot.cell ambient.height
+        [ownerGrant ambient.template authority.snapshot.cell ambient.height (enrolIds deployment plan),
+          controlGrant ambient.template authority.snapshot.cell ambient.height
             (enrolIds deployment plan)] ∧
       legs.descriptor.initialPolicies =
         [initialPolicy deployment profile.semantics (enrolIds deployment plan)] := by
@@ -197,9 +197,9 @@ def enrolGrantFields (deployment : CanonicalCellRegistry.Deployment)
     (authority : Loaded deployment durable.snapshot) (plan : EnrolPlan) :
     List (Address CredentialAuthorityState.layout) :=
   [ResourceBirthAuthority.grantField
-      (ownerGrant profile.template authority.snapshot.cell ambient.height (enrolIds deployment plan)),
+      (ownerGrant ambient.template authority.snapshot.cell ambient.height (enrolIds deployment plan)),
     ResourceBirthAuthority.grantField
-      (controlGrant profile.template authority.snapshot.cell ambient.height (enrolIds deployment plan)),
+      (controlGrant ambient.template authority.snapshot.cell ambient.height (enrolIds deployment plan)),
     ResourceBirthAuthority.grantField (enrolObserve deployment profile ambient authority plan)]
 
 def isCapabilityAddress : Address CredentialAuthorityState.layout → Bool
@@ -238,9 +238,9 @@ theorem enrolled_key_has_no_grant_beyond_membership
           authority.snapshot.logical ⟨.capability kind, id⟩ →
         (⟨.capability kind, id⟩ : Address CredentialAuthorityState.layout) ∈
           enrolGrantFields deployment profile ambient authority plan) ∧
-    (∀ grant ∈ [ownerGrant profile.template authority.snapshot.cell ambient.height
+    (∀ grant ∈ [ownerGrant ambient.template authority.snapshot.cell ambient.height
           (enrolIds deployment plan),
-        controlGrant profile.template authority.snapshot.cell ambient.height (enrolIds deployment plan),
+        controlGrant ambient.template authority.snapshot.cell ambient.height (enrolIds deployment plan),
         enrolObserve deployment profile ambient authority plan],
       legs.authorityPost.logical (ResourceBirthAuthority.grantField grant) = some grant.capability) := by
   have exact := enrol_descriptor_exact legs
@@ -458,7 +458,7 @@ theorem enrol_descriptor_fee {F : Type} [Field F] {deployment : CanonicalCellReg
     {price : Price} {plan : EnrolPlan}
     (legs : EnrolLegs deployment profile ambient directory authority book tariff price plan) :
     legs.descriptor.fee = ⟨plan.float, ambient.tariff.collector, ambient.tariff.asset,
-      birthFee deployment profile.semantics profile.template ambient.tariff authority.snapshot.cell
+      birthFee deployment profile.semantics ambient.template ambient.tariff authority.snapshot.cell
         ambient.height (enrolIds deployment plan) 0⟩ ∧
     legs.descriptor.funding = [⟨plan.float, (enrolIds deployment plan).account, ambient.tariff.asset,
       enrolRemainder tariff price plan⟩] := by
@@ -488,7 +488,7 @@ theorem enrol_float_net_zero {F : Type} [Field F] {deployment : CanonicalCellReg
     ((enrolBatch tariff ambient.tariff.collector plan legs.descriptor).apply pre).balance
         plan.float tariff.asset = pre.balance plan.float tariff.asset := by
   obtain ⟨feeExact, fundingExact⟩ := enrol_descriptor_fee legs
-  have paid : birthFee deployment profile.semantics profile.template ambient.tariff
+  have paid : birthFee deployment profile.semantics ambient.template ambient.tariff
       authority.snapshot.cell ambient.height (enrolIds deployment plan) 0 = price.birthFee := by
     rw [feeExact] at fee
     exact fee

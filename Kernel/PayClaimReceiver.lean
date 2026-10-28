@@ -117,8 +117,8 @@ birth descriptor. Renewal/rotation decision ignores this birth fee. -/
 def pricingAt {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (seed : Digest)
     (authority : CredentialAuthorityDomain.Snapshot) (command : Command) : PayClaimDecision.Pricing :=
-  ⟨deployment.domain, seed, profile.semantics, ambient.tariff, profile.template,
-    PayEnrolReceiver.birthFee deployment profile.semantics profile.template ambient.tariff
+  ⟨deployment.domain, seed, profile.semantics, ambient.tariff, ambient.template,
+    PayEnrolReceiver.birthFee deployment profile.semantics ambient.template ambient.tariff
       authority.cell ambient.height (PayEnrolReceiver.ids deployment.domain (identityKey command)) 0⟩
 
 section Preparation
@@ -165,6 +165,8 @@ structure Prepared (deployment : Deployment) (profile : CanonicalRuntimeProfile.
   pay : PayCellDomain.Loaded deployment durable.snapshot
   book : BookCell deployment directory.directory
   factory : FactoryCell deployment directory.directory
+  /-- The claim is priced from the image's platform record. -/
+  ambientCurrent : PayEnrolReceiver.AmbientCurrent deployment profile durable ambient
   tariff : Tariff
   tariffExact : tariffOf pay.cell.logical = some tariff
   clock : ClockCellDomain.Loaded deployment durable.snapshot
@@ -193,6 +195,7 @@ def prepare (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile
     (ResourceBirthController.Concrete.observeCell deployment directory.directory deployment.resourceBookId .resourceBook)
   let factory ← requireSome .factoryUnavailable
     (ResourceBirthController.Concrete.observeCell deployment directory.directory deployment.factoryId .declaredObject)
+  let current ← (PayEnrolV2Legs.requireCurrent deployment profile durable ambient).mapError Reject.legs
   if ingress.command.expectedAuthorityRoot ≠ authority.snapshot.cell.root then throw .staleAuthority
   if rootExact : ingress.command.expectedPayRoot = pay.cell.root then
     match tariffExact : tariffOf pay.cell.logical with
@@ -219,7 +222,7 @@ def prepare (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile
                 profile.semantics deployment.factoryId dependencies.additional with
             | none => throw .policyUnavailable
             | some lawGuards =>
-              pure ⟨seed, directory, authority, pay, book, factory, tariff, tariffExact, clock,
+              pure ⟨seed, directory, authority, pay, book, factory, current.down, tariff, tariffExact, clock,
                 decision, decided, legs, candidate, dependencies, dependenciesExact, lawGuards, lawGuardsExact⟩
   else throw .stalePay
 

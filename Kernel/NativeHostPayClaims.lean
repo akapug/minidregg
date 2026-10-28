@@ -68,9 +68,10 @@ def payClaimStatusLoaded (config : Config) (opened : Opened config) (bytes : Lis
 
 /-- Exact quote source uses the same live birth descriptor as receiving. -/
 def payClaimPricing (config : Config) (opened : Opened config) (identity : List UInt8) : PayEnrolV2Decision.Pricing :=
-  ⟨config.deployment.domain, config.expectedSeed, config.profile.semantics, config.tariff, config.profile.template,
-    PayEnrolReceiver.birthFee config.deployment config.profile.semantics config.profile.template
-      config.tariff opened.authority.snapshot.cell (logicalHeight config opened.durable)
+  let ambient := payEnrolAmbient config opened
+  ⟨config.deployment.domain, config.expectedSeed, config.profile.semantics, ambient.tariff, ambient.template,
+    PayEnrolReceiver.birthFee config.deployment config.profile.semantics ambient.template
+      ambient.tariff opened.authority.snapshot.cell (logicalHeight config opened.durable)
       (PayEnrolReceiver.ids config.deployment.domain identity) 0⟩
 
 def payClaimSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (bytes : List UInt8) : IO Outcome := do

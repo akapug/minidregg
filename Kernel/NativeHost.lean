@@ -2309,8 +2309,15 @@ P6's.)  The plan asks the Receiver's verifier about the memo's two possession
 signatures (`PayEnrolReceiver.observations`), because the decision the observer
 signs depends on both bits. -/
 
+/-- The pay ambient prices from the opened image's platform record: the pins' creation
+tariff (the record's, `pinnedTariff`) and the factory template under the record. Without a
+record the genesis terms stand in and every pay plan refuses `platformUnavailable`
+(`PayEnrolReceiver.AmbientCurrent`), so the stand-in prices nothing. -/
 def payEnrolAmbient (config : Config) (opened : Opened config) : PayEnrolReceiver.Ambient :=
-  ⟨config.federation, logicalHeight config opened.durable, config.tariff⟩
+  ⟨config.federation, logicalHeight config opened.durable, opened.pins.tariff,
+    match ResourceBirthPolicyController.Concrete.platformRecordAt config.deployment opened.durable with
+    | some record => ResourceBirthPolicyController.Concrete.templateAt config.profile.template record
+    | none => config.profile.template⟩
 
 def payEnrolPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
     IO (Except String PayCellDomain.SigningPlan) := do

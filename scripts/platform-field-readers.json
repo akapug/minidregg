@@ -179,11 +179,11 @@
  },
  "Kernel/NativeHost.lean": {
   "config.tariff": {
-   "count": 10,
+   "count": 9,
    "status": "owed"
   },
   "profile.template": {
-   "count": 1,
+   "count": 3,
    "status": "owed"
   }
  },
@@ -219,16 +219,6 @@
   "template.ownerBudget": {
    "count": 1,
    "status": "genesis"
-  }
- },
- "Kernel/NativeHostPayClaims.lean": {
-  "config.tariff": {
-   "count": 2,
-   "status": "owed"
-  },
-  "profile.template": {
-   "count": 2,
-   "status": "owed"
   }
  },
  "Kernel/NativeHostReplay.lean": {
@@ -301,41 +291,13 @@
    "status": "owed"
   }
  },
- "Kernel/PayClaimReceiver.lean": {
-  "profile.template": {
-   "count": 2,
-   "status": "owed"
-  }
- },
- "Kernel/PayEnrolProofs.lean": {
-  "profile.template": {
-   "count": 8,
-   "status": "owed"
-  }
- },
  "Kernel/PayEnrolReceiver.lean": {
-  "profile.template": {
-   "count": 5,
-   "status": "owed"
-  },
   "template.lifetime": {
    "count": 1,
    "status": "owed"
   },
   "template.ownerBudget": {
    "count": 1,
-   "status": "owed"
-  }
- },
- "Kernel/PayEnrolV2Legs.lean": {
-  "profile.template": {
-   "count": 4,
-   "status": "owed"
-  }
- },
- "Kernel/PayEnrolV2Receiver.lean": {
-  "profile.template": {
-   "count": 2,
    "status": "owed"
   }
  },
