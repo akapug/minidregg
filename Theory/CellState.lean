@@ -145,17 +145,30 @@ theorem Materialized.root_encoding_coherent {L : Layout.{u, v, w}} {Root : Type 
   obtain ⟨logical, ⟨leftBytes⟩, leftBytesExact, ⟨leftRoot⟩, leftExact⟩ := left
   obtain ⟨_, ⟨rightBytes⟩, rightBytesExact, ⟨rightRoot⟩, rightExact⟩ := right
   cases h
-  have sameBytes : leftBytes = rightBytes := by
-    funext unit
-    cases unit
-    exact leftBytesExact.trans rightBytesExact.symm
-  have same : leftRoot = rightRoot := by
-    funext unit
-    cases unit
-    exact leftExact.trans rightExact.symm
+  -- A `Unit → α` is determined by its value at `()` definitionally (eta), so
+  -- no function extensionality is needed.
+  have sameBytes : leftBytes = rightBytes :=
+    congrArg (fun (value : List UInt8) (_ : Unit) => value)
+      (leftBytesExact.trans rightBytesExact.symm)
+  have same : leftRoot = rightRoot :=
+    congrArg (fun (value : Root) (_ : Unit) => value) (leftExact.trans rightExact.symm)
   cases sameBytes
   cases same
   rfl
+
+/-- A cell decoded from canonical bytes: those bytes are its bytes, so it is
+never re-encoded (`materializeCanonical_eq`: it is `materialize`). -/
+def materializeCanonical {L : Layout.{u, v, w}} {Root : Type y} (M : Materializer L Root)
+    (bytes : List UInt8) (logical : Store L) (canonical : M.codec.encode logical = bytes) :
+    Materialized M :=
+  let cached : Thunk (List UInt8) := Thunk.pure bytes
+  ⟨logical, cached, canonical.symm, Thunk.mk fun _ => M.rootBytes cached.get,
+    congrArg M.rootBytes canonical.symm⟩
+
+theorem materializeCanonical_eq {L : Layout.{u, v, w}} {Root : Type y} (M : Materializer L Root)
+    (bytes : List UInt8) (logical : Store L) (canonical : M.codec.encode logical = bytes) :
+    materializeCanonical M bytes logical canonical = materialize M logical :=
+  Materialized.ext rfl
 
 /-! ## Pair-scoped root binding
 

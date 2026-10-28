@@ -214,7 +214,7 @@ theorem bytes_of_decode {input : List UInt8} {cell : PackedCell registry}
       | some logical =>
         simp only [accepted, Option.map_some, Option.some.injEq] at decoded
         subst decoded
-        simp only [bytes, materialize_logical]
+        simp only [bytes, materialize_bytes]
         rw [registry.tag_of_kindAtTag _ _ found,
           registry.materializer_canonical _ _ _ accepted]
         rfl
@@ -241,6 +241,55 @@ def payloadRoot (cell : PackedCell registry) : Root :=
     (codec registry).encode cell =
       [68, 82, 1, registry.tag cell.kind] ++ cell.payload.bytes :=
   rfl
+
+/-- A payload decoded as `decode` does, its accepted bytes kept as the cell's
+bytes (the registry's codecs are canonical, `materializer_canonical`). -/
+def decodePayload (kind : registry.Kind) (payloadBytes : List UInt8) :
+    Option (PackedCell registry) :=
+  match decoded : (registry.materializer kind).codec.decode payloadBytes with
+  | none => none
+  | some logical => some
+      { kind := kind
+        payload := CellState.materializeCanonical (registry.materializer kind) payloadBytes logical
+          (registry.materializer_canonical kind payloadBytes logical decoded) }
+
+theorem decodePayload_eq (kind : registry.Kind) (payloadBytes : List UInt8) :
+    decodePayload registry kind payloadBytes =
+      ((registry.materializer kind).codec.decode payloadBytes).map
+        (fun logical =>
+          { kind := kind
+            payload := CellState.materialize (registry.materializer kind) logical }) := by
+  unfold decodePayload
+  split
+  · rename_i decoded
+    rw [decoded]
+    rfl
+  · rename_i logical decoded
+    simp only [decoded, Option.map_some]
+    exact congrArg some (congrArg (PackedCell.mk kind) (CellState.materializeCanonical_eq _ _ _ _))
+
+/-- `decode`, compiled: a decoded cell is never re-encoded for its bytes or root. -/
+def decodeFast : List UInt8 -> Option (PackedCell registry)
+  | 68 :: 82 :: 1 :: tag :: payloadBytes =>
+      match registry.kindAtTag tag with
+      | none => none
+      | some kind => decodePayload registry kind payloadBytes
+  | _ => none
+
+/-- **Refinement, compiled**: every packed-cell decode the host runs is `decodeFast`. -/
+@[csimp] theorem decode_eq_decodeFast : @decode = @decodeFast := by
+  funext Root registry bytes
+  unfold decode
+  split
+  · rw [decodeFast.eq_1]
+    split
+    · rename_i found
+      rw [found]
+    · rename_i kind found
+      rw [found]
+      exact (decodePayload_eq registry kind _).symm
+  · rename_i other
+    rw [decodeFast.eq_2 _ _ other]
 
 end PackedCell
 
