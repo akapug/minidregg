@@ -963,7 +963,12 @@ fn sandbox_reply_for(request: &Value, log: &Path) -> Option<Result<(Value, &'sta
         let append = room_tool(request, "mini_doc_append")?;
         return calls(vec![call(append, "sb-append", json!({"doc":digest,"text":format!("sandbox: sum of squares 1..100 = {result}")}))], "sandbox-export");
     }
-    None
+    // The answer, in the same prompt: four model calls (write, run, export, reply), inside the
+    // controller's per-prompt bound of six. Handing over to the librarian's read-and-write
+    // rounds here went past that bound.
+    let appended = tool_result(current, "sb-append").and_then(|m| m.get("content")).map(|c| c.to_string()).unwrap_or_default();
+    Some(Ok((json!({"role":"assistant","content":format!("sandbox work done: the sum of squares 1..100 was computed in /scratch and appended to the digest ({})",
+        clip(&appended, 200))}), "stop", "sandbox-done".into())))
 }
 
 /// The await bridge (docs/HERMES-TOOLS-2026-10-27.md is the sandbox; this is Quest 2): when the
@@ -1664,7 +1669,7 @@ mod tests {
         let mut request = json!({"tools": [
             {"function":{"name":"mini_oracle_discover","parameters":{"properties":{"application":{"enum":["oracle-app"]}}}}},
             {"function":{"name":"mini_oracle_call"}}],
-            "messages":[{"role":"user","content":r#"Assignment: {"selectedRequest":{"n":"1","text":"oracle: Who wrote Leaves of Grass?"}}"#}]});
+            "messages":[{"role":"user","content":r#"Assignment: {"selectedRequest":{"author":"20","cell":"201","sequence":1},"recentMemberEntries":[{"author":"20","cell":"201","sequence":1,"n":1,"kind":"say","text":"oracle: Who wrote Leaves of Grass?"}]}"#}]});
         let discover = oracle_reply_for(&request, &log).unwrap().unwrap().0;
         let args: Value = serde_json::from_str(discover["tool_calls"][0]["function"]["arguments"].as_str().unwrap()).unwrap();
         assert_eq!(args, json!({"application":"oracle-app","operationId":"core.query"}));
@@ -1676,7 +1681,7 @@ mod tests {
         assert_eq!(args["arguments"], json!({"text":"Who wrote Leaves of Grass?"}));
         assert_eq!(oracle_reply_for(&request, &log).unwrap().unwrap().0, invoke);
         let mut later_ask = request.clone();
-        later_ask["messages"][0]["content"] = json!(r#"Assignment: {"selectedRequest":{"n":"2","text":"oracle: Who wrote Leaves of Grass?"}}"#);
+        later_ask["messages"][0]["content"] = json!(r#"Assignment: {"selectedRequest":{"author":"20","cell":"201","sequence":2},"recentMemberEntries":[{"author":"20","cell":"201","sequence":2,"n":2,"kind":"say","text":"oracle: Who wrote Leaves of Grass?"}]}"#);
         let later = oracle_reply_for(&later_ask, &log).unwrap().unwrap().0;
         let later_args: Value = serde_json::from_str(later["tool_calls"][0]["function"]["arguments"].as_str().unwrap()).unwrap();
         assert_ne!(later_args["requestId"], args["requestId"]);
@@ -1691,7 +1696,7 @@ mod tests {
         let transcript = std::fs::read_to_string(log.with_extension("oracle.jsonl")).unwrap();
         let recorded: Value = serde_json::from_str(transcript.lines().last().unwrap()).unwrap();
         assert_eq!(recorded["question"], "Who wrote Leaves of Grass?");
-        assert_eq!(recorded["selectedRequest"]["n"], "1");
+        assert_eq!(recorded["selectedRequest"]["sequence"], 1);
         assert_eq!(recorded["requestId"], args["requestId"]);
         let mut refused = http.clone(); refused["status"] = json!(403);
         assert!(oracle_answer(&refused, 0).is_none());

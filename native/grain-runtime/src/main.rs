@@ -15693,8 +15693,13 @@ impl Runtime {
                 }
             }
             if msg.get("method").and_then(Value::as_str) == Some("session/request_permission") {
-                let reply = json!({"jsonrpc":"2.0","id":msg.get("id"),
-                    "result":{"outcome":{"outcome":"cancelled"}}});
+                let params = msg.get("params").cloned().unwrap_or(Value::Null);
+                let outcome = sandbox_tools::permission_outcome(&self.prompt_sandbox, &params);
+                eprintln!("grain-runtime: ACP permission {} ({}): {}",
+                    params.pointer("/toolCall/toolCallId").and_then(Value::as_str).unwrap_or("?"),
+                    params.pointer("/toolCall/kind").and_then(Value::as_str).unwrap_or("?"),
+                    outcome.pointer("/outcome/outcome").and_then(Value::as_str).unwrap_or("?"));
+                let reply = json!({"jsonrpc":"2.0","id":msg.get("id"),"result":outcome});
                 writeln!(writer, "{reply}")
                     .and_then(|_| writer.flush())
                     .map_err(|e| e.to_string())?;

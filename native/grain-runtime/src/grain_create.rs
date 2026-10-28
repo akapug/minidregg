@@ -217,6 +217,13 @@ impl Spec {
         confirmed(&self.root.join("create/birth/outcome.json"))
     }
 
+    /// Whether this run still authors or looks up the birth, and so reads genesis.
+    /// The operator's birth phase always does; the resident's half only until the
+    /// birth outcome is confirmed.
+    fn needs_genesis(&self, phase: &Phase) -> Result<bool> {
+        Ok(matches!(phase, Phase::Birth { .. }) || !self.birth_confirmed()?)
+    }
+
     /// Values only: no filesystem access.
     fn check_values(&self) -> Result<()> {
         if self.kind != SPEC_TYPE {
@@ -336,7 +343,13 @@ impl Spec {
         if !fs::metadata(live).map(|m| m.file_type().is_socket()).unwrap_or(false) {
             return Err(format!("the Host socket is not a live socket: {}", live.display()));
         }
-        readable(&self.genesis, "genesis")?;
+        // Genesis describes the deployment for the birth only. A confirmed birth
+        // is past that: the resident half of a split create never reads it (the
+        // deployment's genesis file is the operator's, 0600, and holds sponsor and
+        // enrollment material).
+        if self.needs_genesis(phase)? {
+            readable(&self.genesis, "genesis")?;
+        }
         directory(&self.namespace_root, "namespaceRoot")?;
         absolute(&self.root, "root")?;
         // Linux sockaddr_un holds 108 bytes including NUL; the control and
@@ -678,21 +691,24 @@ pub(crate) fn create_phase(spec_path: &Path, phase: Phase) -> Result<Value> {
         write_private_new(&work.join("spec.sha256"), format!("{spec_sha}\n").as_bytes())?;
     }
 
-    // 1. The birth: both grains in one sponsor-signed intent.
-    let genesis: Value = serde_json::from_slice(&fs::read(&spec.genesis).map_err(|e| format!("genesis: {e}"))?)
-        .map_err(|e| format!("genesis: {e}"))?;
-    let intent_path = work.join("birth-intent.json");
-    let source = serde_json::to_vec(&spec.birth_intent(&genesis)).map_err(|e| e.to_string())?;
-    if intent_path.exists() {
-        if fs::read(&intent_path).map_err(|e| e.to_string())? != source {
-            return Err("retained grain birth source differs from current spec/genesis".into());
-        }
-    } else {
-        write_private_new(&intent_path, &source)?;
-    }
+    // 1. The birth: both grains in one sponsor-signed intent. Once its outcome is
+    // confirmed nothing here runs again, and genesis is not read.
     let birth = work.join("birth");
-    let birth_socket = match &phase { Phase::Birth { socket } => socket.clone(), Phase::Whole => spec.host_socket.clone() };
-    submit_birth(&spec, &birth_socket, &intent_path, &genesis, &work)?;
+    if spec.needs_genesis(&phase)? {
+        let genesis: Value = serde_json::from_slice(&fs::read(&spec.genesis).map_err(|e| format!("genesis: {e}"))?)
+            .map_err(|e| format!("genesis: {e}"))?;
+        let intent_path = work.join("birth-intent.json");
+        let source = serde_json::to_vec(&spec.birth_intent(&genesis)).map_err(|e| e.to_string())?;
+        if intent_path.exists() {
+            if fs::read(&intent_path).map_err(|e| e.to_string())? != source {
+                return Err("retained grain birth source differs from current spec/genesis".into());
+            }
+        } else {
+            write_private_new(&intent_path, &source)?;
+        }
+        let birth_socket = match &phase { Phase::Birth { socket } => socket.clone(), Phase::Whole => spec.host_socket.clone() };
+        submit_birth(&spec, &birth_socket, &intent_path, &genesis, &work)?;
+    }
 
     if matches!(phase, Phase::Birth { .. }) {
         return Ok(json!({"type":"mini-grain-birth-v1","task":spec.task,"root":spec.root,
@@ -860,6 +876,22 @@ esac
         assert_eq!(again.lines().count(), 5);
         assert!(again.lines().last().unwrap().starts_with("retry "));
         assert!(!fixture.0.join("birth-author-1").exists());
+    }
+
+    #[test]
+    fn the_resident_half_reads_no_genesis_once_the_birth_is_confirmed() {
+        let fixture = BirthFixture::new();
+        let mut value = spec_json();
+        value["root"] = json!(fixture.0);
+        let spec: Spec = serde_json::from_value(value).unwrap();
+        let operator = Phase::Birth { socket: PathBuf::from("/operator.sock") };
+        assert!(spec.needs_genesis(&Phase::Whole).unwrap(), "no birth yet: the birth needs genesis");
+        fs::create_dir_all(fixture.0.join("create/birth")).unwrap();
+        fs::write(fixture.0.join("create/birth/outcome.json"), br#"{"type":"undecided"}"#).unwrap();
+        assert!(spec.needs_genesis(&Phase::Whole).unwrap(), "an undecided birth is still looked up");
+        fs::write(fixture.0.join("create/birth/outcome.json"), br#"{"type":"confirmed"}"#).unwrap();
+        assert!(!spec.needs_genesis(&Phase::Whole).unwrap());
+        assert!(spec.needs_genesis(&operator).unwrap());
     }
 
     #[test]

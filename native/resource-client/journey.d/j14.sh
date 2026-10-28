@@ -342,8 +342,21 @@ hermes() { # STEP WHAT: one resident pass that runs exactly one more prompt (or 
   local next=$(( $(resident_completed) + 1 ))
   jq -n --arg c "$G/controller.json" --arg i "$RINBOX" --arg s "$RSTATE" --argjson m "$next" \
     '{type:"mini-hermes-room-resident-v1",controller:$c,inbox:$i,state:$s,maxPrompts:$m,intervalSeconds:5}' >"$RCFG"
+  # The peak the resident's uid holds during the pass (the quota must cover it, not the
+  # end state): the controller root and the room workspace, sampled every 5 s.
+  ( while :; do
+      printf '%s\t%s\t%s\t%s\n' "$(du -sk "$G" 2>/dev/null | cut -f1)" "$(find "$G" 2>/dev/null | wc -l)" \
+        "$(du -sk "$G/state/resource-workspace" 2>/dev/null | cut -f1)" "$(find "$G/state/resource-workspace" 2>/dev/null | wc -l)"
+      sleep 5
+    done >"$SD/sample-pass.tsv" ) &
+  local sampler=$!
+  echo "$sampler" >"$SD/sampler.pid"
   operator "$1" "hermes resident pass: $2" env "MINI_TRACE=$SD/trace-resident.jsonl" \
     timeout "$J14_PASS_SECONDS" "$GRAIN_RUNTIME" hermes-room resident "$RCFG"
+  kill "$(cat "$SD/sampler.pid")" 2>/dev/null; wait "$sampler" 2>/dev/null; rm -f "$SD/sampler.pid"
+  [ -s "$SD/footprint-passes.tsv" ] || printf 'pass\tpeak_kib\tpeak_inodes\tpeak_room_ws_kib\tpeak_room_ws_inodes\n' >"$SD/footprint-passes.tsv"
+  awk -F '\t' -v p="$1" '{for (i = 1; i <= 4; i++) if ($i + 0 > m[i]) m[i] = $i + 0}
+    END {printf "%s\t%d\t%d\t%d\t%d\n", p, m[1], m[2], m[3], m[4]}' "$SD/sample-pass.tsv" >>"$SD/footprint-passes.tsv"
   cp "$OUT" "$SD/resident-$1.jsonl"; cp "$ERR" "$SD/resident-$1.err"
   # After the pass, never between a member's ask and the pass that serves it:
   # the resident's brief reads the room's recent entries above the certified
@@ -588,9 +601,13 @@ N=$((N + 1)); WALL=-
   --intent-kind birth-intent --key "$W/sponsor.key" --dir "$SD/stale-birth" >"$L/stale-birth.out" 2>"$L/stale-birth.err"
 STALE_RC=$?
 STALE1=$(cat "$W"/public/serve*.log 2>/dev/null | grep -c 'submission refused (operator log).*birthStale')
-record aged OPERATOR "a birth authored at genesis (notBefore $GH) is refused on the aged World" "refused, operator log birthStale" \
-  "rc $STALE_RC, birthStale lines $STALE0 -> $STALE1" \
-  "$([ "$STALE_RC" != 0 ] && [ "$STALE1" -gt "$STALE0" ] && echo ok || echo FAIL)" "$(tail -1 "$L/stale-birth.err" | cut -c1-160)"
+# The Host refuses it at prepare (the submitter reads the kernel's reason) or, if a
+# plan was signed, at admission (the operator log names it): birthStale either way.
+STALE_NAMED=$(grep -c 'ResourceBirthPolicyController.Reject.birthStale' "$L/stale-birth.err")
+record aged OPERATOR "a birth authored at genesis (notBefore $GH) is refused on the aged World" "refused birthStale" \
+  "rc $STALE_RC, prepare refusals naming birthStale $STALE_NAMED, operator-log birthStale lines $STALE0 -> $STALE1" \
+  "$([ "$STALE_RC" != 0 ] && { [ "$STALE_NAMED" -gt 0 ] || [ "$STALE1" -gt "$STALE0" ]; } && echo ok || echo FAIL)" \
+  "$(grep -m1 -o 'refused: .\{0,140\}' "$L/stale-birth.err")"
 # Hermes's grain and controller config, in one command.
 jq -n --arg mini "$MINI" --arg host "$HOST" --arg cfg "$CONFIG" --arg sock "$SOCKET" --arg g "$W/genesis.json" \
   --arg ns "$W/namespace" --arg root "$G" --arg sk "$W/sponsor.key" --arg sp "$SPONSOR_SUBJECT" \
@@ -843,7 +860,15 @@ fi
 
 if [ -n "$J14_AWAIT" ]; then
   # -------------------------------------------- the await bridge: a world program asks Hermes and resumes on the answer
-  install -m 0600 "$REPO/world/activity/Tally.obend" "$H/alice/requests/Tally.obend"
+  # Tally awaits its answer for `patience` heights (4 in world/activity/Tally.obend). A
+  # resident answers in a later pass, minutes and dozens of heights after the ask (run
+  # hb-q3-3: the slot's deadline 281 had passed at height 292, before Hermes listed it), so
+  # the bridge's program is Tally with a patience a resident pass can meet: the kernel's
+  # longest (Kernel.ObjectiveKernelConfig.maxPatience, 64 heights).
+  PATIENCE=${J14_AWAIT_PATIENCE:-64}
+  sed "s/patience: 4n/patience: ${PATIENCE}n/" "$REPO/world/activity/Tally.obend" >"$H/alice/requests/Tally.obend"
+  chmod 600 "$H/alice/requests/Tally.obend"
+  checkp await "the bridge's Tally waits $PATIENCE heights for its answer" grep -q "patience: ${PATIENCE}n" "$H/alice/requests/Tally.obend"
   ok await alice "bend publish tally @Tally.obend --entry tally"
   for o in ask-hermes ask-alice; do
     operator await "OBJECT: alice's content resource $o" "$MINI" workspace --action create --dir "$WS/alice" \

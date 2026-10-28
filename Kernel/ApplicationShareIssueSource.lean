@@ -378,10 +378,10 @@ def appRequestFromSourceBytes (domain semantics : Digest) (federation : Federati
   target := ⟨spec.ticket.scope.app⟩
   verb := .delegateObject
   argsDigest := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/SHARE-ISSUE-ARGS/v3".toUTF8.toList
+    "DREGG/APPLICATION/SHARE-ISSUE-ARGS/v4".toUTF8.toList
     originalSourceBytes).digest
   effectsDigest := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/SHARE-ISSUE-EFFECTS/v3".toUTF8.toList
+    "DREGG/APPLICATION/SHARE-ISSUE-EFFECTS/v4".toUTF8.toList
     originalSourceBytes).digest
   nonce := spec.ticket.issueNonce
   height := height
