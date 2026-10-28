@@ -129,6 +129,11 @@ def resolve(x, args, context, results=None):
         for p in x['result']:
             v = v[p]
         return v
+    if set(x) == {'sha256'}:
+        value = resolve(x['sha256'], args, context, results)
+        if not isinstance(value, str):
+            raise Refusal('hash-input-invalid')
+        return hashlib.sha256(value.encode('utf-8')).hexdigest()
     if set(x) == {'concat'}:
         return ''.join(str(resolve(v, args, context, results)) for v in x['concat'])
     if set(x) == {'path'} and isinstance(x['path'], list):
@@ -329,7 +334,14 @@ class Engine:
                 raise Refusal('binding-protocol-unsupported')
             if 'projection' in op:
                 p = op['projection']; where = resolve(p['where'], args, self.context)
-                value = [v for v in value[p['collection']] if all(v.get(k) == x for k, x in where.items())]
+                values = value.get(p['collection']) if isinstance(value, dict) else None
+                if p.get('values', False):
+                    if not isinstance(values, dict):
+                        raise Refusal('projection-shape-invalid')
+                    values = list(values.values())
+                if not isinstance(values, list) or any(not isinstance(v, dict) for v in values):
+                    raise Refusal('projection-shape-invalid')
+                value = [v for v in values if all(v.get(k) == x for k, x in where.items())]
             validate(self.d, op['output'], value, 'output')
             return value
         except Uncertain:
