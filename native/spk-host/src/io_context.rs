@@ -34,7 +34,7 @@ mod tests {
     #[test]
     fn the_broker_connect_path_names_a_missing_socket() {
         let path = std::env::temp_dir().join(format!("mini-ioctx-b-{}/broker.sock", std::process::id()));
-        let error = crate::broker_endpoint::connect_for_test(&path).unwrap_err().to_string();
+        let error = crate::broker::connect_for_test(&path).unwrap_err().to_string();
         assert!(error.contains("inspect broker socket") && error.contains(path.to_str().unwrap()), "{error}");
     }
 

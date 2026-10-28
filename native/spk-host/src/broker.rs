@@ -18,6 +18,8 @@ use crate::canonical::hex64;
 
 #[path = "broker_endpoint.rs"]
 mod endpoint;
+#[cfg(test)]
+pub(crate) fn connect_for_test(path: &Path) -> io::Result<std::os::unix::net::UnixStream> { endpoint::connect_for_test(path) }
 
 #[path = "broker_runtime_adoption.rs"]
 mod runtime_adoption;
