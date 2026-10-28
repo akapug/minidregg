@@ -88,12 +88,30 @@ of everything published. If the file is absent, empty or not a reference name (`
 most 64), or the document is not published to the public reader, `/` is the index as before.
 Members' front pages are unchanged.
 
+**Whose publication a house name is** is `/etc/mini/house-publications`, root-owned, one
+`NAME MEMBER` per line: the demo's `welcome house` and, once the box member exists,
+`operations box` (`printf 'welcome house\n' >/etc/mini/house-publications`). The front page's
+document, `operations` and every name listed are house names: the helper hands a publication over
+under a house name only from the member listed for it, and anyone else's document of that name as
+`NAME-MEMBER`, so no member's page can become the front page or the box's operations room by
+taking the name first. Without the file every house name is nobody's, and `/` is the index.
+
 **What the helper does on its own**, besides spawning: every 60 s it sweeps every member home's
 `workspace/proposals/*/recipient-reference.json` for references addressed to the public subject and
 copies each into `/var/lib/mini/sessions/public/inbox/NAME.TARGET.json` (owned by `mini-s-public`,
 0600); it decides nothing. The public body imports new inbox files before it renders its index
 (`mini workspace --action import --from-ref`); a name already taken gets `NAME-CAPABILITY`. A
 revoked grant renders nothing: the signed read refuses.
+
+**It warms the public reader.** At its start and at every sweep, when `/etc/mini/public-subject`
+exists and no live public body answers from the current basis (subject, front document, the
+reader's `workspace.json`, the pinned config, the candidate), it starts the public body and sends it
+one `GET /`, so the body's start and its consent worker's Store replay are paid before the first
+visitor (demo-dry 2026-10-28: 23 s cold on an idle box, the gateway's 504 at 120 s under load). The
+journal says `public reader warmed (body PID): HTTP/1.1 200 OK in N s`. A body whose basis changed (a
+re-genesis, a re-enrolled reader, a new front document) is ended and replaced. Keeping the worker
+warm afterwards is the frame's: `mini-consent@public` does not idle out (dregg-infra, install.sh).
+The tour's J-COLD-READ rows (`journey.d/jweb-frontend.sh`) check the cold path.
 
 The `install-demo.sh` contract check: `mini-web.service` carries the full
 `placeholders/web-gateway.conf` floor; `mini-web-spawn.service` is root by design (the door's

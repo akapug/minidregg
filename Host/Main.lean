@@ -2073,8 +2073,8 @@ def agentLifetimeGrantSubmitSession (config : NativeHost.Config)
     session.verified payload
   let outcome : NativeHostCodec.Outcome := match result with
     | .confirmed kind receipt _ _ => .confirmed kind receipt
-    | .rejected _ => .refused .operationRejected "application-agent-lifetime-grant".toUTF8.toList
-        "request refused".toUTF8.toList
+    | .rejected detail => .refused .operationRejected "application-agent-lifetime-grant".toUTF8.toList
+        detail.toUTF8.toList
     | .transactionConflict => .refused .conflict "replay".toUTF8.toList
         "transaction identity conflict".toUTF8.toList
     | .contention => .contention
@@ -2855,11 +2855,13 @@ def dispatchAgentSubmitSession (config : NativeHost.Config)
       writeSessionFrame output 46 <| outcomeCodec.encode <|
         .confirmed committed.confirmation committed.receipt
       sessionSetWalked state committed.old committed.readback
-  | .rejected _ =>
+  | .rejected detail =>
+      -- The submitter gets the uniform frame; the operator's log keeps the reason.
+      let outcome : NativeHostCodec.Outcome :=
+        .refused .operationRejected "application-agent-dispatch".toUTF8.toList detail.toUTF8.toList
+      NativeHost.logOperatorRefusal outcome
       writeSessionFrame output 46 <| outcomeCodec.encode <|
-        NativeHost.publicSubmissionOutcome
-          (.refused .operationRejected "application-agent-dispatch".toUTF8.toList
-            "request refused".toUTF8.toList)
+        NativeHost.publicSubmissionOutcome outcome
   | .contention =>
       writeSessionFrame output 46 <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome .contention
@@ -2888,11 +2890,13 @@ def dispatchAgentLifetimeSubmitSession (config : NativeHost.Config)
       | .error detail =>
           writeSessionFrame output 76 <| outcomeCodec.encode <|
             NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
-  | .rejected _ =>
+  | .rejected detail =>
+      -- The submitter gets the uniform frame; the operator's log keeps the reason.
+      let outcome : NativeHostCodec.Outcome :=
+        .refused .operationRejected "application-agent-lifetime-dispatch".toUTF8.toList detail.toUTF8.toList
+      NativeHost.logOperatorRefusal outcome
       writeSessionFrame output 76 <| outcomeCodec.encode <|
-        NativeHost.publicSubmissionOutcome
-          (.refused .operationRejected "application-agent-lifetime-dispatch".toUTF8.toList
-            "request refused".toUTF8.toList)
+        NativeHost.publicSubmissionOutcome outcome
   | .contention =>
       writeSessionFrame output 76 <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome .contention

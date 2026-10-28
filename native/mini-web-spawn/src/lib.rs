@@ -257,9 +257,11 @@ pub fn read_line(stream: &mut UnixStream) -> io::Result<String> {
 pub fn sha256_hex(bytes: &[u8]) -> String {
     use sha2::Digest;
     let digest = sha2::Sha256::digest(bytes);
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
     let mut out = String::with_capacity(64);
     for b in digest {
-        out.push_str(&format!("{b:02x}"));
+        out.push(DIGITS[usize::from(b >> 4)] as char);
+        out.push(DIGITS[usize::from(b & 15)] as char);
     }
     out
 }

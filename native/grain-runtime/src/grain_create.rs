@@ -522,14 +522,14 @@ fn provision_consent_readiness(spec: &Spec, work: &Path) -> Result<Option<bool>>
     }
     if spec.dispatch.is_none() { return Ok(None); }
     let pins = json!({"mini":spec.mini, "miniSha256":sha256_file(&spec.mini)?,
-        "host":spec.host, "hostSha256":sha256_file(&spec.host)?,
+        "host":spec.host, "hostSha256":sha256_pinned_file(&spec.host)?,
         "hostConfig":spec.host_config, "hostConfigSha256":sha256_file(&spec.host_config)?});
     let output = run_with_limit(Command::new(&spec.mini).arg("consent-full-ready")
         .arg("--host").arg(&spec.host).arg("--config").arg(&spec.host_config),
         "prepare dispatch controller full consent", deadline::startup_limit(None)?)?;
     let receipt = ConsentFullReadiness::parse(&output)?;
     let after = json!({"mini":spec.mini, "miniSha256":sha256_file(&spec.mini)?,
-        "host":spec.host, "hostSha256":sha256_file(&spec.host)?,
+        "host":spec.host, "hostSha256":sha256_pinned_file(&spec.host)?,
         "hostConfig":spec.host_config, "hostConfigSha256":sha256_file(&spec.host_config)?});
     if after != pins { return Err("full-consent provisioning inputs changed during preparation".into()); }
     let bytes = serde_json::to_vec_pretty(&json!({"type":"mini-grain-create-consent-readiness-v1",

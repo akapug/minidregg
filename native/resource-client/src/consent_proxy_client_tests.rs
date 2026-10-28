@@ -143,7 +143,7 @@ fn a_body_whose_worker_closed_its_connection_serves_the_next_request_on_a_fresh_
     };
     let (mut slot, mut live) = session(connect_with_lifeline(&fixture.selection, &fixture.config).unwrap());
     assert!(live.as_ref().unwrap().alive(), "a fresh connection is alive");
-    assert!(!crate::client_consent::drop_dead_delegated_session(&mut slot, &mut live), "and is kept");
+    assert!(!crate::client_consent::drop_dead_session(&mut slot, &mut live), "and is kept");
     let reply = slot.as_mut().unwrap().0.exchange(220, &[1]).unwrap();
     assert_eq!(reply, (220, vec![2]));
     // the worker is gone: the idle connection is dead before anything is sent into it
@@ -151,10 +151,26 @@ fn a_body_whose_worker_closed_its_connection_serves_the_next_request_on_a_fresh_
         if !live.as_ref().unwrap().alive() { break; }
         thread::sleep(Duration::from_millis(10));
     }
-    assert!(crate::client_consent::drop_dead_delegated_session(&mut slot, &mut live), "a closed connection is dropped");
+    assert!(crate::client_consent::drop_dead_session(&mut slot, &mut live), "a closed connection is dropped");
     assert!(slot.is_none() && live.is_none());
     // the next request: a fresh connection, one exchange, never a replay of the old one
     let (mut slot, _live) = session(connect_with_lifeline(&fixture.selection, &fixture.config).unwrap());
     assert_eq!(slot.as_mut().unwrap().0.exchange(220, &[3]).unwrap(), (220, vec![4]));
     server.join().unwrap();
+}
+
+/// A resident provider's connection is watched the same way (`Lifeline::watching`): a body whose
+/// resident ended (killed, or its provider failed) drops the dead session instead of failing every
+/// later request, and the next request connects to a new resident.
+#[test]
+fn a_body_whose_resident_ended_drops_its_dead_session() {
+    let (ours, resident) = UnixStream::pair().unwrap();
+    let watch = ours.try_clone().unwrap();
+    let input = ours.try_clone().unwrap();
+    let mut slot = Some(mini_sdk::consent::Consent(mini_sdk::local::Session::over(Box::new(input), Box::new(ours), PathBuf::from("/x"), Vec::new())));
+    let mut live = Some(Lifeline::watching(watch));
+    assert!(!crate::client_consent::drop_dead_session(&mut slot, &mut live), "a live resident's session is kept");
+    drop(resident);
+    assert!(crate::client_consent::drop_dead_session(&mut slot, &mut live), "an ended resident's session is dropped");
+    assert!(slot.is_none() && live.is_none());
 }

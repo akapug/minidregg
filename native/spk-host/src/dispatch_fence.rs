@@ -220,15 +220,29 @@ fn attempts(parent: &Path) -> io::Result<Vec<(u64, PathBuf)>> {
     Ok(found)
 }
 
+/// One attempt directory and whether its call is undecided (`submit-active.json` present).
+struct Attempt {
+    path: PathBuf,
+    undecided: bool,
+}
+
+/// One pass over the journal: every attempt, oldest first, with its undecided state.
+fn scan(parent: &Path) -> io::Result<Vec<Attempt>> {
+    let mut found = Vec::new();
+    for (_, path) in attempts(parent)? {
+        let undecided = present(&path.join(SUBMIT_ACTIVE))?;
+        found.push(Attempt { path, undecided });
+    }
+    Ok(found)
+}
+
 /// The undecided calls of this journal, oldest first.
 pub(crate) fn undecided(parent: &Path) -> io::Result<Vec<PathBuf>> {
-    let mut open = Vec::new();
-    for (_, path) in attempts(parent)? {
-        if present(&path.join(SUBMIT_ACTIVE))? {
-            open.push(path);
-        }
-    }
-    Ok(open)
+    Ok(scan(parent)?
+        .into_iter()
+        .filter(|attempt| attempt.undecided)
+        .map(|attempt| attempt.path)
+        .collect())
 }
 
 /// Write the per-call markers before op34/164. Both are create-new, fsynced
@@ -252,7 +266,7 @@ pub(crate) fn settle(active: &Path, expected: &[u8], resolution: &Value) -> io::
     write_new(attempt_dir, RESOLUTION, &serde_json::to_vec(resolution)?)?;
     fs::remove_file(&active).ctx("remove", &active)?;
     File::open(&attempt_dir).ctx("open", &attempt_dir)?.sync_all()?;
-    strip(attempt_dir)
+    strip(attempt_dir).map(|_| ())
 }
 
 /// Lean's refusal reasons, kept with the markers: a helper's bounded
@@ -264,10 +278,12 @@ fn refusal_evidence(name: &std::ffi::OsStr) -> bool {
 
 /// Keep `submit-requested.json`, `resolution.json` and refusal evidence;
 /// remove the request body, plan, ingress, permit, inspection and lookups.
-fn strip(attempt_dir: &Path) -> io::Result<()> {
+/// Returns whether anything was removed.
+fn strip(attempt_dir: &Path) -> io::Result<bool> {
     if present(&attempt_dir.join(SUBMIT_ACTIVE))? {
         return Err(invalid("undecided dispatch attempt is never stripped"));
     }
+    let mut removed = false;
     for entry in fs::read_dir(&attempt_dir).ctx("list", &attempt_dir)? {
         let entry = entry?;
         let name = entry.file_name();
@@ -279,8 +295,9 @@ fn strip(attempt_dir: &Path) -> io::Result<()> {
         } else {
             fs::remove_file(entry.path()).ctx("remove", &(entry.path()))?;
         }
+        removed = true;
     }
-    Ok(())
+    Ok(removed)
 }
 
 /// Bound this journal's dispatch evidence. Settled attempts, and attempts
@@ -289,20 +306,27 @@ fn strip(attempt_dir: &Path) -> io::Result<()> {
 /// and at most `MAX_SETTLED` of them are retained, newest first. Undecided
 /// attempts are never touched. Runs between calls on the resident's single
 /// dispatch thread, so no attempt is in authoring while it runs.
+#[cfg(test)]
 pub(crate) fn collect(parent: &Path) -> io::Result<()> {
+    collect_scanned(parent, &scan(parent)?)
+}
+
+/// `collect` over a scan the caller already holds. The parent directory is synced only when an
+/// entry of it was removed; a pass that found everything already stripped writes nothing.
+fn collect_scanned(parent: &Path, scanned: &[Attempt]) -> io::Result<()> {
     let mut settled = Vec::new();
-    for (_, path) in attempts(parent)? {
-        if present(&path.join(SUBMIT_ACTIVE))? {
-            continue;
-        }
-        strip(&path)?;
-        settled.push(path);
+    for attempt in scanned.iter().filter(|attempt| !attempt.undecided) {
+        strip(&attempt.path)?;
+        settled.push(&attempt.path);
     }
     let excess = settled.len().saturating_sub(MAX_SETTLED);
     for path in settled.into_iter().take(excess) {
-        fs::remove_dir_all(&path).ctx("remove", &path)?;
+        fs::remove_dir_all(path).ctx("remove", path)?;
     }
-    File::open(&parent).ctx("open", &parent)?.sync_all()
+    if excess > 0 {
+        File::open(&parent).ctx("open", &parent)?.sync_all()?;
+    }
+    Ok(())
 }
 
 /// A plan (op36) or assembly (op37) refusal: no submit was armed, so the
@@ -605,20 +629,23 @@ pub(crate) fn no_record(
 /// (`committed-payload.bin`) belong to hostd's delivery journal and are not
 /// looked up here; they still count toward the bound.
 pub(crate) fn admit_new_call(operator: &PrivateOperator, parent: &Path) -> io::Result<()> {
-    let open = undecided(parent)?;
-    if let Some(oldest) = open
+    let mut scanned = scan(parent)?;
+    let oldest = scanned
         .iter()
-        .find(|path| !path.join("committed-payload.bin").exists())
-    {
-        if let Err(error) = settle_retained(operator, oldest) {
+        .position(|attempt| attempt.undecided && !attempt.path.join("committed-payload.bin").exists());
+    if let Some(index) = oldest {
+        let oldest = &mut scanned[index];
+        if let Err(error) = settle_retained(operator, &oldest.path) {
             eprintln!(
                 "spk-host: undecided dispatch {} not settled: {error}",
-                oldest.display()
+                oldest.path.display()
             );
         }
+        // Only this attempt can have changed state since the scan.
+        oldest.undecided = present(&oldest.path.join(SUBMIT_ACTIVE))?;
     }
-    collect(parent)?;
-    if undecided(parent)?.len() >= MAX_UNDECIDED {
+    collect_scanned(parent, &scanned)?;
+    if scanned.iter().filter(|attempt| attempt.undecided).count() >= MAX_UNDECIDED {
         return Err(DispatchOutcome {
             operation: None,
             status: Status::Backlog,
@@ -947,6 +974,29 @@ mod tests {
         let undecided_call = decide(&fake.operator, &third, &third_marker, "3", &third_ingress, Reply::Lost);
         assert_eq!(undecided_call.status, Status::Uncertain);
         assert!(third.exists());
+    }
+
+    /// Calls whose permit was committed belong to hostd's delivery journal: no lookup is made for
+    /// them, they count toward the bound, and a settled attempt is stripped by the same single pass.
+    #[test]
+    fn admit_new_call_counts_committed_calls_without_a_lookup_and_strips_settled_ones() {
+        let fake = FakeHost::new("fence-committed");
+        for number in 1..MAX_UNDECIDED as u64 {
+            let (active, _, _) = armed(&fake.root, number, None);
+            write_new(active.parent().unwrap(), "committed-payload.bin", b"permit").unwrap();
+        }
+        let settled = fake.root.join("dispatch-op-100");
+        DirBuilder::new().mode(0o700).create(&settled).unwrap();
+        write_new(&settled, "request.json", b"scratch").unwrap();
+        write_new(&settled, "op36-refused-frame.bin", b"refusal").unwrap();
+        admit_new_call(&fake.operator, &fake.root).unwrap();
+        assert!(!settled.join("request.json").exists());
+        assert!(settled.join("op36-refused-frame.bin").exists());
+        let (active, _, _) = armed(&fake.root, MAX_UNDECIDED as u64, None);
+        write_new(active.parent().unwrap(), "committed-payload.bin", b"permit").unwrap();
+        let refused = admit_new_call(&fake.operator, &fake.root).unwrap_err();
+        assert_eq!(DispatchOutcome::of(&refused).unwrap().status, Status::Backlog);
+        assert_eq!(undecided(&fake.root).unwrap().len(), MAX_UNDECIDED);
     }
 
     /// Below the bound a new call is admitted beside undecided ones; at the
