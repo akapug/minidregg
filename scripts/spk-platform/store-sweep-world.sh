@@ -30,7 +30,7 @@ mkdir -p "$ev" "$stage/packages"
 [[ ${5:-} == --recover ]] || cp "$batch" "$ev/batch.json"
 if [[ ${5:-} != --recover ]]; then
   mkdir -p "$ev/driver"
-  cp "$0" "$data" "$here/store-sweep-profile.sh" "$here/grain-journey.sh" "$here/world-up.sh" "$here/broker-world-up.sh" "$here/world-down.sh" "$here/stop-residents.sh" "$ev/driver/"
+  cp "$0" "$data" "$here/store-sweep-profile.sh" "$here/world-import-profile.sh" "$here/grain-journey.sh" "$here/world-up.sh" "$here/broker-world-up.sh" "$here/world-down.sh" "$here/stop-residents.sh" "$ev/driver/"
 fi
 cleanup_attempted=0
 cleanup() {
@@ -73,6 +73,7 @@ record() {
   python3 "$data" record "$out" "$sha" "$entry" "$1" "$2" "$3" "$ev" "${profile:-unknown}" "${raw:-0}" "${decoded:-0}"
   printf '%s\t%s\t%s\t%s\n' "$1" "$(jq -r .name <<<"$entry")" "$2" "$3"
 }
+read -r rawlimit decodedlimit _ < <("$candidate/bin/spk-host" import-limits standard-v1 0)
 read -r large_raw large_decoded _ < <("$candidate/bin/spk-host" import-limits market-large-v1 0)
 world_profile=standard-v1
 : >"$stage/ready.jsonl"
@@ -100,7 +101,7 @@ while IFS= read -r entry; do
   rm "$stage/package.xz"
   [[ $decoded =~ ^[0-9]+$ ]] || { record FAIL package-size invalid-xz-size; continue; }
   if ((raw > large_raw || decoded > large_decoded)); then record FAIL package-size sizeOverMarketLargeProfile; continue; fi
-  profile=$(TMPDIR="$stage" "$here/store-sweep-profile.sh" "$candidate/bin/spk-host" "$file" "$raw" "$decoded" "$ev/$id-profile")
+  profile=$(python3 "$data" profile "$raw" "$decoded" "$rawlimit" "$decodedlimit")
   [[ $profile == standard-v1 ]] || world_profile=market-large-v1
   class=S; ((raw < 64*1024*1024)) || class=M
   [[ $profile == standard-v1 ]] || class=L
@@ -121,6 +122,32 @@ fi
 . "$world/WORLD.env"
 PROFILE=${PROFILE:?world profile not set}
 export BIN GRAINS_ROOT BROKER_SOCKET
+# Native qualification requires root/operator-owned ancestry, which a shared lane
+# directory need not have. Probe inside this world's protected intake, before any
+# app exists. Its anonymous spools and this temporary copy leave with the world.
+initial_profile=$world_profile
+: >"$stage/profiled.jsonl"
+while IFS= read -r entry; do
+  id=$(jq -r .packageId <<<"$entry")
+  if [[ $(jq -r .importProfile <<<"$entry") == standard-v1 ]]; then
+    probe=$GRAINS_ROOT/spk/sweep-profile-$id.spk
+    cp "$stage/packages/$id.spk" "$probe"
+    profile=$("$here/store-sweep-profile.sh" "$candidate/bin/spk-host" "$probe" \
+      "$(jq -r .rawBytes <<<"$entry")" "$(jq -r .decodedBytes <<<"$entry")" "$ev/$id-profile")
+    rm "$probe"
+    if [[ $profile == market-large-v1 ]]; then
+      world_profile=$profile
+      entry=$(jq -c '.importProfile="market-large-v1" | .class="L"' <<<"$entry")
+    fi
+  fi
+  printf '%s\n' "$entry" >>"$stage/profiled.jsonl"
+done <"$stage/ready.jsonl"
+mv "$stage/profiled.jsonl" "$stage/ready.jsonl"
+cp "$stage/ready.jsonl" "$ev/profiles.jsonl"
+if [[ $world_profile != "$initial_profile" ]]; then
+  "$here/world-import-profile.sh" "$world/WORLD.env" "$world_profile" >"$ev/import-profile.log" 2>&1
+  export MINI_IMPORT_PROFILE=$world_profile
+fi
 while IFS= read -r entry; do
   letter=$(jq -r .letter <<<"$entry") upper=$(tr a-p A-P <<<"$letter")
   id=$(jq -r .packageId <<<"$entry") class=$(jq -r .class <<<"$entry")

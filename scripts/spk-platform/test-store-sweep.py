@@ -9,6 +9,7 @@ import os
 import sys
 import threading
 import shutil
+import socket
 import uuid
 import unittest
 
@@ -104,6 +105,53 @@ echo "$SWEEP_TEST_NATIVE_REFUSAL" >&2
                 env['SWEEP_TEST_NATIVE_REFUSAL'] = refusal
                 result = subprocess.run(cmd, env=env, capture_output=True, text=True, check=True)
                 self.assertEqual(result.stdout.strip(), expected)
+            env['SWEEP_TEST_NATIVE_REFUSAL'] = 'spk-host: scratch parent custody refused'
+            result = subprocess.run(cmd, env=env, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0, 'broken preflight custody is not a standard-profile result')
+
+    def test_world_import_profile_keeps_broker_and_grain_consistent_before_apps(self):
+        here = Path(__file__).resolve().parent
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bins, grains, state = root/'bin', root/'grains', root/'state'
+            for path in (bins, grains/'broker', state):
+                path.mkdir(parents=True)
+            profile = root/'host.json'
+            profile.write_text(json.dumps(dict(stateRoot=str(state))))
+            broker = grains/'broker/config.json'
+            broker.write_text(json.dumps(dict(importProfile='standard-v1')))
+            commands = root/'commands'
+            (bins/'systemctl').write_text('''#!/bin/bash
+echo "$*" >> "$SWEEP_TEST_COMMANDS"
+if [[ $2 == start ]]; then
+  jq -e '.importProfile == "market-large-v1"' "$SWEEP_TEST_PROFILE" >/dev/null &&
+  jq -e '.importProfile == "market-large-v1"' "$SWEEP_TEST_BROKER" >/dev/null || exit 99
+fi
+''')
+            (bins/'stat').write_text('#!/bin/bash\necho "$(id -u):600"\n')
+            for path in bins.iterdir():
+                path.chmod(0o755)
+            with socket.socket(socket.AF_UNIX) as sock:
+                sockpath = root/'broker.sock'
+                sock.bind(str(sockpath))
+                sock.listen()
+                world = root/'WORLD.env'
+                world.write_text(f'PROFILE={profile}\nGRAINS_ROOT={grains}\nSTORE=test\nBROKER_SOCKET={sockpath}\n')
+                env = dict(os.environ, PATH=str(bins)+os.pathsep+os.environ['PATH'],
+                           SWEEP_TEST_COMMANDS=str(commands), SWEEP_TEST_PROFILE=str(profile),
+                           SWEEP_TEST_BROKER=str(broker))
+                cmd = ['bash', str(here/'world-import-profile.sh'), str(world), 'market-large-v1']
+                result = subprocess.run(cmd, env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(profile.read_text())['importProfile'], 'market-large-v1')
+                self.assertEqual(json.loads(broker.read_text())['importProfile'], 'market-large-v1')
+                self.assertEqual(commands.read_text().splitlines(),
+                                 ['--user stop mini-spk-broker@test.service', '--user start mini-spk-broker@test.service'])
+                (state/'apps/a6101').mkdir(parents=True)
+                result = subprocess.run(cmd, env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn('world with no apps', result.stderr)
+                self.assertEqual(len(commands.read_text().splitlines()), 2, 'used world must refuse before stopping anything')
 
     def test_teardown_does_not_need_removed_grain_profile(self):
         here = Path(__file__).resolve().parent

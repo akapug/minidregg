@@ -30,10 +30,16 @@ SPK's eight-byte magic supplies the decoded-size hint. Either raw or decoded siz
 `standard-v1` selects `market-large-v1`; a batch containing such a package gets that
 profile. When the bytes fit standard, a bounded `spk-host qualify --import-profile standard-v1`
 preflight also detects the native Cap'n Proto segment-count refusal and selects the large
-profile for it. Segment count is not inferred from byte length or parsed in this wrapper.
+profile for it. This probe runs in the fresh world's protected intake directory: native scratch
+custody requires root/operator-owned ancestors, which a shared lane staging path need not have.
+Before any app is installed, `world-import-profile.sh` keeps the grain profile and broker budget
+consistent and restarts the exact broker if the segment limit requires the larger profile.
+It refuses to change a world that already contains apps. Segment count is not inferred from
+byte length or parsed in this wrapper.
 Other preflight refusals are retained as evidence; the real grain install still decides the
 app's verdict. The real Mini ingest verifies signatures and enforces the actual decoder bounds.
-Packages beyond the large profile are reported as `FAIL package-size`, never silently omitted.
+Decoded sizes beyond the large profile are reported as `FAIL package-size`; downloads beyond
+its raw ceiling fail at `fetch`. Neither is silently omitted.
 
 Every complete world, including teardown, holds `flock -o /tank/lanes/world-up.lock`.
 No lock descriptor reaches resident children. Every app is stopped after its probe;

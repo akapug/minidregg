@@ -13,6 +13,9 @@ if [[ $profile == standard-v1 ]]; then
   timeout --kill-after=5s "$seconds" "$host" qualify --import-profile standard-v1 "$file" \
     >"$evidence.out" 2>"$evidence.err" || status=$?
   printf '%s\n' "$status" >"$evidence.exit"
+  if grep -Fq 'scratch parent custody refused' "$evidence.err"; then
+    cat "$evidence.err" >&2; exit 1
+  fi
   if [[ $status != 0 ]] && grep -Eq "^spk-host: too many Cap'n Proto segments: [0-9]+ exceeds bound [0-9]+$" "$evidence.err"; then
     profile=market-large-v1
   fi
