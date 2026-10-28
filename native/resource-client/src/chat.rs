@@ -704,6 +704,17 @@ fn propose_submit_in(session: &Session, prefix: &str, request: &Value, sealed: O
     Ok(json!({"id":id,"outcome":outcome}))
 }
 
+/// How long a retained read of the same label is left alone. Another process of the same home (the
+/// door's `story invite` beside the seed's, a second shell line) may be mid-read in its own
+/// `LABEL.NONCE` directory; deleting it fails that read with "cannot create .../view.bin: No such file
+/// or directory" (demo-dry seed:story invite, 9bd52317c). A directory written to within this window is
+/// in flight, not superseded; one whose age is unknown is kept.
+const READ_IN_FLIGHT_SECS: u64 = 600;
+
+fn read_is_superseded(age: Option<std::time::Duration>) -> bool {
+    age.is_some_and(|age| age.as_secs() >= READ_IN_FLIGHT_SECS)
+}
+
 /// A signed read in this process (no JSON on the terminal). The attempt is
 /// retained under HOME/chat/reads/ROOM/LABEL.NONCE; older reads of the same
 /// label are removed once this one answered, so the newest is always kept.
@@ -746,7 +757,11 @@ pub(crate) fn signed_read(
                 for entry in entries.flatten() {
                     let n = entry.file_name().to_string_lossy().into_owned();
                     if n.starts_with(&format!("{label}.")) && entry.path() != dir {
-                        let _ = fs::remove_dir_all(entry.path());
+                        let age = entry.metadata().and_then(|m| m.modified()).ok()
+                            .and_then(|t| t.elapsed().ok());
+                        if read_is_superseded(age) {
+                            let _ = fs::remove_dir_all(entry.path());
+                        }
                     }
                 }
             }
@@ -2828,6 +2843,15 @@ mod feedback_tests {
     }
 
     /// The operator sees a report with its context, in the tail and in the digest's source.
+    #[test]
+    fn a_read_another_process_may_be_making_is_never_swept() {
+        use std::time::Duration;
+        assert!(!read_is_superseded(Some(Duration::from_secs(0))));
+        assert!(!read_is_superseded(Some(Duration::from_secs(READ_IN_FLIGHT_SECS - 1))));
+        assert!(read_is_superseded(Some(Duration::from_secs(READ_IN_FLIGHT_SECS))));
+        assert!(!read_is_superseded(None));
+    }
+
     #[test]
     fn a_report_reads_back_with_its_context() {
         let payload = r#"{"type":"feedback","text":"the save button is gone","client":"mini 0.1.0","sha":"abc123","from":"w-abc","standing":"refused","clause":"refused: law-denied: field 2","page":"/doc/paper"}"#;
