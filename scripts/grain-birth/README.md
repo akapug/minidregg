@@ -10,8 +10,12 @@ The script exact-hash guards `scripts/workroom/provision.sh` and makes a private
 copy with an independent grain-birth permission tariff and an installed factory
 law: owner 7 may use bare birth; worker 8 may observe the factory with its
 observe grant and may birth only through the `birth/mode/grain-backed`
-projection. A worker bare-birth attempt must reach
-native admission and receive the exact policy rejection. A matching owner-7
+projection. A worker bare-birth attempt is refused at prepare, before anything is
+signed: the factory law is judged at plan time (`NativeHost.birthRefusal`), and the
+Host's NO_RECORD (253) frame, retained as `pre-submit-refusal.frame` and decoded by the
+Host, must be `law-denied` by the clause for subject 8 that wants the grain-backed mode
+slot. (`verify-r3-negative.sh` rechecks the retained 2026-09-26 r3 evidence, which predates
+plan-time judging and was refused at admission.) A matching owner-7
 bare content birth must succeed under the same enabled profile. The original
 workroom provisioner creates an
 unrelated content object 8001; 8301 is absent until the composite receipt.
