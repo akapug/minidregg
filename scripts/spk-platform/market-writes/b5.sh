@@ -31,22 +31,9 @@ write_FileDrop() {
 # this recipe sends the one small chunk. nginx's client_max_body_size is 50M and the Flask limit 15 MiB.
 
 
-# Groove Basin 2016.06.25 (dwrensha/groovebasin as packaged: lib/server.js, lib/player_server.js,
-# lib/web_socket_api_client.js, config.json, start.sh). HTTP authorisation is the `token` COOKIE of a
-# live websocket client (createHasPermMiddleware), and the websocket is plain JSON text frames
-# {name,args} on any path. So the write is b5-gb.py: connect, read `token`, subscribe `library`, POST
-# /upload (multipart, the `size` field before the audio part, `add` permission from the owner's role) with
-# the token cookie, then read the track back from the `library` subscription and its bytes from
-# GET /library/<file>. Role 0 is "controller" (no `add`): the run answered 403 "not authorized", so the
-# table gives the owner role 2, "administrator" (b5.tsv). The upload is a 0.5 s WAV with RIFF INFO tags (about 8 KB), under the 8 MiB bound.
-# LIMITS: real albums are over 8 MiB per request (APP-MARKET 2b); GET /stream.mp3 is an endless
-# response the 8 MiB response bound cannot carry, so listening is not exercised. The websocket needs the
-# entrance's websocket support (BROWSER-WEBSOCKETS.md), which the rt batch already relies on.
-write_GrooveBasin() {
-  local res; res=$(python3 -I "$b5_here/b5-gb.py" "$dir" 2>&1 | tail -1)
-  [[ $res == *'"ok": true'* ]] && echo "1 websocket token + POST /upload; library subscription and GET /library/<file> hold it: ${res:0:140}" \
-    || echo "0 ${res:0:200}"
-}
+# Groove Basin now uses apps/interfaces/groove-basin.json. Its live WebSocket
+# token must remain open across multipart HTTP and bounded library-file reads;
+# the native shared conversation executes those steps. See DATA-2026-10-28.md.
 
 # Tube 1.1.13 (prologic/tube as packaged: /opt/app/tube, .sandstorm/launcher.sh, .sandstorm/config.json:
 # port 8000, videos in /var/videos, uploads in /var/uploads, max_upload_size 100 MB, ffmpeg in

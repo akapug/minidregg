@@ -11,3 +11,5 @@ write_ExpenseOwl() { typed_app_row expenseowl; }
 write_Kiwix() { typed_app_row kiwix; }
 write_SwaggerEditor() { typed_app_row swagger-editor; }
 write_Tube() { typed_app_row tube; }
+write_GrooveBasin() { typed_app_row groove-basin; }
+write_Hummingbird() { typed_app_row hummingbird; }
