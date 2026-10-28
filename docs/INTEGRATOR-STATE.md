@@ -117,6 +117,8 @@ the newest built main that passed the gate; each is reported in one line, and in
 | A12c result / A12d | — | 12:07 A12c host rc=1 (708 s): only Kernel.PayCellDomain, refused as over the 18G cap (weight 19.1 GB; M2 moves Pay modules). `integ4/regen-A12d.sh` (pid file integ4/regen-A12d.pid 494589) waits for the b26630168 gate (integ8/gate.pid), then at main's tip: host at 22G seats 4, regen, consent. Then commit integ8/regen-A12.patch to main, launch main-full2.sh at that sha: it is the rehearsal candidate (86ad31dd3, 2add39053, b71898658, birthStale 6325a6045, M2), and re-record NativeAcceptedFixture + NativeDocWriteFixture from it |
 | b26630168 gate | — | FAIL 12:12 (harness 3f91e1fa9, EDGE 7d2c765): tour 62/62 PASS; enrol-resume PASS; composed rooms/churn/documents pass, apps:sheet stopped: `mini grain-share-issue-submit` (hook 117, ticket issue for app 930001) refused by the Host at admission, effect no-record, reason undisclosed, detail "request refused" (/build/c-b26630/inputs/evidence/app-930001/hooks/1793189324969250689-139032ab/113-ticket-issue/submit.outcome.json; client error share_issue.rs:231). First run to get past grain install; named to the coordinator as unclassified (product or harness). A12d started 12:12:17 at 4ce6c29a3 |
 | A12d progress | 31c96d923 | 12:39 A12d host rc=0 (1655 s at 22G seats 4); regen running. Main since A12d start: un-spk-pinned-read 2ae1ccf96 (rehearsal blocker 4: hosted-frame install refused "native attempt directory is not owner-private"; spk-host dispatch_native.rs only), merged 12:41 as 31c96d923. It rides main-full2.sh at the regen commit (main tip + regen-A12.patch), so the rehearsal candidate carries it with no extra build |
+| A12d result | 349e59ef1 | host clean 12:39 (1655 s); regen rc=0 13:24 (2668 s, 650 pins; AUTHORITY.CAPABILITY v4, TRANSACTION.OBSERVE v8, DISPATCH-OBSERVATION v7, SHARE-ISSUE-ARGS/EFFECTS v4; DURABLE.IMAGE prefix re-pinned); consent rc=65 companion check only. Pins committed as main 349e59ef1 |
+| full (rehearsal) | 349e59ef1 | 13:27 `integ4/main-full2.sh` (main-full.pid 552038; build.pid, then gate.pid + enrol-resume.pid under integ8); outputs moved aside. Host stage = first incremental number under modules (to the coordinator and a0fd127abfb9aac75) |
 Gate harness rule (coordinator, 10-28): the tour and composed harness (scripts/, native/resource-client/*.sh|*.py, journey.d/) come from main at gate time over the candidate's source.tar and binaries (`integ4/harness-overlay.sh DEST SHA`; `HARNESS=<sha>` in tour-run2.sh and composed-full2.sh; gate-cut4.sh resolves main's tip, adds `harnessCommit` to the gate file after gate-from-runs.py, which binds only the candidate's SHA256SUMS). Infra was asked to copy harnessCommit in gate-from-runs.py itself (optional).
 Runner rule (coordinator, 10-28): launch builds with `integ4/main-full2.sh`, which gates with `gate-cut5.sh`: it copies tour-run2.sh, composed-full2.sh and harness-overlay.sh into `$G/runner` at gate start, runs only from that copy and writes `runnerSha256sums` beside `harnessCommit` in the gate file. Never edit a script a running job reads; change it under a new name.
 Merge-subject slip: 8e7940fea and 1a3240483 name the un-deputy sha in their subjects; their parents are un-story-install 733dd948f and red-authority-zero-field 108083a35. 733dd948f was a red-first test (shared_names.rs:1144), cleared by a8376ce8f (d2b639068).
@@ -137,21 +139,19 @@ elaboration of the fix pending NativeHostReplay.olean). L1d (formerly L1c; lean-
 constructors with pricedAt, drops e7958d3b9's arms on merge; unbuilt, not to merge until its warm-tree build
 elaborates) seeds its dregg-ref tree from the integ8 copy; tell it when the copy lands.
 
-Next steps (10-28, 12:45): A12d (integ4/regen-A12d.pid) ends with codec-shapes-regen.py and the consent stage at
-4ce6c29a3. Then: (1) commit integ8/regen-A12.patch onto main's tip (scp it to the Mac, `git apply`, check the census
-diff is pins/bumps only, commit, push); (2) launch integ4/main-full2.sh at that sha. That build IS the rehearsal
-candidate: it carries M2 + the module conversion (fresh genesis), un-public-read 86ad31dd3 + 2add39053, b71898658,
-birthStale 6325a6045 and un-spk-pinned-read 31c96d923 + ccc527405 (main 7007d5068; the offline qualifier half). Its host stage is the first incremental number under modules
-(A12d's tree is warm at 4ce6c29a3): send that wall time to the coordinator and iter-speed (a0fd127abfb9aac75).
-(3) On READY: "candidate <sha> at <path>: gate <verdict>, reds by name" to the coordinator; the sha + full
-/build/candidates/<sha> path to infra a298031c78e86d651 (demo-dry, then the rehearsal), L4c a6c2f758a0dac46fe and the
-deputy a308118209b4a48ea. (4) Re-record Fixtures.NativeAcceptedFixture and NativeDocWriteFixture from that candidate
-and tell effects (a26c13b24522dee35) and L1e's successor. (5) The b26630168 composed red (apps:sheet,
-grain-share-issue-submit refused undisclosed) is with the coordinator; f2deb6ede (every blind submission logs its named
-refusal) is on main, so the rehearsal candidate's composed run names it. Held (do not land without the owner's sha via
-the coordinator): cx-oracle, cx-store-sweep, cx-app-interface, un-route-latency, oracle-grant-factory past what is on
-main; un-consent-reconnect 02a03960f is dropped (b71898658 stands); un-ns-owner 587c5acbd is superseded; un-japps-rows
-waits for its owner's message.
+Next steps (10-28, 13:30): the rehearsal build of main 349e59ef1 is running (A12d's regen committed). (1) When its
+host stage ends, send the wall time to the coordinator and iter-speed (a0fd127abfb9aac75). (2) On READY:
+"candidate <sha> at <path>: gate <verdict>, reds by name" to the coordinator; the sha + full /build/candidates/<sha>
+path to infra a298031c78e86d651 (demo-dry, then the rehearsal), L4c a6c2f758a0dac46fe and the deputy
+a308118209b4a48ea. (3) Re-record Fixtures.NativeAcceptedFixture and NativeDocWriteFixture from that candidate and
+tell effects (a26c13b24522dee35) and L1e's successor; then restore the umbrellas stage to blocking. (4) The
+b26630168 composed red (apps:sheet, grain-share-issue-submit refused undisclosed) is with the coordinator; this
+candidate's composed run names the refusal (f2deb6ede). Held (do not land without the owner's sha via the
+coordinator): cx-oracle, cx-store-sweep, cx-app-interface, un-route-latency, oracle-grant-factory past what is on
+main; un-consent-reconnect 02a03960f is dropped (b71898658 stands); un-ns-owner 587c5acbd is superseded;
+un-japps-rows waits for its owner's message. Pending tool work (coordinator): front-load the rust stage's exact
+cargo invocations as `cargo check` with the same features beside the host stage; widen the regen's
+old-spelling scan to string literals in every .lean file (selftest case: a bumped tag inside a theorem literal).
 
 Hermes is L4c a6c2f758a0dac46fe (10-28; L4b ad81db6d6fd317d3a stopped: older mentions are history). Infra is a298031c78e86d651 (10-28; older mentions of ae95a4eac63b0715e/aed5ecf506cf840af in the table are history). Red routing: lean-audit-c and lean-audit-c-m2 are L1e's successor's (L1e a58f907aef8926430 handed off 10-28 at its cap; the successor starts from docs/PLATFORM-RECEIVER-STATE.md and will message; until then route through the coordinator): its green sha comes from and its reds go to L1e directly; when the module conversion lands on main, tell L1e (it merges the conversion into lean-audit-c and sends a green sha) and L1d's old address; Hermes to L4c (a6c2f758a0dac46fe; L4b ad81db6d6fd317d3a has stopped); L13 a1618140607ac439b; un-stream-continuity reds
 (ApplicationStreamContinuityFresh pole proofs, NativeHostReplay.lean:3816) to the deputy a308118209b4a48ea; all
