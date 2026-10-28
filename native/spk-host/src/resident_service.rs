@@ -73,6 +73,33 @@ fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
 }
 
+/// The running app's ViewInfo must equal the signed schema. A package that signs no permissions
+/// and no roles (no bridge-config member, so the canonical empty config) has nothing for Mini's
+/// descriptor to author from; an app that nonetheless declares some at runtime (a package whose
+/// root process serves WebSession itself, such as diagrams.net's static server declaring `write`
+/// and the editor/viewer roles) is unsupported, and the refusal says so by name instead of
+/// printing a bare mismatch.
+fn check_running_view_info(
+    running: &minidregg_spk_rpc::ViewInfo,
+    signed: &minidregg_spk_rpc::ViewInfo,
+) -> io::Result<()> {
+    if running == signed {
+        return Ok(());
+    }
+    let signs_nothing = signed.permissions.is_empty() && signed.roles.is_empty();
+    let message = if signs_nothing {
+        format!(
+            "package signs no bridge permissions or roles but the running app declares {} permissions and {} roles ({:?}): a non-bridge app that declares its own ViewInfo is unsupported, because Mini authors its descriptor only from a signed bridge schema",
+            running.permissions.len(),
+            running.roles.len(),
+            running.permission_names
+        )
+    } else {
+        "running app ViewInfo differs from signed bridge schema".to_owned()
+    };
+    Err(io::Error::new(io::ErrorKind::InvalidData, message))
+}
+
 fn private_file(path: &Path, max: u64) -> io::Result<Vec<u8>> {
     private_dir(path.parent().ok_or_else(|| invalid("private file parent absent"))?)?;
     crate::private_file::read(path, max, "operator private file identity or size refused")
@@ -1771,11 +1798,7 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     // The RPC driver bounds every call (MAX_CALL_TIME, 30 s); a longer
     // request is refused before it is sent, after the claim is committed.
     let view = resident.rpc.get_view_info(Duration::from_secs(30))?;
-    if view != bridge.view_info {
-        return Err(invalid(
-            "running app ViewInfo differs from signed bridge schema",
-        ));
-    }
+    check_running_view_info(&view, &bridge.view_info)?;
     let (_receipt, outcome_dir, completed_name) = match (&retry, &retry_signers) {
         (Some(selection), Some((_, _, fixed))) => {
             let report = prepare_v4_running_report(
@@ -2244,6 +2267,31 @@ mod tests {
     use std::os::unix::fs::DirBuilderExt;
     use std::os::unix::net::UnixStream;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn view_info_of(member: &[u8]) -> minidregg_spk_rpc::ViewInfo {
+        minidregg_spk_rpc::decode_bridge_config(member).unwrap().view_info
+    }
+    const SIGNED_GITWEB: &[u8] =
+        include_bytes!("../../spk-rpc/tests/fixtures/gitweb-signed-bridge-config.capnp");
+
+    #[test]
+    fn a_non_bridge_app_declaring_permissions_is_refused_by_name() {
+        let signed = view_info_of(&minidregg_spk_rpc::default_bridge_config_bytes());
+        let running = view_info_of(SIGNED_GITWEB);
+        let error = check_running_view_info(&running, &signed).unwrap_err().to_string();
+        assert!(error.contains("non-bridge app that declares its own ViewInfo is unsupported"), "{error}");
+        assert!(error.contains("signs no bridge permissions or roles"), "{error}");
+    }
+
+    #[test]
+    fn matching_and_signed_mismatching_view_info_keep_their_rules() {
+        let empty = || view_info_of(&minidregg_spk_rpc::default_bridge_config_bytes());
+        assert!(check_running_view_info(&empty(), &empty()).is_ok(), "a silent app under the empty config");
+        assert!(check_running_view_info(&view_info_of(SIGNED_GITWEB), &view_info_of(SIGNED_GITWEB)).is_ok());
+        // A signed non-empty schema against silence stays the plain mismatch, not the non-bridge refusal.
+        let error = check_running_view_info(&empty(), &view_info_of(SIGNED_GITWEB)).unwrap_err().to_string();
+        assert_eq!(error, "running app ViewInfo differs from signed bridge schema");
+    }
 
     #[test]
     fn retry_v4_restart_selects_the_lane_of_the_retained_admitted_marker() {
