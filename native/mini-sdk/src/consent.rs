@@ -287,6 +287,9 @@ fn resident_socket(kind: ResidentKind, anchors: &Path, binding: &[u8; 32]) -> Re
     use std::os::unix::ffi::OsStrExt;
     let ordinary = resident_file(kind, anchors, binding, "sock");
     if ordinary.as_os_str().as_bytes().len() < 100 { return Ok((ordinary, None)); }
+    if !crate::private::dir_ok(&fs::symlink_metadata(anchors).map_err(|e| e.to_string())?) {
+        return Err("resident anchor directory must be owner-private, not a symlink".into());
+    }
     #[cfg(target_os = "linux")]
     {
         use std::os::fd::AsRawFd;
@@ -946,6 +949,7 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn resident_socket_namespaces_are_short_private_and_anchor_specific() {
         use std::os::unix::fs::symlink;
