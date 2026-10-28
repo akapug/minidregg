@@ -472,7 +472,7 @@ impl Gateway {
     /// any other asks the short cache, so an old link still resolves and a stale one cannot stick.
     fn asset(&self, name: &str, query: &str) -> Response {
         let Some((_, kind, bytes)) = page::ASSETS.iter().find(|(n, _, _)| *n == name) else { return Response::text(404, "no such asset") };
-        let tagged = page::asset_tag(name).is_some_and(|tag| query == format!("v={tag}"));
+        let tagged = page::asset_tag(name).is_some_and(|tag| query.strip_prefix("v=") == Some(tag));
         let cache = if tagged { "public, max-age=31536000, immutable" } else { "public, max-age=3600" };
         Response::new(200).with("Content-Type", kind).with("Cache-Control", cache).body(bytes.to_vec())
     }

@@ -180,7 +180,7 @@ fn inspect(
         || report["providerRequestRepeated"] != false
         || Path::new(string(&report, "attempt")?) != pending.attempt
         || Path::new(string(&report, "host")?) != config.host
-        || string(&report, "hostSha256")? != sha256_file(&config.host)?
+        || string(&report, "hostSha256")? != sha256_pinned_file(&config.host)?
         || Path::new(string(&report, "config")?) != config.host_config
         || string(&report, "configSha256")? != sha256_file(&config.host_config)?
         || Some(Path::new(string(&report, "socket")?)) != config.host_socket.as_deref()

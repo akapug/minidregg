@@ -483,7 +483,8 @@ pub(crate) fn match_committed_inspection(input: CommittedMatch<'_>) -> io::Resul
         .get("request")
         .ok_or_else(|| refused("request absent"))?;
     if field(request, "canonicalHex")? != canonical_http_hex
-        || decode_hex(canonical_http_hex)?.is_empty()
+        || canonical_http_hex.is_empty()
+        || !crate::canonical::lower_hex(canonical_http_hex)
     {
         return Err(refused("lifetime exact HTTP stream changed"));
     }
@@ -497,7 +498,7 @@ pub(crate) fn match_committed_inspection(input: CommittedMatch<'_>) -> io::Resul
         same(request, name, field(decoded_http, http_name)?)?;
     }
     if field(inspected, "frameByteCount")? != exact_frame.len().to_string()
-        || field(inspected, "frameHex")? != encode_hex(exact_frame)
+        || !crate::canonical::hex_matches(field(inspected, "frameHex")?, exact_frame)
         || inspected.get("dispatchReceipt") != Some(&serde_json::to_value(expected_receipt)?)
     {
         return Err(refused("lifetime committed frame or receipt changed"));

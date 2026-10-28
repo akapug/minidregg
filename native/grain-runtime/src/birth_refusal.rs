@@ -653,7 +653,7 @@ impl Runtime {
             || manifest["route"] != "session"
             || manifest["operation"] != 31
             || manifest["sourceSha256"] != origin.source_sha256
-            || manifest["hostSha256"] != sha256_file(&self.config.host)?
+            || manifest["hostSha256"] != sha256_pinned_file(&self.config.host)?
             || manifest["host"].as_str().map(Path::new) != Some(self.config.host.as_path())
             || manifest["socket"].as_str().map(Path::new) != self.config.host_socket.as_deref()
         {

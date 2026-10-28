@@ -5,7 +5,7 @@
 use crate::io_context::IoContext;
 use crate::agent_api_custody::AgentCustody;
 use crate::agent_api_wire::Request;
-use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
+use crate::dispatch_native::{private_dir, write_new, write_new_unsynced, PrivateOperator};
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -62,7 +62,7 @@ fn source_bytes(
     kind: &str,
     request: &Value,
 ) -> io::Result<Vec<u8>> {
-    let input = write_new(dir, &format!("{name}.json"), &serde_json::to_vec(request)?)?;
+    let input = write_new_unsynced(dir, &format!("{name}.json"), &serde_json::to_vec(request)?)?;
     operator.tool("author", kind, &input, &dir.join(format!("{name}.bin")))
 }
 
@@ -73,7 +73,7 @@ fn source_inspect(
     kind: &str,
     bytes: &[u8],
 ) -> io::Result<Value> {
-    let input = write_new(dir, &format!("{name}.bin"), bytes)?;
+    let input = write_new_unsynced(dir, &format!("{name}.bin"), bytes)?;
     let raw = operator.tool("inspect", kind, &input, &dir.join(format!("{name}.json")))?;
     serde_json::from_slice(&raw).map_err(Into::into)
 }
@@ -84,7 +84,7 @@ fn signatures(
     name: &str,
     values: &Value,
 ) -> io::Result<Vec<u8>> {
-    let input = write_new(dir, &format!("{name}.json"), &serde_json::to_vec(values)?)?;
+    let input = write_new_unsynced(dir, &format!("{name}.json"), &serde_json::to_vec(values)?)?;
     operator.tool("signatures", "", &input, &dir.join(format!("{name}.bin")))
 }
 
@@ -752,16 +752,8 @@ pub(crate) fn authorize_once(
     if canonical_http_hex.is_empty() || !lower_hex(canonical_http_hex) {
         return Err(invalid("paid canonical HTTP is not source hex"));
     }
-    let canonical_http = canonical_http_hex
-        .as_bytes()
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .map(|pair| {
-            u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16)
-                .map_err(|_| invalid("paid canonical HTTP hex byte"))
-        })
-        .collect::<io::Result<Vec<_>>>()?;
+    let canonical_http = crate::canonical::unhex(canonical_http_hex)
+        .ok_or_else(|| invalid("paid canonical HTTP hex byte"))?;
     let canonical_http_sha256 = hex(&Sha256::digest(&canonical_http));
     let app = custody.sign_slots(&paid_view, &paid_plan, "appSlots", &custody.app_signers)?;
     let payer = reserve.sign_payer_once(&paid_plan, &paid_view, cancelled)?;
@@ -820,7 +812,7 @@ pub(crate) fn authorize_once(
         &permit,
     )?;
     if str_field(&inspection, "type")? != "application-agent-dispatch-committed-inspection-v2"
-        || str_field(&inspection, "frameHex")? != hex(&permit)
+        || !crate::canonical::hex_matches(str_field(&inspection, "frameHex")?, &permit)
     {
         return Err(invalid(
             "source committed inspection differs from private op46 bytes",
