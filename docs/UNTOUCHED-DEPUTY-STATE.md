@@ -1,4 +1,4 @@
-# Untouched-areas deputy: state (2026-10-28 ~10:15: resident-stop rule; Mercurial featured; japps waits for the 7280f9db8 candidate)
+# Untouched-areas deputy: state (2026-10-28 ~10:30: resumed on Opus from distillation; japps and B8 wait for the f1b7add21 candidate)
 
 Inputs: docs/review/2026-10-27-untouched-areas/{LEAN,NATIVE}.md, docs/review/2026-10-27-blind-spots/BLIND-SPOTS.md Sweep 1.
 Each lane: /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>.
@@ -103,5 +103,5 @@ Its hbox worlds: /tank/rows-2d8b7ed5-apps/w-{featured,b1,b2,b4,b6,rt,fixups}. Mi
 
 ## Next three
 1. Read B3/B5/B7/B8 on 76758dba6 (each serial under the world-up flock); fix reds (recipes or spk-host); every app green on lifecycle + write into FEATURED in apps.rs (B3 does its own commit; DiagramsNet stays out); target 2-3 dozen.
-2. When the integrator names the 7280f9db8 candidate: hand it to a4e312352a7091f59 (one japps run on hbox per JAPPS-STATE.md; context ~500k, it hands off by its file if it nears 580k); verdict -> validator for ROWS-OWED §0. That run confirms restart -> renew -> write and a fresh-world bootstrap -> install (the parent's `reserve 1` checked).
+2. When the integrator names the candidate of main f1b7add21 (host stage since 09:19; carries 7280f9db8, 391311929, bf5ead3fa, de74f4f5e, 3a8109059, 0870373ae; the allAccess owner fix and 7162b1d30 are on main's scripts; japps and B8 told): hand it to a4e312352a7091f59 (one japps run on hbox per JAPPS-STATE.md; context ~500k, it hands off by its file if it nears 580k); verdict -> validator for ROWS-OWED §0. That run confirms restart -> renew -> write and a fresh-world bootstrap -> install (the parent's `reserve 1` checked).
 3. Owed after the demo: revive Effects/ so transfer/commit come from the derivation engine (EFFECTS.md); private-backend P6 lost reply; the child() twin check.
