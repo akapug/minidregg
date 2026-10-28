@@ -1077,3 +1077,26 @@ is the right fix. It is a stronger premise every producer inhabits, not a new hy
 genesis records every lane (`TurnLog.genesisSystem`), which writes preserve. `representsCheck_sound`
 moving to the `some` comparison keeps the open deciding it. Restating `charge_le_allowance`'s second
 conjunct as `step_meter` is required by the credit and accepted.
+
+## 2026-10-28, twenty-fourth pass: how item 7's witnesses may be evaluated (L1e)
+
+**Ruling: option 3, amended. The signature needs no native evaluation.** `CheckedSignature.source` already
+admits a recorded run of the native verifier "only in a pure evaluation" (`CredentialSignatureIO.Oracle`
+`.recorded`, `CredentialSignatureAdmission.lean:287-296`), and `scripts/check-native-transcripts.sh`
+re-submits every recorded verdict to the native process. Build the signed poles (`AcceptedBirth`, the
+completion `Candidate`) over a recorded transcript holding the fixture signer's verdict. The verdict is
+then data, and the trust boundary is the one passes 3 and 8 accepted: statements relative to the
+transcript, which the native check re-verifies. Ed25519 never enters the kernel.
+
+The remaining cost is cSHAKE over the image's roots. Measure one root under `decide +kernel` on a box
+first.
+- If it is feasible, every pole is kernel-evaluated over a minimal hand-written coherent image. A witness
+  need not be the deployed genesis, only a real coherent snapshot through the real
+  `preparePending`/admission.
+- If it is not, a separate witness module evaluated by `native_decide` is acceptable as the fallback. Its
+  axiom pin names `Lean.ofReduceBool` explicitly; no keystone module imports it; it is graded and
+  confessed per law 9.
+
+Either form meets law 2 only if the module is built by the merge gate with its pin checked, so a broken
+witness turns the gate red. An executed script does not count. `neutral-birth.lean` stays as the
+end-to-end run.
