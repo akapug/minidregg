@@ -68,13 +68,15 @@ elaboration of the fix pending NativeHostReplay.olean). L1c (lean-audit-c a281e5
 constructors with pricedAt, drops e7958d3b9's arms on merge; unbuilt, not to merge until its warm-tree build
 elaborates) seeds its dregg-ref tree from the integ8 copy; tell it when the copy lands.
 
-Next steps: when the full build's host stage ends cleanly, name `/build/lanes/integ8/src` to infra (aed5ecf506cf840af),
-the coordinator and L1c (acf52d65283ef4ebc), and run `swarm-build lake lean Effects/Revival/Statements.lean` there for the
-effects-revival lane (a83b7949ba401cca5; `lake lean`, not `lake env lean`, applies the lakefile's options). When the
-candidate exists: report "candidate <sha> at <path>: gate <verdict>, reds by name" to the coordinator and L4b
-(ad81db6d6fd317d3a; J14_TOOLS + J14_AWAIT); then push integration/regen-tool 21077e063 to main (the next build checks
-ClockCell's import). Every lane named to land so far is on main (hermes, hermes-b, abuse-caps, snipe-unconfigured,
-redteam, effects-revival); welcome-hermes is still to come.
+Next steps: the full build of da4a7645e passed its host stage at 00:24:47 (1670 s); the tree was named to infra,
+the coordinator and L1c (L1c waits for the dregg-ref copy, then builds lean-audit-c d4e192f35 there and sends a green sha).
+When the build ends: run `swarm-build lake lean Effects/Revival/Statements.lean` in integ8/src and send the errors verbatim
+to effects-revival (a83b7949ba401cca5) unless it says dregg-ref got there first. When the candidate exists: report
+"candidate <sha> at <path>: gate <verdict>, reds by name" to the coordinator and L4b (ad81db6d6fd317d3a; J14_TOOLS +
+J14_AWAIT); then push integration/regen-tool 21077e063 to main (the next build checks ClockCell's import), and start
+the next full build from main (06b32d86d+: effects-revival docs, oracle-appliance da016ed24, red-pq-mailbox,
+red-mini-web-devflow, red-discord-session (their filtered tests green on the Mac), audit-platform 260fceae).
+welcome-hermes is still to come.
 
 Red routing: lean-audit-c reds go to L1c (acf52d65283ef4ebc) directly; Hermes to L4b (ad81db6d6fd317d3a); L13 a1618140607ac439b; un-stream-continuity reds
 (ApplicationStreamContinuityFresh pole proofs, NativeHostReplay.lean:3816) to the deputy a308118209b4a48ea; all
