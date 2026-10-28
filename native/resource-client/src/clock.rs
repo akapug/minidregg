@@ -29,6 +29,11 @@
 //! `--abandon-after-submit true` submits and exits without reading the reply (the
 //! lost-reply probe).
 //!
+//! A tick refused `staleAuthority` or `staleClock` (another turn moved a root it pinned
+//! between the view and the submit) is journaled like any refusal, then re-observed and
+//! re-authored within the same run, at most `STALE_ATTEMPTS` times; the reply lists each
+//! such refusal under `staleRefusals`, and the last one fails the run as before.
+//!
 //! `mini clock --action view --workspace DIR` prints the clock view.
 
 use crate::agent_reserve::field;
@@ -236,6 +241,38 @@ fn resolve_pending(ws: &Workspace) -> Result<Vec<Value>> {
     Ok(resolved)
 }
 
+/// How many times one run re-observes and re-authors a tick refused stale. The tick pins
+/// the credential-authority root and the clock root it observed (`ClockTickReceiver.prepare`);
+/// the authority root moves with every turn that spends an authority nullifier, so under
+/// load another turn often lands between the view (op 129) and the submit (op 128). The
+/// tick asserts only wall time, never anything derived from that authority state, so a
+/// fresh view and a fresh command is the same proposal against the new roots; a revoked
+/// `C_tick` or a non-advancing clock then refuses by its own name.
+const STALE_ATTEMPTS: usize = 6;
+
+/// The pin a refused tick names, read from the Host's rendering of
+/// `ClockTickReceiver.Reject` at phase `clock-tick`; any other refusal is not stale.
+fn stale_pin(outcome: &Value) -> Option<&'static str> {
+    if outcome.get("type").and_then(Value::as_str) != Some("refused") {
+        return None;
+    }
+    let text = |name: &str| {
+        outcome
+            .get(name)
+            .and_then(Value::as_str)
+            .and_then(|hex| mini_sdk::hex::decode(hex).ok())
+            .map(|bytes| String::from_utf8_lossy(&bytes).trim().to_string())
+    };
+    if text("phase").as_deref() != Some("clock-tick") {
+        return None;
+    }
+    match text("detail")?.as_str() {
+        "Minidregg.Kernel.ClockTickReceiver.Reject.staleAuthority" => Some("staleAuthority"),
+        "Minidregg.Kernel.ClockTickReceiver.Reject.staleClock" => Some("staleClock"),
+        _ => None,
+    }
+}
+
 fn tick(
     ws: &Workspace,
     capability: &str,
@@ -245,11 +282,42 @@ fn tick(
     catch_up: bool,
 ) -> Result<Value> {
     let resolved = resolve_pending(ws)?;
-    let current = view(ws)?;
     let now = match now {
         Some(now) => now,
         None => unix_now()?.to_string(),
     };
+    // Every stale refusal is definite, journaled and reported in `staleRefusals`; the
+    // run re-observes only for the two pins, and only STALE_ATTEMPTS times.
+    let mut stale = Vec::new();
+    let mut value = loop {
+        let value = tick_once(ws, capability, &now, slot.clone(), abandon, catch_up)?;
+        match stale_pin(&value) {
+            Some(pin) if stale.len() + 1 < STALE_ATTEMPTS => {
+                eprintln!("mini clock: tick refused {pin}; re-observing ({}/{STALE_ATTEMPTS})", stale.len() + 1);
+                stale.push(json!({"pin": pin, "asserted": value.get("asserted")}));
+            }
+            _ => break value,
+        }
+    };
+    if !stale.is_empty() {
+        value["staleRefusals"] = json!(stale);
+    }
+    if !resolved.is_empty() {
+        value["resolvedRetained"] = json!(resolved);
+    }
+    Ok(value)
+}
+
+/// One observation, one authored tick, one submission.
+fn tick_once(
+    ws: &Workspace,
+    capability: &str,
+    now: &str,
+    slot: Option<String>,
+    abandon: bool,
+    catch_up: bool,
+) -> Result<Value> {
+    let current = view(ws)?;
     // A bounded candidate is only a proposal. The Lean receiver is the sole judge;
     // explicit --now remains unmodified so it can be refused by name.
     let now = if catch_up {
@@ -260,7 +328,7 @@ fn tick(
             .map_err(|_| "clock view step bound exceeds u64")?;
         target.min(current_now.saturating_add(bound)).to_string()
     } else {
-        now
+        now.to_string()
     };
     let slot = slot.unwrap_or(field(&current, "slot")?.to_string());
     let command = author(
@@ -293,11 +361,7 @@ fn tick(
         let _ = invoke(ws, mini_sdk::host_operations::CLOCK_TICK_SUBMIT, &ingress)?;
         return Ok(json!({"type": "abandoned", "attempt": attempt, "asserted": asserted}));
     }
-    let mut value = resolve(ws, &attempt)?;
-    if !resolved.is_empty() {
-        value["resolvedRetained"] = json!(resolved);
-    }
-    Ok(value)
+    resolve(ws, &attempt)
 }
 
 fn init(mut args: Args) -> Result<Value> {
@@ -391,4 +455,30 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         return Err(format!("clock tick not confirmed: {value}").into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn refused(phase: &str, detail: &str) -> Value {
+        json!({"type": "refused", "reason": "operationRejected",
+            "phase": mini_sdk::hex::encode(phase.as_bytes()),
+            "detail": mini_sdk::hex::encode(detail.as_bytes())})
+    }
+
+    #[test]
+    fn stale_pins_are_read_from_the_clock_receivers_rendering_only() {
+        let stale = |name: &str| format!("Minidregg.Kernel.ClockTickReceiver.Reject.{name}");
+        assert_eq!(stale_pin(&refused("clock-tick", &stale("staleAuthority"))), Some("staleAuthority"));
+        assert_eq!(stale_pin(&refused("clock-tick", &stale("staleClock"))), Some("staleClock"));
+        // Teeth: every other refusal is final for the run.
+        for other in ["clockNotAdvancing", "clockStepExceeded", "capabilityRejected", "replayedMarker"] {
+            assert_eq!(stale_pin(&refused("clock-tick", &stale(other))), None, "{other}");
+        }
+        assert_eq!(stale_pin(&refused("durable", &stale("staleAuthority"))), None);
+        assert_eq!(stale_pin(&refused("clock-tick", "Minidregg.Kernel.PayBookReceiver.Reject.staleAuthority")), None);
+        assert_eq!(stale_pin(&json!({"type": "confirmed", "phase": "", "detail": ""})), None);
+        assert_eq!(stale_pin(&json!({"type": "contention"})), None);
+    }
 }
