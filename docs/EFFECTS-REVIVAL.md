@@ -269,169 +269,94 @@ the tree's root:
 `Effects/Revival/Statements.lean` is not yet imported by `Effects.lean`.  It joins the CI
 closure (law 5) in the commit after it elaborates.
 
-## 8. Continuation (for a successor; present state, 2026-10-27)
+## 8. Continuation (for a successor; present state, 2026-10-28)
 
-**Gates.**  Proofs start once two gates are back.
-- Audit: **CLEARED.**  The auditor (`af7a93e7b8ba729d4`) wrote pass 19 on
-  `lane/audit-platform` (`3fc181cae`) and an addendum (`260fceaed`).  It accepted
-  `3dac92b91`.
-- Elaboration: **CLEARED** (rc=0, no diagnostics, 22 s).  It ran in dregg-ref
-  `/build/minidregg` (infra's warm copy of main `da4a7645e`) under `/build/lock/closure.lock`,
-  through the script `/build/lanes/effects-revival-scratch/check.sh`, which writes its own
-  PID file and puts `/build/home-lanes/.elan/bin` on PATH.  It checks the file copied to
-  that directory, so infra's tree is never edited.  The first check found two syntax
-  problems, both fixed with no change in meaning: `seal` is a Lean keyword (the fields are
-  now `rotate`/`rotated`), and `_` cannot be a binder in a `where` field (those fields are
-  now `fun _ => …`).  Never run Lean on the Mac, and never start a cold closure.
+**Where the lane stands.**  Every statement is auditor-accepted (passes 19-28 on
+`lane/audit-platform`), and every proof of them is accepted too.  All are kernel-checked
+(`#assert_axioms`).  `Effects/Revival` holds no `native_decide`, `#assert_compiled` or
+`sorry`.  On main through `ae0c78a01` (merge `ac4247487`).  `f46beaa46` (PrepareFactors) was
+sent to the integrator and the auditor on 10-28.
 
-**Branch.**  `lane/effects-revival` in the worktree
-`/Users/ember/dev/minidregg-lanes/effects-revival`.  Main has the statements at
-`f3361d17`.  `Effects.lean` now imports `Effects.Revival.Statements` (law 5: it is in the
-CI closure).
+**Files** (all `module`s written by `scripts/lean-modularize.py`, never hand-edited headers;
+`Effects.lean`, `Effects/EffectSpec.lean`, `Effects/Placeholder.lean` stay non-module because
+EffectSpec imports the non-module `Kernel.State`; both old files die at the migration commit):
+- `Engine.lean`: the kernel-free engine (substrate, declaration, registry, dispatcher,
+  `Dispatches`, keystones, toy pole, census/one-source/extension, prefix consumption).
+- `EngineProofs.lean`: engine, completeness, census, one-source, extension, prefix proofs.
+- `Statements.lean`: the live content declaration, `ContentAgreement`, `HostKeystone`,
+  `PrepareFactors`, `HostLegacyCensus`, live prefix agreement.
+- `ContentProofs.lean`: `contentComplete`, `contentAgreement`, `contentAccepted`,
+  `contentTeeth`, `hostAccepted`, `contentPrefixAgreement`/`Accepts`/`Teeth`,
+  `hostLegacyCensusRefutedToday`.  The witnesses are hand-built cells: a link at a store that
+  holds only its blinding (`blindedStore`, `sampleDeployment`, `sampleHostCtx`).
+- `HostTeethProofs.lean`: `hostTeeth`.  The cSHAKE256 fact `ratchet_moves` is decided by
+  `decide +kernel`, in under a minute.
+- `PrepareProofs.lean`: `prepareFactors : PrepareFactors contentSpec`.
+- `ActivityStatements.lean` / `ActivityProofs.lean`: `TwoLevels` (with `verdict`, `ok`,
+  `turn`) and its satisfiable, premise and teeth poles.
 
-**Keystones and their witnesses** (all `def … : Prop` in `Statements.lean`; nothing proved):
+**So:** `LiveKeystone` holds with its poles.  `HostKeystone` has its poles, and the keystone
+itself is known false until the migration (it is that commit's gate, with `HostLegacyCensus`).
+`PrepareFactors` holds today, so rewiring `prepareTarget`'s content branch through `dispatch`
+preserves behaviour.
 
-| keystone | satisfiable | teeth | premise |
-|---|---|---|---|
-| `EngineKeystone` | `EngineSatisfiable` | `EngineTeeth` (ghost, fail-open, unframed, twin) | `EnginePremise` |
-| `CompletenessKeystone` | `CompletenessSatisfiable` | `CompletenessTeeth` | `CompletenessPremise` |
-| `LiveKeystone` = `ContentAgreement contentSpec ∧ ContentComplete` | `ContentAccepted` (fixture owed) | `ContentTeeth` (`contentGhost`, `contentNarrowed`) | `ContentAccepted` |
-| `HostKeystone` (known false today, by clause; it gates the migration commit) | `HostAccepted` (fixture owed) | `HostTeeth` | `HostPremise` = `contentHandler.Lawful` |
+**Checking.**  hbox private tree `/tank/lanes/effects-revival/src` was synced to the merged
+lane (main `d6f0372d8` plus the lane) on 10-28 and has the whole `Effects` closure built as
+modules.  To check files: `scratchpad/effects-revival/hcheck.sh <module>...` (rsyncs `Effects/`
+and `Effects.lean`, runs `check.sh`, which writes `check.pid`, `swarm-build lake build`).
+After a main merge that touches the closure, re-sync the tree with
+`rsync -a --delete --exclude=.lake --exclude=.git --exclude=target --exclude=.claude ./
+hbox:/tank/lanes/effects-revival/src/`, then start `/tank/lanes/effects-revival/rebuild.sh`
+detached.  It writes `rebuild.pid` and `rebuild.log`, builds kernels, then `lake build Effects`.
+Lean never runs on the Mac.
 
-**Files.**  `Effects/Revival/Engine.lean` (§1-§5: substrate, declaration, registry,
-dispatcher, engine and completeness keystones and the toy pole; kernel-free, imports only
-`Theory.Store`, `Theory.TypedAuthorization`, `Compiler.Tower256ConcreteBackend`).
-`Effects/Revival/Statements.lean` (§6-§7: the live content declaration, `ContentAgreement`,
-`HostKeystone`; imports Engine and `Kernel.DeclaredResourceController`).
-`Effects/Revival/EngineProofs.lean` (proofs of everything in Engine, plus the materialize
-lemma).  The split exists because Statements' kernel import is a 294-module project closure
-while Engine needs about 50: an abstraction seam (the engine does not depend on the
-controller) worth keeping for the inversion work.
+**Owed, in order.**
+1. **After the A12c regen build lands on main.**  The integrator re-records both recorded
+   fixtures (`NativeAcceptedFixture`, `NativeDocWriteFixture`) from it (coordinator,
+   10-28).  No Revival proof imports a fixture: the ghost half of `ContentTeeth` and every
+   other pole are kernel proofs on hand-built cells.  So this lane's job then is only:
+   1. merge main;
+   2. re-sync the hbox tree and run `rebuild.sh Effects`;
+   3. fix anything red in `Effects/`, plus any Revival red the integrator's umbrellas stage
+      reports with file:line;
+   4. send the integrator one sha.
+2. **The migration commit** (§5 step 1; post-demo; prepare, never land without the
+   coordinator's word).  The gate is `HostKeystone` and `HostLegacyCensus` (both provable
+   only after it) plus the already-proved `PrepareFactors`.  Its shape:
+   - `Payload` loses `content` and gains `registered (code : UInt8) (op : List UInt8)`, with
+     canonical op bytes.  `payloadStream` reads tag octet 1 through `readPrefix` of the content
+     registry: `ContentPrefixAgreement` says no byte changes.
+   - `prepareTarget`'s registered branch becomes `dispatch` then `genericChecks`; this is
+     `PrepareFactors`' right side.
+   - The content arms of `computeTarget`, `targetPatch`, `targetField`, `targetAmount`,
+     `targetRatchet`, `targetFullFootprint`, `targetProjection`, `Target.layout`,
+     `Target.materializer`, `packTarget`, `selectTarget`, `Target.contentStore?`,
+     `targetWrites` and the `Repr` are deleted in the same commit.
+   - About 25 Lean consumers construct or match `.content cmd`.  The heaviest are
+     `Kernel/NativeHost.lean` (about 20 sites), `HyperdocumentPublication`,
+     `HyperdocumentMergePublication`, `CanonicalCellRegistry`, the Fn consumers and
+     `Assurance/HyperdocumentQueryDeployment`.  They build the registered payload from
+     `ContentResource.commandStream.encode`.
+   - The Host presentation arms (`Host/Json.lean:1380`, `SourceAgreementJson.lean:1082`,
+     `GrainOriginSource.lean:167`, `InspectRender.draftLines`, `FnInboxView.targetJson`) need
+     the declaration's JSON face.  It is still open which: a `json` codec field, or JSON over
+     canonical op bytes.  Without it those arms stay as twins, and step 1 is not done.
+   - `Effects/EffectSpec.lean` and `Effects/Placeholder.lean` are deleted.  `Effects.lean`
+     then converts to a module.
+   - Persisted identities move: `payloadStream` and the transaction frame.  The integrator
+     plans the raw-octet bump; this is a re-genesis by the whole-epoch design (§8 item 4
+     below), which re-genesis at the homelab absorbs.
+3. **Migration step 2 (transfer)** must satisfy `TwoLevels` for its derived executor projected
+   to a `YieldCommit` (§5 step 2, corrected 10-28: a refused verdict is an accepted yield).
+4. **Whole-epoch compatibility** (design only; no local handler upgrade is promised until it is
+   built).  Today `StoreEpoch.current.schemaRefs` hashes the whole persisted corpus, and opening
+   is equality, so every registry change is a re-genesis.  The design:
+   - the seed carries the corpus itself;
+   - opening becomes "H ⊇ S, one fingerprint per identity, a `SafeExtension` registry delta",
+     where `ExtensionPreserves` and `PrefixKeystone` give old-byte preservation;
+   - a codec change is a new `/v(N+1)` identity, and the old one stays readable;
+   - the first record under a code outside S appends an epoch step;
+   - the theorem to prove then is "EpochCompatible S H implies replay under H equals replay
+     under S".
 
-**Proved** (EngineProofs, `#assert_axioms` pinned; built green on hbox):
-`materialize_logical`, `storeSubstrate_framed`, `Substrate.run_frame`, `engineKeystone`,
-`completenessKeystone`, `enginePremise`, `engineSatisfiable`, `engineTeeth`,
-`entryA_lawful`, `completenessSatisfiable`, `completenessTeeth`, `completenessPremise`.
-`Effects/Revival/ContentProofs.lean`: `contentComplete` (`ContentComplete`), via a
-syntactic invariant `Emits` over the lowering's progress proved helper by helper and action
-by action (`step_emits`, `run_emits`), `run_executes`, and the rotation's guard (no content
-write touches the blinding).  The declared table `contentActionFrame` held for all fifteen
-actions with no change.  `contentNarrowed_incomplete` (the narrowed half of `ContentTeeth`: a
-link is admitted and written at `annotations`, outside the narrowed frame) sits beside it, so
-`ContentComplete` carries its teeth (law 2); the ghost half waits for the fixture.  The
-Statements closure is now built in the hbox tree too, so the
-live proofs check there in seconds.
-
-**Where to check.**  The kernel-free files: hbox `/tank/lanes/effects-revival/src`, a
-private small-closure tree (packages a real copy of the warm base's, `.lake/native` built by
-`scripts/build-mini-kernels.sh`).  `scratchpad/effects-revival/hcheck.sh <module>` rsyncs
-`Effects/` there and runs `/tank/lanes/effects-revival/check.sh` (`swarm-build lake build`,
-PID file `check.pid`, log `check.log`); seconds per file.  The live file (kernel closure):
-dregg-ref, via the concatenation check in `/build/lanes/effects-revival-scratch/` under
-the closure lock (contended by host builds; expect waits).
-
-**Pending merge (module-conversion window).**  The integrator holds `3c98e54d3`
-(ContentProofs) until iter-speed's module conversion lands on main.  When the integrator
-announces it: merge main into this branch, convert `Effects/Revival/ContentProofs.lean`
-and `Effects.lean` (and any Revival file the conversion missed) with
-`scripts/lean-modularize.py`, re-check on hbox (`hcheck.sh Effects.Revival.ContentProofs`),
-push, and send the integrator the sha.
-
-**Owed, in order** (the astra architecture review's Effects gaps, 2026-10-28, are items 2-6;
-its text: `scratchpad/astra/arch.out.md`, final section; it read `c7d983746`, before the
-Engine/Statements split).
-1. The module-conversion merge above.
-2. **One dispatch source by construction** (review gap 1).  `noTwin` only proves a supplied
-   legacy list disjoint from the registry.  Stated (Engine §6, Statements §8; pass 27):
-   `LegacyDisjoint tagOf R` (the hand arms' input type has no constructor at a registered
-   code), with toy satisfiable/teeth, and the live `HostLegacyCensus` over `Payload`, FALSE
-   today (`HostLegacyCensusRefutedToday`: `Payload.content` is tag 1) and provable exactly
-   when the migration deletes that constructor.  `OneSource`/`composeDispatch` stay only as
-   the extensional shadow (any dispatcher agreeing on registered codes satisfies it).
-   Proved (pass 27 accepted): `legacyCensusSatisfiable`, `legacyCensusTeeth`,
-   `oneSourceSatisfiable`, `oneSourceTeeth`, `hostLegacyCensusRefutedToday`.  Owed: the
-   census itself, at the migration commit.
-3. **The bridge to the deployed receiver** (gap 2).  `HostKeystone` is about a wrapper this
-   lane wrote.  Stated (Statements §8; pass 27): `PrepareFactors E`: the deployed
-   `ResourceTransaction.prepareTarget` (post packed, refusals named) equals the content
-   handler's dispatch followed by `genericChecks`, which reads only the pre/post cells, the
-   policy source and the audience, never the payload (its signature shows it).  Acceptance,
-   acceptance up to a generic refusal, and refusal by name are corollaries.  Proof owed; it
-   needs `ContentAgreement` and `ContentComplete`.  At the migration commit
-   `prepareTarget`'s registered branch calls `dispatch`, and this is that commit's gate.
-4. **Registry extension** (gap 3).  Stated now (Engine §6): `Extends`, `ExtensionPreserves`
-   (every byte string under an old code dispatches exactly as before: decode, header,
-   selection, interpretation, execution, refusals), `SafeExtension` (the explicit policy for
-   newly accepted codes: a retired code is never rebound), with satisfiable and teeth;
-   `LawfulRegistry` gains `octet` (every code < 256, the payload tag byte).  Proved:
-   `extensionPreserves`, `extensionSatisfiable`, `extensionTeeth`.
-   **Prefix consumption** (stated, Engine §6 and Statements §8; to the auditor): `readPrefix R`
-   (the tag octet, then the entry's own `decodePrefix`, the suffix handed back), the predicate
-   `ConsumesPrefix R read` on any candidate reader (consume exactly one operation, refuse an
-   unregistered octet, accept only canonical spellings), `PrefixKeystone` (every registry is
-   read as a prefix; an extension reads every old code's prefix as before), toy
-   `PrefixSatisfiable`/`PrefixTeeth` (a whole-rest reader, a fail-open reader, a codec rebind),
-   and live `ContentPrefixAgreement` (on code 1 the deployed `payloadStream.decodePrefix` reads
-   exactly what the registry's reader reads) with `ContentPrefixAccepts` and
-   `ContentPrefixTeeth` (code 3 disagrees).
-   **Whole-epoch compatibility (design; no local handler upgrade is promised until it is
-   built).**  Today `StoreEpoch.current.schemaRefs` is one hash of the whole persisted corpus
-   (every tag entry, every structural fingerprint, every cell descriptor), and a Store opens
-   only when its epoch EQUALS the Host's (`StoreEpoch.differing`).  So adding a handler (a new
-   `DREGG/EFFECT/<NAME>/vN` identity) or bumping one moves the epoch and every existing Store
-   is refused: each registry change is a re-genesis.  That is the promise until the following
-   exists:
-   1. The seed carries the corpus itself (the canonical list of identity:fingerprint entries
-      and cell descriptors), not only its hash; the hash stays as the label's commitment.
-   2. Opening becomes a relation: a Store written under corpus S opens under Host corpus H
-      exactly when every entry of S is in H byte for byte (H ⊇ S, one fingerprint per
-      identity), and the registry delta is a `SafeExtension` (no retired code rebound).  Then
-      `ExtensionPreserves` and `PrefixKeystone` say every logged byte string under an old code
-      decodes, is consumed and dispatches exactly as when it was written.
-   3. A changed fingerprint at an existing identity is never compatible.  A codec change is a
-      new identity `/v(N+1)`, and the old one stays registered for reading old records.
-   4. The first record a Host writes under a code outside S moves the Store's epoch to H, as an
-      appended epoch step in the log, so an older Host refuses the Store by name.
-   5. The statement to prove when this is built: `EpochCompatible S H` (2) implies that
-      replaying the Store's log under H yields the states it yielded under S.
-   For the demo this costs nothing: re-genesis at the homelab is planned anyway.
-5. **The generic engine is a leaf** (gap 4): done.  `Effects/Revival/Engine.lean` imports
-   only `Theory.Store`, `Theory.TypedAuthorization` and the stream codecs; controllers import
-   it at migration.  `Statements.lean` (the live content instance) is the only file importing
-   the controller.
-6. **Activity refusals have two levels** (review, §6).  Stated
-   (`Effects/Revival/ActivityStatements.lean`; to the auditor): `TwoLevels candidate`, a
-   predicate on any yield judgment over `YieldInput` (`commitYield`'s arguments): an
-   effect-level refusal (`TransferRefused`: the turn's guards pass, the verdict refuses) is an
-   ACCEPTED yield whose await records `.performed (.refused reason)` and commits nothing else;
-   every refusal of today's `commitYield` stays a turn refusal under its name.
-   `TwoLevelsSatisfiable` (today's kernel), `TwoLevelsPremise` (an effect-level refusal
-   exists), `TwoLevelsTeeth` (the collapsed judgment is refuted).  At step 2 the transfer
-   declaration's derived executor, projected to a `YieldCommit`, must satisfy it.
-7. The accepted-branch witnesses, by KERNEL proof on hand-built cells (ContentProofs),
-   superseding the fixture route: `contentAccepted : ContentAccepted` and
-   `hostAccepted : HostAccepted` (a link admitted at a content cell holding only its blinding,
-   through `contentAgreement` and the host dispatch), `contentTeeth : ContentTeeth` (at that
-   blinded cell the live patch carries the rotation, so `contentGhost` disagrees), and
-   `hostTeeth : HostTeeth` (`Effects/Revival/HostTeethProofs.lean`): its twin half is
-   `noTwin`.  Its ghost half compares post blindings at the blinded cell.  The dispatch's is
-   one ratchet step (`run_leg_blinding`); the ghost's is the pre blinding.  The cSHAKE256 fact
-   that the step moves the zero blinding (`ratchet_moves`) is decided by the kernel
-   (`decide +kernel`), so every pole is `#assert_axioms`-pinned.  The poles of
-   `LiveKeystone` and `HostKeystone` are done; `HostKeystone` itself stays the migration gate.  The
-   doc-write fixture is red (its recorded frames no longer decode).  Its regeneration is owed
-   to the integrator's umbrellas stage, from the first READY candidate carrying the conversion
-   plus M2, which the integrator names.  It is no longer a witness for this lane.
-8. `ContentAgreement contentSpec`: **PROVED** (`contentAgreement`, ContentProofs, pinned), so
-   `LiveKeystone` holds (`contentAgreement` with `contentComplete`), its poles by item 7.  Also proved (pass 28
-   statements): `prefixKeystone`, `prefixSatisfiable`, `prefixTeeth` (EngineProofs),
-   `contentPrefixAgreement`, `contentPrefixAccepts`, `contentPrefixTeeth` (ContentProofs),
-   `twoLevelsSatisfiable`, `twoLevelsPremise`, `twoLevelsTeeth`
-   (`Effects/Revival/ActivityProofs.lean`, imported by Effects.lean).
-9. `HostKeystone`, `PrepareFactors` and `HostLegacyCensus` land with the migration commit (§5 step 1), with the
-   platform lane (L1).
-
-**Not done, not this lane's:**
-- the migration itself (§5);
-- the census/regen changes (§6); the integrator plans the raw-octet bump separately;
-- the open item in step 1, a JSON face for the Host presentation arms.
+**Not this lane's:** the census and regen changes (§6); the raw-octet bump (the integrator's).

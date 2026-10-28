@@ -18,8 +18,9 @@ theorem held_funded_after_actual_debit {rootBytes : List UInt8 → TypedAuthoriz
     held + maintenance ≤ (DataSnapshot.install before intent).model.available := by
   have budget := (Charge.fundedCheck_eq_true_iff _ _).mp funded
   intro lane
-  change held lane + maintenance lane ≤ before.model.available lane - intent.exactCharge lane
-  exact Nat.le_sub_of_add_le (budget lane)
+  change held lane + maintenance lane ≤
+    before.model.available lane - intent.exactCharge lane + intent.credit lane
+  exact Nat.le_add_right_of_le (Nat.le_sub_of_add_le (budget lane))
 
 /-- The reservation constructor checks the post-fee obligation, hence an exact
 fit before paying the reservation method cannot strand completion maintenance. -/

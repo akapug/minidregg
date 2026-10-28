@@ -4,6 +4,8 @@
 Every transition uses native Mini; the fixed installer handles cross-UID
 transport. Retained command outputs and exact native attempts survive failure.
 """
+import hashlib
+import fcntl
 import importlib.util
 import json
 import os
@@ -18,6 +20,8 @@ import time
 
 HERE=Path(__file__).resolve().parent
 REPO=HERE.parents[2]
+PHASES=['world','prepare_platform','prepare_application','publish_data','worker','room','attach','probe']
+RESUMABLE={'prepare_platform','prepare_application','publish_data','worker'}
 spec=importlib.util.spec_from_file_location('inputs',HERE/'j14-oracle-inputs.py')
 inputs=importlib.util.module_from_spec(spec);spec.loader.exec_module(inputs)
 read,write,sha=inputs.read,inputs.write,inputs.sha
@@ -37,8 +41,9 @@ class Journey:
         os.umask(0o077)
         self.root=Path(os.environ['JOURNEY_STEP_DIR'])/'oracle'
         self.root.mkdir(mode=0o700)
+        self.lock_root()
         self.logs=self.root/'commands';self.logs.mkdir()
-        self.processes=[];self.counter=0;self.controller=False
+        self.processes=[];self.daemons=[];self.counter=0;self.controller=False
         # A separate fresh private root avoids sharing controller traversal ACLs
         # with another preserved world (including /run/user/UID).
         socket_parent=Path(os.environ.get('J14_ORACLE_SOCKET_PARENT','/build/lanes'))
@@ -61,6 +66,161 @@ class Journey:
         (self.root/'subjects').mkdir()
         self.subjects={}
         self.pin_candidate()
+
+    @classmethod
+    def resume_transport(cls, checkpoint=None):
+        """Resume only the proved pre-provision transport cutover boundary.
+
+        No genesis, enrollment, provision, room write or application attempt is
+        repeated. Other failure phases need their exact native recovery path.
+        """
+        os.umask(0o077)
+        j=cls.__new__(cls);j.root=Path(os.environ['JOURNEY_STEP_DIR'])/'oracle';j.logs=j.root/'commands';j.lock_root()
+        if checkpoint is None:
+            failure=read(j.root/'failure.json')
+            if failure['phase']!='world' or (j.root/'context-after-world.json').exists() or (j.root/'broker').exists():
+                raise ValueError('transport continuation requires the uncompleted world cutover boundary')
+            last=failure['lastCommand'];result=j.logs/f'{last:04d}-lifetime-target.result.json'
+            if not result.is_file() or read(result)!={'exitCode':0}:
+                raise ValueError('transport continuation requires retained successful target metadata rendering')
+            j.c=read(j.root/'allocation-context.json')
+        else:
+            # The first reusable checkpoint is before physical registration or
+            # native app attempts. Later uncertain phases use their native exact
+            # lookup APIs; an arbitrary phase replay is deliberately unavailable.
+            if checkpoint!=j.root/'context-after-world.json' or (j.root/'application').exists():
+                raise ValueError('only the pre-application world checkpoint can resume here')
+            failures=[read(p) for p in j.root.glob('failure*.json')]
+            failure=max(failures,key=lambda f:f['lastCommand']);last=failure['lastCommand']
+            command=j.logs/f'{last:04d}-broker-world'
+            if failure['phase']!='application' or read(command.with_suffix('.result.json'))!={'exitCode':1}:
+                raise ValueError('checkpoint refuses replay after an unclassified native attempt')
+            # A refused sudo invocation submitted nothing. Require its retained
+            # evidence instead of treating any installer error as safe to retry.
+            argv=read(command.with_suffix('.argv.json'));prior=Path(argv[-1])
+            if 'sudo: a password is required' not in (prior/'root-setup.log').read_text() or (prior/'broker.json').exists():
+                raise ValueError('registration refusal is not proved; inspect exact physical state')
+            j.c=read(checkpoint)
+        j.c['manifest']=str(j.root/'candidate.json')
+        if Path(j.c['root'])!=j.root:raise ValueError('retained root differs')
+        j.bins=Path(need('J14_ORACLE_BIN'));j.mini=need('MINI');j.host=need('HOST');j.runtime=need('GRAIN_RUNTIME')
+        j.provider=need('TEST_PROVIDER');j.hermes_root=need('J14_HERMES_ROOT');j.spk=need('J14_ORACLE_SPK')
+        j.data=need('J14_ORACLE_DATA_SOURCE');j.inventory=need('J14_ORACLE_INVENTORY')
+        candidate=read(j.c['manifest'])
+        for role,path in [('mini',j.mini),('host',j.host),('spkHost',str(j.bins/'spk-host')),('store',need('STORE')),('verifier',need('VERIFIER'))]:
+            if sha(path)!=candidate['sha256'][role]:raise ValueError('continuation binary pin changed: '+role)
+        if sha(j.runtime)!=candidate['overlays']['grainRuntime'] or sha(j.provider)!=candidate['overlays']['testProvider']:
+            raise ValueError('continuation runtime/provider changed before explicit release')
+        j.installer=REPO/'deploy/spk-host/install-user-world';j.sockets=Path(j.c['socketDirectory'])
+        j.homes=j.root/'homes';j.workspaces=j.root/'workspaces'
+        j.subjects={name:read(j.root/'subjects'/f'{name}.json')['subject'] for name in ['alice','bob','hermes','hhost','hprov','hdisp']}
+        w=j.root/'world';h=read(w/'handoff.json');j.sponsor=str(read(w/'genesis-params.json')['sponsor']['subject'])
+        j.c.update(repo=str(REPO),world=str(w),hostConfig=h['config'],sponsorWorkspace=h['sponsorWorkspace'],
+                   operatorSocket=str(j.sockets/'operator-v2.sock'),publicSocket=str(j.sockets/'participant.sock'),allocation=str(j.root/'allocation.json'))
+        room=read(Path(j.c['sponsorWorkspace'])/'refs/oracle-room.json');j.c['room']={'target':room['target'],'capability':room['observeCapability']}
+        if read(j.c['allocation'])!=inputs.allocation(j.c) or sha(j.c['hostConfig'])!=sha(j.root/'operator-with-oracle.json'):
+            raise ValueError('continuation allocation or installed metadata differs')
+        j.counter=last;j.processes=[];j.daemons=[];j.controller=False;j.world_pid=None
+        record=j.root/(f'checkpoint-continuation-{last:04d}.json' if checkpoint else 'transport-continuation.json')
+        if record.exists():raise ValueError('transport continuation already attempted; inspect its retained commands')
+        write(record,{'previousSource':candidate['orchestrationSource'],'sourceCommit':os.environ.get('J14_ORACLE_ORCHESTRATION_COMMIT'),
+            'driverSha256':sha(HERE/'j14-oracle.py'),'installerSha256':sha(j.installer),'helperSha256':sha(REPO/'deploy/spk-host/controller-world.py'),
+            'previousOperatorSocket':str(j.sockets/'operator.sock'),'operatorSocket':j.c['operatorSocket'],
+            'hostConfigSha256':sha(j.c['hostConfig']),'lastCompletedCommand':last})
+        return j
+
+    def restart_transport(self):
+        self.spawn('operator-restart-'+str(self.counter),[self.mini,'serve-operator','--host',self.host,'--config',self.c['hostConfig'],'--socket',self.c['operatorSocket']])
+        self.wait_socket(self.c['operatorSocket'])
+        self.spawn('participant-restart-'+str(self.counter),[self.mini,'serve-public-proxy','--socket',self.c['publicSocket'],'--upstream',self.c['operatorSocket'],'--config',self.c['hostConfig']])
+        self.wait_socket(self.c['publicSocket'])
+
+    def resume_world(self):
+        self.restart_transport()
+        self.migrate_workspace_transport()
+        self.c['nativeProfile']=str(self.run('native-profile',[self.host,self.c['hostConfig'],'profile']))
+
+    def __del__(self):
+        lock=getattr(self,'_lock',None)
+        if lock is not None:lock.close()
+
+    def lock_root(self):
+        fd=os.open(self.root/'journey.lock',os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
+        m=os.fstat(fd)
+        if m.st_uid!=os.getuid() or m.st_mode&0o077 or m.st_nlink!=1:
+            os.close(fd);raise ValueError('journey lock custody differs')
+        self._lock=os.fdopen(fd,'r+')
+        try:fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError:
+            self._lock.close();raise ValueError('another journey owns this evidence root')
+
+    def frontier(self):
+        rows=[(int(p.name.split('-',1)[0]),p) for p in self.logs.glob('*.argv.json') if re.match(r'^\d+-',p.name)]
+        if not rows:return 0,[]
+        number,path=max(rows)
+        result=path.with_name(path.name.replace('.argv.json','.result.json'))
+        if not result.is_file():raise ValueError('last command has no retained result; exact recovery required')
+        return number,[{'path':str(p),'sha256':sha(p)} for p in [path,result]]
+
+    def checkpoint(self,next_phase,basis=None,adjudication=None):
+        """Retain orchestration coordinates, never fabricate native state."""
+        if next_phase not in RESUMABLE:raise ValueError('post-worker recovery requires native application lineage recovery')
+        frontier,proof=self.frontier()
+        if frontier!=self.counter:raise ValueError('checkpoint counter differs from actual command frontier')
+        if proof and read(proof[-1]['path'])!={'exitCode':0} and not adjudication:
+            raise ValueError('failed command requires explicit no-submission or exact-recovery adjudication')
+        path_fields={'root','logs','sockets','bins','installer','homes','workspaces','contract'}
+        omit={'processes','world_pid','_lock'}
+        state={k:str(v) if k in path_fields else v for k,v in vars(self).items() if k not in omit}
+        live={p.pid for p in self.processes if p.poll() is None}
+        state['daemons']=[{k:v for k,v in d.items() if k!='pid'} for d in self.daemons if d.get('pid') in live]
+        pins={str(p):sha(p) for p in [self.mini,self.host,self.runtime,self.provider,self.bins/'spk-host',self.installer,
+            REPO/'deploy/spk-host/controller-world.py',self.c['hostConfig']]}
+        value={'protocol':'mini-j14-checkpoint-v1','nextPhase':next_phase,'state':state,'pins':pins,
+            'basis':(basis or [])+proof,'adjudication':adjudication,'sourceCommit':os.environ.get('J14_ORACLE_ORCHESTRATION_COMMIT')}
+        path=self.root/f'checkpoint-{self.counter:04d}-{next_phase}.json';write(path,value)
+        return path
+
+    @classmethod
+    def from_checkpoint(cls,path):
+        os.umask(0o077)
+        expected=Path(os.environ['JOURNEY_STEP_DIR'])/'oracle'
+        if path.parent!=expected or path.is_symlink():raise ValueError('checkpoint must be a retained direct child of the journey root')
+        meta=path.stat()
+        if meta.st_uid!=os.getuid() or meta.st_mode&0o077:raise ValueError('checkpoint must be private operator custody')
+        value=read(path)
+        if value.get('protocol')!='mini-j14-checkpoint-v1' or value['nextPhase'] not in RESUMABLE:
+            raise ValueError('unsupported journey checkpoint phase')
+        for name,digest in value['pins'].items():
+            if sha(name)!=digest:raise ValueError('checkpoint input changed: '+name)
+        for proof in value['basis']:
+            if sha(proof['path'])!=proof['sha256']:raise ValueError('checkpoint native basis changed')
+        j=cls.__new__(cls)
+        for name,data in value['state'].items():
+            setattr(j,name,Path(data) if name in {'root','logs','sockets','bins','installer','homes','workspaces','contract'} else data)
+        if j.root!=expected:raise ValueError('checkpoint root differs')
+        # A source update is explicit in the successor receipt. Native artifacts,
+        # transports and controller custody stay pinned to the retained world.
+        j.c['repo']=str(REPO);j.installer=REPO/'deploy/spk-host/install-user-world'
+        for rel in ['deploy/spk-host/install-user-world','deploy/spk-host/controller-world.py']:
+            selected=[digest for source,digest in value['pins'].items() if source.endswith('/'+rel)]
+            if len(selected)!=1 or sha(REPO/rel)!=selected[0]:raise ValueError('checkpoint installer custody changed')
+        j.processes=[];j.world_pid=None;j.resume_phase=value['nextPhase'];j.lock_root()
+        if j.frontier()[0]!=j.counter:raise ValueError('newer command exists after this checkpoint; exact phase recovery required')
+        prior_daemons=j.daemons;j.daemons=[]
+        record=j.root/f'checkpoint-resume-{j.counter:04d}-{j.resume_phase}.json'
+        if record.exists():raise ValueError('checkpoint continuation already attempted; inspect its exact retained outputs')
+        write(record,{'checkpoint':str(path),'sha256':sha(path),'priorSource':value['sourceCommit'],
+            'sourceCommit':os.environ.get('J14_ORACLE_ORCHESTRATION_COMMIT'),'driverSha256':sha(HERE/'j14-oracle.py')})
+        j.restart_daemons=prior_daemons
+        return j
+
+    def restore_services(self):
+        for item in self.restart_daemons:
+            if sha(item['argv'][0])!=item['executableSha256']:raise ValueError('checkpoint daemon executable changed')
+            self.spawn(item['label']+'-resume-'+str(self.counter),item['argv'])
+            if item.get('socket'):self.wait_socket(item['socket'])
+        del self.restart_daemons
 
     def pin_candidate(self):
         candidate=read(self.candidate_manifest)
@@ -94,13 +254,24 @@ class Journey:
     def spawn(self,label,args):
         out=(self.logs/(label+'.stdout')).open('w');err=(self.logs/(label+'.stderr')).open('w')
         p=subprocess.Popen(list(map(str,args)),stdout=out,stderr=err);out.close();err.close();self.processes.append(p)
-        write(self.logs/(label+'.process.json'),{'pid':p.pid,'argv':list(map(str,args))})
+        argv=list(map(str,args))
+        write(self.logs/(label+'.process.json'),{'pid':p.pid,'argv':argv})
+        daemon={'label':label,'argv':argv,'executableSha256':sha(argv[0]),'pid':p.pid}
+        if '--socket' in argv:daemon['socket']=argv[argv.index('--socket')+1]
+        self.daemons.append(daemon)
         return p
 
     def wait_socket(self,path):
         deadline=time.monotonic()+120
         while time.monotonic()<deadline:
-            if Path(path).is_socket():return
+            # A stopped endpoint can leave its socket inode behind. Readiness
+            # requires a listener, not merely a filesystem entry.
+            try:
+                with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as client:
+                    client.settimeout(.2);client.connect(str(path))
+                if getattr(self,'daemons',[]):self.daemons[-1]['socket']=str(path)
+                return
+            except (OSError,TimeoutError):pass
             time.sleep(.1)
         raise RuntimeError('socket did not appear: '+str(path))
 
@@ -167,15 +338,59 @@ class Journey:
         while Path('/proc',str(self.world_pid)).exists() and time.monotonic()<deadline:time.sleep(.1)
         if Path('/proc',str(self.world_pid)).exists():raise RuntimeError('own operator did not stop before settings update')
         shutil.copyfile(fresh,self.c['hostConfig'])
-        self.spawn('operator',[self.mini,'serve-operator','--host',self.host,'--config',self.c['hostConfig'],'--socket',sock]);self.world_pid=None
+        # Retained endpoint config pins are immutable. Preserve the old pin
+        # and expose revised transport metadata on a fresh same-Store endpoint.
+        sock=self.sockets/'operator-v2.sock';self.c['operatorSocket']=str(sock)
+        self.spawn('operator-v2',[self.mini,'serve-operator','--host',self.host,'--config',self.c['hostConfig'],'--socket',sock]);self.world_pid=None
         self.wait_socket(sock)
         self.spawn('participant',[self.mini,'serve-public-proxy','--socket',self.c['publicSocket'],'--upstream',sock,'--config',self.c['hostConfig']]);self.wait_socket(self.c['publicSocket'])
+        self.migrate_workspace_transport()
         native=self.run('native-profile',[self.host,self.c['hostConfig'],'profile']);self.c['nativeProfile']=str(native)
 
-    def application(self):
+    def migrate_workspace_transport(self):
+        """Explicit same-Store routing change; preserve every authority field."""
+        old=self.sockets/'operator.sock';new=self.c['operatorSocket']
+        if str(old)==new:return
+        old_config=old.with_suffix('.config');before_config=read(old_config);after_config=read(self.c['hostConfig'])
+        semantic=lambda value:{k:v for k,v in value.items() if k!='agentLifetimeDispatchTargets'}
+        if semantic(before_config)!=semantic(after_config):raise ValueError('workspace migration requires identical native Store settings')
+        archive=self.root/'workspace-transport';archive.mkdir(mode=0o700,exist_ok=True)
+        for index,path in enumerate([Path(self.c['sponsorWorkspace'])/'workspace.json',*sorted(self.workspaces.glob('*/workspace.json'))]):
+            record=archive/f'{index:02d}.json'
+            if record.exists():
+                pins=read(record)
+                if str(path)!=pins['workspace']:raise ValueError('workspace routing inventory changed')
+                before=Path(pins['before']).read_bytes();after=Path(pins['after']).read_bytes()
+                if hashlib.sha256(before).hexdigest()!=pins['beforeSha256'] or hashlib.sha256(after).hexdigest()!=pins['afterSha256']:
+                    raise ValueError('retained workspace routing bytes changed')
+            else:
+                if path.is_symlink() or path.stat().st_uid!=os.getuid() or path.stat().st_mode&0o077:
+                    raise ValueError('workspace routing requires private operator custody')
+                before=path.read_bytes();value=json.loads(before)
+                if value['socket']!=str(old) or value['config']!=self.c['hostConfig'] or value['host']!=self.host or value['hostSha256']!=sha(self.host):
+                    raise ValueError('workspace routing source pins differ')
+                value['socket']=new;after=(json.dumps(value,indent=2)+'\n').encode()
+                previous=archive/f'{index:02d}-before.json';successor=archive/f'{index:02d}-after.json'
+                for target,data in [(previous,before),(successor,after)]:
+                    with target.open('xb') as out:out.write(data);out.flush();os.fsync(out.fileno())
+                write(record,{'workspace':str(path),'before':str(previous),'after':str(successor),
+                    'beforeSha256':sha(previous),'afterSha256':sha(successor),'oldSocket':str(old),'newSocket':new,
+                    'oldConfig':str(old_config),'oldConfigSha256':sha(old_config),'newConfigSha256':sha(self.c['hostConfig'])})
+            current=path.read_bytes()
+            if current==after:continue
+            if current!=before:raise ValueError('workspace changed outside retained routing transition')
+            temporary=path.with_name('workspace.transport-next.json')
+            with temporary.open('xb') as out:out.write(after);out.flush();os.fsync(out.fileno())
+            os.replace(temporary,path)
+            directory=os.open(path.parent,os.O_RDONLY)
+            try:os.fsync(directory)
+            finally:os.close(directory)
+
+    def prepare_platform(self):
         env=dict(os.environ,MINI_IMPORT_PROFILE='operator-appliance-v1')
-        self.run('broker-world',[REPO/'scripts/spk-platform/broker-world-up.sh',self.bins,self.c['hostConfig'],self.root/'broker'],env=env)
-        self.broker=read(self.root/'broker/broker.json')
+        broker=self.root/f'broker-{self.counter+1:04d}'
+        self.run('broker-world',[REPO/'scripts/spk-platform/broker-world-up.sh',self.bins,self.c['hostConfig'],broker],env=env)
+        self.broker=read(broker/'broker.json')
         self.layout=read(self.fixed('controller-create'));self.c['controllerRoot']=str(Path(self.layout['controllerHome'])/'grain')
         params=read(Path(self.c['world'])/'genesis-params.json')
         manifest=Path(self.c['manifest']);m=read(manifest)
@@ -188,9 +403,17 @@ class Journey:
             'bwrap':self.run('bwrap',['sh',REPO/'deploy/grain-host/resolve-bwrap']).read_text().strip(),'importProfile':'operator-appliance-v1'}
         path=self.root/'profile-input.json';write(path,p)
         result=read(self.run('profile',['python3',REPO/'scripts/spk-platform/same-store-profile.py',path]));self.c['profileResult']=result['profileResult']
-        path=self.root/'application-input.json';write(path,inputs.provision(self.c))
+
+    def prepare_application(self):
+        path=self.root/'application-input.json'
+        expected=inputs.provision(self.c)
+        if path.exists():
+            if read(path)!=expected:raise ValueError('retained application input differs')
+        else:write(path,expected)
         prepared=self.run('application-prepare',['python3',REPO/'scripts/spk-platform/same-store-app.py','prepare',path],timeout=14400)
         self.c['preparedApplication']=str(prepared)
+
+    def publish_data(self):
         self.run('publish-data',[self.bins/'spk-data-publish','publish','--store',Path(self.broker['grainsRoot'])/'spk/public-data','--source',self.data,'--inventory',self.inventory],timeout=3600)
 
     def cleanup(self):
@@ -299,7 +522,7 @@ class Journey:
                     'reserveSigner':{'role':'4','index':'0','publicKey':(self.homes/'hdisp/keys/mini.key.pub').read_bytes().hex(),
                                      'keyId':read(self.root/'subjects/hdisp.json')['keyId'],'keyEpoch':'1'}}},
             'room':{'mini':str(base/'bin/mini'),'host':str(base/'bin/minidregg-host'),'hostConfig':str(home/'host-config.json'),
-                'socket':str(home/'operator/mini.sock'),'workspace':str(grain/'state/resource-workspace'),'home':str(grain/'state/room-home'),
+                'socket':self.c['publicSocket'],'workspace':str(grain/'state/resource-workspace'),'home':str(grain/'state/room-home'),
                 'room':'lab','account':'unsummoned'}}
         # Public Host frames use the public endpoint; reserve authoring uses
         # the separate, controller-only operator proxy.
@@ -354,6 +577,8 @@ class Journey:
         self.inbox=read(dispatched)['inbox'];self.prompts=0
 
     def attach(self):
+        grain=Path(self.c['controllerRoot'])
+        self.controller_run('grain-runtime',['hermes-room','resident-init',grain/'controller.json',grain/'state/resident'])
         contract=self.root/'attachment-input.json';write(contract,inputs.attachment(self.c));self.contract=contract
         def phase(name,*extra):
             return self.run('attachment-'+name,['python3',REPO/'scripts/application-attachment.py',contract,name,*extra],timeout=3600)
@@ -373,6 +598,7 @@ class Journey:
         if value.get('type')!='tool-complete' or value.get('isError') is not False:raise ValueError('session tool not complete; retain request ID for native tool-result')
         retained=self.fixed('controller-tool-result',request)
         if session.read_bytes()!=retained.read_bytes():raise ValueError('session retained result differs')
+        self.fixed('controller-tool-ack',request)
         self.fixed('controller-stop')
         phase('issue-grant','--input',session)
         layout=dict(self.layout,controllerHome=self.c['controllerRoot'])
@@ -382,10 +608,24 @@ class Journey:
         start=self.run('app-start',[self.bins/'spk-host','grain','start',self.profile,'9890001'],timeout=2400)
         self.application_unit=read(start)['unit']
         activated=result(phase('activate','--input',start))
-        self.fixed('controller-config',activated['bundle']);self.controller_config()
+        self.enroll(activated['bundle'],'application')
         self.fixed('controller-start')
-        self.fixed('controller-tool-ack',request)
         self.application_unit=read(start)['unit']
+
+    def enroll(self,bundle,mode):
+        before=read(self.fixed('controller-journal'))
+        canonical=json.dumps(before['binding'],sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()
+        target=Path(bundle)/'controller.json'
+        request=self.root/f'enrollment-{self.counter:04d}.json'
+        write(request,{'protocol':'mini-controller-application-enrollment-v1','mode':mode,
+            'expectedBindingSha256':hashlib.sha256(canonical).hexdigest(),'targetConfigSha256':sha(target),
+            'residentState':str(Path(self.c['controllerRoot'])/'state/resident')})
+        self.fixed('controller-config',bundle)
+        result=read(self.fixed('controller-enroll',request))
+        after=read(self.fixed('controller-journal'))
+        if result.get('status')!='enrolled' or {k:v for k,v in before.items() if k!='binding'}!={k:v for k,v in after.items() if k!='binding'}:
+            raise ValueError('native enrollment did not preserve settled journal')
+        self.controller_config()
 
     def resident(self,label):
         home=Path(self.layout['controllerHome']);grain=Path(self.c['controllerRoot']);self.prompts+=1
@@ -475,14 +715,24 @@ class Journey:
 
 
 def main():
-    j=Journey()
+    resume=os.environ.get('J14_ORACLE_RESUME_WORLD')=='1'
+    selected=os.environ.get('J14_ORACLE_RESUME_CHECKPOINT')
+    checkpoint=Path(selected) if selected else None
+    generic=checkpoint is not None and read(checkpoint).get('protocol')=='mini-j14-checkpoint-v1'
+    j=Journey.from_checkpoint(checkpoint) if generic else Journey.resume_transport(checkpoint) if checkpoint else Journey.resume_transport() if resume else Journey()
+    phase='transport';start_counter=j.counter
     try:
-        for phase in ['world','application','worker','room','attach','probe']:
+        if generic:j.restore_services()
+        elif checkpoint:j.restart_transport()
+        phases=PHASES[PHASES.index(j.resume_phase):] if generic else PHASES[1:] if checkpoint else PHASES
+        for phase in phases:
             if phase=='worker':j.await_worker_release()
-            getattr(j,phase)()
+            (j.resume_world if resume and phase=='world' else getattr(j,phase))()
             write(j.root/('context-after-'+phase+'.json'),j.c)
+            next_index=PHASES.index(phase)+1
+            if next_index<len(PHASES) and PHASES[next_index] in RESUMABLE:j.checkpoint(PHASES[next_index])
     except Exception as error:
-        write(j.root/'failure.json',{'phase':phase,'error':str(error),'passed':False,'lastCommand':j.counter,
+        write(j.root/(f'failure-checkpoint-{start_counter:04d}.json' if checkpoint else 'failure-transport-continuation.json' if resume else 'failure.json'),{'phase':phase,'error':str(error),'passed':False,'lastCommand':j.counter,
             'recovery':'Inspect retained exact native attempts; do not repeat an uncertain submission as new work.'})
         raise
     finally:j.cleanup()

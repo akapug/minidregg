@@ -329,7 +329,8 @@ def encodeTurnAt (w : World deployedR TransactionId Digest) (t : DTurn deployedR
        (StreamCodec.option digestStream).encode t.capability,
        StreamCodec.nat.encode t.notBefore,
        (StreamCodec.option StreamCodec.nat).encode t.validUntil,
-       (StreamCodec.list (StreamCodec.product StreamCodec.nat digestStream)).encode t.pins])
+       (StreamCodec.list (StreamCodec.product StreamCodec.nat digestStream)).encode t.pins,
+       DurableReceiverCodec.chargeStream.encode t.credit])
 
 /-- Decode a persisted turn against the follower's world. -/
 def decodeTurnAt (w : World deployedR TransactionId Digest) (bytes : List UInt8) :
@@ -338,7 +339,7 @@ def decodeTurnAt (w : World deployedR TransactionId Digest) (bytes : List UInt8)
     (StreamCodec.list bytesStream)) bytes
   match fields with
   | [fTx, fCreates, fLegs, fRetires, fEvent, fNull, fCharge, fSubject, fEpoch, fCap,
-      fBefore, fUntil, fPins] =>
+      fBefore, fUntil, fPins, fCredit] =>
     let txId ← full digestStream fTx
     let createsRaw ← full (StreamCodec.list bytesStream) fCreates
     let creates ← createsRaw.mapM decodeCreate
@@ -354,8 +355,9 @@ def decodeTurnAt (w : World deployedR TransactionId Digest) (bytes : List UInt8)
     let notBefore ← full StreamCodec.nat fBefore
     let validUntil ← full (StreamCodec.option StreamCodec.nat) fUntil
     let pins ← full (StreamCodec.list (StreamCodec.product StreamCodec.nat digestStream)) fPins
+    let credit ← full DurableReceiverCodec.chargeStream fCredit
     some { txId, creates, legs, retires, event, nullifiers, charge, subject, keyEpoch,
-           capability, notBefore, validUntil, absent, pins }
+           capability, notBefore, validUntil, absent, pins, credit }
   | _ => none
 
 theorem mapM_decodeLegAt (held : CellId → Option (Cell deployedR)) (legs : List (Leg deployedR)) :

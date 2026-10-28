@@ -41,13 +41,19 @@ def lineageOf (coordinates : BirthCoordinates) : CapabilityId → Option (Finset
   fun placement => (coordinates.lineage.lookup placement.value).map fun ids =>
     (ids.map CapabilityId.mk).toFinset
 
+/-- The platform terms at a draft's coordinates: the owner budget, lifetime and fee its grants
+and fee carry. -/
+def termsOf (coordinates : BirthCoordinates) : SourceAgreementJson.BirthTerms :=
+  ⟨coordinates.ownerBudget, coordinates.lifetime, fun _ =>
+    (coordinates.fee.collector, coordinates.fee.asset, coordinates.fee.amount)⟩
+
 /-- **The deployed authoring of the member's source at given coordinates**: the whole intent
 (subject, nonce, observe grants, draft descriptor bytes and source capabilities). -/
 def author (config : NativeHost.Config) (source : Lean.Json)
     (coordinates : BirthCoordinates) : Option NativeObservationCodec.Intent :=
   (SourceAgreementJson.birthIntentFrom "$" source fun path birth =>
     SourceAgreementJson.birthAt path birth config coordinates.height (epochsOf coordinates)
-      (lineageOf coordinates)).toOption
+      (lineageOf coordinates) (termsOf coordinates)).toOption
 
 /-- Thin birth intent consent (frame 234): the authoring check alone. -/
 def checkIntent (config : NativeHost.Config) (source : Lean.Json)

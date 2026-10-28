@@ -236,7 +236,7 @@ inductive Ctor
   | subjectKeyCommitmentAdoption | payEnrolV2 | payClaim
   | jointReserve | bootstrapBundle | applicationFailedStartRecovery
   | applicationRetryBeginV4 | applicationRetryClaimV4 | applicationRetryCompletionV4
-  | platformInstall
+  | platformInstall | meterRefill
   deriving DecidableEq, Repr
 
 def Ctor.all : List Ctor :=
@@ -252,11 +252,11 @@ def Ctor.all : List Ctor :=
     .certify, .renounce, .subjectKeyRotation, .activity, .seat, .subjectKeyCommitmentAdoption, .payEnrolV2, .payClaim,
     .jointReserve, .bootstrapBundle, .applicationFailedStartRecovery,
     .applicationRetryBeginV4, .applicationRetryClaimV4, .applicationRetryCompletionV4,
-    .platformInstall]
+    .platformInstall, .meterRefill]
 
 theorem Ctor.mem_all (c : Ctor) : c ∈ Ctor.all := by cases c <;> decide
 
-theorem Ctor.all_length : Ctor.all.length = 52 := rfl
+theorem Ctor.all_length : Ctor.all.length = 53 := rfl
 
 /-- The capability guard: the authority row the exercised capability lives at. -/
 def capGuard : Leg R := leg cAuth .authority [rd 1 (some 1)]
@@ -355,6 +355,9 @@ def Ctor.turn : Ctor → CTurn
   | .seat => mk [] [leg cSeat .seat [wr 0 1 2], leg cBook .book [wr 0 100 90, al 6 10]] [157, 158]
   -- platform install: the record written at its loaded value, the controller untouched
   | .platformInstall => mk [] [leg cPlatform .platform [wr 0 1 2]] [159]
+  -- seed-meter refill: no cell written; the authority row read as its guard, one marker
+  -- (the meter credit is the commit protocol's, not a cell's)
+  | .meterRefill => mk [] [leg cAuth .authority [rd 1 (some 1)]] [160]
   -- holder renunciation appends the authority revocation and spends one marker
   | .renounce => mk [] [leg cAuth .authority [rd 1 (some 1), lg 8 1]] [143]
   -- key rotation reads the current authority and appends its successor record
@@ -462,6 +465,8 @@ def Ctor.negation : Ctor → CTurn
   | .seat => mk [] [leg cSeat .seat [wr 0 9 2], leg cBook .book [wr 0 100 90, al 6 10]] [157, 158]
   -- a platform install over a record that moved (a stale base)
   | .platformInstall => mk [] [leg cPlatform .platform [wr 0 9 2]] [159]
+  -- a refill over an authority row that moved (a revoked capability)
+  | .meterRefill => mk [] [leg cAuth .authority [rd 1 (some 0)]] [160]
   | .renounce => mk [] [leg cAuth .authority [rd 1 (some 1), lg 8 1]] [99]
   | .subjectKeyRotation => mk [] [leg cAuth .authority [rd 1 (some 0), lg 9 1]] [144]
   | .subjectKeyCommitmentAdoption => mk [] [leg cAuth .authority [wr 1 0 2]] [145]
@@ -534,6 +539,7 @@ def Ctor.refusal : Ctor → Reject
   | .activity => .guardFailed cActivity 0
   | .seat => .guardFailed cSeat 0
   | .platformInstall => .guardFailed cPlatform 0
+  | .meterRefill => .guardFailed cAuth 0
   | .renounce => .nullifierSpent
   | .subjectKeyRotation => .guardFailed cAuth 0
   | .subjectKeyCommitmentAdoption => .guardFailed cAuth 0

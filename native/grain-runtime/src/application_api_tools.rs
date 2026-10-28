@@ -378,6 +378,91 @@ struct LifetimeBindingReply {
     binding_sha256: String,
 }
 
+// The resident's v3 wire (agent_api_lifetime_wire_v3::Reply), decoded
+// directly from bytes before Value can collapse duplicate object fields.
+#[derive(Debug, Deserialize, Serialize)]
+enum LifetimeWireProtocol {
+    #[serde(rename = "mini-spk-agent-api-v3")]
+    V3,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
+enum LifetimeHostReply {
+    BindingV3 {
+        protocol: LifetimeWireProtocol,
+        binding: Box<LifetimeBinding>,
+        #[serde(rename = "bindingSha256")]
+        binding_sha256: String,
+    },
+    HttpV3 {
+        protocol: LifetimeWireProtocol,
+        #[serde(rename = "operationId")]
+        operation_id: String,
+        #[serde(rename = "bindingSha256")]
+        binding_sha256: String,
+        #[serde(rename = "operationFingerprint")]
+        operation_fingerprint: String,
+        #[serde(rename = "responseSha256")]
+        response_sha256: String,
+        #[serde(rename = "committedReceipt")]
+        committed_receipt: SourceReceiptPin,
+        status: u16,
+        headers: Vec<HostHeader>,
+        #[serde(rename = "bodyHex")]
+        body_hex: String,
+    },
+    RefusedV3 {
+        protocol: LifetimeWireProtocol,
+        #[serde(rename = "operationId")]
+        operation_id: String,
+        #[serde(rename = "bindingSha256")]
+        binding_sha256: String,
+        #[serde(
+            rename = "operationFingerprint",
+            skip_serializing_if = "Option::is_none"
+        )]
+        operation_fingerprint: Option<String>,
+        code: String,
+    },
+    UncertainV3 {
+        protocol: LifetimeWireProtocol,
+        #[serde(rename = "operationId")]
+        operation_id: String,
+        #[serde(rename = "bindingSha256")]
+        binding_sha256: String,
+        #[serde(rename = "operationFingerprint")]
+        operation_fingerprint: String,
+        phase: String,
+    },
+    InspectionV3 {
+        protocol: LifetimeWireProtocol,
+        #[serde(rename = "operationId")]
+        operation_id: String,
+        #[serde(rename = "bindingSha256")]
+        binding_sha256: String,
+        #[serde(
+            rename = "operationFingerprint",
+            skip_serializing_if = "Option::is_none"
+        )]
+        operation_fingerprint: Option<String>,
+        state: String,
+        #[serde(
+            rename = "definiteReplySha256",
+            skip_serializing_if = "Option::is_none"
+        )]
+        definite_reply_sha256: Option<String>,
+        #[serde(
+            rename = "definiteReplyJsonHex",
+            skip_serializing_if = "Option::is_none"
+        )]
+        definite_reply_json_hex: Option<String>,
+        #[serde(rename = "retentionError", skip_serializing_if = "Option::is_none")]
+        retention_error: Option<String>,
+    },
+}
+
+
 /// Exact order mirrors the resident v3 fingerprint preimage. These values
 /// come from the source-owned reserve plan and signed task observations, not
 /// from the forward dispatch frame or a static route generation.
@@ -1568,6 +1653,16 @@ fn exchange_once_guarded(
             "application API forward request exceeds frame bound".into(),
         ));
     }
+    let (lifetime, inspection) = match (
+        request.get("protocol").and_then(Value::as_str),
+        request.get("type").and_then(Value::as_str),
+    ) {
+        (Some(LIFETIME_PROTOCOL), Some("hello-v3" | "dispatch-v3")) => (true, false),
+        (Some(LIFETIME_PROTOCOL), Some("inspect-v3")) => (true, true),
+        (Some(PROTOCOL), Some("hello" | "dispatch")) => (false, false),
+        (Some(PROTOCOL), Some("inspect")) => (false, true),
+        _ => return Err(TransportError::BeforeSend("application API request protocol/type mismatch".into())),
+    };
     check_socket_ancestors(socket, expected_host_uid)?;
     let before = fs::symlink_metadata(socket)
         .map_err(|error| TransportError::BeforeSend(format!("host socket: {error}")))?;
@@ -1635,7 +1730,7 @@ fn exchange_once_guarded(
         .1
         .map_err(|error| TransportError::Uncertain(format!("host reply header: {error}")))?;
     let size = u32::from_be_bytes(size) as usize;
-    let max_reply = if request.get("type").and_then(Value::as_str) == Some("inspect") {
+    let max_reply = if inspection {
         MAX_INSPECT_REPLY_FRAME
     } else {
         MAX_FORWARD_FRAME
@@ -1653,8 +1748,13 @@ fn exchange_once_guarded(
         })?;
     // Decode against the strict tagged wire before admitting a Value. Direct
     // typed decoding rejects duplicate fields that Value would collapse.
-    serde_json::from_slice::<HostReply>(&payload)
-        .map_err(|error| TransportError::Uncertain(format!("host reply wire: {error}")))?;
+    if lifetime {
+        serde_json::from_slice::<LifetimeHostReply>(&payload)
+            .map_err(|error| TransportError::Uncertain(format!("host lifetime reply wire: {error}")))?;
+    } else {
+        serde_json::from_slice::<HostReply>(&payload)
+            .map_err(|error| TransportError::Uncertain(format!("host reply wire: {error}")))?;
+    }
     serde_json::from_slice(&payload)
         .map_err(|error| TransportError::Uncertain(format!("host reply JSON: {error}")))
 }
@@ -1912,6 +2012,78 @@ mod tests {
             fs::remove_file(path).unwrap();
         }
         fs::remove_dir(path.parent().unwrap()).unwrap();
+    }
+
+    fn socket_reply(request: &Value, reply: Vec<u8>) -> Result<Value, TransportError> {
+        let path = socket_path();
+        let listener = UnixListener::bind(&path).unwrap();
+        let expected = request.clone();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+            let mut size = [0u8; 4]; stream.read_exact(&mut size).unwrap();
+            let mut body = vec![0; u32::from_be_bytes(size) as usize];
+            stream.read_exact(&mut body).unwrap();
+            assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), expected);
+            stream.write_all(&(reply.len() as u32).to_be_bytes()).unwrap();
+            // Oversized frames are rejected before the client reads the body.
+            let _ = stream.write_all(&reply);
+        });
+        let result = exchange_once(&path, unsafe { libc::geteuid() }, request,
+            Instant::now() + Duration::from_secs(2));
+        server.join().unwrap(); remove_socket(&path); result
+    }
+
+    fn lifetime_http_wire() -> Value {
+        json!({"type":"http-v3","protocol":LIFETIME_PROTOCOL,"operationId":"9",
+            "bindingSha256":"ab".repeat(32),"operationFingerprint":"cd".repeat(32),
+            "responseSha256":"ef".repeat(32),"status":200,"headers":[],"bodyHex":"6869",
+            "committedReceipt":{"transactionId":"1","eventId":"2","acceptedCount":"3","worldRoot":"4"}})
+    }
+
+    #[test]
+    fn lifetime_transport_dispatch_and_large_inspection_use_strict_v3_wire() {
+        let dispatch = json!({"type":"dispatch-v3","protocol":LIFETIME_PROTOCOL});
+        let http = lifetime_http_wire();
+        assert_eq!(socket_reply(&dispatch, serde_json::to_vec(&http).unwrap()).unwrap(), http);
+        for kind in ["refused-v3", "uncertain-v3"] {
+            let mut reply = json!({"type":kind,"protocol":LIFETIME_PROTOCOL,
+                "operationId":"9","bindingSha256":"ab".repeat(32),"operationFingerprint":"cd".repeat(32)});
+            reply[if kind == "refused-v3" { "code" } else { "phase" }] = json!("held");
+            assert_eq!(socket_reply(&dispatch, serde_json::to_vec(&reply).unwrap()).unwrap(), reply);
+        }
+        let inspect = json!({"type":"inspect-v3","protocol":LIFETIME_PROTOCOL});
+        let reply = json!({"type":"inspection-v3","protocol":LIFETIME_PROTOCOL,"operationId":"9",
+            "bindingSha256":"ab".repeat(32),"state":"committed",
+            "definiteReplyJsonHex":"00".repeat(MAX_FORWARD_FRAME / 2),"definiteReplySha256":"cd".repeat(32)});
+        let bytes = serde_json::to_vec(&reply).unwrap();
+        assert!(bytes.len() > MAX_FORWARD_FRAME && bytes.len() < MAX_INSPECT_REPLY_FRAME);
+        assert_eq!(socket_reply(&inspect, bytes.clone()).unwrap(), reply);
+        assert!(matches!(socket_reply(&dispatch, bytes), Err(TransportError::Uncertain(_))));
+        let oversized = vec![b' '; MAX_INSPECT_REPLY_FRAME + 1];
+        assert!(matches!(socket_reply(&inspect, oversized), Err(TransportError::Uncertain(_))));
+    }
+
+    #[test]
+    fn lifetime_transport_refuses_duplicate_unknown_and_cross_protocol_frames() {
+        let request = json!({"type":"dispatch-v3","protocol":LIFETIME_PROTOCOL});
+        let valid = serde_json::to_string(&lifetime_http_wire()).unwrap();
+        for wire in [
+            valid.replacen("\"operationId\":\"9\"", "\"operationId\":\"9\",\"operationId\":\"10\"", 1),
+            valid.replacen("\"eventId\":\"2\"", "\"eventId\":\"2\",\"eventId\":\"3\"", 1),
+            valid.replacen("{", "{\"unexpected\":true,", 1),
+            valid.replace(LIFETIME_PROTOCOL, PROTOCOL),
+            serde_json::to_string(&json!({"type":"refused","protocol":PROTOCOL,
+                "operation_id":"9","binding_sha256":"ab".repeat(32),"code":"held"})).unwrap(),
+        ] {
+            assert!(matches!(socket_reply(&request, wire.into_bytes()), Err(TransportError::Uncertain(_))));
+        }
+        assert!(matches!(socket_reply(&hello_request(), valid.into_bytes()), Err(TransportError::Uncertain(_))));
+        for invalid in [json!({"type":"hello-v3","protocol":PROTOCOL}),
+            json!({"type":"hello","protocol":LIFETIME_PROTOCOL}), json!({"type":"hello-v3"})] {
+            assert!(matches!(exchange_once(Path::new("/not-a-socket"), unsafe { libc::geteuid() },
+                &invalid, Instant::now() + Duration::from_secs(1)), Err(TransportError::BeforeSend(_))));
+        }
     }
 
     fn request() -> Value {
@@ -2293,7 +2465,13 @@ mod tests {
         let sha = hex(&digest.finalize());
         let reply = json!({"type":"binding-v3","protocol":LIFETIME_PROTOCOL,
             "binding":binding,"bindingSha256":sha});
-        let (checked, invocation) = verify_lifetime_binding_reply(reply.clone(), &route).unwrap();
+        let received = socket_reply(&lifetime_hello_request(), serde_json::to_vec(&reply).unwrap()).unwrap();
+        assert_eq!(received, reply);
+        let duplicate_nested = serde_json::to_string(&reply).unwrap().replacen(
+            "\"hostUnit\":", "\"hostUnit\":\"other.service\",\"hostUnit\":", 1);
+        assert!(matches!(socket_reply(&lifetime_hello_request(), duplicate_nested.into_bytes()),
+            Err(TransportError::Uncertain(_))));
+        let (checked, invocation) = verify_lifetime_binding_reply(received, &route).unwrap();
         assert_eq!(checked, sha);
         assert_eq!(invocation, "ab".repeat(16));
         let mut changed = route.clone();
@@ -2510,7 +2688,7 @@ mod tests {
             stream.read_exact(&mut payload).unwrap();
             assert_eq!(
                 serde_json::from_slice::<Value>(&payload).unwrap(),
-                json!({"type":"dispatch","operation_id":"7"})
+                json!({"type":"dispatch","protocol":PROTOCOL,"operation_id":"7"})
             );
             let reply = serde_json::to_vec(&json!({"type":"refused","protocol":PROTOCOL,
                 "operation_id":"7","binding_sha256":"0".repeat(64),"code":"disabled"}))
@@ -2523,7 +2701,7 @@ mod tests {
         let pending = start_exchange_once(
             &path,
             unsafe { libc::geteuid() },
-            json!({"type":"dispatch","operation_id":"7"}),
+            json!({"type":"dispatch","protocol":PROTOCOL,"operation_id":"7"}),
             Instant::now() + Duration::from_secs(2),
             Arc::new(AtomicBool::new(false)),
         )
@@ -2546,7 +2724,7 @@ mod tests {
             exchange_once(
                 &absent,
                 unsafe { libc::geteuid() },
-                &json!({"type":"inspect","operation_id":"8"}),
+                &json!({"type":"inspect","protocol":PROTOCOL,"operation_id":"8"}),
                 Instant::now() + Duration::from_secs(2),
             ),
             Err(TransportError::BeforeSend(_))
@@ -2565,7 +2743,7 @@ mod tests {
             exchange_once(
                 &path,
                 unsafe { libc::geteuid() },
-                &json!({"type":"dispatch","operation_id":"8"}),
+                &json!({"type":"dispatch","protocol":PROTOCOL,"operation_id":"8"}),
                 Instant::now() + Duration::from_secs(2),
             ),
             Err(TransportError::Uncertain(_))

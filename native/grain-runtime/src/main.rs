@@ -18232,6 +18232,12 @@ fn main() -> ExitCode {
             }
         };
     }
+    if args.len() == 5 && args[1] == "hermes-room" && args[2] == "resident-init" {
+        return match room_resident::initialize(Path::new(&args[3]), Path::new(&args[4])) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => { eprintln!("room resident initialization: {error}"); ExitCode::from(1) }
+        };
+    }
     if args.len() == 4 && args[1] == "hermes-room" && args[2] == "resident" {
         return match room_resident::main(Path::new(&args[3])) {
             Ok(()) => ExitCode::SUCCESS,

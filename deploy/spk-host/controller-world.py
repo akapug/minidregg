@@ -1382,7 +1382,8 @@ def enroll(store, helper, source_arg):
             and runtime.get('ControlPID', '0') == '0', 'controller runtime must be stopped for native enrollment')
     raw = read_file(canonical(source_arg), r['operatorUid'], 8192, required_mode=0o600)
     request = strict_json(raw)
-    require(isinstance(request, dict) and set(request) == {'protocol', 'mode', 'expectedBindingSha256', 'targetConfigSha256'}
+    require(isinstance(request, dict) and set(request) in ({'protocol', 'mode', 'expectedBindingSha256', 'targetConfigSha256'},
+                {'protocol', 'mode', 'expectedBindingSha256', 'targetConfigSha256', 'residentState'})
             and request['protocol'] == 'mini-controller-application-enrollment-v1'
             and request['mode'] in ('bootstrap-dispatch', 'application')
             and all(isinstance(request[key], str) and re.fullmatch('[0-9a-f]{64}', request[key])
@@ -1392,6 +1393,13 @@ def enroll(store, helper, source_arg):
     require(sha(config) == request['targetConfigSha256']
             and read_file(base / 'configs' / (sha(config) + '.json'), 0, 524288, required_mode=0o600) == config,
             'native enrollment config differs from retained revision')
+    if 'residentState' in request:
+        state = strict_json(config).get('stateDir')
+        resident = request['residentState']
+        require(isinstance(state, str) and isinstance(resident, str)
+                and str(Path(resident)) == resident and Path(resident).is_absolute()
+                and Path(resident).parent == Path(state) and Path(resident).name not in ('.', '..'),
+                'native enrollment resident state must be an exact direct child of stateDir')
     # Source reads need the separately pinned operator services. The controller
     # runtime remains stopped; no background controller work is launched.
     prior = {}

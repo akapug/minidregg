@@ -1,5 +1,9 @@
 {
  "Compiler/CanonicalRuntimeProfileCore.lean": {
+  "profile.template": {
+   "count": 2,
+   "status": "encoding"
+  },
   "template.lifetime": {
    "count": 1,
    "status": "encoding"
@@ -7,282 +11,118 @@
   "template.ownerBudget": {
    "count": 1,
    "status": "encoding"
-  }
- },
- "Host/ApplicationAgentLifetimeGrantAuthoring.lean": {
-  "config.tariff": {
-   "count": 1,
-   "status": "owed"
   }
  },
  "Host/ApplicationCurrentBirthAuthoring.lean": {
   "config.tariff": {
    "count": 1,
-   "status": "owed"
+   "reason": "checkSource: the supplied genesis description must equal the pinned runtime's genesis parameters and rebuild the pinned seed; prices and the grant window come from the loaded platform record",
+   "status": "genesis"
   },
-  "grainBirthTariffValue": {
-   "count": 1,
-   "status": "owed"
-  }
- },
- "Host/ApplicationFailedStartRecoveryAuthoring.lean": {
-  "config.completionCustodianKey": {
-   "count": 1,
-   "status": "owed"
-  }
- },
- "Host/ApplicationLifecycleCompletionOperator.lean": {
-  "config.completionCustodianKey": {
-   "count": 1,
-   "status": "owed"
-  }
- },
- "Host/ApplicationLifecycleLaunchCompletionAuthoring.lean": {
-  "config.completionCustodianKey": {
-   "count": 1,
-   "status": "owed"
-  }
- },
- "Host/ApplicationLifecycleRetryCompletionV4Authoring.lean": {
-  "config.completionCustodianKey": {
-   "count": 1,
-   "status": "owed"
+  "profile.template": {
+   "count": 2,
+   "reason": "checkSource: the supplied genesis description must equal the pinned runtime's genesis parameters and rebuild the pinned seed; prices and the grant window come from the loaded platform record",
+   "status": "genesis"
   }
  },
  "Host/BirthRuntimeProfile.lean": {
   "config.tariff": {
    "count": 1,
-   "status": "owed"
+   "reason": "select: the supplied genesis coordinates must equal the deployed genesis's; the profile semantics hash them. Not a price",
+   "status": "genesis"
   }
  },
  "Host/ClientConsentSettingsScenario.lean": {
   "config.tariff": {
    "count": 1,
-   "status": "owed"
+   "reason": "settings-parse check: `tariffBase` is the operator manifest's genesis field",
+   "status": "genesis"
   }
  },
  "Host/Json.lean": {
-  "config.tariff": {
-   "count": 2,
-   "status": "owed"
-  },
   "template.lifetime": {
    "count": 2,
-   "status": "owed"
+   "reason": "birthRootCapability: offline authoring at a genesis description (no loaded image); loaded authoring overrides the window and budget with the record (birthRootCapabilityAt `current`), and its time-window lemma",
+   "status": "genesis"
   }
  },
  "Host/Main.lean": {
+  "config.grainBirthTariff": {
+   "count": 1,
+   "reason": "profileDescription: the deployment's genesis description beside runtimeParameters (the profile semantics hash these); birth contexts name it as their genesis source and checkSource/BirthRuntimeProfile.select compare it to the pinned genesis. It quotes no price: births and quotes price from the loaded platform record; and the `genesis` command, which builds the genesis image and checks its source against the operator's genesis manifest",
+   "status": "genesis"
+  },
   "config.tariff": {
    "count": 7,
-   "status": "owed"
+   "reason": "profileDescription: the deployment's genesis description beside runtimeParameters (the profile semantics hash these); birth contexts name it as their genesis source and checkSource/BirthRuntimeProfile.select compare it to the pinned genesis. It quotes no price: births and quotes price from the loaded platform record; and the `genesis` command, which builds the genesis image and checks its source against the operator's genesis manifest",
+   "status": "genesis"
   },
   "template.lifetime": {
    "count": 1,
-   "status": "owed"
+   "reason": "profileDescription: the deployment's genesis description beside runtimeParameters (the profile semantics hash these); birth contexts name it as their genesis source and checkSource/BirthRuntimeProfile.select compare it to the pinned genesis. It quotes no price: births and quotes price from the loaded platform record; and the `genesis` command, which builds the genesis image and checks its source against the operator's genesis manifest",
+   "status": "genesis"
   },
   "template.ownerBudget": {
    "count": 1,
-   "status": "owed"
-  }
- },
- "Host/NativeReserveBirthAuthoring.lean": {
-  "config.tariff": {
-   "count": 1,
-   "status": "owed"
-  }
- },
- "Host/PayClaims.lean": {
-  "config.tariff": {
-   "count": 1,
-   "status": "owed"
+   "reason": "profileDescription: the deployment's genesis description beside runtimeParameters (the profile semantics hash these); birth contexts name it as their genesis source and checkSource/BirthRuntimeProfile.select compare it to the pinned genesis. It quotes no price: births and quotes price from the loaded platform record; and the `genesis` command, which builds the genesis image and checks its source against the operator's genesis manifest",
+   "status": "genesis"
   }
  },
  "Host/SourceAgreementJson.lean": {
   "template.lifetime": {
    "count": 1,
-   "status": "owed"
+   "reason": "birthRootCapability: offline authoring at a genesis description; loaded authoring overrides the window and budget with the record (birthRootCapabilityAt `current`)",
+   "status": "genesis"
   }
  },
  "Host/SourceAgreementReader.lean": {
   "config.tariff": {
    "count": 6,
-   "status": "owed"
+   "reason": "profileDescription: the deployment's genesis description beside runtimeParameters (the profile semantics hash these); birth contexts name it as their genesis source and checkSource/BirthRuntimeProfile.select compare it to the pinned genesis. It quotes no price: births and quotes price from the loaded platform record",
+   "status": "genesis"
   },
   "template.lifetime": {
    "count": 1,
-   "status": "owed"
+   "reason": "profileDescription: the deployment's genesis description beside runtimeParameters (the profile semantics hash these); birth contexts name it as their genesis source and checkSource/BirthRuntimeProfile.select compare it to the pinned genesis. It quotes no price: births and quotes price from the loaded platform record",
+   "status": "genesis"
   },
   "template.ownerBudget": {
    "count": 1,
-   "status": "owed"
+   "reason": "profileDescription: the deployment's genesis description beside runtimeParameters (the profile semantics hash these); birth contexts name it as their genesis source and checkSource/BirthRuntimeProfile.select compare it to the pinned genesis. It quotes no price: births and quotes price from the loaded platform record",
+   "status": "genesis"
   }
  },
  "Kernel/ActivitySeatEnd.lean": {
   "config.tariff": {
    "count": 2,
-   "status": "owed"
-  }
- },
- "Kernel/ApplicationAgentLifetimeGrantAdmission.lean": {
-  "config.tariff": {
-   "count": 4,
-   "status": "owed"
-  }
- },
- "Kernel/ApplicationAgentLifetimeGrantIntentTemplate.lean": {
-  "config.tariff": {
-   "count": 1,
-   "status": "owed"
-  }
- },
- "Kernel/ApplicationAgentLifetimeGrantSource.lean": {
-  "config.tariff": {
-   "count": 3,
-   "status": "owed"
-  },
-  "template.lifetime": {
-   "count": 1,
-   "status": "owed"
-  },
-  "template.ownerBudget": {
-   "count": 1,
-   "status": "owed"
-  }
- },
- "Kernel/ApplicationFailedStartRecoveryAdmission.lean": {
-  "config.completionCustodianKey": {
-   "count": 3,
-   "status": "owed"
-  }
- },
- "Kernel/ApplicationGrainBirth.lean": {
-  "config.tariff": {
-   "count": 4,
-   "status": "owed"
-  },
-  "template.lifetime": {
-   "count": 3,
-   "status": "owed"
-  }
- },
- "Kernel/ApplicationGrainSessionBirth.lean": {
-  "config.tariff": {
-   "count": 4,
-   "status": "owed"
-  },
-  "template.lifetime": {
-   "count": 3,
-   "status": "owed"
-  }
- },
- "Kernel/ApplicationLifecycleCompletionAdmission.lean": {
-  "config.completionCustodianKey": {
-   "count": 3,
-   "status": "owed"
-  }
- },
- "Kernel/ApplicationLifecycleCompletionV2Admission.lean": {
-  "config.completionCustodianKey": {
-   "count": 3,
-   "status": "owed"
-  }
- },
- "Kernel/ApplicationLifecycleRetryCompletionV4Admission.lean": {
-  "config.completionCustodianKey": {
-   "count": 3,
-   "status": "owed"
-  }
- },
- "Kernel/ApplicationShareIssueAdmission.lean": {
-  "config.tariff": {
-   "count": 4,
-   "status": "owed"
-  }
- },
- "Kernel/ApplicationShareIssueAuthoring.lean": {
-  "config.tariff": {
-   "count": 1,
-   "status": "owed"
-  }
- },
- "Kernel/ApplicationShareIssueGrainAdmission.lean": {
-  "config.tariff": {
-   "count": 3,
-   "status": "owed"
-  },
-  "grainBirthTariffValue": {
-   "count": 1,
-   "status": "owed"
-  }
- },
- "Kernel/ApplicationShareIssueGrainAuthoring.lean": {
-  "config.tariff": {
-   "count": 1,
-   "status": "owed"
-  },
-  "grainBirthTariffValue": {
-   "count": 1,
-   "status": "owed"
-  }
- },
- "Kernel/ApplicationShareIssueGrainReceiver.lean": {
-  "config.tariff": {
-   "count": 1,
-   "status": "owed"
-  },
-  "grainBirthTariffValue": {
-   "count": 1,
-   "status": "owed"
-  }
- },
- "Kernel/ApplicationShareIssueReceiver.lean": {
-  "config.tariff": {
-   "count": 1,
-   "status": "owed"
-  }
- },
- "Kernel/ApplicationShareIssueSource.lean": {
-  "config.tariff": {
-   "count": 3,
-   "status": "owed"
-  },
-  "template.lifetime": {
-   "count": 1,
-   "status": "owed"
-  },
-  "template.ownerBudget": {
-   "count": 1,
-   "status": "owed"
-  }
- },
- "Kernel/NativeHost.lean": {
-  "config.tariff": {
-   "count": 10,
-   "status": "owed"
-  },
-  "grainBirthTariffValue": {
-   "count": 1,
-   "status": "owed"
+   "status": "other"
   }
  },
  "Kernel/NativeHostBookInvariant.lean": {
   "config.tariff": {
    "count": 2,
-   "status": "owed"
+   "status": "genesis"
   }
  },
  "Kernel/NativeHostContext.lean": {
   "config.completionCustodianKey": {
    "count": 2,
-   "status": "owed"
+   "reason": "runtimeParameters (genesis-parameter fingerprint) and validateChecks' 32-byte check of the genesis key that genesisRecord seeds; installs are checked by Platform.valid",
+   "status": "genesis"
+  },
+  "config.grainBirthTariff": {
+   "count": 3,
+   "reason": "grainBirthTariffValue, runtimeParameters and validateChecks: the genesis grain tariff's validity and fingerprint; the record's is checked by Platform.valid and read by grainTariffAt",
+   "status": "genesis"
   },
   "config.tariff": {
    "count": 13,
-   "status": "owed"
+   "reason": "runtimeParameters (the config's genesis-parameter fingerprint, and its lemma) and pinnedTariff's stand-in where the image holds no platform record, under which every birth refuses platformUnavailable",
+   "status": "genesis"
   },
   "grainBirthTariffValue": {
    "count": 2,
-   "status": "owed"
+   "status": "genesis"
   }
  },
  "Kernel/NativeHostGenesis.lean": {
@@ -299,122 +139,101 @@
    "status": "genesis"
   }
  },
- "Kernel/NativeHostGrainBirth.lean": {
-  "grainBirthTariffValue": {
-   "count": 1,
-   "status": "owed"
-  }
- },
- "Kernel/NativeHostPayClaims.lean": {
-  "config.tariff": {
-   "count": 2,
-   "status": "owed"
-  }
- },
  "Kernel/NativeHostReplay.lean": {
-  "config.tariff": {
-   "count": 22,
-   "status": "owed"
-  },
-  "grainBirthTariffValue": {
-   "count": 2,
-   "status": "owed"
+  "profile.template": {
+   "count": 1,
+   "reason": "payEnrolAmbient's stand-in where the image holds no platform record, under which every pay plan refuses platformUnavailable (PayEnrolReceiver.AmbientCurrent)",
+   "status": "genesis"
   }
  },
  "Kernel/ObjectiveActivity.lean": {
   "config.tariff": {
    "count": 17,
-   "status": "owed"
+   "status": "other"
   }
  },
  "Kernel/ObjectiveActivityReceiverCore.lean": {
   "config.tariff": {
    "count": 3,
-   "status": "owed"
+   "status": "other"
   }
  },
  "Kernel/ObjectiveActivityUpgrade.lean": {
   "config.tariff": {
    "count": 3,
-   "status": "owed"
+   "status": "other"
   }
  },
  "Kernel/ObjectiveCall.lean": {
   "config.tariff": {
    "count": 2,
-   "status": "owed"
+   "status": "other"
   }
  },
  "Kernel/ObjectiveDomain.lean": {
   "config.tariff": {
    "count": 1,
-   "status": "owed"
-  }
- },
- "Kernel/ObjectiveRefinesWorld.lean": {
-  "config.tariff": {
-   "count": 14,
-   "status": "owed"
+   "status": "other"
   }
  },
  "Kernel/ObjectiveResumeContract.lean": {
   "config.tariff": {
    "count": 16,
-   "status": "owed"
+   "status": "other"
   }
  },
  "Kernel/ObjectiveSend.lean": {
   "config.tariff": {
    "count": 2,
-   "status": "owed"
+   "status": "other"
   }
  },
  "Kernel/ObjectiveUpgradeInvariant.lean": {
   "config.tariff": {
    "count": 2,
-   "status": "owed"
+   "status": "other"
   }
  },
  "Kernel/ParticipantFactoryProvisioning.lean": {
   "template.lifetime": {
    "count": 1,
-   "status": "owed"
+   "status": "cell"
   },
   "template.ownerBudget": {
    "count": 1,
-   "status": "owed"
+   "status": "cell"
   }
  },
  "Kernel/PayEnrolReceiver.lean": {
   "template.lifetime": {
    "count": 1,
-   "status": "owed"
+   "status": "cell"
   },
   "template.ownerBudget": {
    "count": 1,
-   "status": "owed"
+   "status": "cell"
   }
  },
  "Kernel/ResourceBirthPolicyController.lean": {
   "template.lifetime": {
-   "count": 4,
-   "status": "owed"
+   "count": 3,
+   "status": "cell"
   },
   "template.ownerBudget": {
    "count": 1,
-   "status": "owed"
+   "status": "cell"
   }
  },
  "Kernel/SeatStore.lean": {
   "config.tariff": {
    "count": 1,
-   "status": "owed"
+   "status": "other"
   }
  },
  "TokenCensus/Table.lean": {
   "config.tariff": {
-   "count": 3,
-   "status": "owed"
+   "count": 1,
+   "status": "other"
   }
  }
 }

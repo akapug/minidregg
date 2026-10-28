@@ -33,8 +33,15 @@ def authorAndPrepareLoadedAuthorized (config : NativeHost.Config)
         | return .error "ordinary resource birth source required"
       let some ordinary := CanonicalCellRegistry.sourceEncoding.codec.decode ordinaryBytes
         | return .error "noncanonical ordinary birth source"
-      match withReserveGrants config.profile.template opened.authority.snapshot.authState
-          (NativeHost.logicalHeight config opened.durable) config.tariff ordinary reserveCapabilityIds with
+      -- The reserve grants and the re-quoted fee follow the image's platform record, as the
+      -- ordinary birth just authored did and as the receiver binds it (`birthTemplate`).
+      let some record := PlatformCellDomain.recordOn config.deployment opened.durable.snapshot
+        | return .error "platform cell unavailable: the image holds no platform record to price a birth from"
+      match withReserveGrants
+          (ResourceBirthPolicyController.Concrete.templateAt config.profile.template record)
+          opened.authority.snapshot.authState
+          (NativeHost.logicalHeight config opened.durable) record.creation ordinary
+          reserveCapabilityIds with
       | .error reason => return .error reason
       | .ok descriptor =>
           return prepareLoaded config opened

@@ -483,6 +483,11 @@ def rust_literals(root, data):
                         for number in re.finditer(r"\d+", arm[1]):
                             report(f, k + arm.start(1) + number.start(), "match arm", int(number[0]))
                 k += 1
+        # A reply's leading byte compared with a marker: `frame[0] != 255`, `reply.first() != Some(&255)`.
+        for m in re.finditer(r"\b\w+\s*\[\s*0\s*\]\s*(?:==|!=)\s*(\d+)\b", text):
+            if int(m[1]) in markers: report(f, m.start(1), "[0] ==", int(m[1]))
+        for m in re.finditer(r"\.first\(\)(?:\.copied\(\))?\s*(?:==|!=)\s*Some\(\s*&?\s*(\d+)\s*\)", text):
+            if int(m[1]) in markers: report(f, m.start(1), "first() ==", int(m[1]))
         # A reply classified by its leading marker in a slice pattern: `[255, ..] =>`.
         for m in re.finditer(r"\[\s*(\d+)\s*,\s*(?:\w+\s*@\s*)?\.\.\s*\]\s*(?:=>|\||if\b)", text):
             if int(m[1]) in markers: report(f, m.start(1), "[marker, ..]", int(m[1]))

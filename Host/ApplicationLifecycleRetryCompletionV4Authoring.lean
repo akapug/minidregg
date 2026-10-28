@@ -118,8 +118,10 @@ def prepareVerified (config : Config) {target : Durable}
     return .error "retry completion subject or resource differs from operator pin"
   if !ApplicationLifecycleResidentProfile.beginMatchesV3 config.storeIdentity begin.begin then
     return .error "retry completion BEGIN is outside resident host profile"
-  let some key := config.completionCustodianKey
-    | return .error "pinned physical custodian key unavailable"
+  let some record := PlatformCellDomain.recordOn config.deployment opened.durable.snapshot
+    | return .error "platform cell unavailable (completion custodian key)"
+  let some key := record.completionCustodianKey
+    | return .error "physical custodian key unavailable in the platform record"
   match ← ApplicationLifecycleRetryCompletionV4Report.check config.signature
       config.deployment.domain config.profile.semantics key begin physical with
   | .error detail => return .error detail

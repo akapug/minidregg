@@ -95,8 +95,8 @@ request field. Ordinary birth pricing is reused unchanged. -/
 def pricingAt {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (seed : Digest)
     (authority : CredentialAuthorityDomain.Snapshot) (memo : Memo) : PayEnrolV2Decision.Pricing :=
-  ⟨deployment.domain, seed, profile.semantics, ambient.tariff, profile.template,
-    PayEnrolReceiver.birthFee deployment profile.semantics profile.template ambient.tariff
+  ⟨deployment.domain, seed, profile.semantics, ambient.tariff, ambient.template,
+    PayEnrolReceiver.birthFee deployment profile.semantics ambient.template ambient.tariff
       authority.cell ambient.height
       (PayEnrolReceiver.ids deployment.domain memo.unsigned.enrollmentIdentityKey) 0⟩
 
@@ -194,6 +194,8 @@ structure Planned (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
   pay : PayCellDomain.Loaded deployment durable.snapshot
   book : BookCell deployment directory.directory
   factory : FactoryCell deployment directory.directory
+  /-- The payment is priced from the image's platform record. -/
+  ambientCurrent : PayEnrolReceiver.AmbientCurrent deployment profile durable ambient
   tariff : Tariff
   tariffExact : tariffOf pay.cell.logical = some tariff
   clock : ClockCellDomain.Loaded deployment durable.snapshot
@@ -218,12 +220,13 @@ structure Planned (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
 
 /-- **What every `Planned` v2 payment means** (layer 1): the decision is
 `PayEnrolV2Decision.decide`'s on the loaded pay and authority cells under exactly
-the bits `verified`, its economic input is the decision's, the tip is fresh and
+the bits `verified`, at prices from the image's platform record, its economic input is the decision's, the tip is fresh and
 ahead of the clock, and the factory law's dependencies are the loaded ones. -/
 theorem Planned.sound {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
     {ambient : Ambient} {seed : Digest} {durable : Durable} {command : Command} {memo : Memo}
     {verified : PayEnrolDecision.Verified}
     (planned : Planned deployment profile ambient seed durable command memo verified) :
+    PayEnrolReceiver.AmbientCurrent deployment profile durable ambient ∧
     PayEnrolV2Decision.decide planned.pay.cell.logical planned.authority.snapshot
         (pricingAt deployment profile ambient seed planned.authority.snapshot memo)
         command.tip command.observation memo verified.mini verified.ssh = .ok planned.decision ∧
@@ -234,7 +237,8 @@ theorem Planned.sound {deployment : Deployment} {profile : CanonicalRuntimeProfi
         (some command.tip) = .ok command.tip ∧
       WorldKindLawDependencies.loadTarget deployment planned.directory.directory
         deployment.factoryId = some planned.dependencies :=
-  ⟨planned.decided, planned.inputExact, planned.tipAhead, planned.tipFresh, planned.dependenciesExact⟩
+  ⟨planned.ambientCurrent, planned.decided, planned.inputExact, planned.tipAhead, planned.tipFresh,
+    planned.dependenciesExact⟩
 
 /-- Plan the payment under the verifier's answers `verified`.  Freshness
 measures observer lag against the monotone deployment clock, while the expiry
@@ -255,6 +259,7 @@ def plan (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ResourceBirthController.Concrete.observeCell deployment directory.directory deployment.resourceBookId .resourceBook)
   let factory ← requireSome .factoryUnavailable
     (ResourceBirthController.Concrete.observeCell deployment directory.directory deployment.factoryId .declaredObject)
+  let current ← (PayEnrolV2Legs.requireCurrent deployment profile durable ambient).mapError Reject.legs
   let snapshot := authority.snapshot
   if command.expectedAuthorityRoot ≠ snapshot.cell.root then throw .staleAuthority
   if rootExact : command.expectedPayRoot = pay.cell.root then
@@ -294,7 +299,7 @@ def plan (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
                       | none => throw .policyUnavailable
                       | some dependencies =>
                         pure ⟨directory, directoryExact, authority, authorityExact, pay, book, factory,
-                          tariff, tariffExact, clock, tipAhead, chainTipAhead,
+                          current.down, tariff, tariffExact, clock, tipAhead, chainTipAhead,
                           by simpa [exactTip] using tipFresh, clockValid, decision, decided, input,
                           inputExact, legs, candidate, dependencies, dependenciesExact⟩
             else throw .chainTipRegressed
