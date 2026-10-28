@@ -46,31 +46,24 @@ passes 16–21 on lane/audit-platform.
 
 ### Build status (read this first)
 
-Nothing on this lane has gone green yet. The green candidate before the merge is d95bf65ea
-(b7412f32a plus the build-3 red fixes). The successor starts from the conversion's landing
-sha (see the order below).
-- dregg-ref, build 3 of e2dae30ee: red in two places, both fixed in d95bf65ea.
-  - `enrolObserve` call sites still passed `profile`.
-  - ParticipantFactoryProvisioning lacked an import.
-- dregg-ref, build 4: queued on closure-lock.
-  - PID file /build/lanes/lean-audit-c-build.pid, log /build/lanes/lean-audit-c-build4.log,
-    script /build/lanes/lean-audit-c-build.sh, run as `lanes`.
-  - Box tree /build/lanes/lean-audit-c: 138320fbe plus the diff to e2dae30ee, with d95bf65ea's
-    four fixed files copied in, all uncommitted.
-  - `git fetch` fails there because of object dirs owned by another user; don't chown them.
-    Infra (aed5ecf506cf840af) has the closure.pid permission problem.
-- hbox: a build of d95bf65ea's content.
-  - Tree /othersys/lanes/lean-audit-c/src, from `git archive` of b7412f32a plus the four
-    fixes, with `LANE_SHA`.
-  - Script build.sh, PID file build.pid, log build.log, `SWARM_MEM_MAX=40G`.
-  - Seeded with the warm base's packages only, so our modules build cold.
-  - Remove /othersys/lanes/lean-audit-c when the lane ends.
-- Not covered by the targets: tests/lean/LifetimeGrantSourceAdversary.lean and the
-  share-issue and lifetime-grant Host/*Authoring files.
-- Likely reds still to come:
-  - the anonymous constructors of the grain Pending, the pay Planned structures and provisioning;
-  - `CompletionCustodianKey.select_pinned`'s split chain;
-  - the four Cores' `rcases … split at`.
+L1e (successor to L1d) holds the lane. **82c17c448 is green** in a warm tree on dregg-ref
+(build 6, closure-lock, peak 23.7 GB) and cold on hbox (build 3). Both box trees match the
+lane's HEAD byte for byte. The targets were the twenty modules in
+/build/lanes/lean-audit-c-build.sh, plus Host.ApplicationAgentLifetimeGrantAuthoring,
+-Inspection, Host.ApplicationShareIssueGrainInspection and
+tests/lean/LifetimeGrantSourceAdversary.lean (lane-check).
+- Reds fixed on the way (statements unchanged):
+  - bd199e0e9 `recordOn_congr`;
+  - 82c17c448 `select_pinned`'s split chain, and provisioning `recordOf`. Lean 4.30
+    generalizes a match discriminant inside the subtype it returns, so the equation is
+    carried by a local `go` instead.
+- dregg-ref box tree /build/lanes/lean-audit-c (a worktree of /build/minidregg; `git fetch`
+  there fails on the other user's object dirs). Sync it with `git archive HEAD <files> | ssh
+  dregg-ref tar -x` and chown the files to lanes. Build scripts must export
+  `PATH=/build/home-lanes/.cargo/bin:/build/home-lanes/.elan/bin:$PATH`; build 4 died with
+  `lake` not found. PID file /build/lanes/lean-audit-c-build.pid.
+- hbox tree /othersys/lanes/lean-audit-c/src (git archive, build.sh, build.pid, SWARM_MEM_MAX=40G).
+  Remove /othersys/lanes/lean-audit-c when the lane ends.
 
 ### Item 5 ruling
 
