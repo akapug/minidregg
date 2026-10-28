@@ -89,7 +89,7 @@ Its hbox worlds: /tank/rows-2d8b7ed5-apps/w-{featured,b1,b2,b4,b6,rt,fixups}. Mi
 - PASS: EtherCalc lifecycle + write, DokuWiki lifecycle + write, Datasette lifecycle + recorded read, HedgeDoc/Davros/HledgerWeb lifecycles.
 - HedgeDoc write "close frame" (socket.io): same family as IPython's kernel websocket; given to B8 (a13f0bc9626b1320a), fix at the cause for both.
 - Davros write, HledgerWeb write and sntfy lifecycle: ONE cause (B7 abf203f357754001b): featured-qualify gave the owner session role 0, the package's weakest (sntfy `api` lacks administration -> 401/400; Davros and hledger-web `viewer`). Fixed at 817e8c7f1 (owner basis allAccess, which a grain owner holds and the Lean enrollment admits; failing write rows now print status + 160 body bytes; failing lifecycle rows name the phase). Rerun of l/m/o queued behind the B7 table (job2.pid under /tank/lanes/app-market-b7). Sha to the integrator once green.
-- spk-host io errors must name operation + path (coordinator): B3 faerie (a85d12892ea6de3ca) after its run, lane/un-spk-ioctx, one context wrapper, red-first missing-socket test.
+- spk-host io errors must name operation + path (coordinator): OWNED by a6603277e4ffe2d70 on lane/un-spk-ioctx (7ec878215: IoContext::ctx, 21 sites in broker_endpoint.rs + grain.rs, missing operator/broker socket and grain file tests). Told to finish whole (hostd, http_entrance, www_publish, broker...), one module per commit with the grep, then one sha. B3 (a85d12892ea6de3ca) told to stay out.
 
 ## Next three
 1. Read B3/B5/B7/B8 on 76758dba6 (each serial under the world-up flock); fix reds (recipes or spk-host); every app green on lifecycle + write into FEATURED in apps.rs (B3 does its own commit; DiagramsNet stays out); target 2-3 dozen.
