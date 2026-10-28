@@ -71,49 +71,95 @@ fn retain(path: &Path, data: &[u8]) -> Result<()> {
 struct ConsumedOriginProof(Value);
 
 /// The origin is historical only after the native resident consumed its exact
-/// typed terminal refusal. An idle controller alone is insufficient. Read the
+/// typed terminal outcome. An idle controller alone is insufficient. Read the
 /// two resident journals through their already-held guard and retain their
 /// hashes with the native outcome evidence; never clear the origin.
-fn consumed_origin(j: &Journal, config: &Config, resident: &quiescence::ResidentGuard) -> Result<Option<ConsumedOriginProof>> {
-    let Some(origin) = &j.resident_prompt_origin else { return Ok(None) };
-    if !matches!(resident.evidence(), quiescence::ResidentEvidence::Stopped {
-        prompt_pending:false, return_pending:false, queued_requests:false,
-        started_request:false, maintenance_pending:false }) {
+fn consumed_origin(
+    j: &Journal,
+    config: &Config,
+    resident: &quiescence::ResidentGuard,
+) -> Result<Option<ConsumedOriginProof>> {
+    let Some(origin) = &j.resident_prompt_origin else {
+        return Ok(None);
+    };
+    if !matches!(
+        resident.evidence(),
+        quiescence::ResidentEvidence::Stopped {
+            prompt_pending: false,
+            return_pending: false,
+            queued_requests: false,
+            started_request: false,
+            maintenance_pending: false
+        }
+    ) {
         return Err("retained resident origin requires stopped, drained resident custody".into());
     }
-    let requests = resident.request_bytes().ok_or("consumed resident origin requires retained request custody")?;
-    let outcome = prompt_outcome::read_bound(&config.state_dir,origin.prompt_operation_id,
-        &origin.resident_prompt_id,&origin.prompt_sha256)?;
-    validate_consumed_frame(origin,resident.bytes()?,&outcome)?;
-    Ok(Some(ConsumedOriginProof(json!({"type":"mini-enrollment-consumed-resident-origin-v1",
+    let requests = resident
+        .request_bytes()
+        .ok_or("consumed resident origin requires retained request custody")?;
+    let outcome = prompt_outcome::read_bound(
+        &config.state_dir,
+        origin.prompt_operation_id,
+        &origin.resident_prompt_id,
+        &origin.prompt_sha256,
+    )?;
+    validate_consumed_frame(origin, resident.bytes()?, &outcome)?;
+    let mut proof = json!({"type":"mini-enrollment-consumed-resident-origin-v1",
         "origin":origin,"residentState":resident.path()?,"residentStateSha256":sha256_bytes(resident.bytes()?)?,
         "requestsSha256":sha256_bytes(requests)?,
-        "promptEvidence":prompt_outcome::evidence(&config.state_dir,origin.prompt_operation_id)?}))))
+        "promptEvidence":prompt_outcome::evidence(&config.state_dir,origin.prompt_operation_id)?});
+    if matches!(outcome.outcome, prompt_outcome::Outcome::Admitted { .. }) {
+        proof["completedTurn"] = resident_completion::consumed_turn(config, j, resident)?;
+    }
+    Ok(Some(ConsumedOriginProof(proof)))
 }
 
-fn validate_consumed_frame(origin: &resident_origin::ResidentPromptOrigin, resident: &[u8], outcome: &prompt_outcome::Record) -> Result<()> {
-    let state: Value = serde_json::from_slice(resident).map_err(|e|e.to_string())?;
+fn validate_consumed_frame(
+    origin: &resident_origin::ResidentPromptOrigin,
+    resident: &[u8],
+    outcome: &prompt_outcome::Record,
+) -> Result<()> {
+    let state: Value = serde_json::from_slice(resident).map_err(|e| e.to_string())?;
     let frame = &state["lastCompletion"];
-    let completed: resident_origin::ResidentPromptOrigin = serde_json::from_value(frame["residentOrigin"].clone())
-        .map_err(|e|format!("resident drain lacks exact terminal origin: {e}"))?;
-    if state["completed"].as_u64().is_none_or(|n|n==0)
-        || frame["type"] != "prompt-complete" || frame["outcome"].as_str().is_none_or(|v| v == "completed")
-        || bytes(&completed)? != bytes(origin)? || outcome.session_id != origin.session_id
+    let completed: resident_origin::ResidentPromptOrigin =
+        serde_json::from_value(frame["residentOrigin"].clone())
+            .map_err(|e| format!("resident drain lacks exact terminal origin: {e}"))?;
+    let terminal = match &outcome.outcome {
+        prompt_outcome::Outcome::Refused { .. } => {
+            frame["outcome"].as_str().is_some_and(|v| v != "completed")
+        }
+        prompt_outcome::Outcome::Admitted { stop_reason, .. } => {
+            stop_reason == "end_turn"
+                && frame["outcome"] == "completed"
+                && frame["reviewNeeded"] == false
+                && frame["retainedSession"] == true
+        }
+        _ => false,
+    };
+    if state["completed"].as_u64().is_none_or(|n| n == 0)
+        || frame["type"] != "prompt-complete"
+        || !terminal
+        || bytes(&completed)? != bytes(origin)?
+        || outcome.session_id != origin.session_id
         || outcome.prompt_operation_id != origin.prompt_operation_id
         || outcome.resident_prompt_id.as_deref() != Some(&origin.resident_prompt_id)
         || outcome.prompt_sha256.as_deref() != Some(&origin.prompt_sha256)
-        || !matches!(outcome.outcome,prompt_outcome::Outcome::Refused { .. }) {
-        return Err("resident origin has not consumed its exact native terminal refusal".into());
+    {
+        return Err("resident origin has not consumed its exact native terminal outcome".into());
     }
     Ok(())
 }
 
 #[cfg(test)]
 fn quiescent(j: &Journal, resident: quiescence::ResidentEvidence) -> Result<()> {
-    quiescent_with_origin(j,resident,None)
+    quiescent_with_origin(j, resident, None)
 }
 
-fn quiescent_with_origin(j: &Journal, resident: quiescence::ResidentEvidence, consumed: Option<&ConsumedOriginProof>) -> Result<()> {
+fn quiescent_with_origin(
+    j: &Journal,
+    resident: quiescence::ResidentEvidence,
+    consumed: Option<&ConsumedOriginProof>,
+) -> Result<()> {
     // Reuse the retained-work census, including unresolved historical rows.
     // A failed initial read may leave the connection fenced with no work; this
     // command preserves that fence. Soft alone is not a held allowance.
@@ -125,14 +171,17 @@ fn quiescent_with_origin(j: &Journal, resident: quiescence::ResidentEvidence, co
         .map_err(|e| e.to_string())?
         .get("providerRetryGate")
         .is_some_and(|value| !value.is_null());
+    let completed = consumed
+        .is_some_and(|proof| proof.0["completedTurn"]["type"] == "mini-consumed-completed-turn-v1");
     if matches!(resident, quiescence::ResidentEvidence::Unknown)
         || retained.iter().any(|field| *field != "connection_fenced")
         || j.connection == Connection::Hard
-        || j.provider_settlement.is_some()
+        || (j.provider_settlement.is_some() && !completed)
         || provider_retry
-        || j.resident_prompt_origin.as_ref().is_some_and(|origin|
-            consumed.is_none_or(|proof| proof.0["origin"] != json!(origin)))
-        || j.hermes_session.is_some()
+        || j.resident_prompt_origin
+            .as_ref()
+            .is_some_and(|origin| consumed.is_none_or(|proof| proof.0["origin"] != json!(origin)))
+        || (j.hermes_session.is_some() && !completed)
     {
         return Err(
             "enrollment requires stopped, settled controller custody; resolve retained work first"
@@ -141,6 +190,7 @@ fn quiescent_with_origin(j: &Journal, resident: quiescence::ResidentEvidence, co
     }
     Ok(())
 }
+
 
 fn array<'a>(value: &'a Value, field: &str) -> Result<&'a [Value]> {
     match value.get(field) {

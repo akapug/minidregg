@@ -97,6 +97,41 @@ fn record(state: &Path, request: &Request, status: &str, evidence: Value) -> Res
     owe(state,request,status,&terminal_text(status,&evidence))
 }
 
+/// The request's native terminal receipt proves the resident consumed this
+/// exact delivery, rather than merely dropping its selected queue entry.
+pub(crate) fn consumed_delivery_receipt(
+    state: &Path,
+    queue_bytes: &[u8],
+    entry: &Value,
+    subject: &str,
+    delivery_path: &Path,
+    delivery: &Value,
+) -> Result<Value> {
+    let queue = decode_queue(queue_bytes)?;
+    if !queue.pending.is_empty() || queue.selected.is_some() || queue.maintenance_pending.is_some()
+    {
+        return Err("completed request custody is not drained".into());
+    }
+    let request = request(&queue.binding, entry, subject)?;
+    let status = match delivery["result"]["result"]["resolution"].as_str() {
+        Some("performed") => "completed",
+        Some("refused") => "refused",
+        _ => return Err("consumed request lacks a definite delivery".into()),
+    };
+    let path = state.join(format!(
+        "request-{}-{status}.json",
+        digest(&request.identity)?
+    ));
+    let bytes = bounded_regular_file(&path, 1_048_576)?;
+    let receipt: Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    let expected = json!({"type":"mini-resident-request-outcome-v1","identity":request.identity,"status":status,
+        "evidence":{"deliveryReceipt":delivery_path,"sha256":digest(delivery)?,"origin":delivery["origin"]}});
+    if receipt != expected {
+        return Err("consumed request differs from its native final receipt".into());
+    }
+    Ok(json!({"path":path,"sha256":sha256_bytes(&bytes)?}))
+}
+
 fn terminal_text(status:&str,evidence:&Value)->String {
     match (status,evidence["basis"].as_str()) {
         ("cancelled",Some("author-withdrew"))=>"cancelled: you withdrew it before it started".into(),

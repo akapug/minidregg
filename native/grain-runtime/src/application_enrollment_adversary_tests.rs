@@ -250,3 +250,23 @@ fn consumed_terminal_origin_accepts_retained_native_capture() {
     let proof=ConsumedOriginProof(json!({"origin":journal.resident_prompt_origin}));
     quiescent_with_origin(&journal,evidence,Some(&proof)).unwrap();
 }
+
+#[test]
+fn consumed_admitted_turn_enrolls_preserving_session_and_all_receipts() {
+    for refused in [false,true] {
+        let (root,rt,state)=resident_completion::tests::consumed_fixture(if refused {"enrollment-final-refused"} else {"enrollment-final-performed"},refused);
+        let before=serde_json::to_value(&rt.journal).unwrap();
+        let guard=quiescence::ResidentGuard::acquire(&rt.config,Some(&state)).unwrap();
+        let proof=consumed_origin(&rt.journal,&rt.config,&guard).unwrap().unwrap();
+        quiescent_with_origin(&rt.journal,guard.evidence(),Some(&proof)).unwrap();
+        assert!(quiescent(&rt.journal,guard.evidence()).is_err());
+        let mut target=rt.config.clone();target.tool_task.as_mut().unwrap().agent_api_host_sha256=Some("d".repeat(64));
+        let (mut after,_)=successor(&before,&target,&rt.config_path).unwrap();
+        let enrolled:Journal=serde_json::from_value(after.clone()).unwrap();
+        assert_eq!(consumed_origin(&enrolled,&target,&guard).unwrap().unwrap().0,proof.0,"historical proof survives an allowed binding-only enrollment");
+        after["binding"]=before["binding"].clone();assert_eq!(after,before);
+        let mut foreign:Journal=serde_json::from_value(before.clone()).unwrap();foreign.resident_prompt_origin.as_mut().unwrap().prompt_operation_id=41;
+        assert!(consumed_origin(&foreign,&rt.config,&guard).is_err());
+        guard.assert_unchanged().unwrap();drop(guard);drop(rt);fs::remove_dir_all(root).unwrap();
+    }
+}

@@ -1751,6 +1751,77 @@ struct ProviderSettlement {
     receipt: ReserveAnchor,
 }
 
+fn provider_settlement_record_from(
+    config: &Config,
+    provider_attempt_id: u64,
+    pending: &Pending,
+    outcome_path: &Path,
+) -> Result<ProviderSettlement> {
+    let task = config.provider_task.as_ref().ok_or("providerTask absent")?;
+    if !matches!(
+        pending.operation.as_str(),
+        "provider settle" | "provider audit settle" | "provider recovery settle"
+    ) || pending.attempt
+        != config
+            .state_dir
+            .join(format!("attempt-{:016}", pending.operation_id))
+    {
+        return Err("provider settlement has no exact pending operation".into());
+    }
+    let source_path = config
+        .state_dir
+        .join(format!("source-{:016}.json", pending.operation_id));
+    let source_bytes = bounded_regular_file(&source_path, 131_072)?;
+    let source: Value = serde_json::from_slice(&source_bytes)
+        .map_err(|e| format!("provider settlement source: {e}"))?;
+    let charge = source
+        .pointer("/grain/operation/charge")
+        .and_then(Value::as_str)
+        .ok_or("provider settlement charge absent")?;
+    decimal(charge, "provider settlement charge")?;
+    if source.pointer("/grain/task").and_then(Value::as_str) != Some(task.task.as_str())
+        || source.pointer("/grain/subject").and_then(Value::as_str) != Some(task.subject.as_str())
+        || source
+            .pointer("/grain/operation/type")
+            .and_then(Value::as_str)
+            != Some("settle")
+        || !grain_source::retained_identity(
+            &source,
+            &config.task,
+            &task.task,
+            &task.subject,
+            pending.operation_id,
+        )
+    {
+        return Err("provider settlement source differs from pinned operation".into());
+    }
+    let outcome_bytes = bounded_regular_file(outcome_path, 131_072)?;
+    let outcome: Value = serde_json::from_slice(&outcome_bytes)
+        .map_err(|e| format!("provider settlement outcome: {e}"))?;
+    if outcome.get("type").and_then(Value::as_str) != Some("confirmed")
+        || !matches!(
+            outcome.get("confirmation").and_then(Value::as_str),
+            Some("installed" | "replayed")
+        )
+    {
+        return Err("provider settlement has no confirmed native outcome".into());
+    }
+    let call = pending.attempt.join("call.bin");
+    let outcome_binary = outcome_path.with_extension("bin");
+    Ok(ProviderSettlement {
+        provider_attempt_id,
+        operation_id: pending.operation_id,
+        operation: pending.operation.clone(),
+        attempt: pending.attempt.clone(),
+        charge: charge.to_owned(),
+        source_sha256: sha256_bytes(&source_bytes)?,
+        call_sha256: sha256_bytes(&bounded_regular_file(&call, 4_194_304)?)?,
+        outcome_path: outcome_path.to_owned(),
+        outcome_sha256: sha256_bytes(&bounded_regular_file(&outcome_binary, 4_194_304)?)?,
+        receipt: ReserveAnchor::from_confirmed(&outcome)?,
+    })
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum MeteredAuditPath {
     ProvenNoSend,
@@ -7166,79 +7237,11 @@ impl Runtime {
             .cloned())
     }
     fn provider_settlement_record(
-        &self,
-        pending: &Pending,
-        outcome_path: &Path,
+        &self, pending: &Pending, outcome_path: &Path,
     ) -> Result<ProviderSettlement> {
-        let task = self
-            .config
-            .provider_task
-            .as_ref()
-            .ok_or("providerTask absent")?;
-        let provider_attempt = self
-            .journal
-            .provider_attempt
-            .as_ref()
-            .ok_or("provider settlement has no retained request")?;
-        if !matches!(
-            pending.operation.as_str(),
-            "provider settle" | "provider audit settle" | "provider recovery settle"
-        ) || pending.attempt
-            != self
-                .config
-                .state_dir
-                .join(format!("attempt-{:016}", pending.operation_id))
-        {
-            return Err("provider settlement has no exact pending operation".into());
-        }
-        let source_path = self
-            .config
-            .state_dir
-            .join(format!("source-{:016}.json", pending.operation_id));
-        let source_bytes = bounded_regular_file(&source_path, 131_072)?;
-        let source: Value = serde_json::from_slice(&source_bytes)
-            .map_err(|e| format!("provider settlement source: {e}"))?;
-        let charge = source
-            .pointer("/grain/operation/charge")
-            .and_then(Value::as_str)
-            .ok_or("provider settlement charge absent")?;
-        decimal(charge, "provider settlement charge")?;
-        if source.pointer("/grain/task").and_then(Value::as_str) != Some(task.task.as_str())
-            || source.pointer("/grain/subject").and_then(Value::as_str)
-                != Some(task.subject.as_str())
-            || source
-                .pointer("/grain/operation/type")
-                .and_then(Value::as_str)
-                != Some("settle")
-            || !grain_source::retained_identity(&source, &self.config.task, &task.task, &task.subject, pending.operation_id)
-        {
-            return Err("provider settlement source differs from pinned operation".into());
-        }
-        let outcome_bytes = bounded_regular_file(outcome_path, 131_072)?;
-        let outcome: Value = serde_json::from_slice(&outcome_bytes)
-            .map_err(|e| format!("provider settlement outcome: {e}"))?;
-        if outcome.get("type").and_then(Value::as_str) != Some("confirmed")
-            || !matches!(
-                outcome.get("confirmation").and_then(Value::as_str),
-                Some("installed" | "replayed")
-            )
-        {
-            return Err("provider settlement has no confirmed native outcome".into());
-        }
-        let call = pending.attempt.join("call.bin");
-        let outcome_binary = outcome_path.with_extension("bin");
-        Ok(ProviderSettlement {
-            provider_attempt_id: provider_attempt.id,
-            operation_id: pending.operation_id,
-            operation: pending.operation.clone(),
-            attempt: pending.attempt.clone(),
-            charge: charge.to_owned(),
-            source_sha256: sha256_bytes(&source_bytes)?,
-            call_sha256: sha256_bytes(&bounded_regular_file(&call, 4_194_304)?)?,
-            outcome_path: outcome_path.to_owned(),
-            outcome_sha256: sha256_bytes(&bounded_regular_file(&outcome_binary, 4_194_304)?)?,
-            receipt: ReserveAnchor::from_confirmed(&outcome)?,
-        })
+        let id = self.journal.provider_attempt.as_ref()
+            .ok_or("provider settlement has no retained request")?.id;
+        provider_settlement_record_from(&self.config, id, pending, outcome_path)
     }
     fn verified_provider_settlement(
         &self,

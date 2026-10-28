@@ -944,6 +944,125 @@ impl Runtime {
     }
 }
 
+/// Verify a retained native final and its definite delivery outcome without
+/// another room write. Both performed and refused writes are terminal; the
+/// latter is never described as a delivered answer.
+pub(crate) fn consumed_delivery(
+    config: &Config,
+    journal: &Journal,
+    origin: &Value,
+    binding: &str,
+    final_text: &str,
+    guard: &ResidentGuard,
+) -> Result<Value> {
+    let op = origin["promptOperationId"]
+        .as_u64()
+        .ok_or("delivery origin absent")?;
+    let final_path = config
+        .state_dir
+        .join(format!("resident-final-{op:016}.json"));
+    let record: FinalRecord = serde_json::from_slice(&bounded_regular_file(&final_path, LIMIT)?)
+        .map_err(|e| e.to_string())?;
+    record.validate()?;
+    let tool = config
+        .tool_task
+        .as_ref()
+        .ok_or("consumed final ToolTask absent")?;
+    let room = tool.room.as_ref().ok_or("consumed final room absent")?;
+    if record.room != room.room || record.subject != tool.subject {
+        return Err("consumed final belongs to another room or subject".into());
+    }
+    let replay = journal
+        .provider_replays
+        .last()
+        .ok_or("consumed final has no provider response")?;
+    if record.request_sha256 != replay.request_sha256
+        || record.response_sha256 != replay.response_sha256
+        || replay.meter_report_sha256.as_deref() != Some(record.meter_report_sha256.as_str())
+    {
+        return Err("consumed final differs from exact settled provider response".into());
+    }
+    if record.origin != *origin
+        || record.binding_sha256 != binding
+        || !acp_final_matches(final_text, &record.final_text)
+    {
+        return Err("consumed delivery differs from source completed turn".into());
+    }
+    let mut terminal = None;
+    for (prefix, kind, resolution) in [
+        (
+            "resident-delivered",
+            "mini-resident-delivered-v1",
+            "performed",
+        ),
+        (
+            "resident-final-refused",
+            "mini-resident-final-refused-v1",
+            "refused",
+        ),
+    ] {
+        let path = config.state_dir.join(format!("{prefix}-{op:016}.json"));
+        if !path.try_exists().map_err(|e| e.to_string())? {
+            continue;
+        }
+        let bytes = bounded_regular_file(&path, LIMIT)?;
+        let receipt: Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+        if terminal.is_some()
+            || receipt["type"] != kind
+            || receipt["origin"] != record.origin
+            || receipt["planSha256"] != hash(&record)?
+            || receipt["result"]["result"]["resolution"] != resolution
+            || !journal
+                .room_resolutions
+                .iter()
+                .any(|v| v == &receipt["result"])
+        {
+            return Err("consumed delivery lacks one exact retained native result".into());
+        }
+        validate_terminal_resolution(&record, &receipt["result"])?;
+        let request = resident_requests::consumed_delivery_receipt(
+            guard.path()?,
+            guard.request_bytes().ok_or("request custody absent")?,
+            &record.source_entry,
+            &record.subject,
+            &path,
+            &receipt,
+        )?;
+        terminal = Some(
+            json!({"path":path,"sha256":sha256_bytes(&bytes)?,"resolution":resolution,"request":request}),
+        );
+    }
+    let terminal = terminal.ok_or("completed turn has no definite final delivery receipt")?;
+    Ok(
+        json!({"final":{"path":final_path,"sha256":sha256_bytes(&bounded_regular_file(&final_path,LIMIT)?)?},"terminal":terminal}),
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn fixture_consume_final(rt:&mut Runtime,state:&Path,refused:bool)->Result<()> {
+    let origin=serde_json::to_value(&rt.journal.resident_prompt_origin).map_err(|e|e.to_string())?;
+    let replay=rt.journal.provider_replays.last().ok_or("fixture replay absent")?;
+    let entry=json!({"author":"20","to":"8","cell":"20","n":7,"sequence":1,"height":53,"text":"question","kind":"say"});
+    let record=FinalRecord {kind:"mini-resident-final-v1".into(),origin:origin.clone(),binding_sha256:hash(&rt.journal.binding)?,
+        request_sha256:replay.request_sha256.clone(),response_sha256:replay.response_sha256.clone(),
+        meter_report_sha256:replay.meter_report_sha256.clone().unwrap(),source_entry:entry.clone(),room:"lab".into(),subject:"8".into(),
+        final_text:"the answer".into(),final_text_sha256:sha256_bytes(b"the answer")?,provenance:"source-acp-and-settled-provider-final".into()};
+    let prepared=json!({"requestBinding":{"world":{"domain":"1","expectedSeed":"2"},"roomCell":"99","assignment":"1","task":rt.config.task},
+        "sourceRoom":{"entries":1,"selectedEntries":1,"members":[{"subject":"20","stream":"20"}]},
+        "sourceRequests":[entry],"acceptedHeight":"0","me":"8","recentMemberEntries":[]});
+    resident_requests::select(&prepared,state,resident_requests::Limits::default())?;
+    resident_requests::started(state,origin["residentPromptId"].as_str().unwrap(),"input")?;
+    rt.install_final(record.clone())?;
+    rt.journal.resident_delivery.as_mut().unwrap().operation_id=Some(45);
+    let resolution=json!({"operationId":"45","tool":"mini_say","arguments":record.arguments(7),
+        "residentOrigin":origin,"expectedReply":[record.source_entry["cell"],record.source_entry["sequence"]],
+        "payment":{"confirmed":true},"toolCharge":"1","result":{"resolution":if refused {"refused"} else {"performed"},"basis":"fixture-native-resolution"}});
+    rt.journal.room_resolutions.push(resolution.clone());
+    rt.finish_delivery(&record,&record.arguments(7),resolution)?;
+    let resident:Value=serde_json::from_slice(&fs::read(state.join("resident.json")).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
+    resident_requests::reconcile(state,&rt.config.state_dir,Some(&resident["lastCompletion"]))
+}
+
 /// The resident driver owns its flock across model work. A source final is
 /// already pending in the controller before completion arrives. Temporarily
 /// transfer the flock to the no-model admin receiver, then reload driver state
