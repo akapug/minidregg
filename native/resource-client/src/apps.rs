@@ -286,6 +286,7 @@ pub(crate) const FEATURED: &[(&str, &str)] = &[
     ("8x12h6p0x0nrzk73hfq6zh2jxtgyzzcty7qsatkg7jfg2mzw5n90", "a plain-text journal: POST /add a transaction, GET /accounts and the JSON API"),
     ("7qvcjh7gk0rzdx1s3c8gufd288sesf6vvdt297756xcv4q8xxvhh", "the deck is slides.md: PUT /slides.md, GET it back; published at <grain>-www"),
     ("m86q05rdvj14yvn78ghaxynqz7u2svw6rnttptxx49g1785cdv1h", "REST /api (boards, lists, cards) and DDP"),
+    ("61gh7gnns305cknp20v2ekvdex48g4d3rv6wghuzk6huzx5qmp7h", "hg over HTTP: POST /?cmd=unbundle pushes a changegroup; GET /raw-file/<rev>/<path> and /rev/<node> read it back"),
 ];
 
 pub(crate) fn featured(app_id: &str) -> Option<(usize, &'static str)> {
@@ -1533,7 +1534,7 @@ mod tests {
         assert_eq!(all.len(), entries.len());
         let names: Vec<&str> = all.iter().take(FEATURED.len()).map(|e| e.name.as_str()).collect();
         assert_eq!(names[0], "Etherpad");
-        assert_eq!(names.len(), 13, "every featured appId is in the recorded index: {names:?}");
+        assert_eq!(names.len(), 14, "every featured appId is in the recorded index: {names:?}");
         assert!(all[FEATURED.len()..].iter().all(|e| featured(&e.app_id).is_none()));
         let pad = entry_json(all[0], &Verdict { state: "unverified".into(), reason: None, raw_bytes: None, signed_app_id: None, running: 0 });
         assert_eq!(pad["featured"]["rank"], 1);
