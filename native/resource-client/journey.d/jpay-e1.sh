@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# J-PAY-E1 (PAY.md §11.9 row P1b): the pay watcher's enrollment index, on fixtures, no network,
+# J-PAY-E1 (PAY §11.9 row P1b): the pay watcher's enrollment index, on fixtures, no network,
 # no keys. For every native/pay-watcher/fixtures/enrol-*/ vector (a private COPY: the watcher
 # writes its enrollment cursor beside the config) it runs the binary against the vector's two
 # endpoints and checks the exit code, the observation count, the SET of event reasons, and the

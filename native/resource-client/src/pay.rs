@@ -1,4 +1,4 @@
-//! PAY P4: the client side of the payment rail (PAY.md §2.2–§2.5, §3.4, §5).
+//! PAY P4: the client side of the payment rail (PAY §2.2–§2.5, §3.4, §5).
 //!
 //! Every verb runs through a participant workspace (`mini workspace --action init`) whose
 //! session socket reaches the Host's pay operations:

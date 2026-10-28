@@ -313,7 +313,7 @@ def happy():
     return ep
 
 
-# Enrolment (PAY.md §11) ---------------------------------------------------------------------
+# Enrolment (PAY §11) ---------------------------------------------------------------------
 # The enrollment address is the book row named by config `enrol.index`. Its observations carry
 # the transaction's one memo as raw bytes; the kernel parses them. The memos below follow the
 # §11.3 grammar, enrol:v1:<mini hex 64>:<ssh blob base64 68>:<mini-sig hex 128>:<ssh-sig hex 128>

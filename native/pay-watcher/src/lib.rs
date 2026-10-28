@@ -1,12 +1,12 @@
-//! The PAY watcher (PAY.md §3): a stateless process that turns finalized Solana transfers into
-//! `Observation` records (PAY.md §2.4) for the kernel's observation ingress.
+//! The PAY watcher (PAY §3): a stateless process that turns finalized Solana transfers into
+//! `Observation` records (PAY §2.4) for the kernel's observation ingress.
 //!
 //! One run: read the finalized tip, then for every book index ask every configured endpoint
 //! for the token accounts the book address owns for the asset's mint, their signature
 //! histories (to the page bound), and each transaction's `jsonParsed` balances. A transfer is
 //! emitted only when EVERY endpoint returns the same record for it. The only memory is the
 //! retained-receipt directory the caller supplies, and the kernel's nullifier refusal is what
-//! makes a resubmission harmless, with one exception: the ENROLLMENT index (PAY.md §11) pages
+//! makes a resubmission harmless, with one exception: the ENROLLMENT index (PAY §11) pages
 //! to a persistent cursor instead of a page bound, and its observations carry the transaction's
 //! memo bytes (`watch::Cursor`, `memo`, README.md).
 //!
