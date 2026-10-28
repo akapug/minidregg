@@ -5,6 +5,7 @@
 #
 #   LANE_DIR=/abs/lane  deploy/candidate/lane-build.sh host    [build-native-host.sh args: --incremental-suffix-from ...]
 #   LANE_DIR=/abs/lane  deploy/candidate/lane-build.sh consent                      (after host: a companion of that build)
+#   LANE_DIR=/abs/lane  deploy/candidate/lane-build.sh umbrellas                    (after host: the libraries no shipped root imports)
 #   LANE_DIR=/abs/lane  deploy/candidate/lane-build.sh rust-check                   (no Lean needed: `cargo check` of every rust role)
 #   LANE_DIR=/abs/lane  deploy/candidate/lane-build.sh rust
 #   LANE_DIR=/abs/lane  deploy/candidate/lane-build.sh pack OUT_DIR
@@ -24,7 +25,7 @@ here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 . "$here/lib.sh"
 LANE_DIR=${LANE_DIR:?LANE_DIR=/abs/path/of/the/lane}
 [[ $LANE_DIR = /* ]] || { echo "lane-build: LANE_DIR must be absolute" >&2; exit 64; }
-step=${1:?host|consent|rust|pack}; shift
+step=${1:?host|consent|umbrellas|rust-check|rust|pack}; shift
 src=$LANE_DIR/src
 [ -d "$src/.git" ] || { echo "lane-build: $src is not a clone" >&2; exit 64; }
 mkdir -p "$LANE_DIR/artifacts" "$LANE_DIR/cycle" "$LANE_DIR/logs"
@@ -60,6 +61,16 @@ case $step in
     unchanged_since host
     native "$LANE_DIR/consent-out" "$LANE_DIR/artifacts/minidregg-client-consent" \
       --root Host.ClientConsentSession --usage-prefix 'minidregg-client-consent:' --companion-of "$LANE_DIR/native-out" ;;
+  umbrellas)
+    # Fixtures, ObjectiveProofs and CensusChecks: no shipped root imports them, so the host and consent
+    # stages never elaborate them, and a red there sat unseen on main (NativeDocWriteFixture, stale since
+    # 3315a908). Seated like the host stage; a red here reds the candidate.
+    [ -f "$LANE_DIR/native-out/manifest.txt" ] || { echo "lane-build: run host first (umbrellas reuse its closure)" >&2; exit 1; }
+    unchanged_since host
+    u="$LANE_DIR/umbrellas-out/$(date -u +%Y%m%dT%H%M%SZ)"
+    mkdir -p "$LANE_DIR/umbrellas-out"
+    targets=(); for t in $(bash scripts/pipeline/umbrella-targets --unshipped); do targets+=(--umbrella-target "$t"); done
+    native "$u" "$u.no-binary" --umbrella --umbrella-only "${targets[@]}" ;;
   rust-check)
     # The rust step's exact role list, features included, as `cargo check --release`: a cfg or
     # feature red shows here in minutes, before the host stage, instead of after it.
