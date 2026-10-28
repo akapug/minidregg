@@ -283,9 +283,14 @@ def Prepared.template {F : Type} [Field F] {deployment : Deployment}
 private def recordOf (deployment : Deployment) (durable : Durable) :
     Option {record : PlatformCellLayout.Platform //
       ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable = some record} :=
-  match recorded : ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable with
-  | none => none
-  | some record => some ⟨record, recorded⟩
+  go _ rfl
+where
+  go : (found : Option PlatformCellLayout.Platform) →
+      ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable = found →
+      Option {record : PlatformCellLayout.Platform //
+        ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable = some record}
+    | none, _ => none
+    | some record, recorded => some ⟨record, recorded⟩
 
 def prepare {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)

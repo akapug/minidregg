@@ -111,27 +111,24 @@ theorem select_pinned (ground : Ground deployment) (record : PlatformCellLayout.
     (pinned : record.completionCustodianKey = some key) :
     ∃ read, select deployment ground = .ok read ∧ read.record = record ∧ read.key = key := by
   unfold PlatformCellDomain.recordOn at recorded
-  unfold select
   cases found : PlatformCellDomain.load deployment ground.view with
   | none => rw [found] at recorded; cases recorded
   | some loaded =>
       rw [found] at recorded
       simp only [Option.bind_some] at recorded
+      unfold select
       split
-      · rename_i none' _; cases none'
+      · simp_all
       · rename_i loaded' same
+        rw [found] at same
         cases same
         split
-        · rename_i missing; rw [recorded] at missing; cases missing
-        · rename_i record' recorded'
-          rw [recorded] at recorded'
-          cases recorded'
-          split
-          · rename_i missing; rw [pinned] at missing; cases missing
-          · rename_i key' pinned'
-            rw [pinned] at pinned'
-            cases pinned'
-            exact ⟨_, rfl, rfl, rfl⟩
+        · simp_all
+        · split
+          · simp_all
+          · simp_all
+            subst_vars
+            simp_all
 
 /-- **The light read is key-independent**: two bases over the same served state read the
 same platform record whatever keys they declare (a basis's keys name only transactions and
