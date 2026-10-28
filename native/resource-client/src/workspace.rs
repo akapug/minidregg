@@ -1260,7 +1260,7 @@ fn signed_read_batches(references: &[Value], views: &[String]) -> Result<Vec<Sig
 /// Independent reads of different view types share ordinary signed transport.
 /// Collections spanning batches must agree on every native image coordinate;
 /// a write between them triggers the proposal's existing whole-action retry.
-fn signed_views_mixed(
+pub(crate) fn signed_views_mixed(
     root: &Path, workspace: &Value, references: &[Value], views: &[String],
 ) -> Result<Vec<(Value, Value, PathBuf)>> {
     // Keep the existing seven-exchange singleton path; wrapping one local

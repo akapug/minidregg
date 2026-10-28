@@ -214,47 +214,86 @@ fn forget_index(root: &Path, room: &Value) {
 /// read together in one native image.
 fn coherent_discovery(root: &Path, workspace: &Value, room: &Value)
     -> Result<Vec<(Value,String,Value,Value)>> {
+    Ok(coherent_discovery_with(root, workspace, room, &[])?.0)
+}
+
+/// As `coherent_discovery`, and the `extra` resource references are read in
+/// that same batch, so they share the one image that admits the room pointer
+/// and the index names. The extras come back as (view, at) in order; an absent
+/// index returns no extras.
+fn coherent_discovery_with(root: &Path, workspace: &Value, room: &Value, extra: &[Value])
+    -> Result<(Vec<(Value,String,Value,Value)>, Vec<(Value,Value)>)> {
     let room = existing_authority(root,room)?;
     if let Some(hint) = index_hint(root, &room) {
         // A stale candidate (an index this grant no longer reads, a cell gone)
         // is not a decision about the name: discover from the room again.
-        match coherent_pair(root, workspace, &room, hint) {
+        match coherent_pair(root, workspace, &room, hint, extra) {
             Ok(chain) => return Ok(chain),
             Err(_) => forget_index(root, &room),
         }
     }
     let (room_view, room_at) = discovery_read(root,workspace,&room,INDEX_FIELD)?;
     let Some(index) = index_target(&room_view)? else {
-        return Ok(vec![(room,INDEX_FIELD.to_owned(),room_view,room_at)]);
+        return Ok((vec![(room,INDEX_FIELD.to_owned(),room_view,room_at)], vec![]));
     };
-    coherent_pair(root, workspace, &room, index)
+    coherent_pair(root, workspace, &room, index, extra)
 }
 
-/// Read the room and an index candidate in one batch. Replan only a changed
-/// room pointer, never a different unrelated world head.
-fn coherent_pair(root: &Path, workspace: &Value, room: &Value, mut index: String)
-    -> Result<Vec<(Value,String,Value,Value)>> {
-    for _ in 0..3 {
+fn coherent_pair(root: &Path, workspace: &Value, room: &Value, index: String, extra: &[Value])
+    -> Result<(Vec<(Value,String,Value,Value)>, Vec<(Value,Value)>)> {
+    let out = pair_loop(room, index, extra, |index_id| {
         let mut index_ref = room.clone();
-        index_ref["target"] = json!(index);
+        index_ref["target"] = json!(index_id);
         index_ref.as_object_mut().unwrap().remove("room");
-        let index_ref = existing_authority(root,&index_ref)?;
-        let references = vec![room.clone(),index_ref.clone()];
-        let result = super::signed_views(root,workspace,&references,"resource-scope")?;
+        existing_authority(root,&index_ref)
+    }, |references, views| {
+        Ok(super::signed_views_mixed(root,workspace,references,views)?
+            .into_iter().map(|(view,at,_)| (view,at)).collect())
+    })?;
+    match &out.0.get(1) {
+        Some(_) => remember_index(root, room, &out.2),
+        None => forget_index(root, room),
+    }
+    Ok((out.0, out.1))
+}
+
+/// Read the room, an index candidate and any `extra` resources in one batch.
+/// Replan only a changed room pointer, never a different unrelated world head:
+/// every read of one batch shares one admitted image by construction, and the
+/// image coordinates are still checked equal. The room pointer, the index
+/// binding and the extras are all judged in that single image.
+fn pair_loop(
+    room: &Value,
+    mut index: String,
+    extra: &[Value],
+    mut index_ref_of: impl FnMut(&str) -> Result<Value>,
+    mut read: impl FnMut(&[Value], &[String]) -> Result<Vec<(Value,Value)>>,
+) -> Result<(Vec<(Value,String,Value,Value)>, Vec<(Value,Value)>, String)> {
+    for _ in 0..3 {
+        let index_ref = index_ref_of(&index)?;
+        let mut references = vec![room.clone(),index_ref.clone()];
+        references.extend(extra.iter().cloned());
+        let mut views = vec!["resource-scope".to_owned(); 2];
+        views.extend(extra.iter().map(|_| "resource".to_owned()));
+        let result = read(&references,&views)?;
+        if result.len() != references.len() {
+            return Err("batched shared-name read returned the wrong number of views".into());
+        }
+        for read in &result[1..] { same_snapshot(&result[0].1, &read.1)?; }
         let current_room = scoped_resource(&result[0].0,room,INDEX_FIELD)?;
         let current_index = index_target(&current_room)?;
         if current_index.as_deref() != Some(&index) {
             let Some(next) = current_index else {
-                forget_index(root, room);
-                return Ok(vec![(room.clone(),INDEX_FIELD.to_owned(),current_room,result[0].1.clone())]);
+                return Ok((vec![(room.clone(),INDEX_FIELD.to_owned(),current_room,result[0].1.clone())],
+                    vec![], index));
             };
             index = next;
             continue;
         }
         let index_view = scoped_resource(&result[1].0,&index_ref,"annotations")?;
-        remember_index(root, room, &index);
-        return Ok(vec![(room.clone(),INDEX_FIELD.to_owned(),current_room,result[0].1.clone()),
-            (index_ref,"annotations".to_owned(),index_view,result[1].1.clone())]);
+        return Ok((vec![(room.clone(),INDEX_FIELD.to_owned(),current_room,result[0].1.clone()),
+            (index_ref,"annotations".to_owned(),index_view,result[1].1.clone())],
+            result[2..].to_vec(), index));
     }
     Err("shared-name room pointer changed repeatedly; reopen the name".into())
 }
@@ -670,9 +709,15 @@ pub(crate) fn command(
             if leaf == "index" {
                 return Err("index is the reserved room map name".into());
             }
-            // The room's pointer and its index's names, one native image.
-            let chain = coherent_discovery(root, workspace, &room)?;
-            let Some((index_ref, _, index_view, index_at)) = chain.get(1).cloned() else {
+            // The room's pointer, its index's names and (for bind) the target,
+            // one native image: a head moved by unrelated writes is no refusal,
+            // a changed room pointer replans, and nothing is read apart.
+            let target_ref = if op == "bind" {
+                Some(super::reference(root, to.ok_or("bind requires --to TARGET")?)?)
+            } else { None };
+            let extra: Vec<Value> = target_ref.iter().cloned().collect();
+            let (chain, _) = coherent_discovery_with(root, workspace, &room, &extra)?;
+            let Some((index_ref, _, index_view, _)) = chain.get(1).cloned() else {
                 return Err("room has no index document".into());
             };
             room = index_ref;
@@ -681,10 +726,7 @@ pub(crate) fn command(
             if op == "bind" {
                 // Do not hide duplicate refusal behind a client precheck: the
                 // source-owned index law judges the final live bindings.
-                let target_ref = super::reference(root, to.ok_or("bind requires --to TARGET")?)?;
-                let (_, target_at, _) =
-                    super::signed_view(root, workspace, &target_ref, "resource")?;
-                same_snapshot(&index_at, &target_at)?;
+                let target_ref = target_ref.unwrap();
                 actions.push(json!({"type":"link","link":super::random_nonce()?,"source":null,"relation":"0",
                     "target":target(leaf,member(&target_ref,"kind")?,member(&target_ref,"target")?)?}));
             } else {
@@ -831,6 +873,56 @@ mod tests {
             .unwrap_err()
             .contains("does not contain this exact retained proposal"));
         std::fs::remove_dir_all(root).unwrap();
+    }
+    /// A world whose head advances on every read call (unrelated writers); the
+    /// room points at `pointer()` at call n; all views of one call share one head.
+    fn live_batch(pointer: impl Fn(usize) -> &'static str, split_extras: bool)
+        -> (Result<(Vec<(Value,String,Value,Value)>, Vec<(Value,Value)>, String)>, usize) {
+        let room = room();
+        let target = json!({"name":"chapters","kind":"object","target":"77","observeCapability":"9"});
+        let mut calls = 0usize;
+        let out = {
+            let mut one = |references: &[Value], views: &[String]| -> Result<Vec<(Value,Value)>> {
+                calls += 1;
+                let head = at(&format!("root-{calls}"));
+                Ok(references.iter().zip(views).map(|(reference, v)| {
+                    let resource = if reference["target"] == "10" {
+                        view(vec![json!({"key":{"field":INDEX_FIELD},"value":pointer(calls)})])
+                    } else { view(vec![link("board","1")]) };
+                    (if v == "resource-scope" { scope(reference, resource) } else { resource }, head.clone())
+                }).collect())
+            };
+            pair_loop(&room, "11".to_owned(), &[target], |id| {
+                let mut r = room.clone(); r["target"] = json!(id);
+                r.as_object_mut().unwrap().remove("room"); Ok(r)
+            }, |references, views| {
+                if !split_extras { return one(references, views); }
+                // The old shape: the target is read apart, at a later head.
+                let mut out = one(&references[..2], &views[..2])?;
+                out.extend(one(&references[2..], &views[2..])?);
+                Ok(out)
+            })
+        };
+        (out, calls)
+    }
+    #[test]
+    fn bind_reads_target_in_the_rooms_image_so_unrelated_head_moves_do_not_refuse() {
+        let (out, calls) = live_batch(|_| "11", false);
+        let (chain, extras, index) = out.unwrap();
+        assert_eq!((calls, chain.len(), extras.len(), index.as_str()), (1, 2, 1, "11"));
+        assert_eq!(extras[0].1["worldRoot"], chain[1].3["worldRoot"]);
+    }
+    #[test]
+    fn bind_replans_a_moved_room_pointer_and_names_a_pointer_that_never_settles() {
+        let (out, calls) = live_batch(|n| "12", false);
+        assert_eq!((calls, out.unwrap().2.as_str()), (2, "12"));
+        let (out, _) = live_batch(|n| ["12","13","14"][n % 3], false);
+        assert!(out.unwrap_err().to_string().contains("room pointer changed repeatedly"));
+    }
+    #[test]
+    fn bind_refuses_reads_that_do_not_share_one_image() {
+        let (out, _) = live_batch(|_| "11", true);
+        assert!(out.unwrap_err().to_string().contains("moved between room and index"));
     }
     #[test]
     fn same_snapshot_scope_requires_exact_grant_and_explicit_coverage() {
