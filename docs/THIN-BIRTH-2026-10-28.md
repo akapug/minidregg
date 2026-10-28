@@ -210,3 +210,53 @@ when the arm lands.
   `protocol/host-operations.json`), mini-sdk `thin_birth_intent`/`thin_birth_plan`, the workspace
   birth path. JP2 rows: row 19 thin birth, lifecycle restored, swapped-plan row.
 * Owed: the Host consent modules' build on the box, then JP2 on a candidate world.
+
+### Continuation: the thin write path (JP2 row 22, candidate e89fe7b8b), 2026-10-28
+
+* **Cause.** `NativeThinConsent.checkServed` re-encodes the served store and compares its root
+  with the signed root. The Host never serves a cell's blinding entry
+  (`narrowPacked_erases_blinding`), and the salts derive from it, so every thin write to a blinded
+  cell (every declared cell the friend creates) is refused `servedRootMismatch`. Thin birth is
+  fine; the invocation arm's law was wrong.
+* **Audited.** AUDIT.md §26 on lane/audit-platform: ACCEPT with the strengthening applied. The
+  statements are in `Kernel/NativeThinConsent.lean`, "Served views over salted openings":
+  `checkOpened`, `OpeningCollision`, `SealedIn`, `OpenedDisplayIsCommitStatement` (with
+  sealed ⇒ post = pre), `OpenedViewRefusedStatement`, `HonestScalarViewAcceptedStatement`
+  (declared-object scalar scope; the other kinds are owed, a pole or row each).
+* **Proved (per file on dregg-ref, `#assert_axioms` clean):** `opened_display_is_commit`
+  and `target_rootOf`, `run_congr_at`, `untouched_of_both_valid`, `checkOpened_ok`,
+  `shown_agrees`, `memberPatch_pre_independent`. One tightening after the audit:
+  `checkOpened` refuses a pre-reading payload (world, kind definition: `patchReadsPre`) over an
+  opening that seals anything (`unsupportedPayload`). The keystone needs it because those member
+  patches read the pre-state. Tell the auditor.
+* **Done (successor lane, 2026-10-28):** the auditor ACCEPTED the `patchReadsPre` tightening
+  (world/kindDefinition payloads require an opening that seals nothing, a full-scope view) and
+  asked for its named teeth: `PreReadingSealedRefusedStatement`, proved. Proved per file on
+  dregg-ref (lean-ask, `#assert_axioms` clean): `opened_view_refused`,
+  `pre_reading_sealed_refused`, `honest_scalar_view_accepted` (with `entries_filter`,
+  `openedBytes_items`). `displayTarget` calls `checkOpened`; `checkServed`, `servedBytes`,
+  `RootBinds`, `honest_binds`, `mismatch_refused`, `thin_display_is_commit` and the
+  `servedMalformed` refusal are deleted. `Display.post` is `Option (bytes × Option root)`: the
+  root only when the opening seals nothing (`sealsNothing`); `displayJson` prints `postRoot` only
+  then. jthin-consent N1 (narrowed grant on a declared cell) now commits with an opened display
+  and no `postRoot`; S2 seals its own write over N1's post.
+* **Poles (statements ACCEPTED by the auditor before proof, proved, one per payload):**
+  `honest_account_scalar_view_accepted`, `honest_world_view_accepted` and
+  `honest_kind_definition_view_accepted` (full scope: the opening seals nothing, so the display
+  carries the post root), `honest_content_read_view_accepted`, `honest_kind_read_view_accepted`,
+  and `honest_content_stream_write_named` (the honest view passes every opening check and is
+  refused `unsupportedPayload` by name; the full-peer provider covers those writes). Helpers:
+  `checkOpened_of` (the converse of `checkOpened_ok`), `servedOpening_honest`, `decode_narrowed`,
+  `items_none_sealed`, `visible_full`.
+* **Verified.** dregg-ref: `Host.ClientConsentCore Host.ClientConsentSession Kernel.NativeThinBirth`
+  built (closure-lock, rc 0, peak 3.4 GiB) and `minidregg-client-consent` linked (sha256
+  e275bca9...); after merging main 1c789dc7b, `Kernel/NativeThinConsent.lean` checks clean per file.
+  hbox, candidate e89fe7b8b with that consent provider substituted
+  (`/tank/dregg-build/claude-lanes/thin-birth/cand`, `run-jp2.sh`), main's scripts plus this
+  branch's jpriv2/jthin-consent: JP2 PASS (71 rows: row 22, swapped plan 33-37), THIN PASS.
+* **Held by the integrator** (a34bdb948f1cf4796) under the module-conversion freeze (iter-speed
+  a0fd127abfb9aac75). When the integrator says the conversion is on main: merge origin/main into
+  lane/thin-birth; re-convert this branch's touched Lean files (`Kernel/NativeThinConsent.lean`,
+  `Host/ClientConsentCore.lean`, `Kernel.lean`'s comment line) with `scripts/lean-modularize.py`
+  as L1e does; per-file check on dregg-ref (lean-ask `--reload`); push; send the integrator the
+  merged sha. Its next build is the Host.Main closure, and JP2/THIN then go to the rows validator.
