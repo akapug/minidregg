@@ -1023,7 +1023,7 @@ class Journey:
     @staticmethod
     def selected_ask(call,rows,author,resident,question):
         identity=call.get('selectedRequest',{});entry=call.get('selectedEntry',{})
-        if (not isinstance(identity,dict) or not isinstance(identity.get('binding'),dict)
+        if (not isinstance(identity,dict) or not isinstance(entry,dict) or not isinstance(identity.get('binding'),dict)
                 or identity.get('author')!=author or entry.get('to')!=resident
                 or entry.get('kind')!='say' or question not in entry.get('text','')
                 or any(identity.get(k)!=entry.get(k) for k in ('author','cell','sequence'))):
@@ -1066,6 +1066,8 @@ class Journey:
             phase_log=self.root/f'oracle-{label}-{self.counter:04d}.jsonl';phase_log.write_text('\n'.join(new_lines)+'\n')
             calls=[json.loads(line) for line in new_lines if json.loads(line).get('id')=='or-call']
             if not calls or calls[-1].get('question')!=question:raise ValueError('fresh provider call did not name selected question')
+            if any(call.get('selectedRequest')!=calls[-1].get('selectedRequest') for call in calls):
+                raise ValueError('one resident invocation consumed multiple native source requests')
             chosen=self.selected_ask(calls[-1],transcript(),self.subjects['bob'],self.subjects['hermes'],question)
             number=str(chosen['n'])
             if number in asks:raise ValueError('native resident selected an already qualified request')
