@@ -119,13 +119,32 @@ class SelectedRequestTests(unittest.TestCase):
         for state in [{'completed':7,'pending':{'requestId':2}},{'completed':7,'returnPending':True},{'completed':True}]:
             with self.assertRaises(ValueError):driver.Journey.completed_prompts(exported(state))
 
-    def test_unadmitted_old_ask_prevents_a_fresh_duplicate(self):
-        ask={'author':'20','to':'8','kind':'say','text':'oracle: question','cell':'90','sequence':2,'n':2}
-        self.assertEqual(driver.Journey.unanswered_asks([ask],'20','8','question'),[ask])
-        unrelated={'author':'8','to':'20','kind':'say','re':2,'reCell':'91','reSequence':2}
-        self.assertEqual(driver.Journey.unanswered_asks([ask,unrelated],'20','8','question'),[ask])
-        exact={**unrelated,'reCell':'90'}
-        self.assertEqual(driver.Journey.unanswered_asks([ask,exact],'20','8','question'),[])
+    def test_actual_two_views_and_native_failed_consumption_do_not_invent_more_asks(self):
+        import base64,hashlib
+        binding={'world':{'domain':'8501','expectedSeed':'seed'},'assignment':'assignment'}
+        author='10155331997800770906';resident='11878379532295594848';cell='16237251625639573621'
+        first={'author':author,'to':resident,'kind':'say','text':'oracle: question','cell':cell,'sequence':1,'n':1,'height':100}
+        selected={**first,'sequence':2,'n':2,'height':124}
+        merged={**selected,'n':4,'height':125}
+        identity=lambda seq:{'binding':binding,'author':author,'cell':cell,'sequence':seq}
+        call={'selectedRequest':identity(2),'selectedEntry':selected}
+        self.assertEqual(driver.Journey.selected_ask(call,[first,merged],author,resident,'question'),merged)
+        def encoded(value):
+            raw=driver.json.dumps(value).encode()
+            return {'base64':base64.b64encode(raw).decode(),'sha256':hashlib.sha256(raw).hexdigest()}
+        queue={'binding':binding,'selected':{'identity':identity(2),'entry':selected,'started':None},'pending':[],'cursors':{cell:2}}
+        failed={'type':'mini-resident-request-outcome-v1','identity':identity(1),'status':'failed-after-admission'}
+        exported={'files':{'resident/requests.json':encoded(queue),'resident/request-old-failed-after-admission.json':encoded(failed)}}
+        self.assertEqual(driver.Journey.unconsumed_asks(exported,[first,merged],author,resident,'question'),[merged])
+        # After native drain, neither an old failure without a say reply nor the
+        # consumed second request should prevent a genuinely fresh ask.
+        queue['selected']=None;exported['files']['resident/requests.json']=encoded(queue)
+        exported['files']['resident/request-current-completed.json']=encoded({'type':'mini-resident-request-outcome-v1','identity':identity(2),'status':'completed'})
+        self.assertEqual(driver.Journey.unconsumed_asks(exported,[first,merged],author,resident,'question'),[])
+        # A cursor alone cannot manufacture a terminal receipt.
+        del exported['files']['resident/request-current-completed.json']
+        with self.assertRaisesRegex(ValueError,'lacks retained or terminal'):
+            driver.Journey.unconsumed_asks(exported,[first,merged],author,resident,'question')
 
     def test_started_native_custody_blocks_another_probe_and_no_text_guessing(self):
         import base64,hashlib

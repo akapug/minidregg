@@ -1012,13 +1012,30 @@ class Journey:
         return ([selected] if selected is not None else [])+queue.get('pending',[])
 
     @staticmethod
-    def unanswered_asks(rows,author,resident,question):
-        asks=[r for r in rows if r.get('author')==author and r.get('to')==resident
-              and r.get('kind')=='say' and question in r.get('text','')]
-        return [ask for ask in asks if not any(reply.get('author')==resident
-            and reply.get('to')==author and reply.get('kind')=='say'
-            and reply.get('reCell')==ask.get('cell') and reply.get('reSequence')==ask.get('sequence')
-            and str(reply.get('re'))==str(ask.get('n')) for reply in rows)]
+    def unconsumed_asks(exported,rows,author,resident,question):
+        queue=Journey.exported_state(exported,'resident/requests.json') or {}
+        retained=([queue['selected']] if queue.get('selected') is not None else [])+queue.get('pending',[])
+        terminal=[]
+        for name in exported.get('files',{}):
+            if not name.startswith('resident/request-') or not name.endswith('.json'):continue
+            record=Journey.exported_state(exported,name)
+            if record.get('type')=='mini-resident-request-outcome-v1' and record.get('status') in ('completed','refused','cancelled','failed-after-admission'):
+                terminal.append(record.get('identity'))
+        remaining=[]
+        for row in rows:
+            if not (row.get('author')==author and row.get('to')==resident and row.get('kind')=='say'
+                    and question in row.get('text','')):continue
+            identity={'binding':queue.get('binding'),'author':row.get('author'),'cell':row.get('cell'),'sequence':row.get('sequence')}
+            if identity in terminal:continue
+            if any(item.get('identity')==identity for item in retained):
+                remaining.append(row);continue
+            cursor=queue.get('cursors',{}).get(row.get('cell'),0)
+            if type(row.get('sequence')) is not int or type(cursor) is not int:
+                raise ValueError('native discovery cursor or signed source sequence is invalid')
+            if row['sequence']<=cursor:
+                raise ValueError('discovered request lacks retained or terminal native custody; inspect before another ask')
+            remaining.append(row)
+        return remaining
 
     @staticmethod
     def selected_ask(call,rows,author,resident,question):
@@ -1028,7 +1045,8 @@ class Journey:
                 or entry.get('kind')!='say' or question not in entry.get('text','')
                 or any(identity.get(k)!=entry.get(k) for k in ('author','cell','sequence'))):
             raise ValueError('provider call lacks the exact native selected request')
-        fields=('author','cell','sequence','height','n','text','to','kind')
+        # n and height are presentation coordinates of distinct signed views.
+        fields=('author','cell','sequence','text','to','kind')
         matches=[row for row in rows if all(row.get(k)==entry.get(k) for k in fields)]
         if len(matches)!=1:raise ValueError('native selected request does not join exactly one signed room entry')
         return matches[0]
@@ -1048,7 +1066,7 @@ class Journey:
             before_rows=transcript()
             if resumed is None:
                 before=self.paid()
-                if not queued and not self.unanswered_asks(before_rows,self.subjects['bob'],self.subjects['hermes'],question):
+                if not queued and not self.unconsumed_asks(exported,before_rows,self.subjects['bob'],self.subjects['hermes'],question):
                     self.shell('bob','ask lab oracle: '+question)
             else:
                 self.validate_refusal_resume(resumed,old_lines)
@@ -1069,14 +1087,14 @@ class Journey:
             if any(call.get('selectedRequest')!=calls[-1].get('selectedRequest') for call in calls):
                 raise ValueError('one resident invocation consumed multiple native source requests')
             chosen=self.selected_ask(calls[-1],transcript(),self.subjects['bob'],self.subjects['hermes'],question)
-            number=str(chosen['n'])
-            if number in asks:raise ValueError('native resident selected an already qualified request')
-            asks.add(number)
+            selected_identity=(chosen['author'],chosen['cell'],chosen['sequence'])
+            if selected_identity in asks:raise ValueError('native resident selected an already qualified request')
+            asks.add(selected_identity)
             if queued and not any(item.get('identity')==calls[-1]['selectedRequest'] for item in queued):
                 raise ValueError('provider selection differs from retained native request custody')
             expected='Whitman' if answer else 'oracle-not-granted'
             replies=[r for r in transcript() if r.get('author')==self.subjects['hermes'] and r.get('to')==self.subjects['bob']
-                     and str(r.get('re'))==number and r.get('reCell')==chosen['cell']
+                     and r.get('reCell')==chosen['cell']
                      and r.get('reSequence')==chosen['sequence'] and r.get('kind')=='say']
             if not any(expected in r.get('text','') for r in replies):raise ValueError('fresh room reply lacks expected Oracle outcome')
             if self.paid()<=before:raise ValueError('fresh Oracle room reply was not a paid turn')
