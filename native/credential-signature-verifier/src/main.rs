@@ -1,5 +1,4 @@
-use ed25519_dalek::{Signature, VerifyingKey, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH};
-use sha2::{Digest, Sha512};
+use mini_kernels::{verify_ed25519, verify_sshsig as verify_sshsig_bytes};
 use std::env;
 use std::ffi::OsStr;
 use std::fs::{self, File};
@@ -26,42 +25,17 @@ fn read_fixed<const N: usize>(path: &Path, role: &str) -> Result<[u8; N], String
 }
 
 fn verify(key_path: &Path, frame_path: &Path, signature_path: &Path) -> Result<&'static [u8], String> {
-    let key_bytes = read_fixed::<PUBLIC_KEY_LENGTH>(key_path, "public key")?;
-    let signature_bytes = read_fixed::<SIGNATURE_LENGTH>(signature_path, "signature")?;
-    let key = VerifyingKey::from_bytes(&key_bytes)
-        .map_err(|_| "public key point decoding failed".to_owned())?;
+    let key_bytes = read_fixed::<32>(key_path, "public key")?;
+    let signature_bytes = read_fixed::<64>(signature_path, "signature")?;
     let frame = fs::read(frame_path).map_err(|error| format!("cannot read frame: {error}"))?;
-    let signature = Signature::from_bytes(&signature_bytes);
 
     // The frame is opaque. Domain separation, key selection, request binding,
     // revocation, and authority are the Lean caller's responsibility.
-    Ok(if key.verify_strict(&frame, &signature).is_ok() {
+    Ok(if verify_ed25519(&key_bytes, &frame, &signature_bytes)? {
         b"verified\n"
     } else {
         b"invalid\n"
     })
-}
-
-/// An SSH `string`: a big-endian u32 length, then the bytes.
-fn ssh_string(out: &mut Vec<u8>, bytes: &[u8]) -> Result<(), String> {
-    let length = u32::try_from(bytes.len()).map_err(|_| "SSH string exceeds 2^32 bytes".to_owned())?;
-    out.extend_from_slice(&length.to_be_bytes());
-    out.extend_from_slice(bytes);
-    Ok(())
-}
-
-/// OpenSSH PROTOCOL.sshsig: the bytes an SSHSIG signature is over,
-/// `"SSHSIG" || string namespace || string "" || string "sha512" || string SHA-512(message)`.
-/// This is the only hash computed here; Lean fixes every other byte
-/// (`Kernel.PayEnrolMemo.sshsigSignedData`).
-fn sshsig_signed_data(namespace: &[u8], message: &[u8]) -> Result<Vec<u8>, String> {
-    let digest = Sha512::digest(message);
-    let mut signed = b"SSHSIG".to_vec();
-    ssh_string(&mut signed, namespace)?;
-    ssh_string(&mut signed, b"")?;
-    ssh_string(&mut signed, b"sha512")?;
-    ssh_string(&mut signed, &digest)?;
-    Ok(signed)
 }
 
 fn verify_sshsig(
@@ -70,19 +44,12 @@ fn verify_sshsig(
     message_path: &Path,
     signature_path: &Path,
 ) -> Result<&'static [u8], String> {
-    let key_bytes = read_fixed::<PUBLIC_KEY_LENGTH>(key_path, "public key")?;
-    let signature_bytes = read_fixed::<SIGNATURE_LENGTH>(signature_path, "signature")?;
-    let key = VerifyingKey::from_bytes(&key_bytes)
-        .map_err(|_| "public key point decoding failed".to_owned())?;
+    let key_bytes = read_fixed::<32>(key_path, "public key")?;
+    let signature_bytes = read_fixed::<64>(signature_path, "signature")?;
     let namespace =
         fs::read(namespace_path).map_err(|error| format!("cannot read namespace: {error}"))?;
-    if namespace.is_empty() {
-        return Err("SSHSIG namespace must not be empty".to_owned());
-    }
     let message = fs::read(message_path).map_err(|error| format!("cannot read message: {error}"))?;
-    let signed = sshsig_signed_data(&namespace, &message)?;
-    let signature = Signature::from_bytes(&signature_bytes);
-    Ok(if key.verify_strict(&signed, &signature).is_ok() {
+    Ok(if verify_sshsig_bytes(&key_bytes, &namespace, &message, &signature_bytes)? {
         b"verified\n"
     } else {
         b"invalid\n"

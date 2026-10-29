@@ -9,8 +9,7 @@ is refused BY NAME, with no panic and no allocation sized by the pipe:
     re-examined.
  0b. the launcher alone (no flush) passes ZERO of those bytes.
  1. missing helper, caller stdout holding buffered bytes: `attempt` answers
-    `closed 0`: ZERO bytes read from the reply pipe; through
-    `CredentialSignatureIO.verify` the verdict is `unavailable` naming it.
+    `closed 0`: ZERO bytes read from the reply pipe.
  2. a helper whose first bytes are not the reply tag: `untagged`.
  3. a helper declaring a stdout one byte over `maxField`: `oversized "stdout"`;
     at exactly `maxField` (and then closing) it is `closed`, not `oversized`.
@@ -18,7 +17,7 @@ is refused BY NAME, with no panic and no allocation sized by the pipe:
     (with VERIFIER given) the real verifier's `serve` answers a usage request.
 
 Usage: lake env lean --run scripts/kn2/coprocess-faults.lean [VERIFIER] -/
-import Compiler.CredentialSignatureIO
+import Compiler.NativeCoprocess
 
 open Minidregg.Compiler
 open Minidregg.Compiler.NativeCoprocess
@@ -78,14 +77,6 @@ def run (verifier : Option String) (directory : System.FilePath) : IO Unit := do
   -- 1. missing helper with buffered stdout: zero bytes read, refused by name.
   IO.print "buffered-before-the-helper-spawn "
   expectFailure "missing helper, buffered stdout" (directory / "absent-helper") (.closed 0)
-  IO.print "buffered-before-the-verifier-spawn "
-  let config : CredentialSignatureIO.NativeConfig := ⟨directory / "absent-verifier"⟩
-  match ← CredentialSignatureIO.verify config (List.replicate 32 1) [0] (List.replicate 64 2) with
-  | .error (.unavailable detail) =>
-      unless detail == (Failure.closed 0).render do
-        fail s!"missing verifier: unavailable, but not as `closed 0`: {detail}"
-      IO.println s!"refused as expected (missing verifier): unavailable \"{detail}\""
-  | other => fail s!"missing verifier answered {repr other}"
   -- 2. untagged first frame.
   let garbage ← fakeHelper directory "garbage" "store at height 3 (the fixture's prefix)\n".toUTF8
   expectFailure "untagged reply" garbage (.untagged 8)

@@ -3165,25 +3165,12 @@ partial def serveCodec (config : NativeHost.Config)
     writeSessionFrame output answer.1 answer.2
   serveCodec config providerRoutes input output
 
-/-- Execute from one private copy throughout this stdio process. The copy is
-the pinned launch artifact; the originally configured pathname may later be
-replaced or have a symlink target swapped without changing the session's
-historical verifier. The OS must protect this private directory from writes
-by other actors for the lifetime of the process. -/
+/-- Run one stdio process with the linked native signature verifier. The
+historical wrapper name and configured artifact path remain for deploy/carry
+pins; live verification copies and launches no executable. -/
 def withPinnedSignature {α : Type} (config : NativeHost.Config)
     (body : NativeHost.Config → IO α) : IO α :=
-  IO.FS.withTempDir fun directory => do
-    let pinned := directory / "credential-verifier"
-    let bytes ← IO.FS.readBinFile config.signature.binary
-    IO.FS.writeBinFile pinned bytes
-    let permission ← IO.Process.output
-      { cmd := "/bin/chmod", args := #["0500", pinned.toString] }
-    unless permission.exitCode == 0 do
-      throw (IO.userError "cannot make pinned credential verifier executable")
-    -- A launch failure is detected before the first semantic replay. The
-    -- verifier's usage exit here is expected; it has no arguments yet.
-    discard <| IO.Process.output { cmd := pinned.toString, args := #[] }
-    body { config with signature := ⟨pinned⟩ }
+  body config
 
 partial def readOperatorSnapshot (input : IO.FS.Handle) (limit : Nat)
     (acc : ByteArray := ByteArray.empty) : IO ByteArray := do
