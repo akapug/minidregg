@@ -19,6 +19,9 @@ here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 [ $# -ge 1 ] || pipeline_die "usage: lane-check FILE.lean..."
 root=$(git rev-parse --show-toplevel) || pipeline_die "not in a clone"
 cd "$root"
+pipeline_user_bus
+# A pooled tree (scripts/pipeline/lane-tree): every check renews its holder's lease.
+[ -L .lake/packages ] && "$here/lane-tree" renew "$root" 2>/dev/null || true
 log=$(mktemp "${TMPDIR:-/tmp}/lane-check.XXXXXX"); trap 'rm -f "$log"' EXIT
 # The header as Lean reads it (scripts/lean_imports.py: `public`/`meta` imports of module files included).
 mods=$(python3 -c 'import sys; sys.path.insert(0, "scripts"); from lean_imports import file_imports
