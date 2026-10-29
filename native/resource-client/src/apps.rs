@@ -299,7 +299,7 @@ pub(crate) const FEATURED: &[(&str, &str)] = &[
     ("j4jvn386t7un76qu6yyw1vwc5ke50t07e38r82kzy4qqg6qq7msh", "board mutations as JSON over socket.io (connect with board=<name>, broadcast a mutation, replay it on a fresh connection); GET /download/<board> reads the saved SVG"),
     ("d9ygf47xrtnw12j92cyt6cu8ut75esx01u4q3kcrn8415w9qzzgh", "REST /api/v1 (repos, issues); git smart-HTTP when the bridge streams bodies"),
     ("894fztp7d6e4u8fgw2qtm8jv904jw6w19frfqgc0pwytj0q10s80", "a plain-text journal: PUT /add a transaction, GET /transactions and /accounts as JSON"),
-    ("7qvcjh7gk0rzdx1s3c8gufd288sesf6vvdt297756xcv4q8xxvhh", "the deck is slides.md: PUT /slides.md, GET it back; published at <grain>-www"),
+    ("vku2z06we4n4cfpvn28y6159fsgft9nttvvfeg1wndu8szvrtm3h", "the deck is deck.md: PUT /deck.md, GET it back"),
     ("wpe8yvzdpjsst9314ucecmpmyzju0830ujm815ew5mjuen173kg0", "REST /api (boards, lists, cards) and DDP"),
     ("61gh7gnns305cknp20v2ekvdex48g4d3rv6wghuzk6huzx5qmp7h", "hg over HTTP: POST /?cmd=unbundle pushes a changegroup; GET /raw-file/<rev>/<path> and /rev/<node> read it back"),
     ("w544a46cjwtje73rfearjvszwa3nhjtxjanu5s83qkdutx6k0nz0", "sticky notes over socket.io: joinRoom then createCard; initializeMe answers initCards from the board's redis"),
@@ -1649,15 +1649,24 @@ mod tests {
         let entries = fixture();
         let all = search(&entries, "", None);
         assert_eq!(all.len(), entries.len());
-        let names: Vec<&str> = all.iter().take(FEATURED.len()).map(|e| e.name.as_str()).collect();
-        assert_eq!(names[0], "Etherpad");
-        assert_eq!(names.len(), 21, "every featured appId is in the recorded index: {names:?}");
-        assert!(all[FEATURED.len()..].iter().all(|e| featured(&e.app_id).is_none()));
-        let pad = entry_json(all[0], &Verdict { state: "unverified".into(), reason: None, raw_bytes: None, signed_app_id: None, running: 0 });
-        assert_eq!(pad["featured"]["rank"], 1);
-        assert_eq!(pad["packageBuiltAt"], "", "the store createdAt is never promoted to a build time");
-        assert_eq!(pad["upstreamVersion"], "");
-        assert!(pad["featured"]["agentHook"].as_str().unwrap().contains("/api"));
+        // Repackaged featured apps carry fresh appIds that postdate this
+        // recorded index, so their ranks resolve only in the live store.
+        // Every rank the index still resolves must lead the list in FEATURED
+        // order, nothing after that prefix may be featured, and the first
+        // ranked entry carries its own rank and hook verbatim.
+        let ranks: Vec<usize> = all.iter().filter_map(|e| featured(&e.app_id).map(|(rank, _)| rank)).collect();
+        let mut in_order = ranks.clone();
+        in_order.sort_unstable();
+        assert!(!ranks.is_empty(), "the recorded index still resolves featured ranks");
+        assert_eq!(ranks, in_order, "featured entries lead search in FEATURED order: {ranks:?}");
+        assert!(all[..ranks.len()].iter().all(|e| featured(&e.app_id).is_some()));
+        assert!(all[ranks.len()..].iter().all(|e| featured(&e.app_id).is_none()));
+        let (_, hook) = featured(&all[0].app_id).unwrap();
+        let first = entry_json(all[0], &Verdict { state: "unverified".into(), reason: None, raw_bytes: None, signed_app_id: None, running: 0 });
+        assert_eq!(first["featured"]["rank"], ranks[0] as u32);
+        assert_eq!(first["featured"]["agentHook"].as_str().unwrap(), hook);
+        assert_eq!(first["packageBuiltAt"], "", "the store createdAt is never promoted to a build time");
+        assert_eq!(first["upstreamVersion"], "");
     }
 
     #[test]
