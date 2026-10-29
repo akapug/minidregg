@@ -1,4 +1,8 @@
-# HOT-PATH lane state (2026-10-29)
+# HOT-PATH lane state (2026-10-29, wound down for ember's flight)
+
+**Frame (law 17, ember 10-29): the system never gets slower over time, except by at most a logarithmic factor.**
+Per-operation cost must be O(log n) in history and state size; anything scaling with document length, cell size, cell
+count, history length or member count violates it. Performance is a gate for this one property (the flatness bench).
 
 Present state; rewritten whole. Branch `lane/hot-path` (= main 1baf18816 + lane/perf-batch1 + fixes). Owner: the
 hot-path Opus agent. Brief ground: docs/STATE-OF-MINIDREGG-2026-10-28.md (lane/root-state). Goal: a turn costs
@@ -114,18 +118,56 @@ measured per-turn cost is NOT the absence of that layer; it is derived values co
    it is cached. O(changed) for documents needs per-entry salt epochs, which reveals to a holder of two views which
    entries changed between them; ember keeps the ratchet.
 
-## Running
+## Running / left on hbox (harmless, PID files)
 
-- hbox (base tree moved to `/home/hbox/lanes/hot-path`, clones `/home/hbox/lanes/hp-*`; /othersys is not ours): umbrella
-  build `b-umb.log`; `coldwalk.sh b2c 150` (ages world w-b2c, times `audit` with both Hosts; `coldwalk-b2c.log`).
-  `after.sh TAG SHA` = build, Host binary, doc bench, SandMD world on the new Host, 20 GETs.
-- Mac: seven claude-kimi workers (PID files above).
+- Flatness bench on the batch-1 Host: `/home/hbox/lanes/hot-path/flatness-bench.py` (copy of
+  `scripts/perf/flatness-bench.py`), PID file `/home/hbox/lanes/hot-path/flat-b2c.pid`, log `flat-b2c.log`, root
+  `flat-b2c/` (N=300, lo=10). It stops its own world at the end. No Lean.
+- SandMD world on the batch-1 Host, standing: `/tank/lanes/hot-path/w-b2c` (aged ~170 GETs). Tear down with
+  `cd /tank/lanes/hot-path/src-run && MINI_OPERATOR_UID=1000 MINI_OPERATOR_NAME=hbox XDG_RUNTIME_DIR=/run/user/1000
+  bash scripts/spk-platform/world-down.sh /tank/lanes/hot-path/w-b2c/world`.
+- Nothing Lean-heavy: the integrator's host stage of batch 1 (staging f34b03095) has the box; combined Lean caps ~60 GB.
 
-## Next
+## Next (successor: start here)
 
-1. Base green -> clone-warm worker clones; harvest worker shas; merge into lane/hot-path; full build; doc bench on
-   the built Host (needs a candidate-shaped bin dir: build the host exe from the base tree); profile again.
-2. Persistent-state layer (owner): decoded cells and per-cell derived views held by the session across turns
-   (Engine cells with decoded/law-view thunks + exactness), the authority snapshot built once per cell image,
-   seals over changed cells only, cold start from a derived-state snapshot. Design note in this file before code.
-3. Batch landing to the integrator (agent aca7a1fd39def735a) with before/after numbers.
+Measured violations of law 17 (flatness bench, batch-1 Host, one document): submit CPU 60 / 250 / 620 / 1,140 / 1,740 ms at
+appends 2 / 21 / 51 / 101 / 141 (wall 148 -> 3,287 ms); propose wall 261 -> 7,937 ms with Host CPU 20 -> 450 ms (the client
+side dominates propose). Cold walk (`audit`, ~200 records): 302 s on 2b8f75dcb, 39 s on batch 1, still O(history).
+
+Growth terms found by reading the turn path (each must become O(log n) or O(changed)):
+1. **Records carry whole post-state bytes** (`DataWrite.canonicalPostBytes`, 72 files): every append writes, hashes,
+   fsyncs and replays the whole document; the log is O(n^2). Fix: writes carry patches plus the post root; the executor
+   applies the patch to the held cell (re-genesis is free). The largest single item.
+2. **Whole-cell work on the written cell**: encode (`Materialized.bytes`), root (`rootBytesFast` decodes the bytes just
+   encoded), re-decode in `validateLoadedFrom`/`validateServedFrom`, `World.admit` -> `pinFails` -> `DeployedBridge.cellRoot`,
+   `DeployedCharge.storageCharge`. Fix: cells as persistent sorted maps with per-entry cached bytes and a Merkle root updated
+   along the changed path; bytes produced from the map (rope), never re-decoded.
+3. **Privacy ratchet (K-HIDE-ROTATE, kept by ember)**: re-keys every entry salt per write, O(n). What it forces: unlinkability
+   against holders of OPENINGS (sibling hashes) requires every leaf to change per write, so O(n) is forced for them.
+   Unlinkability against holders of ROOTS and receipts only is achievable at O(log n): stable per-entry salts in a Merkle tree
+   and a published root H(fresh secret epoch key, Merkle root). Needs ember's choice between the two guarantees.
+4. **Document laws** (`ContentLaw`/`EventHistoryLaw`, now one pass but O(n)): check incrementally (the pre-store held the law;
+   check only the new entries against the held document id), proved equal to the full law under the pre-state's validity.
+5. **Policy state = whole resource projection**: `ResourceObservationAdmission.resourceSlots` projects the entire observed
+   store into string-keyed slots (`DeclaredResourceProjection.project`, `ContentResource.project`, `bytesSlots` one slot per
+   byte) before every law check; then `indexState` hashes them all. Fix: a demand-driven state whose `get` computes a slot from
+   the store (O(log n) per atom), proved to agree with the list state on every slot (`State.get` congruence lemmas exist).
+6. **Certificate lists in the session** (`Verified.issues/reserves/...`): `priorIssueFor` etc. are `find?` with byte
+   comparisons over lists that grow with shares and dispatches. Fix: keyed maps with exactness to the first-match `find?`.
+7. **Checkpoint seals** encode every cell every 64 records: O(state). Fix: incremental checkpoints (only changed cells, the
+   cell store content-addressed), so a seal is O(changed).
+8. **Cold start** O(history): sealed walk-certificate snapshots (ruled; design above), then O(suffix).
+9. **Client (mini) propose**: wall grows ~50 ms per append with little Host CPU. Unread; likely whole-document work client
+   side (reading/rendering the proposal context).
+10. GET: per-GET Host CPU looked like it grew 160 -> 500 ms over ~30 GETs, but that window overlapped a build; rerun the GET
+    flatness (route world on NVMe: `WORLD_PARENT=/home/hbox/lanes/worlds route-up.sh ...`) before concluding.
+
+The flatness bench (`scripts/perf/flatness-bench.py`, doc submit at append lo vs n, bound max(1.5, log2 n / log2 lo)) is
+written for the integrator's gate; a GET twin (`flatness-route.sh`: route world, GET 10 vs 1,000) is not written yet. Order of
+work: (1)+(2) together (write patches into persistent cells; this also kills most of 4 and 7), then 5, 6, 8, 9, 3 after ember's
+choice. Kimi only for mechanical edits (ember 10-29); proofs and design are the owner's.
+
+Batch 1 umbrella status (my tree): Host.Main + consent green; reds only in Fixtures (NativeAcceptedFixture,
+NativeDocWriteFixture, BirthPlanPoles: recorded pins/transcripts to re-record after the codec writer and the in-process
+verifier) and Effects/Revival/EngineProofs.lean:45 `materialize_logical` (needs `CellState.Materialized.ext rfl`; the root's
+effects worker on lane/effects-proofs owns that file).
