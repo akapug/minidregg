@@ -107,6 +107,15 @@ open Minidregg.Kernel.NativeHost
 set_option autoImplicit false
 attribute [local irreducible] NativeHost.Config.profile CanonicalRuntimeProfile.Profile.compilerProfile
 
+/-- Historical records compare by object identity first. A record selected from the verified prefix
+is normally the very object retained by its evidence; only distinct objects need the canonical
+encoding fallback (including the function-valued ten-lane charge). -/
+local instance : DecidableEq DurableReceiver.IntentRecord := fun left right =>
+  withPtrEqDecEq left right fun _ =>
+    decidable_of_iff (DurableReceiverCodec.intentStream.encode left =
+        DurableReceiverCodec.intentStream.encode right)
+      (lawful_encode_injective DurableReceiverCodec.intentStream.toLawful).eq_iff
+
 /-- The pay ambient prices from the opened image's platform record: the pins' creation
 tariff (the record's, `pinnedTariff`) and the factory template under the record. Without a
 record the genesis terms stand in and every pay plan refuses `platformUnavailable`
@@ -567,10 +576,7 @@ private def recordPresent {config : Config} (opened : Opened config) (index : Na
   match found : opened.durable.image.accepted[index]? with
   | none => .error "historical record absent from the verified prefix"
   | some stored =>
-      if bytes : DurableReceiverCodec.intentStream.encode stored =
-          DurableReceiverCodec.intentStream.encode record then
-        have exact : stored = record :=
-          (lawful_encode_injective DurableReceiverCodec.intentStream.toLawful) bytes
+      if exact : stored = record then
         .ok ⟨by rw [exact]⟩
       else .error "historical record differs from the verified prefix"
 
@@ -595,10 +601,7 @@ private def selectCreatedAt (config : Config) (opened : Opened config)
   if indexExact : prior.index = selected.index then
     if receiptExact : prior.receipt = selected.receipt then
       if ingressExact : prior.ingress = selected.ingress then
-        if bytesExact : DurableReceiverCodec.intentStream.encode prior.record =
-            DurableReceiverCodec.intentStream.encode (CreatedSelected.record selected) then
-          have recordExact : prior.record = (CreatedSelected.record selected) :=
-            (lawful_encode_injective DurableReceiverCodec.intentStream.toLawful) bytesExact
+        if recordExact : prior.record = CreatedSelected.record selected then
           let ⟨present⟩ ← match recordPresent opened prior.index prior.record with
             | .error detail => return .error detail
             | .ok present => pure present
@@ -621,10 +624,7 @@ private def selectRunningAt {config : Config} (opened : Opened config)
   match found : opened.durable.image.accepted[prior.index]? with
   | none => throw "STOP running completion record absent from verified prefix"
   | some record =>
-      if bytesExact : DurableReceiverCodec.intentStream.encode record =
-          DurableReceiverCodec.intentStream.encode prior.record then
-        have recordExact : record = prior.record :=
-          (lawful_encode_injective DurableReceiverCodec.intentStream.toLawful) bytesExact
+      if recordExact : record = prior.record then
         have present : opened.durable.image.accepted[prior.index]? = some prior.record := by
           rw [found, recordExact]
         if appExact : prior.ingress.beginSource.app = source.app then
@@ -1962,18 +1962,8 @@ private def admitSessionEnrollmentAt (config : Config) (opened : Opened config)
       if issueReceipt : issue.receipt = ingress.issueReceipt then
         if ticketResource : issue.evidence.spec.ticket.resource =
             ingress.request.ticketResource then
-          if recordBytes : (opened.durable.image.accepted[issue.index]?.map
-              DurableReceiverCodec.intentStream.encode) =
-              some (DurableReceiverCodec.intentStream.encode issue.evidence.record) then
-            have present : opened.durable.image.accepted[issue.index]? =
-                some issue.evidence.record := by
-              cases found : opened.durable.image.accepted[issue.index]? with
-              | none => simp [found] at recordBytes
-              | some record =>
-                  simp only [found, Option.map_some, Option.some.injEq] at recordBytes
-                  have exact := (lawful_encode_injective
-                    DurableReceiverCodec.intentStream.toLawful) recordBytes
-                  simpa only [found, Option.some.injEq] using exact
+          if present : opened.durable.image.accepted[issue.index]? =
+              some issue.evidence.record then
             match ← ApplicationGrainSessionEnrollmentAdmission.admitAt config opened
                 ingress issue.evidence.spec issue.receipt with
             | .error reason => return .error reason
@@ -1997,18 +1987,8 @@ private def admitLifetimeGrantIssueAt (config : Config) (opened : Opened config)
       if originalReceipt : prior.receipt = ingress.spec.grant.source.issueReceipt then
         if scope : ingress.spec.grant.matchesIssued prior.evidence.spec
             prior.index prior.receipt = true then
-          if recordBytes : (opened.durable.image.accepted[prior.index]?.map
-              DurableReceiverCodec.intentStream.encode) =
-              some (DurableReceiverCodec.intentStream.encode prior.evidence.record) then
-            have present : opened.durable.image.accepted[prior.index]? =
-                some prior.evidence.record := by
-              cases found : opened.durable.image.accepted[prior.index]? with
-              | none => simp [found] at recordBytes
-              | some record =>
-                simp only [found, Option.map_some, Option.some.injEq] at recordBytes
-                have exact := (lawful_encode_injective
-                  DurableReceiverCodec.intentStream.toLawful) recordBytes
-                simpa only [found, Option.some.injEq] using exact
+          if present : opened.durable.image.accepted[prior.index]? =
+              some prior.evidence.record then
             match ← ApplicationAgentLifetimeGrantAdmission.admitNative config.profile
                 config opened.pins config.signature opened.durable
                 (logicalHeight config opened.durable) ingress.canonicalBytes with
@@ -2038,10 +2018,7 @@ private def admitDispatchAt (config : Config) (opened : Opened config)
   match found : opened.durable.image.accepted[prior.index]? with
   | none => return .error "historical dispatch issue record absent from prefix"
   | some original =>
-    if exactBytes : DurableReceiverCodec.intentStream.encode original =
-        DurableReceiverCodec.intentStream.encode prior.evidence.record then
-      have originalExact : original = prior.evidence.record :=
-        (lawful_encode_injective DurableReceiverCodec.intentStream.toLawful) exactBytes
+    if originalExact : original = prior.evidence.record then
       have present : opened.durable.image.accepted[prior.index]? =
           some prior.evidence.record := by
         simpa only [originalExact] using found
@@ -2065,30 +2042,10 @@ private def admitAgentDispatchAt (config : Config) (opened : Opened config)
     | return .error "agent dispatch reserve absent from admitted prefix"
   if reserveIndex : reserve.index = ingress.reserveIndex then
     if issueBeforeReserve : issue.index < reserve.index then
-      if issueBytes : (opened.durable.image.accepted[issue.index]?.map
-          DurableReceiverCodec.intentStream.encode) =
-        some (DurableReceiverCodec.intentStream.encode issue.evidence.record) then
-        have issuePresent : opened.durable.image.accepted[issue.index]? =
-            some issue.evidence.record := by
-          cases found : opened.durable.image.accepted[issue.index]? with
-          | none => simp [found] at issueBytes
-          | some record =>
-            simp only [found, Option.map_some, Option.some.injEq] at issueBytes
-            have exact := (lawful_encode_injective
-              DurableReceiverCodec.intentStream.toLawful) issueBytes
-            simpa only [found, Option.some.injEq] using exact
-        if reserveBytes : (opened.durable.image.accepted[reserve.index]?.map
-            DurableReceiverCodec.intentStream.encode) =
-            some (DurableReceiverCodec.intentStream.encode reserve.raw.record) then
-          have reservePresent : opened.durable.image.accepted[reserve.index]? =
-              some reserve.raw.record := by
-            cases found : opened.durable.image.accepted[reserve.index]? with
-            | none => simp [found] at reserveBytes
-            | some record =>
-              simp only [found, Option.map_some, Option.some.injEq] at reserveBytes
-              have exact := (lawful_encode_injective
-                DurableReceiverCodec.intentStream.toLawful) reserveBytes
-              simpa only [found, Option.some.injEq] using exact
+      if issuePresent : opened.durable.image.accepted[issue.index]? =
+          some issue.evidence.record then
+        if reservePresent : opened.durable.image.accepted[reserve.index]? =
+            some reserve.raw.record then
           if untouched : dispatchPurseUntouched
               (opened.durable.image.accepted.drop (reserve.index + 1))
               ingress.reserveContext.purseTask then
@@ -2123,42 +2080,12 @@ private def admitLifetimeDispatchAt (config : Config) (opened : Opened config)
     if issueBeforeGrant : issue.index < grant.index then
       if grantBeforeReserve : grant.index < reserve.index then
         if reserveIndex : reserve.index = ingress.reserveIndex then
-          if issueBytes : (opened.durable.image.accepted[issue.index]?.map
-              DurableReceiverCodec.intentStream.encode) =
-              some (DurableReceiverCodec.intentStream.encode issue.evidence.record) then
-            have issuePresent : opened.durable.image.accepted[issue.index]? =
-                some issue.evidence.record := by
-              cases found : opened.durable.image.accepted[issue.index]? with
-              | none => simp [found] at issueBytes
-              | some record =>
-                simp only [found, Option.map_some, Option.some.injEq] at issueBytes
-                have exact := (lawful_encode_injective
-                  DurableReceiverCodec.intentStream.toLawful) issueBytes
-                simpa only [found, Option.some.injEq] using exact
-            if grantBytes : (opened.durable.image.accepted[grant.index]?.map
-                DurableReceiverCodec.intentStream.encode) =
-                some (DurableReceiverCodec.intentStream.encode grant.record) then
-              have grantPresent : opened.durable.image.accepted[grant.index]? =
-                  some grant.record := by
-                cases found : opened.durable.image.accepted[grant.index]? with
-                | none => simp [found] at grantBytes
-                | some record =>
-                  simp only [found, Option.map_some, Option.some.injEq] at grantBytes
-                  have exact := (lawful_encode_injective
-                    DurableReceiverCodec.intentStream.toLawful) grantBytes
-                  simpa only [found, Option.some.injEq] using exact
-              if reserveBytes : (opened.durable.image.accepted[reserve.index]?.map
-                  DurableReceiverCodec.intentStream.encode) =
-                  some (DurableReceiverCodec.intentStream.encode reserve.raw.record) then
-                have reservePresent : opened.durable.image.accepted[reserve.index]? =
-                    some reserve.raw.record := by
-                  cases found : opened.durable.image.accepted[reserve.index]? with
-                  | none => simp [found] at reserveBytes
-                  | some record =>
-                    simp only [found, Option.map_some, Option.some.injEq] at reserveBytes
-                    have exact := (lawful_encode_injective
-                      DurableReceiverCodec.intentStream.toLawful) reserveBytes
-                    simpa only [found, Option.some.injEq] using exact
+          if issuePresent : opened.durable.image.accepted[issue.index]? =
+              some issue.evidence.record then
+            if grantPresent : opened.durable.image.accepted[grant.index]? =
+                some grant.record then
+              if reservePresent : opened.durable.image.accepted[reserve.index]? =
+                  some reserve.raw.record then
                 if untouched : dispatchPurseUntouched
                     (opened.durable.image.accepted.drop (reserve.index + 1))
                     ingress.reserveContext.base.purseTask then
@@ -2197,11 +2124,7 @@ private def admitClaimAt (config : Config) (opened : Opened config)
       match found : opened.durable.image.accepted[prior.index]? with
       | none => return .error "historical lifecycle begin record absent from prefix"
       | some record =>
-        if physicalExact : DurableReceiverCodec.intentStream.encode record =
-            DurableReceiverCodec.intentStream.encode prior.record then
-          have exact : record = prior.record :=
-            (lawful_encode_injective DurableReceiverCodec.intentStream.toLawful)
-              physicalExact
+        if exact : record = prior.record then
           have present : opened.durable.image.accepted[prior.index]? =
               some prior.record := by simpa only [exact] using found
           let at' ← match ← groundAt reader opened with
@@ -2210,15 +2133,8 @@ private def admitClaimAt (config : Config) (opened : Opened config)
           match ← ApplicationLifecycleClaimCore.prepare config reader ⟨opened.ground, at'.down⟩ ingress with
           | .error _ => return .error "historical lifecycle claim current admission refused"
           | .ok conditional =>
-            if recordExact : DurableReceiverCodec.intentStream.encode prior.record =
-                DurableReceiverCodec.intentStream.encode
-                  (DurableReceiver.IntentRecord.ofIntent
-                    conditional.original.admitted.intent) then
-              have sourceExact : prior.record =
-                  DurableReceiver.IntentRecord.ofIntent
-                    conditional.original.admitted.intent :=
-                (lawful_encode_injective DurableReceiverCodec.intentStream.toLawful)
-                  recordExact
+            if sourceExact : prior.record =
+                DurableReceiver.IntentRecord.ofIntent conditional.original.admitted.intent then
               return .ok ⟨prior, indexExact, ingressExact, present, _, reader,
                 conditional, sourceExact⟩
             else return .error "historical lifecycle begin differs from source-admitted intent"
@@ -2239,11 +2155,7 @@ private def admitClaimV2At (config : Config) (opened : Opened config)
       match found : opened.durable.image.accepted[prior.index]? with
       | none => return .error "descriptor-bound lifecycle begin record absent"
       | some record =>
-        if physicalExact : DurableReceiverCodec.intentStream.encode record =
-            DurableReceiverCodec.intentStream.encode prior.record then
-          have exact : record = prior.record :=
-            (lawful_encode_injective DurableReceiverCodec.intentStream.toLawful)
-              physicalExact
+        if exact : record = prior.record then
           have present : opened.durable.image.accepted[prior.index]? =
               some prior.record := by simpa only [exact] using found
           let at' ← match ← groundAt reader opened with
@@ -2252,15 +2164,8 @@ private def admitClaimV2At (config : Config) (opened : Opened config)
           match ← ApplicationLifecycleClaimV2Core.prepare config reader ⟨opened.ground, at'.down⟩ ingress with
           | .error _ => return .error "descriptor-bound lifecycle claim current admission refused"
           | .ok conditional =>
-            if sourceBytes : DurableReceiverCodec.intentStream.encode prior.record =
-                DurableReceiverCodec.intentStream.encode
-                  (DurableReceiver.IntentRecord.ofIntent
-                    conditional.originalAccepted.intent) then
-              have recordExact : prior.record =
-                  DurableReceiver.IntentRecord.ofIntent
-                    conditional.originalAccepted.intent :=
-                (lawful_encode_injective DurableReceiverCodec.intentStream.toLawful)
-                  sourceBytes
+            if recordExact : prior.record =
+                DurableReceiver.IntentRecord.ofIntent conditional.originalAccepted.intent then
               return .ok ⟨prior, indexExact, ingressExact, present, _, reader.head,
                 conditional, recordExact⟩
             else return .error "descriptor-bound lifecycle begin differs from original intent"
@@ -2283,11 +2188,7 @@ private def admitClaimV3At (config : Config) (opened : Opened config)
       match found : opened.durable.image.accepted[prior.index]? with
       | none => return .error "launch-bound BEGIN record absent"
       | some record =>
-        if physicalExact : DurableReceiverCodec.intentStream.encode record =
-            DurableReceiverCodec.intentStream.encode prior.record then
-          have exact : record = prior.record :=
-            (lawful_encode_injective DurableReceiverCodec.intentStream.toLawful)
-              physicalExact
+        if exact : record = prior.record then
           have present : opened.durable.image.accepted[prior.index]? =
               some prior.record := by simpa only [exact] using found
           let at' ← match ← groundAt reader opened with
@@ -2296,15 +2197,8 @@ private def admitClaimV3At (config : Config) (opened : Opened config)
           match ← ApplicationLifecycleClaimV3Core.prepare config reader ⟨opened.ground, at'.down⟩ ingress with
           | .error detail => return .error detail
           | .ok conditional =>
-            if sourceBytes : DurableReceiverCodec.intentStream.encode prior.record =
-                DurableReceiverCodec.intentStream.encode
-                  (DurableReceiver.IntentRecord.ofIntent
-                    conditional.originalAccepted.intent) then
-              have recordExact : prior.record =
-                  DurableReceiver.IntentRecord.ofIntent
-                    conditional.originalAccepted.intent :=
-                (lawful_encode_injective DurableReceiverCodec.intentStream.toLawful)
-                  sourceBytes
+            if recordExact : prior.record =
+                DurableReceiver.IntentRecord.ofIntent conditional.originalAccepted.intent then
               return .ok ⟨prior, indexExact, ingressExact, present, _, reader.head,
                 conditional, recordExact⟩
             else return .error "launch-bound BEGIN differs from original intent"
@@ -2332,10 +2226,7 @@ private def admitCompletionAt (config : Config) (opened : Opened config)
     | return .error "completion original claim absent from admitted history"
   if indexExact : prior.index = conditional.historical.index then
     if ingressExact : prior.ingress = ingress.source.originalClaim then
-      if recordBytes : DurableReceiverCodec.intentStream.encode prior.record =
-          DurableReceiverCodec.intentStream.encode conditional.historical.selected.record then
-        have recordExact : prior.record = conditional.historical.selected.record :=
-          (lawful_encode_injective DurableReceiverCodec.intentStream.toLawful) recordBytes
+      if recordExact : prior.record = conditional.historical.selected.record then
         let ⟨present⟩ ← match recordPresent opened prior.index prior.record with
           | .error detail => return .error detail
           | .ok present => pure present
@@ -2361,10 +2252,7 @@ private def admitFailedStartRecoveryAt (config : Config) (opened : Opened config
     | return .error "failed START original claim absent from admitted history"
   if indexExact : prior.index = conditional.historical.index then
     if ingressExact : prior.ingress = ingress.source.originalClaim then
-      if recordBytes : DurableReceiverCodec.intentStream.encode prior.record =
-          DurableReceiverCodec.intentStream.encode conditional.historical.selected.record then
-        have recordExact : prior.record = conditional.historical.selected.record :=
-          (lawful_encode_injective DurableReceiverCodec.intentStream.toLawful) recordBytes
+      if recordExact : prior.record = conditional.historical.selected.record then
         let ⟨present⟩ ← match recordPresent opened prior.index prior.record with
           | .error detail => return .error detail
           | .ok present => pure present
@@ -2391,10 +2279,7 @@ private def admitCompletionV2At (config : Config) (opened : Opened config)
     | return .error "v2 completion original v3 claim absent from admitted history"
   if indexExact : prior.index = conditional.historical.index then
     if ingressExact : prior.ingress = ingress.source.originalClaim then
-      if recordBytes : DurableReceiverCodec.intentStream.encode prior.record =
-          DurableReceiverCodec.intentStream.encode conditional.historical.selected.record then
-        have recordExact : prior.record = conditional.historical.selected.record :=
-          (lawful_encode_injective DurableReceiverCodec.intentStream.toLawful) recordBytes
+      if recordExact : prior.record = conditional.historical.selected.record then
         let ⟨present⟩ ← match recordPresent opened prior.index prior.record with
           | .error detail => return .error detail
           | .ok present => pure present
@@ -2444,10 +2329,7 @@ private def admitBeginV4At (config : Config) (opened : Opened config)
       match ← ApplicationLifecycleRetryBeginV4Admission.admitNative config reader ⟨opened.ground, at'.down⟩ ingress with
       | .error detail => return .error detail
       | .ok accepted =>
-        if recordBytes : DurableReceiverCodec.intentStream.encode prior.record =
-            DurableReceiverCodec.intentStream.encode accepted.evidence.selected.record then
-          have recoveryExact : prior.record = accepted.evidence.selected.record :=
-            (lawful_encode_injective DurableReceiverCodec.intentStream.toLawful) recordBytes
+        if recoveryExact : prior.record = accepted.evidence.selected.record then
           let ⟨present⟩ ← match recordPresent opened prior.index prior.record with
             | .error detail => return .error detail
             | .ok present => pure present
@@ -2469,11 +2351,7 @@ private def admitClaimV4At (config : Config) (opened : Opened config)
       match found : opened.durable.image.accepted[prior.index]? with
       | none => return .error "retry BEGIN record absent"
       | some record =>
-        if physicalExact : DurableReceiverCodec.intentStream.encode record =
-            DurableReceiverCodec.intentStream.encode prior.record then
-          have exact : record = prior.record :=
-            (lawful_encode_injective DurableReceiverCodec.intentStream.toLawful)
-              physicalExact
+        if exact : record = prior.record then
           have present : opened.durable.image.accepted[prior.index]? =
               some prior.record := by simpa only [exact] using found
           let at' ← match ← groundAt reader opened with
@@ -2482,15 +2360,8 @@ private def admitClaimV4At (config : Config) (opened : Opened config)
           match ← ApplicationLifecycleRetryClaimV4Core.prepare config reader ⟨opened.ground, at'.down⟩ ingress with
           | .error detail => return .error detail
           | .ok conditional =>
-            if sourceBytes : DurableReceiverCodec.intentStream.encode prior.record =
-                DurableReceiverCodec.intentStream.encode
-                  (DurableReceiver.IntentRecord.ofIntent
-                    conditional.originalAccepted.intent) then
-              have recordExact : prior.record =
-                  DurableReceiver.IntentRecord.ofIntent
-                    conditional.originalAccepted.intent :=
-                (lawful_encode_injective DurableReceiverCodec.intentStream.toLawful)
-                  sourceBytes
+            if recordExact : prior.record =
+                DurableReceiver.IntentRecord.ofIntent conditional.originalAccepted.intent then
               return .ok ⟨prior, indexExact, ingressExact, present, _, reader.head,
                 conditional, recordExact⟩
             else return .error "retry BEGIN differs from original intent"
@@ -2515,10 +2386,7 @@ private def admitCompletionV4At (config : Config) (opened : Opened config)
     | return .error "retry completion original claim absent from admitted history"
   if indexExact : prior.index = conditional.historical.index then
     if ingressExact : prior.ingress = ingress.source.originalClaim then
-      if recordBytes : DurableReceiverCodec.intentStream.encode prior.record =
-          DurableReceiverCodec.intentStream.encode conditional.historical.selected.record then
-        have recordExact : prior.record = conditional.historical.selected.record :=
-          (lawful_encode_injective DurableReceiverCodec.intentStream.toLawful) recordBytes
+      if recordExact : prior.record = conditional.historical.selected.record then
         let ⟨present⟩ ← match recordPresent opened prior.index prior.record with
           | .error detail => return .error detail
           | .ok present => pure present
@@ -2934,16 +2802,13 @@ private def derive (config : Config) (opened : Opened config)
                       some ⟨command, signed, prepared, shape, accepted, rfl⟩, none, none, none, none, none, none, none, none, none, none, none, none⟩
                 else return .error "historical invocation physical shape refused"
 
-/-- Compare the complete existing canonical record codec. Function-valued
-metering charges are serialized in all ten lanes by that codec. -/
+/-- Compare the complete record, by object identity first and canonical encoding otherwise. -/
 def recordMatches (record : DurableReceiver.IntentRecord) (intent : DataIntent rootBytes) : Bool :=
-  decide (DurableReceiverCodec.intentStream.encode record =
-    DurableReceiverCodec.intentStream.encode (DurableReceiver.IntentRecord.ofIntent intent))
+  decide (record = DurableReceiver.IntentRecord.ofIntent intent)
 
 theorem recordMatches_iff (record : DurableReceiver.IntentRecord) (intent : DataIntent rootBytes) :
     recordMatches record intent = true ↔ record = DurableReceiver.IntentRecord.ofIntent intent := by
   simp only [recordMatches, decide_eq_true_eq]
-  exact (lawful_encode_injective DurableReceiverCodec.intentStream.toLawful).eq_iff
 
 /-- A new issue enters the chronological context only after the complete
 record matches the accepted intent. The caller invokes this after the durable
@@ -2961,7 +2826,7 @@ private def issuesAfter (config : Config) (opened : Opened config)
           (ApplicationShareIssueReceiver.intent accepted) := by
         rw [← intentExact]
         exact (recordMatches_iff record derived.intent).mp matched
-      ⟨opened.durable.image.accepted.length, receipt,
+      ⟨opened.durable.height, receipt,
         ApplicationDispatchHistoricalCore.IssuedEvidence.fromAccepted config opened.pins
           opened.durable (logicalHeight config opened.durable) ingress accepted record
           recordExact⟩ :: issues
@@ -2970,7 +2835,7 @@ private def issuesAfter (config : Config) (opened : Opened config)
           (ApplicationShareIssueGrainReceiver.intent accepted) := by
         rw [← intentExact]
         exact (recordMatches_iff record derived.intent).mp matched
-      ⟨opened.durable.image.accepted.length, receipt,
+      ⟨opened.durable.height, receipt,
         ApplicationDispatchHistoricalCore.IssuedEvidence.fromGrainAccepted config opened.pins
           opened.durable ⟨config.federation, logicalHeight config opened.durable⟩
           ingress accepted record recordExact⟩ :: issues
@@ -3017,7 +2882,7 @@ private def reservesAfter (config : Config) (opened : Opened config)
         config opened.ground ordinary.command ordinary.signed ordinary.prepared
         ordinary.shape ordinary.accepted record receipt state cell.payload.root
         target.capability observe recordExact receiptTransaction receiptEvent
-      return ⟨opened.durable.image.accepted.length, raw⟩ :: reserves
+      return ⟨opened.durable.height, raw⟩ :: reserves
     else return reserves
   else return reserves
 
@@ -3035,7 +2900,7 @@ private def beginsAfter (config : Config) (opened : Opened config)
           accepted.intent := by
         rw [← intentExact]
         exact (recordMatches_iff record derived.intent).mp matched
-      ⟨opened.durable.image.accepted.length, ingress, record,
+      ⟨opened.durable.height, ingress, record,
         ⟨opened, accepted, recordExact⟩⟩ :: begins
 
 private def beginsV2After (config : Config) (opened : Opened config)
@@ -3050,7 +2915,7 @@ private def beginsV2After (config : Config) (opened : Opened config)
           accepted.intent := by
         rw [← intentExact]
         exact (recordMatches_iff record derived.intent).mp matched
-      ⟨opened.durable.image.accepted.length, ingress, record,
+      ⟨opened.durable.height, ingress, record,
         ⟨opened, accepted, recordExact⟩⟩ :: begins
 
 /-- Called only after complete record matching, durable advance and successor
@@ -3068,7 +2933,7 @@ private def claimsV2After (config : Config) (opened : Opened config)
           admitted.intent := by
         rw [← intentExact]
         exact (recordMatches_iff record derived.intent).mp matched
-      ⟨opened.durable.image.accepted.length, ingress, record,
+      ⟨opened.durable.height, ingress, record,
         ⟨opened, admitted, recordExact⟩⟩ :: claims
 
 private def beginsV3After (config : Config) (opened : Opened config)
@@ -3083,7 +2948,7 @@ private def beginsV3After (config : Config) (opened : Opened config)
           admitted.intent := by
         rw [← intentExact]
         exact (recordMatches_iff record derived.intent).mp matched
-      ⟨opened.durable.image.accepted.length, ingress, record,
+      ⟨opened.durable.height, ingress, record,
         ⟨opened, admitted, recordExact⟩⟩ :: begins
 
 private def claimsV3After (config : Config) (opened : Opened config)
@@ -3098,7 +2963,7 @@ private def claimsV3After (config : Config) (opened : Opened config)
           admitted.intent := by
         rw [← intentExact]
         exact (recordMatches_iff record derived.intent).mp matched
-      ⟨opened.durable.image.accepted.length, ingress, record,
+      ⟨opened.durable.height, ingress, record,
         ⟨opened, admitted, recordExact⟩⟩ :: claims
 
 private def createdV3After (config : Config) (opened : Opened config)
@@ -3115,7 +2980,7 @@ private def createdV3After (config : Config) (opened : Opened config)
     | none => created
     | some ⟨ingress, ⟨admitted, intentExact⟩⟩ =>
         if isCreated : ingress.creationMarker.isSome = true then
-          ⟨opened.durable.image.accepted.length, receipt, .v2 ingress, record,
+          ⟨opened.durable.height, receipt, .v2 ingress, record,
             isCreated, ⟨admitted.store, admitted.head, opened, admitted.conditional,
               exactFor admitted.intent intentExact⟩⟩ :: created
         else created
@@ -3123,7 +2988,7 @@ private def createdV3After (config : Config) (opened : Opened config)
   | none => created
   | some ⟨ingress, ⟨admitted, intentExact⟩⟩ =>
       if isCreated : ingress.creationMarker.isSome = true then
-        ⟨opened.durable.image.accepted.length, receipt, .v4 ingress, record,
+        ⟨opened.durable.height, receipt, .v4 ingress, record,
           isCreated, ⟨admitted.store, admitted.head, opened, admitted.conditional,
             exactFor admitted.intent intentExact⟩⟩ :: created
       else created
@@ -3143,7 +3008,7 @@ private def runningV3After (config : Config) (opened : Opened config)
     | some ⟨ingress, ⟨admitted, intentExact⟩⟩ =>
         if isRunning : (CompletionIngress.v2 ingress).physical.outcome = .running then
           if isStart : (CompletionIngress.v2 ingress).beginSource.kind = .start then
-            ⟨opened.durable.image.accepted.length, receipt, .v2 ingress, record,
+            ⟨opened.durable.height, receipt, .v2 ingress, record,
               isRunning, isStart, ⟨admitted.store, admitted.head, opened, admitted.conditional,
                 exactFor admitted.intent intentExact⟩⟩ :: running
           else running
@@ -3153,7 +3018,7 @@ private def runningV3After (config : Config) (opened : Opened config)
   | some ⟨ingress, ⟨admitted, intentExact⟩⟩ =>
       if isRunning : (CompletionIngress.v4 ingress).physical.outcome = .running then
         if isStart : (CompletionIngress.v4 ingress).beginSource.kind = .start then
-          ⟨opened.durable.image.accepted.length, receipt, .v4 ingress, record,
+          ⟨opened.durable.height, receipt, .v4 ingress, record,
             isRunning, isStart, ⟨admitted.store, admitted.head, opened, admitted.conditional,
               exactFor admitted.intent intentExact⟩⟩ :: running
         else running
@@ -3209,7 +3074,7 @@ private def retryAfter (config : Config) (opened : Opened config)
     (derived : Derived config opened)
     (matched : recordMatches record derived.intent = true) :
     RetryHistory config :=
-  let index := opened.durable.image.accepted.length
+  let index := opened.durable.height
   let exactFor (intent : DataIntent rootBytes) (intentExact : derived.intent = intent) :
       record = DurableReceiver.IntentRecord.ofIntent intent := by
     rw [← intentExact]
@@ -3245,7 +3110,7 @@ private def grantsAfter (config : Config) (opened : Opened config)
         exact (recordMatches_iff record derived.intent).mp matched
       let finalRoot := (ResourceBirthController.birthWrite
         admitted.current.sourceReady.birth.create).exactPost
-      ⟨opened.durable.image.accepted.length, receipt, ingress, record,
+      ⟨opened.durable.height, receipt, ingress, record,
         admitted.prior, finalRoot,
         ⟨opened, admitted, rfl, rfl, recordExact⟩⟩ :: grants
 
@@ -3406,21 +3271,8 @@ theorem validateLoaded_headTag (config : Config) (durable : Durable) (headTag : 
     (fun loaded => cellsLawful config { durable with headTag := headTag } loaded.directory)
     (PlatformCellDomain.recordAt config.deployment durable.snapshot.canonicalBytes)
     directories lawfuls rfl
-  unfold validateLoaded validateParts validatePartsWith validatePartsVia
-  revert core
-  generalize validateCore config durable.image.seed durable.logStart
-    (CredentialAuthorityDomainReceiver.loadDirectory durable)
-    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
-    (·.directory) (·.snapshot.logical) (fun loaded => cellsLawful config durable loaded.directory)
-    (PlatformCellDomain.recordAt config.deployment durable.snapshot.canonicalBytes) = right
-  generalize validateCore config durable.image.seed durable.logStart
-    (CredentialAuthorityDomainReceiver.loadDirectory { durable with headTag := headTag })
-    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
-    (·.directory) (·.snapshot.logical)
-    (fun loaded => cellsLawful config { durable with headTag := headTag } loaded.directory)
-    (PlatformCellDomain.recordAt config.deployment durable.snapshot.canonicalBytes) = left
-  intro core
-  cases left <;> cases right <;> simp_all [Except.map]
+  rw [validateLoaded_pins_core, validateLoaded_pins_core]
+  exact core
 
 /-- **`tail_bounded`, on the replayed history.**  Every step of the replay walk
 that is not a certify record sits at most `L` heights past the certified height
@@ -3482,7 +3334,8 @@ theorem advance_image {config : Config} {opened : Opened config} {derived : Deri
 theorem AdmittedStep.image {config : Config} {before after : Opened config}
     {record : DurableReceiver.IntentRecord} {receipt : NativeHostCodec.Receipt}
     (step : AdmittedStep config before after record receipt) :
-    after.durable.image = ⟨before.durable.image.seed, before.durable.image.accepted ++ [record]⟩ ∧
+    after.durable.image = DurableReceiver.Image.ofAccepted before.durable.image.seed
+        (before.durable.image.accepted ++ [record]) ∧
       after.durable.logStart = before.durable.logStart := by
   obtain ⟨derived, matched, next, advanced, headTag, validated, _⟩ := step
   have wraps := validateLoaded_durable validated
@@ -3490,8 +3343,12 @@ theorem AdmittedStep.image {config : Config} {before after : Opened config}
   obtain ⟨imaged, started⟩ := advance_image advanced
   have image : after.durable.image = next.image := by rw [wraps]
   have start : after.durable.logStart = next.logStart := by rw [wraps]
-  rw [image, start, imaged, started, exact]
-  exact ⟨rfl, rfl⟩
+  constructor
+  · rw [image, imaged, exact]
+    simpa only [DurableReceiver.Image.append, DurableReceiver.Image.snoc_seed,
+      DurableReceiver.Image.accepted_snoc] using
+      (DurableReceiver.Image.ofAccepted_accepted (before.durable.image.append derived.intent)).symm
+  · rw [start, started]
 
 /-- **The replay walk's final image is its start followed by exactly the
 records it walked.** The walk needs no runtime comparison of whole images: the
@@ -3499,16 +3356,18 @@ equation holds of every trace, by construction of `advance`. -/
 theorem AdmittedReplay.image {config : Config} {before after : Opened config}
     {records : List DurableReceiver.IntentRecord} {receipts : List NativeHostCodec.Receipt}
     (trace : AdmittedReplay config before records after receipts) :
-    after.durable.image = ⟨before.durable.image.seed, before.durable.image.accepted ++ records⟩ ∧
+    after.durable.image = DurableReceiver.Image.ofAccepted before.durable.image.seed
+        (before.durable.image.accepted ++ records) ∧
       after.durable.logStart = before.durable.logStart := by
   induction trace with
-  | nil opened => exact ⟨by rw [List.append_nil], rfl⟩
+  | nil opened => exact ⟨by simp, rfl⟩
   | cons step tail ih =>
       obtain ⟨stepImage, stepStart⟩ := step.image
       obtain ⟨tailImage, tailStart⟩ := ih
       refine ⟨?_, tailStart.trans stepStart⟩
       rw [tailImage, stepImage]
-      simp only [List.append_assoc, List.singleton_append]
+      simp [DurableReceiver.Image.ofAccepted, DurableReceiver.Image.accepted,
+        List.append_assoc]
 
 /-- One executable checkpoint in the same native-admitted replay walk. It
 retains only this selected prefix, not every full prefix image. The prior,
@@ -3683,7 +3542,7 @@ private def walk (config : Config) (opened : Opened config)
   | [] => pure (.ok ⟨opened, [], .nil opened, none, issues, reserves, begins, beginsV2, claimsV2,
       frontier, releases, beginsV3, claimsV3, createdV3, runningV3, grants, retry⟩)
   | record :: rest => do
-      let index := opened.durable.image.accepted.length
+      let index := opened.durable.height
       AuditTiming.beginRecord timing index (fun _ => admissionPhase record)
       match ← AuditTiming.measure timing (fun _ => admissionPhase record)
           (derive config opened reader issues reserves begins beginsV2 claimsV2
@@ -4056,7 +3915,7 @@ def extendExact {config : Config} {store : DurableHistory.StoreIdentity}
   let target := exactCandidate old readback.derived readback.ready readback.tag
   let receipt : NativeHostCodec.Receipt :=
     ⟨readback.derived.intent.transactionId, readback.derived.intent.event.eventId,
-      old.opened.durable.image.accepted.length + 1, target.worldRoot⟩
+      old.opened.durable.height + 1, target.worldRoot⟩
   have matched : recordMatches record readback.derived.intent = true := by
     exact (recordMatches_iff _ _).mpr rfl
   have step : AdmittedStep config old.opened readback.after record receipt := by
@@ -4076,9 +3935,8 @@ def extendExact {config : Config} {store : DurableHistory.StoreIdentity}
       old.countExact, ← old.image_exact]
   have admitted : AdmittedReplay config old.origin target.image.accepted
       readback.after (old.receipts ++ [receipt]) := by
-    change AdmittedReplay config old.origin
-      (old.opened.durable.image.accepted ++ [record]) readback.after
-      (old.receipts ++ [receipt])
+    rw [show target.image.accepted = old.opened.durable.image.accepted ++ [record] by
+      simp [target, exactCandidate, DurableReceiverIO.Loaded.extend, record]]
     rw [old.image_exact]
     exact old.admitted.append (.cons step (.nil readback.after))
   let issues := issuesAfter config old.opened old.issues record receipt readback.derived matched
@@ -4226,9 +4084,10 @@ theorem genesisWalk_image {config : Config} {target initial : Durable}
     (wraps : opened.durable = initial)
     (trace : AdmittedReplay config opened target.image.accepted final receipts) :
     final.durable.image = target.image := by
-  have start : initial.image = ⟨target.image.seed, []⟩ := DurableReceiverIO.loadImage_image genesis
+  have start : initial.image = DurableReceiver.Image.ofAccepted target.image.seed [] :=
+    DurableReceiverIO.loadImage_image genesis
   rw [trace.image.1, wraps, start]
-  rfl
+  simp
 
 def verifyLoaded (config : Config) {store : DurableHistory.StoreIdentity}
     (reader : DurableHistoryReader.Reader rootBytes store) (target : Durable)
@@ -4252,13 +4111,13 @@ def verifyLoaded (config : Config) {store : DurableHistory.StoreIdentity}
         have exactImage : walked.final.durable.image = target.image :=
           genesisWalk_image (initialValue.property.symm.trans initialLoaded)
             (validateLoaded_durable (openedValue.property.symm.trans openedValidated)) walked.trace
-        if countExact : walked.receipts.length = target.image.accepted.length then
+        if countExact : walked.receipts.length = target.height then
           return .ok ⟨opened, walked.final, exactImage, walked.receipts,
             countExact, walked.trace, walked.issues, walked.reserves, walked.begins,
             walked.beginsV2, walked.claimsV2, walked.frontier, walked.releases,
             walked.beginsV3, walked.claimsV3, walked.createdV3,
             walked.runningV3, walked.grants, walked.retry, _, reader⟩
-        else return .error ⟨target.image.accepted.length, "verified history count mismatch"⟩
+        else return .error ⟨target.height, "verified history count mismatch"⟩
 
 /-- **The audit walk rebuilds the stored index**: the genesis re-admission
 reaches exactly the stored image, so its presence index is the loaded one's —
@@ -4315,7 +4174,7 @@ verification continue without a selected checkpoint. -/
 def verifyLoadedSelected (config : Config) {store : DurableHistory.StoreIdentity}
     (reader : DurableHistoryReader.Reader rootBytes store) (target : Durable) (index : Nat) :
     IO (Except Failure (VerifiedSelection config target index)) := do
-  if !(index < target.image.accepted.length) then
+  if !(index < target.height) then
     return .error ⟨index, "selected accepted history index unavailable"⟩
   match genesis : DurableReceiverIO.loadSeed rootBytes (config.logStart target.image.seed) target.image.seed with
   | .error detail => return .error ⟨0, s!"genesis decoding: {detail}"⟩
@@ -4328,7 +4187,7 @@ def verifyLoadedSelected (config : Config) {store : DurableHistory.StoreIdentity
       | .ok walked =>
         have exactImage : walked.final.durable.image = target.image :=
           genesisWalk_image genesis (validateLoaded_durable validated) walked.trace
-        if countExact : walked.receipts.length = target.image.accepted.length then
+        if countExact : walked.receipts.length = target.height then
           match walked.selected with
           | none => return .error ⟨index, "selected native checkpoint unavailable"⟩
           | some selected =>
@@ -4341,7 +4200,7 @@ def verifyLoadedSelected (config : Config) {store : DurableHistory.StoreIdentity
                   walked.runningV3, walked.grants, walked.retry, _, reader⟩
               return .ok ⟨verified, selected, indexExact⟩
             else return .error ⟨index, "selected native checkpoint index mismatch"⟩
-        else return .error ⟨target.image.accepted.length, "verified history count mismatch"⟩
+        else return .error ⟨target.height, "verified history count mismatch"⟩
 
 /-- A walk from an opening equal to `source`, over exactly the records
 `target` has after `source`'s, ends at `target`'s image. -/
@@ -4354,6 +4213,7 @@ theorem appendedWalk_image {config : Config} {start final : Opened config}
     (trace : AdmittedReplay config start suffix final receipts) :
     final.durable.image = target.image := by
   rw [trace.image.1, startExact, ← seedExact, ← acceptedExact]
+  exact DurableReceiver.Image.ofAccepted_accepted _
 
 /-- Continue a verified tip over a target whose image is, by the caller's
 proof, the old image followed by `target.image.accepted.drop count`: only that
@@ -4368,7 +4228,7 @@ def extendVerifiedAppended (config : Config) {store : DurableHistory.StoreIdenti
     (acceptedExact : target.image.accepted = oldTarget.image.accepted ++
       target.image.accepted.drop oldTarget.image.accepted.length) :
     IO (Except Failure (Verified config target)) := do
-  let suffix := target.image.accepted.drop oldTarget.image.accepted.length
+  let suffix := target.image.accepted.drop oldTarget.height
   match ← walk config old.opened reader old.issues old.reserves old.begins old.beginsV2 old.claimsV2
       old.beginsV3 old.claimsV3 old.createdV3 old.runningV3 old.grants
       old.frontier old.releases old.retry none none suffix with
@@ -4377,7 +4237,7 @@ def extendVerifiedAppended (config : Config) {store : DurableHistory.StoreIdenti
     have exactImage : walked.final.durable.image = target.image :=
       appendedWalk_image old.exactImage seedExact acceptedExact walked.trace
     let receipts := old.receipts ++ walked.receipts
-    if countExact : receipts.length = target.image.accepted.length then
+    if countExact : receipts.length = target.height then
       have admitted : AdmittedReplay config old.origin target.image.accepted
           walked.final receipts := by
         rw [acceptedExact]
@@ -4386,7 +4246,7 @@ def extendVerifiedAppended (config : Config) {store : DurableHistory.StoreIdenti
         admitted, walked.issues, walked.reserves, walked.begins, walked.beginsV2, walked.claimsV2,
         walked.frontier, walked.releases, walked.beginsV3, walked.claimsV3,
         walked.createdV3, walked.runningV3, walked.grants, walked.retry, _, reader⟩
-    else return .error ⟨target.image.accepted.length, "verified history count mismatch"⟩
+    else return .error ⟨target.height, "verified history count mismatch"⟩
 
 /-- Continue from a previously verified exact tip after an external read.
 The full canonical seed and every prior accepted record must be identical;
@@ -4397,13 +4257,13 @@ def extendVerified (config : Config) {store : DurableHistory.StoreIdentity}
     (reader : DurableHistoryReader.Reader rootBytes store) {oldTarget : Durable}
     (old : Verified config oldTarget) (target : Durable) :
     IO (Except Failure (Verified config target)) := do
-  let count := oldTarget.image.accepted.length
+  let count := oldTarget.height
   if seedBytes : DurableReceiverCodec.seedStream.encode target.image.seed =
       DurableReceiverCodec.seedStream.encode oldTarget.image.seed then
     have seedExact : target.image.seed = oldTarget.image.seed :=
       (lawful_encode_injective DurableReceiverCodec.seedStream.toLawful) seedBytes
-    if target.image.accepted.length < count then
-      return .error ⟨target.image.accepted.length, "verified history rolled back"⟩
+    if target.height < count then
+      return .error ⟨target.height, "verified history rolled back"⟩
     if prefixBytes : (StreamCodec.list DurableReceiverCodec.intentStream).encode
         (target.image.accepted.take count) =
         (StreamCodec.list DurableReceiverCodec.intentStream).encode
@@ -4555,10 +4415,11 @@ records walked**, as for `AdmittedReplay.image`. -/
 theorem AdmittedSuffix.image {config : Config} {before after : Opened config}
     {records : List DurableReceiver.IntentRecord} {receipts : List NativeHostCodec.Receipt}
     (trace : AdmittedSuffix config before records after receipts) :
-    after.durable.image = ⟨before.durable.image.seed, before.durable.image.accepted ++ records⟩ ∧
+    after.durable.image = DurableReceiver.Image.ofAccepted before.durable.image.seed
+        (before.durable.image.accepted ++ records) ∧
       after.durable.logStart = before.durable.logStart := by
   induction trace with
-  | nil opened => exact ⟨by rw [List.append_nil], rfl⟩
+  | nil opened => exact ⟨by simp, rfl⟩
   | @cons _ middle _ _ _ _ _ step tail ih =>
       obtain ⟨derived, matched, next, advanced, headTag, validated, _⟩ := step
       obtain ⟨tailImage, tailStart⟩ := ih
@@ -4569,7 +4430,8 @@ theorem AdmittedSuffix.image {config : Config} {before after : Opened config}
       have start : middle.durable.logStart = next.logStart := by rw [wraps]
       refine ⟨?_, ?_⟩
       · rw [tailImage, image, imaged, exact]
-        simp only [DurableReceiver.Image.append, List.append_assoc, List.singleton_append]
+        simp [DurableReceiver.Image.ofAccepted, DurableReceiver.Image.accepted,
+          DurableReceiver.Image.append, DurableReceiver.Image.snoc, List.append_assoc]
       · rw [tailStart, start, started]
 
 theorem advance_base {config : Config} {opened : Opened config} {derived : Derived config opened}
@@ -4642,6 +4504,7 @@ theorem appendedSuffixWalk_image {config : Config} {start final : Opened config}
     (trace : AdmittedSuffix config start suffix final receipts) :
     final.durable.image = target.image := by
   rw [trace.image.1, startExact, ← seedExact, ← acceptedExact]
+  exact DurableReceiver.Image.ofAccepted_accepted _
 
 /-- Ordinary witness caches always originate in this target-profile suffix.
 Carried event28/event11 admissions create no replacement historical witnesses. -/
@@ -4744,7 +4607,7 @@ private def walkSuffix (config : Config) (anchor : Opened config)
     IO (Except Failure (SuffixWalked config opened records))
   | [] => pure (.ok ⟨opened, [], .nil opened, context⟩)
   | record :: rest => do
-    let index := opened.durable.image.accepted.length
+    let index := opened.durable.height
     match ← deriveSuffixAt config anchor origin opened reader context
         (historicalSourceEvent record.event).canonicalBytes with
     | .error detail => return .error ⟨index, detail⟩
@@ -4753,9 +4616,11 @@ private def walkSuffix (config : Config) (anchor : Opened config)
         match advanced : advanceSuffix opened derived with
         | .error detail => return .error ⟨index, detail⟩
         | .ok next =>
-          match validated : validateLoaded config next with
+          match incremental : validateLoadedFrom config opened next with
           | .error detail => return .error ⟨index, s!"suffix native post image: {detail}"⟩
           | .ok after =>
+            have validated : validateLoaded config next = .ok after :=
+              (validateLoadedFrom_eq config opened next).symm.trans incremental
             let receipt : NativeHostCodec.Receipt :=
               ⟨derived.intent.transactionId, derived.intent.event.eventId, index + 1, next.worldRoot⟩
             match suffixContextAfter config opened after context record receipt derived matched with
@@ -4810,8 +4675,8 @@ In particular this never recomputes an old receipt under target semantics. -/
 def SuffixVerified.receiptAt {config : Config} {anchor : Opened config} {target : Durable}
     (verified : SuffixVerified config anchor target) (index : Nat) :
     Option NativeHostCodec.Receipt :=
-  if anchor.durable.image.accepted.length ≤ index then
-    verified.receipts[index - anchor.durable.image.accepted.length]?
+  if anchor.durable.height ≤ index then
+    verified.receipts[index - anchor.durable.height]?
   else none
 
 theorem SuffixVerified.receiptAt_before_anchor {config : Config}
@@ -4864,7 +4729,7 @@ def verifySuffixFrom (config : Config) (anchor : Opened config) {store : Durable
       anchor.durable.image.accepted)
     (logStartExact : target.logStart = anchor.durable.logStart) :
     IO (Except Failure (SuffixVerified config anchor target)) := do
-  let count := anchor.durable.image.accepted.length
+  let count := anchor.durable.height
   let suffix := target.image.accepted.drop count
   match ← walkSuffix config anchor origin anchor reader {} suffix with
   | .error failure => return .error failure
@@ -4903,8 +4768,8 @@ def verifySuffixFrom (config : Config) (anchor : Opened config) {store : Durable
             retry := walked.context.retry
             store := store
             reader := reader }
-      else return .error ⟨target.image.accepted.length, "suffix receipt count mismatch"⟩
-    else return .error ⟨target.image.accepted.length, "suffix final log anchor differs"⟩
+      else return .error ⟨target.height, "suffix receipt count mismatch"⟩
+    else return .error ⟨target.height, "suffix final log anchor differs"⟩
 
 /-- Audit a target suffix from an actual validated image. This does not confer
 operator authority on the anchor; that obligation belongs to the carry receiver.
@@ -4918,12 +4783,12 @@ def verifySuffixLoaded (config : Config) (anchor : Opened config) {store : Durab
     if custody.start.durable.image != anchor.durable.image ||
         custody.start.durable.logStart != anchor.durable.logStart then
       return .error ⟨anchor.durable.height, "carried provenance names another suffix anchor"⟩
-  let count := anchor.durable.image.accepted.length
+  let count := anchor.durable.height
   if seedBytes : DurableReceiverCodec.seedStream.encode target.image.seed =
       DurableReceiverCodec.seedStream.encode anchor.durable.image.seed then
     have seedExact : target.image.seed = anchor.durable.image.seed :=
       (lawful_encode_injective DurableReceiverCodec.seedStream.toLawful) seedBytes
-    if anchorWithin : count ≤ target.image.accepted.length then
+    if anchorWithin : count ≤ target.height then
       if prefixBytes : (StreamCodec.list DurableReceiverCodec.intentStream).encode
           (target.image.accepted.take count) =
           (StreamCodec.list DurableReceiverCodec.intentStream).encode
@@ -4935,7 +4800,7 @@ def verifySuffixLoaded (config : Config) (anchor : Opened config) {store : Durab
           verifySuffixFrom config anchor reader target origin seedExact anchorWithin prefixExact logStartExact
         else return .error ⟨count, "suffix log anchor changed"⟩
       else return .error ⟨count, "suffix anchor prefix changed"⟩
-    else return .error ⟨target.image.accepted.length, "suffix predates its anchor"⟩
+    else return .error ⟨target.height, "suffix predates its anchor"⟩
   else return .error ⟨count, "suffix genesis seed changed"⟩
 
 /-- Registry/carry receiving seam: retain the authenticated origin already
@@ -4959,7 +4824,7 @@ def extendSuffixAppended (config : Config) {store : DurableHistory.StoreIdentity
       oldTarget.image.accepted)
     (sameLogStart : target.logStart = oldTarget.logStart) :
     IO (Except Failure (SuffixVerified config anchor target)) := do
-  let count := oldTarget.image.accepted.length
+  let count := oldTarget.height
   let suffix := target.image.accepted.drop count
   match ← walkSuffix config anchor old.origin old.opened reader old.context suffix with
   | .error failure => return .error failure
@@ -4969,13 +4834,16 @@ def extendSuffixAppended (config : Config) {store : DurableHistory.StoreIdentity
         target.image.accepted = target.image.accepted.take count ++
             target.image.accepted.drop count :=
           (List.take_append_drop count target.image.accepted).symm
-        _ = oldTarget.image.accepted ++ suffix := by rw [prefixExact]
+        _ = oldTarget.image.accepted ++ suffix := by
+          rw [show count = oldTarget.image.accepted.length from DurableReceiverIO.Loaded.height_eq oldTarget,
+            prefixExact]
+          rfl
     have exactImage : walked.final.durable.image = target.image :=
       appendedSuffixWalk_image old.exactImage sameSeed acceptedExact walked.trace
     if openedLogStartExact : walked.final.durable.logStart = target.logStart then
       let receipts := old.receipts ++ walked.receipts
       if countExact : receipts.length =
-          (target.image.accepted.drop anchor.durable.image.accepted.length).length then
+          (target.image.accepted.drop anchor.durable.height).length then
         have anchorPrefix : target.image.accepted.take anchor.durable.image.accepted.length =
             anchor.durable.image.accepted := by
           rw [acceptedExact, List.take_append_of_le_length old.anchorWithin]
@@ -5015,8 +4883,8 @@ def extendSuffixAppended (config : Config) {store : DurableHistory.StoreIdentity
             retry := walked.context.retry
             store := store
             reader := reader }
-      else return .error ⟨target.image.accepted.length, "extended suffix receipt count mismatch"⟩
-    else return .error ⟨target.image.accepted.length, "extended suffix final log anchor differs"⟩
+      else return .error ⟨target.height, "extended suffix receipt count mismatch"⟩
+    else return .error ⟨target.height, "extended suffix final log anchor differs"⟩
 
 /-- Extend the exact previously admitted suffix, preserving its anchor and
 origin witnesses. The new physical image must retain every prior record; only
@@ -5025,12 +4893,12 @@ def extendSuffixVerified (config : Config) {store : DurableHistory.StoreIdentity
     (reader : DurableHistoryReader.Reader rootBytes store) {anchor : Opened config} {oldTarget : Durable}
     (old : SuffixVerified config anchor oldTarget) (target : Durable) :
     IO (Except Failure (SuffixVerified config anchor target)) := do
-  let count := oldTarget.image.accepted.length
+  let count := oldTarget.height
   if seedBytes : DurableReceiverCodec.seedStream.encode target.image.seed =
       DurableReceiverCodec.seedStream.encode oldTarget.image.seed then
     have sameSeed : target.image.seed = oldTarget.image.seed :=
       (lawful_encode_injective DurableReceiverCodec.seedStream.toLawful) seedBytes
-    if within : count ≤ target.image.accepted.length then
+    if within : count ≤ target.height then
       if prefixBytes : (StreamCodec.list DurableReceiverCodec.intentStream).encode
           (target.image.accepted.take count) =
           (StreamCodec.list DurableReceiverCodec.intentStream).encode
@@ -5042,7 +4910,7 @@ def extendSuffixVerified (config : Config) {store : DurableHistory.StoreIdentity
           extendSuffixAppended config reader old target sameSeed within prefixExact sameLogStart
         else return .error ⟨count, "extended suffix log anchor changed"⟩
       else return .error ⟨count, "verified suffix prefix changed"⟩
-    else return .error ⟨target.image.accepted.length, "verified suffix rolled back"⟩
+    else return .error ⟨target.height, "verified suffix rolled back"⟩
   else return .error ⟨count, "verified suffix genesis seed changed"⟩
 
 /-- Read-only bytes entrypoint for independent verification. No storage driver

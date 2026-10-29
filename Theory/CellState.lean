@@ -61,27 +61,61 @@ def Materializer.rootOf {L : Layout.{u, v, w}} {Root : Type y}
     (M : Materializer L Root) (store : Store L) : Root :=
   M.rootBytes (M.codec.encode store)
 
-/-- A dependent package indexed by its sole materializer.  The private
-constructor prevents alternate root/encoding fields from being introduced. -/
+/-- A dependent package indexed by its sole materializer.  Bytes and root are
+not independent fields: `bytesCache` is the codec's encoding of `logical`
+(`bytesExact`) and `rootCache` the materializer's root of it (`rootExact`),
+each deferred and computed at most once per cell value.  That is what compiled
+code reads (`Materialized.bytes_eq_bytesCached`, `root_eq_rootCached`).  Two
+packages with the same logical store are equal (`Materialized.ext`). -/
 structure Materialized {L : Layout.{u, v, w}} {Root : Type y}
     (M : Materializer L Root) where
   mk ::
   logical : Store L
+  bytesCache : Thunk (List UInt8)
+  bytesExact : bytesCache.get = M.codec.encode logical
+  rootCache : Thunk Root
+  rootExact : rootCache.get = M.rootOf logical
 
-/-- The one constructor for canonical cells. -/
+/-- The one constructor for canonical cells: the root hashes the cached
+bytes, so a cell is encoded at most once. -/
 def materialize {L : Layout.{u, v, w}} {Root : Type y} (M : Materializer L Root)
     (logical : Store L) : Materialized M :=
-  ⟨logical⟩
+  let bytes : Thunk (List UInt8) := Thunk.mk fun _ => M.codec.encode logical
+  ⟨logical, bytes, rfl, Thunk.mk fun _ => M.rootBytes bytes.get, rfl⟩
 
 /-- Canonical bytes are projected from the packaged logical store. -/
 def Materialized.bytes {L : Layout.{u, v, w}} {Root : Type y}
     {M : Materializer L Root} (cell : Materialized M) : List UInt8 :=
   M.codec.encode cell.logical
 
+/-- The bytes as compiled code reads them: encoded on the first read of this
+cell value and never again. -/
+def Materialized.bytesCached {L : Layout.{u, v, w}} {Root : Type y}
+    {M : Materializer L Root} (cell : Materialized M) : List UInt8 :=
+  cell.bytesCache.get
+
+@[csimp] theorem Materialized.bytes_eq_bytesCached :
+    @Materialized.bytes.{u, v, w, y} = @Materialized.bytesCached.{u, v, w, y} := by
+  funext L Root M cell
+  exact cell.bytesExact.symm
+
 /-- The root is the materializer's root of the logical store. -/
 def Materialized.root {L : Layout.{u, v, w}} {Root : Type y}
     {M : Materializer L Root} (cell : Materialized M) : Root :=
   M.rootOf cell.logical
+
+/-- The root as compiled code reads it: the cell's cached root, hashed on the
+first read of this cell value and never again. -/
+def Materialized.rootCached {L : Layout.{u, v, w}} {Root : Type y}
+    {M : Materializer L Root} (cell : Materialized M) : Root :=
+  cell.rootCache.get
+
+/-- **Every compiled root read is a cache read**: the replacement is this
+theorem (`rootExact`), not a trusted `implemented_by`. -/
+@[csimp] theorem Materialized.root_eq_rootCached :
+    @Materialized.root.{u, v, w, y} = @Materialized.rootCached.{u, v, w, y} := by
+  funext L Root M cell
+  exact cell.rootExact.symm
 
 @[simp] theorem materialize_logical {L : Layout.{u, v, w}} {Root : Type y}
     (M : Materializer L Root) (logical : Store L) :
@@ -108,10 +142,33 @@ theorem Materialized.root_encoding_coherent {L : Layout.{u, v, w}} {Root : Type 
 @[ext] theorem Materialized.ext {L : Layout.{u, v, w}} {Root : Type y}
     {M : Materializer L Root} {left right : Materialized M}
     (h : left.logical = right.logical) : left = right := by
-  cases left
-  cases right
+  obtain ⟨logical, ⟨leftBytes⟩, leftBytesExact, ⟨leftRoot⟩, leftExact⟩ := left
+  obtain ⟨_, ⟨rightBytes⟩, rightBytesExact, ⟨rightRoot⟩, rightExact⟩ := right
   cases h
+  -- A `Unit → α` is determined by its value at `()` definitionally (eta), so
+  -- no function extensionality is needed.
+  have sameBytes : leftBytes = rightBytes :=
+    congrArg (fun (value : List UInt8) (_ : Unit) => value)
+      (leftBytesExact.trans rightBytesExact.symm)
+  have same : leftRoot = rightRoot :=
+    congrArg (fun (value : Root) (_ : Unit) => value) (leftExact.trans rightExact.symm)
+  cases sameBytes
+  cases same
   rfl
+
+/-- A cell decoded from canonical bytes: those bytes are its bytes, so it is
+never re-encoded (`materializeCanonical_eq`: it is `materialize`). -/
+def materializeCanonical {L : Layout.{u, v, w}} {Root : Type y} (M : Materializer L Root)
+    (bytes : List UInt8) (logical : Store L) (canonical : M.codec.encode logical = bytes) :
+    Materialized M :=
+  let cached : Thunk (List UInt8) := Thunk.pure bytes
+  ⟨logical, cached, canonical.symm, Thunk.mk fun _ => M.rootBytes cached.get,
+    congrArg M.rootBytes canonical.symm⟩
+
+theorem materializeCanonical_eq {L : Layout.{u, v, w}} {Root : Type y} (M : Materializer L Root)
+    (bytes : List UInt8) (logical : Store L) (canonical : M.codec.encode logical = bytes) :
+    materializeCanonical M bytes logical canonical = materialize M logical :=
+  Materialized.ext rfl
 
 /-! ## Pair-scoped root binding
 

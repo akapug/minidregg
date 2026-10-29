@@ -179,7 +179,8 @@ theorem load_cell (domain : Digest) (revision : Nat) (spent : Nat → Bool) (cel
     load domain revision spent cell.bytes = some (Snapshot.ofCell domain revision spent cell) := by
   unfold load
   rw [CredentialAuthorityCell.cell_decode cell]
-  rfl
+  exact congrArg (fun decoded => some (Snapshot.ofCell domain revision spent decoded))
+    (Materialized.ext rfl)
 
 /-- The retired catalogue frame (`LOOM/AUTH/DOMAIN` v2) refuses to load. -/
 def retiredCatalogueFrame : List UInt8 := "LOOM/AUTH/DOMAIN".toUTF8.toList ++ [2]

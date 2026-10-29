@@ -22,9 +22,9 @@ private def claim (id : Nat) (lane : Lane) (amount : Nat) : DataIntent root wher
   postRootsBound := by simp
   guardsReadOnly := by simp
 
-private def initial : Engine := Engine.ofState ⟨[], [], fun _ => 2⟩ []
+private def initial : Engine root := Engine.ofState root ⟨[], [], fun _ => 2⟩ []
 
-private def accepts (engine : Engine) (intent : DataIntent root) : Bool :=
+private def accepts (engine : Engine root) (intent : DataIntent root) : Bool :=
   match engine.execute root intent with
   | .accepted _ => true
   | _ => false

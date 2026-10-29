@@ -157,11 +157,11 @@ def record (n : Nat) : IntentRecord :=
 def genesis : Seed := { absentBytes := [], cells := [], available := fun _ => 0 }
 
 /-- `record 1` accepted, nothing in flight. -/
-def wQuiesced : World := ⟨⟨genesis, [record 1]⟩, []⟩
+def wQuiesced : World := ⟨Image.ofAccepted genesis [record 1], []⟩
 /-- `record 1` accepted, `record 2` issued and not yet installed here. -/
-def wPending : World := ⟨⟨genesis, [record 1]⟩, [record 2]⟩
+def wPending : World := ⟨Image.ofAccepted genesis [record 1], [record 2]⟩
 /-- Both accepted. -/
-def wDelivered : World := ⟨⟨genesis, [record 1, record 2]⟩, []⟩
+def wDelivered : World := ⟨Image.ofAccepted genesis [record 1, record 2], []⟩
 
 def quiescedIndex : WorldIndex miniModel := ⟨wQuiesced⟩
 def pendingIndex : WorldIndex miniModel := ⟨wPending⟩
@@ -173,7 +173,7 @@ theorem not_stable_at_wPending : ¬ FreeTermination Delivery.future height wPend
   simp [height, wDelivered, wPending] at moved
 
 theorem extension_wQuiesced_wDelivered : Extension.future wQuiesced wDelivered :=
-  ⟨rfl, [record 2], rfl⟩
+  ⟨rfl, [record 2], by simp [wQuiesced, wDelivered]⟩
 
 def quiescedCertificate :
     CheckedCertificate Delivery height (fun w : World => w) Quiesced quiescedIndex :=
@@ -241,7 +241,7 @@ def seen (image : Image) : Seen := (image.accepted.map IntentRecord.transactionI
 
 /-- The evidence view composes over history concatenation by join. -/
 theorem seen_append (seed : Seed) (a b : List IntentRecord) :
-    seen ⟨seed, a ++ b⟩ = seen ⟨seed, a⟩ ⊔ seen ⟨seed, b⟩ := by
+    seen (Image.ofAccepted seed (a ++ b)) = seen (Image.ofAccepted seed a) ⊔ seen (Image.ofAccepted seed b) := by
   simp [seen, List.toFinset_append, Finset.sup_eq_union]
 
 /-- A filtered evidence view IS a join homomorphism: replicating it is sound. -/

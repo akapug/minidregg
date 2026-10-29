@@ -152,7 +152,7 @@ def intent (accepted : AcceptedEnrollment deployment profile ambient durable ing
   writes := writes accepted.prepared
   readGuards := readGuards accepted.prepared
   nullifiers := [nullifier deployment.domain profile.semantics ingress]
-  exactCharge := charge accepted
+  exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (charge accepted)).toCharge
   event := event deployment.domain profile.semantics ingress
   subject := some ingress.command.sponsor
   postRootsBound := writes_roots_bound accepted.prepared

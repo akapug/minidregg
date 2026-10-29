@@ -346,3 +346,23 @@ fn catalogue_filters_use_the_shell_and_keep_failures_explained() {
     assert!(page.body.contains("catalogue temporarily unavailable"), "category must reach the shell, and its refusal stays visible");
     assert!(page.body.contains("value=\"Office\" selected"));
 }
+
+#[test]
+fn the_operations_room_is_a_note_until_this_session_joined_it_and_the_turns_after() {
+    // demo-path, the tour's web story reds on 2b8f75dcb: a workspace that holds the reference `operations`
+    // but no room record for it printed the shell's "this session has no room operations" in a red
+    // outcome <pre>, which the journey's first-<pre> reader took for the story's own output.
+    let (root, site) = site("ops-room");
+    fs::write(root.join("refs").join("operations.json"), "{}").unwrap();
+    FAKE_SHELL.with(|f| *f.borrow_mut() = Some(Box::new(|_| Ending { code: 1, stdout: String::new(), stderr: "error: this session has no room operations (chat new operations, or chat join operations INVITATION)\n".into() })));
+    let before = operations(&site);
+    assert!(before.contains("has not joined it") && before.contains("chat join operations INVITATION"), "{before}");
+    assert!(!before.contains("outcome error") && !before.contains("<pre"), "no red outcome, no pre: {before}");
+    fs::create_dir_all(root.join("home").join("chat").join("rooms")).unwrap();
+    fs::write(root.join("home").join("chat").join("rooms").join("operations.json"), "{}").unwrap();
+    FAKE_SHELL.with(|f| *f.borrow_mut() = Some(Box::new(|_| Ending { code: 0, stdout: "alice: shipped\n".into(), stderr: String::new() })));
+    let after = operations(&site);
+    FAKE_SHELL.with(|f| *f.borrow_mut() = None);
+    fs::remove_dir_all(root).unwrap();
+    assert!(after.contains("From the operations room") && after.contains("alice: shipped"), "{after}");
+}

@@ -210,12 +210,12 @@ def Accepted.intent {F : Type} [Field F] [DecidableEq F]
     DataIntent ResourceBirthCodec.rootBytes :=
   let legacy := accepted.base.intent
   { legacy with
-    exactCharge := fun dimension => match dimension with
+    exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (fun dimension => match dimension with
       | .turnBytes => ingress.canonicalBytes.length
       | .witnessBytes => ingress.canonicalBytes.length
       | .storageBytes => DeployedCharge.storageCharge ground.view legacy.writes
           (event ingress)
-      | other => legacy.exactCharge other
+      | other => legacy.exactCharge other)).toCharge
     event := event ingress }
 
 theorem Accepted.intent_event {F : Type} [Field F] [DecidableEq F]

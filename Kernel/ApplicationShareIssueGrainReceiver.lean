@@ -129,11 +129,16 @@ def intent (accepted : Accepted profile config pins durable ambient ingress) :
   writes := writes accepted
   readGuards := readGuards accepted
   nullifiers := nullifiers config.deployment.domain ingress accepted.decoded accepted.tariff
-  exactCharge := charge accepted
+  exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (charge accepted)).toCharge
   event := event config.deployment.domain ingress
   subject := some accepted.decoded.source.birth.creator
   postRootsBound := writes_roots_bound accepted
   guardsReadOnly := readGuards_readonly accepted
+
+/-- The retained finite charge is exactly the specified charge, lane by lane. -/
+theorem intent_exactCharge (accepted : Accepted profile config pins durable ambient ingress) :
+    (intent accepted).exactCharge = charge accepted :=
+  Minidregg.Theory.ResourceCost.Charge.materialize_eq _
 
 /-- **The committed births are named**: every write of the grain share issue that
 creates its cell -- the ticket with its initialized page included -- is named by the

@@ -943,7 +943,7 @@ def intent (accepted : AcceptedWell deployment profile ambient durable ingress) 
   writes := writes accepted.prepared
   readGuards := readGuards accepted.prepared
   nullifiers := [nullifier deployment.domain profile.semantics ingress]
-  exactCharge := charge accepted
+  exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (charge accepted)).toCharge
   event := event deployment.domain profile.semantics ingress
   postRootsBound := fun write member => accepted.physical.2.2.2.1 write member
   guardsReadOnly := readGuards_readonly accepted.prepared accepted.physical

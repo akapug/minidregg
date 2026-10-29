@@ -8,13 +8,13 @@ admission again, inside Lean: the op-2 path of `NativeHost.submitLoadedVia`
 (`prepareFrom` over the image's own directory, `PhysicalShape`, then
 `DeclaredResourceController.admit` with the production read oracle
 `ObjectiveBendAuthenticatedInputs.oracle`), over the Store prefix it was admitted
-at, under the deployment's pinned config. Two things stand in for the process
-boundary and nothing else does:
+at, under the deployment's pinned config. Two things stand in for the IO
+boundaries and nothing else does:
 
 * the verifier: the oracle `.recorded transcript` (`CredentialSignatureIO.Oracle`),
   the triples the pinned Ed25519 verifier answered `verified` on during that
   admission. It exists only at `Id`; the Host's receivers run at `IO`, where the only
-  oracle is the process (`Oracle.io_process`). Every receipt records the source that
+  oracle is the linked native kernel (`Oracle.io_native`). Every receipt records the source that
   answered it (`first_receipts_recorded`). `scripts/check-native-transcripts.sh`
   re-submits every triple to the verifier built from this tree;
 * the Store: its seed and log records, decoded with the current codecs and

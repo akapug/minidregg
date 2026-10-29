@@ -1922,7 +1922,7 @@ def birth (path : String) (json : Lean.Json)
     unless height == expected do
       throw s!"{path}.height: differs from the verified current image"
   let template ← factoryTemplate (path ++ ".template") (← field path "template" obj)
-  let nativeConfig : NativeHost.Config := {
+  let nativeConfig : NativeHost.Config := NativeHost.Config.ofInputs {
     deployment := source.deployment, federation := source.federation, template := template,
     tariff := source.tariff, genesisHeight := source.genesisHeight, expectedSeed := ⟨0⟩,
     storage := { binary := "", root := "", key := "" }, signature := ⟨""⟩,

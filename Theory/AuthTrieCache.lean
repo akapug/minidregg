@@ -23,6 +23,7 @@ then the cache is the specification: no premise, no fallback rebuild.
 module
 
 public import Theory.AuthTrie
+public import Mathlib.Util.MemoFix
 public import Mathlib.Data.List.Induction
 public import Mathlib.Data.List.Nodup
 public import Mathlib.Data.List.Perm.Basic
@@ -639,6 +640,78 @@ theorem lastVal_map {C : Type} (f : V → C) (es : List (K × V)) (k : K) :
 /-- One entry per key, its last value. -/
 def canon (es : List (K × V)) : List (K × V) := es.foldl (fun L e => dropKey e.1 L ++ [e]) []
 
+section Fast
+
+variable [Hashable K] [LawfulHashable K]
+
+/-- Read the input from the end, keeping only a key's first (hence the original
+list's last) occurrence. The hash map makes each duplicate test constant-time;
+prepending restores the specification's last-occurrence order. -/
+def canonFastGo (seen : Std.HashMap K Unit) (out : List (K × V)) : List (K × V) → List (K × V)
+  | [] => out
+  | e :: rest =>
+      if seen.contains e.1 then canonFastGo seen out rest
+      else canonFastGo (seen.insert e.1 ()) (e :: out) rest
+
+theorem mem_canonFastGo (seen : Std.HashMap K Unit) (out rest : List (K × V)) (x : K × V) :
+    x ∈ canonFastGo seen out rest ↔
+      x ∈ out ∨ (x.1 ∉ seen ∧ lastVal rest.reverse x.1 = some x.2) := by
+  induction rest generalizing seen out with
+  | nil => simp [canonFastGo, lastVal]
+  | cons e rest ih =>
+      obtain ⟨k, v⟩ := e
+      obtain ⟨xk, xv⟩ := x
+      by_cases seenKey : seen.contains k
+      · have mem : k ∈ seen := Std.HashMap.contains_iff_mem.mp seenKey
+        simp only [canonFastGo, seenKey, if_true, ih, List.reverse_cons,
+          lastVal_snoc, List.mem_cons]
+        by_cases same : k = xk
+        · subst k
+          simp [mem]
+        · simp [same]
+      · have mem : k ∉ seen := fun h => seenKey (Std.HashMap.contains_iff_mem.mpr h)
+        rw [canonFastGo, if_neg seenKey, ih, List.reverse_cons, lastVal_snoc]
+        simp only [List.mem_cons, Std.HashMap.mem_insert]
+        by_cases same : k = xk
+        · subst k
+          simp [mem, or_comm, eq_comm]
+        · have different : xk ≠ k := Ne.symm same
+          simp [same, different, mem, or_assoc]
+
+theorem nodupKeys_canonFastGo (seen : Std.HashMap K Unit) (out rest : List (K × V))
+    (nd : NodupKeys out) (bound : ∀ x ∈ out, x.1 ∈ seen) :
+    NodupKeys (canonFastGo seen out rest) := by
+  induction rest generalizing seen out with
+  | nil => simpa [canonFastGo] using nd
+  | cons e rest ih =>
+      by_cases seenKey : seen.contains e.1
+      · simpa [canonFastGo, seenKey] using ih seen out nd bound
+      · rw [canonFastGo, if_neg seenKey]
+        apply ih
+        · simp only [NodupKeys, List.map_cons, List.nodup_cons]
+          refine ⟨?_, nd⟩
+          intro fresh
+          obtain ⟨x, hx, keyEq⟩ := List.mem_map.mp fresh
+          have inSeen := bound x hx
+          have same : e.1 ∈ seen := keyEq ▸ inSeen
+          exact seenKey (Std.HashMap.contains_iff_mem.mpr same)
+        · intro x hx
+          rcases List.mem_cons.mp hx with rfl | hx
+          · exact Std.HashMap.mem_insert_self
+          · exact Std.HashMap.mem_insert.mpr (Or.inr (bound x hx))
+
+/-- The linear canonicalizer used by compiled root construction. -/
+def canonFast (es : List (K × V)) : List (K × V) := canonFastGo ∅ [] es.reverse
+
+theorem mem_canonFast (es : List (K × V)) (x : K × V) :
+    x ∈ canonFast es ↔ lastVal es x.1 = some x.2 := by
+  simp [canonFast, mem_canonFastGo]
+
+theorem nodupKeys_canonFast (es : List (K × V)) : NodupKeys (canonFast es) :=
+  nodupKeys_canonFastGo ∅ [] es.reverse (by simp [NodupKeys]) (by simp)
+
+end Fast
+
 theorem canon_snoc (es : List (K × V)) (e : K × V) : canon (es ++ [e]) = dropKey e.1 (canon es) ++ [e] := by
   simp [canon, List.foldl_append]
 
@@ -664,6 +737,12 @@ theorem mem_canon (es : List (K × V)) (x : K × V) : x ∈ canon es ↔ lastVal
 
 theorem nodup_of_nodupKeys {α : Type} {es : List (K × α)} (nd : NodupKeys es) : es.Nodup :=
   List.Nodup.of_map _ nd
+
+/-- The fast pass has exactly the specification's entries, up to order. -/
+theorem canonFast_perm [Hashable K] [LawfulHashable K] (es : List (K × V)) :
+    (canonFast es).Perm (canon es) :=
+  (List.perm_ext_iff_of_nodup (nodup_of_nodupKeys (nodupKeys_canonFast es))
+    (nodup_of_nodupKeys (nodupKeys_canon es))).mpr fun x => by rw [mem_canonFast, mem_canon]
 
 /-- **Order does not matter**: lists giving every key the same last value have
 one canonical form, up to order. -/
@@ -691,6 +770,16 @@ theorem upsert_perm {es es' : List (Entry K V)} (p : es.Perm es') (k : K) (bits 
 its last value per key, every key at its full path `bitsOf k` of length `L`. -/
 def root (bitsOf : K → List Bool) (L : Nat) (es : List (K × V)) : D :=
   tree dig L (entries bitsOf (canon es))
+
+/-- Root construction over the one-pass canonicalizer. -/
+def rootFast [Hashable K] [LawfulHashable K] (bitsOf : K → List Bool) (L : Nat) (es : List (K × V)) : D :=
+  tree dig L (entries bitsOf (canonFast es))
+
+/-- The hash-map canonicalizer gives the logical root. -/
+theorem root_eq_rootFast [Hashable K] [LawfulHashable K]
+    (bitsOf : K → List Bool) (L : Nat) (es : List (K × V)) :
+    root dig bitsOf L es = rootFast dig bitsOf L es :=
+  tree_perm dig L ((canonFast_perm es).map _).symm
 
 theorem root_congr (bitsOf : K → List Bool) (L : Nat) {es es' : List (K × V)}
     (same : ∀ k, lastVal es k = lastVal es' k) : root dig bitsOf L es = root dig bitsOf L es' :=
@@ -749,6 +838,26 @@ def build (es : List (K × V)) : Cache dig bitsOf L where
 
 theorem build_holds (es : List (K × V)) : (build (dig := dig) lengths es).Holds es :=
   build_entries dig L _ (lengths_entries lengths _)
+
+/-- Bulk build over the one-pass canonicalizer. Its digest is the same root;
+the kept entry order may differ, which `Holds` already abstracts over. -/
+def buildFast [Hashable K] [LawfulHashable K] (es : List (K × V)) : Cache dig bitsOf L where
+  trie := Trie.build dig L (entries bitsOf (canonFast es))
+  inv := build_inv dig L _ (lengths_entries lengths _)
+  paths := by
+    intro e he
+    have := ((build_entries dig L _ (lengths_entries lengths _)).subset he)
+    obtain ⟨kv, _, rfl⟩ := List.mem_map.mp this
+    rfl
+  nodup := by
+    have p := (build_entries dig L _ (lengths_entries lengths (canonFast es))).map (·.1)
+    refine p.nodup_iff.mpr ?_
+    have := nodupKeys_canonFast es
+    simpa [NodupKeys, entries, List.map_map, Function.comp_def] using this
+
+theorem buildFast_holds [Hashable K] [LawfulHashable K] (es : List (K × V)) :
+    (buildFast (dig := dig) lengths es).Holds es :=
+  (build_entries dig L _ (lengths_entries lengths (canonFast es))).trans ((canonFast_perm es).map _)
 
 /-- Write `(k, v)`: one walk, one digest per branch on it. -/
 def insert (cache : Cache dig bitsOf L) (k : K) (v : V) : Cache dig bitsOf L where
@@ -1029,7 +1138,10 @@ end Minidregg.Theory.AuthTrie
 #assert_axioms Minidregg.Theory.AuthTrie.Trie.insert_entries
 #assert_axioms Minidregg.Theory.AuthTrie.Trie.insert_inv
 #assert_axioms Minidregg.Theory.AuthTrie.root_congr
+#assert_axioms Minidregg.Theory.AuthTrie.canonFast_perm
+#assert_axioms Minidregg.Theory.AuthTrie.root_eq_rootFast
 #assert_axioms Minidregg.Theory.AuthTrie.Cache.digest_eq
+#assert_axioms Minidregg.Theory.AuthTrie.Cache.buildFast_holds
 #assert_axioms Minidregg.Theory.AuthTrie.Cache.insertAll_holds
 #assert_axioms Minidregg.Theory.AuthTrie.Cache.opening_complete
 #assert_axioms Minidregg.Theory.AuthTrie.Cache.root_lastVal_eq

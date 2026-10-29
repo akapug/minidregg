@@ -87,7 +87,12 @@ theorem streamPrefixFree {α : Type} (codec : StreamCodec α) : PrefixFree codec
 inductive Key
   | system
   | cell (c : CellId)
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, Hashable
+
+instance : LawfulHashable Key where
+  hash_eq a b same := by
+    cases eq_of_beq same
+    rfl
 
 def keyBytes : Key → List UInt8
   | .system => [0]
@@ -537,6 +542,14 @@ theorem deployedIx_collision {k k' : Key} (hne : k ≠ k') (h : deployedIx k = d
 over each key's last value. -/
 def deployedRoot (es : List (Key × Digest)) : Digest := AuthTrie.root worldDig deployedIx 256 es
 
+/-- The deployed root over one-pass canonicalization. -/
+def deployedRootFast (es : List (Key × Digest)) : Digest := AuthTrie.rootFast worldDig deployedIx 256 es
+
+/-- Compiled deployed roots use the hash-map canonicalizer; proofs keep the specification. -/
+@[csimp] theorem deployedRoot_eq_deployedRootFast : @deployedRoot = @deployedRootFast := by
+  funext es
+  exact AuthTrie.root_eq_rootFast worldDig deployedIx 256 es
+
 /-- The deployed root depends only on each key's last value. -/
 theorem deployedRoot_congr {es es' : List (Key × Digest)}
     (same : ∀ k, AuthTrie.lastVal es k = AuthTrie.lastVal es' k) : deployedRoot es = deployedRoot es' :=
@@ -693,6 +706,7 @@ end Example
 #assert_axioms nodeBytes_injective
 #assert_axioms worldDig_collision
 #assert_axioms deployedIx_collision
+#assert_axioms deployedRoot_eq_deployedRootFast
 #assert_axioms deployedRoot_congr
 #assert_axioms deployed_paths
 #assert_axioms deployedRoot_binds

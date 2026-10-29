@@ -204,7 +204,7 @@ theorem loadServedAuthority_ofLoaded (deployment : CanonicalCellRegistry.Deploym
     (loaded : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes) (sameStart : store.logStart = loaded.logStart) :
     (loadServedAuthority deployment (Served.ofLoaded loaded sameStart)).map (·.cell) =
       (loadDeployment deployment loaded.snapshot).map (·.snapshot.cell) := by
-  unfold loadServedAuthority loadDeployment
+  unfold loadServedAuthority loadDeployment loadDeploymentAt
   by_cases valid : deployment.Valid
   · rw [dif_pos valid, dif_pos valid]
     have bytes : (Served.ofLoaded loaded sameStart).canonicalBytes (cellIdOf deployment) =

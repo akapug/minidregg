@@ -952,7 +952,7 @@ structure Built {F : Type} [Field F]
 
 def Built.image {F : Type} [Field F] {profile : CanonicalRuntimeProfile.Profile F}
     {config : Config} (built : Built profile config) : DurableReceiver.Image :=
-  ⟨built.seed, []⟩
+  DurableReceiver.Image.ofAccepted built.seed []
 
 @[simp] theorem Built.no_history {F : Type} [Field F]
     {profile : CanonicalRuntimeProfile.Profile F} {config : Config}
