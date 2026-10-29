@@ -4432,8 +4432,8 @@ impl Runtime {
                     "sessionObserveCapability":route.dispatch_selectors.session_observe,
                     "manifestObserveCapability":route.dispatch_selectors.manifest_observe,
                     "enrollmentObserveCapability":route.dispatch_selectors.enrollment_observe,
-                    "http":application_api_tools::routed_reserve_http(
-                        &retained, &route.signed_api_path)?,
+                    "http":application_api_tools::routed_reserve_http_for(
+                        &retained, &route.hosted_route()?)?,
                 },
                 // Native application command is authored as the session participant;
                 // the payer's delegated parent witness belongs to ordinary task IO.
@@ -5078,7 +5078,7 @@ impl Runtime {
         }
         application_api_tools::verify_routed_reserve_http(
             &retained_forward,
-            &route.signed_api_path,
+            &application_api_tools::HostedRoute::Api { signed_prefix: route.signed_api_path.clone() },
             &request_view,
         )?;
         let context = plan_view
