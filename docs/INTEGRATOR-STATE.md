@@ -33,39 +33,46 @@ gate; hot-path sends it, wire it into the gate).
 
 ## Main and candidates (2026-10-29 afternoon session)
 
-Main 636b1baeb. Staging (`integration/staging`) = main + hot-path batch 1 f34b03095 (built green 08:18, Kimi review
-clear: no findings) + lane/spk-fresh bf49ce23a (Etherpad 3.3.12 r6, FEATURED rank 1 repointed to ksyn7qa4..., commit
-on staging) + lane/demo-path-market 27db3d1b7 (merge 8cb74aba5; its tests carried into main's appId-list FEATURED shape).
+Main c4264f9cb = staging = 636b1baeb + hot-path batch 1 f34b03095 (Kimi review clear) + lane/spk-fresh bf49ce23a
+(Etherpad 3.3.12 r6; FEATURED rank 1 = ksyn7qa4...) + lane/demo-path-market 27db3d1b7 (operator-pinned index; tests
+carried into main's appId-list FEATURED shape) + 8611c8708 (fixture = fresh-index output over the 8 qualified
+packages; apps::tests 24/24) + demo-path codex 5d30c5f9c (standing-world certifier, rate default 1200/min, stricter
+story-refused row, OwnTracks exact readback).
 
 | candidate | verdict |
 |---|---|
-| d9661be99 | main's last built base; composed apps:sheet and store-restart red (08:02) |
-| f34b03095 | hot-path batch 1: READY 08:18; umbrellas rc=1 (expected Fixtures re-records); not gated |
-| 8cb74aba5 | BUILDING 13:17 (integ-build2.sh, SEATS=4 MEM=40G, pid in integ/build.pid); gate with gate10.sh (adds law-17 flatness) |
+| d9661be99 | composed apps:sheet and store-restart red (08:02) |
+| 8cb74aba5 | READY 13:23; gate10 running (integ/gate-8cb74aba, pid gate-8cb.pid; ports 22740/22743); enrol-resume PASS |
+| c4264f9cb | READY 13:32 (= main); gate10 running (integ/gate-c4264f9c, pid gate-c42.pid; ports 22840/22843). The rehearsal-3 candidate if green |
+
+Both gates: `EDGE_REV=69c17a3 JWORLD_MANAGEMENT=sponsor bash gate10.sh SHA` (gate10.sh is mode 644; run with bash).
+Umbrellas rc=1 on both: Fixtures.NativeAcceptedFixture, NativeDocWriteFixture, BirthPlanPoles, Effects.Revival.EngineProofs.
+
+## Market packages for the demo box
+
+dregg-forge:/var/lib/spk-fresh/qualified-2026-10-29/: in/ (bytes from hbox:/tank/lanes/spk-fresh-*/cache),
+apps/<app>/out/<app>.spk (hard links), out/local.json + adopt.tsv (fresh-index.py adopt mode, spk tool
+/var/lib/spk-fresh/tools/spk). Datasette, Davros, DokuWiki, EtherCalc, Etherpad e6d71fa0, HedgeDoc, Hledger, ntfy;
+packageIds = apps/interfaces/*.json. Infra (add189844d158e3a7) has the paths.
+WBO qualified per landings.md, but its repack declaration has not landed (wbo.json still upstream ac72e0d1); FEATURED
+keeps upstream WBO until spk-fresh (a58fcf100f4438710) sends the sha. Wekan, MediaWiki, Forgejo blocked (landings.md).
 
 ## In flight
 
-- Fixture regen for the market's installable test: the 8 qualified SPKs (packageIds = apps/interfaces/*.json) are
-  streamed from hbox:/tank/lanes/spk-fresh-*/cache to dregg-forge:/var/lib/spk-fresh/qualified-2026-10-29/in
-  (Mac script scratchpad integ2/xfer-spk.sh, pid xfer-spk.pid). Next: lay out in/<app>/out/<app>.spk, run
-  `fresh-index.py --apps ... --recipes repo/apps/packages --spk-tool /var/lib/spk-fresh/tools/spk --out .../out`
-  (adopt mode), copy out/local.json over native/resource-client/tests/fixtures/fresh-local-index-2026-10-29.json,
-  set BUILT_AT in apps_search_shows_the_featured_set_first_with_its_typed_tools to Etherpad's packageBuiltAt, run
-  `cargo test --bin mini -- apps::tests` (24 tests). Expect green: every FEATURED appId is then pinned or upstream.
-- WBO: qualified per landings.md but its repack declaration has not landed (wbo.json still upstream ac72e0d1);
-  FEATURED keeps the upstream WBO until spk-fresh sends the sha. Wekan, MediaWiki, Forgejo blocked (landings.md).
-- Codex workers (apps-agents, demo-path, hot-path) still running; each leaves target/*-commit.sh and
-  scratchpad cx-*/out.md. Land on finish: read report + diff, run its script, merge to staging, rebuild.
-- Infra (add189844d158e3a7) told the candidate is building and where the SPKs/local.json are.
-- Peers: SPK-fresh a58fcf100f4438710 sends shas.
+- Codex apps-agents (cx-aa) and hot-path (cx-hp) still running; each leaves target/*-commit.sh in its worktree and
+  scratchpad cx-*/out.md. On finish: read report + patch, run the script, merge to staging, build, gate.
+- Infra told: c4264f9cb READY, verdict to follow; forge ship from the green candidate.
 
 ## Reds
 
-- apps::tests installable + featured-search: red on staging until the fixture regen above lands (red by design).
-- Flatness (law 17): fails on main's code (60 ms at append 2, 1.7 s at append 141); hot-path codex is on it. Bench scripts/perf/flatness-bench.py (lane/hot-path); gate10.sh runs the candidate's scripts/perf/flatness-gate.sh and records FAIL when it is absent.
+- Flatness (law 17): fails on main's code (60 ms at append 2, 1.7 s at append 141); hot-path codex owns. Bench
+  scripts/perf/flatness-bench.py (lane/hot-path); gate10 runs the candidate's scripts/perf/flatness-gate.sh and
+  records FAIL when absent.
 - Composed: apps:sheet same-Store app and store-restart:shared:resolve (d9661be99); connector capture (7001c0a9f).
-- Umbrellas: Fixtures NativeAcceptedFixture, NativeDocWriteFixture, BirthPlanPoles re-records; Effects/Revival
-  EngineProofs.lean:45 materialize_logical.
+- Umbrellas as above (re-records; effects worker for EngineProofs:45 materialize_logical).
+- OwnTracks package: username normalization differs at write and lookup (repack owed); Hummingbird needs native
+  conversation qualification.
+- apps_front connector unit test fails only inside the apps:: group on the Mac (known).
 - Harness owed: composed residents root hand-offs; distinct-management birth signing.
 
 ## Not landed / held
@@ -75,9 +82,10 @@ statement-fixes (WIP); qualify-doc-contention (WIP).
 
 ## Next steps
 
-1. 8cb74aba5 READY -> merge staging into main, push, gate10 (tour + composed + flatness), hand READY + verdict to infra.
-2. Fixture regen (above) as a fix-forward commit; codex landings as they finish; rebuild once per batch.
-3. Wire residents/distinct-mode harness; take hot-path's Fixtures re-records.
+1. Read both gate verdicts (COMMANDS.log "GATE ... verdict"); send infra the green one (c4264f9cb preferred) and
+   name each red to its owner in one line.
+2. Land cx-aa and cx-hp when they finish; rebuild once for both; gate.
+3. Take hot-path's Fixtures re-records; residents/distinct-mode harness.
 
 ## Hygiene done 2026-10-29
 
