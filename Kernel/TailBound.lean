@@ -26,17 +26,22 @@ every record passes.
 **The one exemption is a certify record**, recognised by its footprint: an
 intent that writes the system cell.  Such an intent is admitted only if it
 writes exactly one post value, and that value is `certifyNext` of the current
-value at the current head and log chain, strictly advancing — so a certify can
-always follow a full tail (liveness), and nothing else can move `certified`.
+value at a prefix the log's history holds with that chain value, strictly
+advancing (`ChainHistory.certifiable`, the rule the certify receiver also
+calls) — so a certify can always follow a full tail (liveness), a write landing
+after the certifier's observation does not refuse it, and nothing else can move
+`certified`.
 
-`head` is the height the record will take (`accepted.length + 1`); a certify at
-`head` certifies `head − 1`, the head before it, whose chain value the loop
-holds.
+The gate reads the log only through a `ChainHistory` (generic: the loaded
+image's chain log, or the head alone on a state without history). The record
+takes height `head history + 1`, so the tail law and the certify rule talk
+about the same head.
 -/
 module
 
 public import Compiler.CanonicalCellRegistry
 public import Kernel.DurableDataIntent
+public import Kernel.ChainHistory
 
 -- Bodies this file reduces or derives through, not exposed by their modules (module system).
 import all Init.Data.Repr
@@ -62,43 +67,57 @@ open Minidregg.Compiler.CanonicalCellRegistry (registry)
 open Minidregg.Kernel.DurableDataIntent
 open Minidregg.Kernel.SystemCell (System certifyNext admitsHead admitsHead_iff)
 open Minidregg.Theory.TypedAuthorization (Digest)
+open Minidregg.Kernel (ChainHistory Tip Prefixes)
 
 set_option autoImplicit false
 
 /-! ## The decision on decoded values -/
 
-/-- Judge one record at height `head` over the current system value `pre` and
-the log chain `chain` (the value after `head − 1` records).  `posts` is the
-decoded post value of every write the record makes on the system cell. -/
-def judge (pre : System) (head : Nat) (chain : Digest) :
-    List (Option System) → Except RejectReason Unit
+variable {H : Type} [ChainHistory H]
+
+/-- The height a record judged over `history` takes. -/
+def recordHeight (history : H) : Nat := ChainHistory.head history + 1
+
+/-- Judge one record over the current system value `pre` and the log's history (the record
+takes `recordHeight history`).  `posts` is the decoded post value of every write the record
+makes on the system cell. -/
+def judge (pre : System) (history : H) : List (Option System) → Except RejectReason Unit
   | [] =>
-      if admitsHead pre head then .ok ()
-      else .error (.tailBound head pre.certifiedHeight pre.tailBound)
+      if admitsHead pre (recordHeight history) then .ok ()
+      else .error (.tailBound (recordHeight history) pre.certifiedHeight pre.tailBound)
   | [some post] =>
-      if post = certifyNext pre (head - 1) chain ∧ pre.certifiedHeight < head - 1 then .ok ()
-      else .error .systemWriteRefused
+      match ChainHistory.certifiable pre.certifiedHeight history post.certifiedHeight
+          post.certifiedDigest with
+      | .ok () =>
+          if post = certifyNext pre post.certifiedHeight post.certifiedDigest then .ok ()
+          else .error .systemWriteRefused
+      | .error _ => .error .systemWriteRefused
   | _ => .error .systemWriteRefused
 
-theorem judge_none_ok {pre : System} {head : Nat} {chain : Digest}
-    (ok : judge pre head chain [] = .ok ()) : head ≤ pre.certifiedHeight + pre.tailBound := by
+theorem judge_none_ok {pre : System} {history : H} (ok : judge pre history [] = .ok ()) :
+    recordHeight history ≤ pre.certifiedHeight + pre.tailBound := by
   simp only [judge] at ok
-  by_cases admits : admitsHead pre head = true
-  · exact (admitsHead_iff pre head).mp admits
+  by_cases admits : admitsHead pre (recordHeight history) = true
+  · exact (admitsHead_iff pre _).mp admits
   · rw [if_neg admits] at ok
     cases ok
 
-theorem judge_write_ok {pre : System} {head : Nat} {chain : Digest} {posts : List (Option System)}
-    (nonempty : posts ≠ []) (ok : judge pre head chain posts = .ok ()) :
-    posts = [some (certifyNext pre (head - 1) chain)] ∧ pre.certifiedHeight < head - 1 := by
+theorem judge_write_ok {pre : System} {history : H} {posts : List (Option System)}
+    (nonempty : posts ≠ []) (ok : judge pre history posts = .ok ()) :
+    ∃ height digest, posts = [some (certifyNext pre height digest)] ∧
+      pre.certifiedHeight < height ∧ ChainHistory.chainAt history height = some digest := by
   match posts, ok with
   | [], _ => exact absurd rfl nonempty
   | [some post], ok =>
       simp only [judge] at ok
-      by_cases both : post = certifyNext pre (head - 1) chain ∧ pre.certifiedHeight < head - 1
-      · exact ⟨by rw [both.1], both.2⟩
-      · rw [if_neg both] at ok
-        cases ok
+      split at ok
+      · rename_i certified
+        obtain ⟨advancing, held⟩ := (ChainHistory.certifiable_ok_iff _ _ _ _).mp certified
+        by_cases shape : post = certifyNext pre post.certifiedHeight post.certifiedDigest
+        · exact ⟨post.certifiedHeight, post.certifiedDigest, by rw [← shape], advancing, held⟩
+        · rw [if_neg shape] at ok
+          cases ok
+      · cases ok
   | [none], ok => simp [judge] at ok
   | _ :: _ :: _, ok => simp [judge] at ok
 
@@ -121,30 +140,30 @@ def systemPosts {rootBytes : List UInt8 → Digest} (systemId : CellId)
   (intent.writes.filter fun write => write.cellId = systemId).map
     fun write => valueOf write.canonicalPostBytes
 
-/-- **The kernel's tail rule.**  `head` is the height the record takes; `chain`
-the log chain before it; `snapshot` the state it is judged on. -/
-def gate {rootBytes : List UInt8 → Digest} (systemId : CellId) (head : Nat) (chain : Digest)
+/-- **The kernel's tail rule.**  `history` is the log before the record (the record takes
+`recordHeight history`); `snapshot` the state it is judged on. -/
+def gate {rootBytes : List UInt8 → Digest} (systemId : CellId) (history : H)
     (snapshot : DataSnapshot rootBytes) (intent : DataIntent rootBytes) :
     Except RejectReason Unit :=
   match valueOf (snapshot.canonicalBytes systemId) with
   | none => .error .systemUnavailable
-  | some pre => judge pre head chain (systemPosts systemId intent)
+  | some pre => judge pre history (systemPosts systemId intent)
 
 theorem systemPosts_nil_iff {rootBytes : List UInt8 → Digest} (systemId : CellId)
     (intent : DataIntent rootBytes) :
     systemPosts systemId intent = [] ↔ ∀ write ∈ intent.writes, write.cellId ≠ systemId := by
   simp [systemPosts, List.filter_eq_nil_iff]
 
-variable {rootBytes : List UInt8 → Digest} {systemId : CellId} {head : Nat} {chain : Digest}
+variable {rootBytes : List UInt8 → Digest} {systemId : CellId} {history : H}
   {snapshot : DataSnapshot rootBytes} {intent : DataIntent rootBytes}
 
 /-- **`tail_bounded`.**  Every admitted record that is not a certify record —
 it writes no system cell — sits at most `L` heights past the certified height
 of the state it was judged on. -/
-theorem tail_bounded (ok : gate systemId head chain snapshot intent = .ok ())
+theorem tail_bounded (ok : gate systemId history snapshot intent = .ok ())
     (notCertify : ∀ write ∈ intent.writes, write.cellId ≠ systemId) :
     ∃ pre, valueOf (snapshot.canonicalBytes systemId) = some pre ∧
-      head - pre.certifiedHeight ≤ pre.tailBound := by
+      recordHeight history - pre.certifiedHeight ≤ pre.tailBound := by
   unfold gate at ok
   split at ok
   · cases ok
@@ -155,14 +174,14 @@ theorem tail_bounded (ok : gate systemId head chain snapshot intent = .ok ())
 
 /-- **`certified_written_only_by_checkpoint`.**  If an admitted record writes
 the system cell at all, it writes it exactly once, and the value it writes is
-the certification of the current head (`head − 1`) at the current log chain,
-with the tail bound unchanged.  No other shape of write to the system cell is
-admitted, whatever receiver produced it. -/
-theorem certified_written_only_by_checkpoint (ok : gate systemId head chain snapshot intent = .ok ())
+the certification of a prefix past the certified height that the history holds
+at that chain value, with the tail bound unchanged.  No other shape of write to
+the system cell is admitted, whatever receiver produced it. -/
+theorem certified_written_only_by_checkpoint (ok : gate systemId history snapshot intent = .ok ())
     (write : DataWrite) (member : write ∈ intent.writes) (target : write.cellId = systemId) :
     ∃ pre, valueOf (snapshot.canonicalBytes systemId) = some pre ∧
-      systemPosts systemId intent = [some (certifyNext pre (head - 1) chain)] ∧
-      pre.certifiedHeight < head - 1 := by
+      ∃ height digest, systemPosts systemId intent = [some (certifyNext pre height digest)] ∧
+        pre.certifiedHeight < height ∧ ChainHistory.chainAt history height = some digest := by
   unfold gate at ok
   split at ok
   · cases ok
@@ -172,14 +191,30 @@ theorem certified_written_only_by_checkpoint (ok : gate systemId head chain snap
       exact (systemPosts_nil_iff systemId intent).mp empty write member target
     exact ⟨pre, found, judge_write_ok nonempty ok⟩
 
+/-- **`certified_true`.**  Over a history faithful to the log, the certified value an
+admitted record installs is a true prefix: at or below the head the gate judged at, with
+the log's own chain value there. -/
+theorem certified_true {truth : Nat → Digest} (faithful : ChainHistory.Faithful history truth)
+    (ok : gate systemId history snapshot intent = .ok ())
+    (write : DataWrite) (member : write ∈ intent.writes) (target : write.cellId = systemId) :
+    ∃ pre, valueOf (snapshot.canonicalBytes systemId) = some pre ∧
+      ∃ height, systemPosts systemId intent = [some (certifyNext pre height (truth height))] ∧
+        pre.certifiedHeight < height ∧ height < recordHeight history := by
+  obtain ⟨pre, found, height, digest, posts, advancing, held⟩ :=
+    certified_written_only_by_checkpoint ok write member target
+  have within := ChainHistory.chainAt_le_head history height digest held
+  have true_ := faithful.sound height digest held
+  subst true_
+  exact ⟨pre, found, height, posts, advancing, by unfold recordHeight; omega⟩
+
 /-- **`certified_monotone`.**  A write to the system cell that the gate admits
 installs a strictly greater certified height and the same tail bound. -/
-theorem certified_monotone (ok : gate systemId head chain snapshot intent = .ok ())
+theorem certified_monotone (ok : gate systemId history snapshot intent = .ok ())
     (write : DataWrite) (member : write ∈ intent.writes) (target : write.cellId = systemId)
     (post : System) (decoded : valueOf write.canonicalPostBytes = some post) :
     ∃ pre, valueOf (snapshot.canonicalBytes systemId) = some pre ∧
       pre.certifiedHeight < post.certifiedHeight ∧ post.tailBound = pre.tailBound := by
-  obtain ⟨pre, found, posts, advancing⟩ :=
+  obtain ⟨pre, found, height, digest, posts, advancing, _⟩ :=
     certified_written_only_by_checkpoint ok write member target
   have inPosts : some post ∈ systemPosts systemId intent := by
     simp only [systemPosts, List.mem_map, List.mem_filter]
@@ -190,7 +225,7 @@ theorem certified_monotone (ok : gate systemId head chain snapshot intent = .ok 
 
 /-- A system cell that is missing or undecodable refuses every record. -/
 theorem unavailable_refuses (missing : valueOf (snapshot.canonicalBytes systemId) = none) :
-    gate systemId head chain snapshot intent = .error .systemUnavailable := by
+    gate systemId history snapshot intent = .error .systemUnavailable := by
   unfold gate
   rw [missing]
 
@@ -198,83 +233,87 @@ theorem unavailable_refuses (missing : valueOf (snapshot.canonicalBytes systemId
 
 /-- **Refuting pole** (general): the first height past the bound is refused by
 name. -/
-theorem beyond_bound_refused (pre : System) (chain : Digest) :
-    judge pre (pre.certifiedHeight + pre.tailBound + 1) chain [] =
+theorem beyond_bound_refused (pre : System) (history : H)
+    (past : recordHeight history = pre.certifiedHeight + pre.tailBound + 1) :
+    judge pre history [] =
       .error (.tailBound (pre.certifiedHeight + pre.tailBound + 1) pre.certifiedHeight pre.tailBound) := by
-  have : admitsHead pre (pre.certifiedHeight + pre.tailBound + 1) = false := by
-    cases h : admitsHead pre (pre.certifiedHeight + pre.tailBound + 1)
+  have : admitsHead pre (recordHeight history) = false := by
+    cases h : admitsHead pre (recordHeight history)
     · rfl
     · have := (admitsHead_iff _ _).mp h
       omega
-  simp [judge, this]
+  simp only [judge, this, Bool.false_eq_true, if_false]
+  rw [past]
 
 /-- **Satisfiable pole** (general): the last height inside the bound is admitted. -/
-theorem at_bound_admitted (pre : System) (chain : Digest) :
-    judge pre (pre.certifiedHeight + pre.tailBound) chain [] = .ok () := by
-  have : admitsHead pre (pre.certifiedHeight + pre.tailBound) = true :=
-    (admitsHead_iff _ _).mpr (Nat.le_refl _)
+theorem at_bound_admitted (pre : System) (history : H)
+    (at_ : recordHeight history = pre.certifiedHeight + pre.tailBound) :
+    judge pre history [] = .ok () := by
+  have : admitsHead pre (recordHeight history) = true :=
+    (admitsHead_iff _ _).mpr (by omega)
   simp [judge, this]
 
-/-- **Refuting pole** (concrete, by `decide`): certified at 64 with `L = 8`, a
-record at height 73 is refused `tailBound 73 64 8`. -/
-theorem tailBound_refuses_73 :
-    judge ⟨64, ⟨7⟩, 8⟩ 73 ⟨9⟩ [] = .error (.tailBound 73 64 8) := by decide
-
-/-- **Satisfiable pole** (concrete, by `decide`): the record at height 72 is
-admitted. -/
-theorem tailBound_admits_72 : judge ⟨64, ⟨7⟩, 8⟩ 72 ⟨9⟩ [] = .ok () := by decide
-
-/-- A certify record is admitted at a full tail (concrete): at height 73 it
-certifies 72 at chain 9. -/
-theorem certify_admitted_at_full_tail :
-    judge ⟨64, ⟨7⟩, 8⟩ 73 ⟨9⟩ [some ⟨72, ⟨9⟩, 8⟩] = .ok () := by decide
-
-/-- A certify that changes the tail bound is refused (concrete). -/
-theorem certify_cannot_move_bound :
-    judge ⟨64, ⟨7⟩, 8⟩ 73 ⟨9⟩ [some ⟨72, ⟨9⟩, 1000⟩] = .error .systemWriteRefused := by decide
-
-/-- A certify that names another chain value is refused (concrete). -/
-theorem certify_wrong_chain_refused :
-    judge ⟨64, ⟨7⟩, 8⟩ 73 ⟨9⟩ [some ⟨72, ⟨8⟩, 8⟩] = .error .systemWriteRefused := by decide
-
-/-- **`checkpoint_restores_progress`.**  A certify record at height `n + 1`
-(certifying `n`) is admitted whenever it advances, and after it every record at
-the next `L` heights — `n + 1 … n + L` — passes the tail law. -/
-theorem checkpoint_restores_progress (pre : System) (n : Nat) (chain : Digest)
-    (advancing : pre.certifiedHeight < n) :
-    judge pre (n + 1) chain [some (certifyNext pre n chain)] = .ok () ∧
-      ∀ head, head ≤ n + pre.tailBound → ∀ later : Digest,
-        judge (certifyNext pre n chain) head later [] = .ok () := by
+/-- **`checkpoint_restores_progress`.**  A certify of a prefix `n` the history holds at
+`chain` is admitted whenever it advances, and after it every record whose height is at most
+`n + L` passes the tail law. -/
+theorem checkpoint_restores_progress (pre : System) (history : H) (n : Nat) (chain : Digest)
+    (held : ChainHistory.chainAt history n = some chain) (advancing : pre.certifiedHeight < n) :
+    judge pre history [some (certifyNext pre n chain)] = .ok () ∧
+      ∀ {H' : Type} [ChainHistory H'] (later : H'), recordHeight later ≤ n + pre.tailBound →
+        judge (certifyNext pre n chain) later [] = .ok () := by
   refine ⟨?_, ?_⟩
-  · simp [judge, advancing]
-  · intro head within later
-    have : admitsHead (certifyNext pre n chain) head = true :=
+  · have certified : ChainHistory.certifiable pre.certifiedHeight history n chain = .ok () :=
+      (ChainHistory.certifiable_ok_iff _ _ _ _).mpr ⟨advancing, held⟩
+    simp [judge, certifyNext, certified]
+  · intro H' _ later within
+    have : admitsHead (certifyNext pre n chain) (recordHeight later) = true :=
       (admitsHead_iff _ _).mpr (by simpa [certifyNext] using within)
     simp [judge, this]
 
-/-- info: 'Minidregg.Kernel.TailBound.tail_bounded' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms tail_bounded
-/-- info: 'Minidregg.Kernel.TailBound.certified_written_only_by_checkpoint' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms certified_written_only_by_checkpoint
-/-- info: 'Minidregg.Kernel.TailBound.certified_monotone' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms certified_monotone
-/-- info: 'Minidregg.Kernel.TailBound.unavailable_refuses' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms unavailable_refuses
-/-- info: 'Minidregg.Kernel.TailBound.beyond_bound_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms beyond_bound_refused
-/-- info: 'Minidregg.Kernel.TailBound.at_bound_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms at_bound_admitted
-/-- info: 'Minidregg.Kernel.TailBound.tailBound_refuses_73' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms tailBound_refuses_73
-/-- info: 'Minidregg.Kernel.TailBound.tailBound_admits_72' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms tailBound_admits_72
-/-- info: 'Minidregg.Kernel.TailBound.certify_admitted_at_full_tail' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms certify_admitted_at_full_tail
-/-- info: 'Minidregg.Kernel.TailBound.certify_cannot_move_bound' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms certify_cannot_move_bound
-/-- info: 'Minidregg.Kernel.TailBound.certify_wrong_chain_refused' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms certify_wrong_chain_refused
-/-- info: 'Minidregg.Kernel.TailBound.checkpoint_restores_progress' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms checkpoint_restores_progress
+/-! ## Built witnesses -/
+
+/-- Certified at 64 with `L = 8`; the log's head is 72 at chain 9, so a record takes 73. -/
+private def tip72 : Tip := ⟨72, ⟨9⟩⟩
+
+/-- **Refuting pole** (concrete): the ordinary record at height 73 is refused `tailBound 73 64 8`. -/
+theorem tailBound_refuses_73 : judge ⟨64, ⟨7⟩, 8⟩ tip72 [] = .error (.tailBound 73 64 8) := by decide
+
+/-- **Satisfiable pole** (concrete): with the head at 71, the record at 72 is admitted. -/
+theorem tailBound_admits_72 : judge ⟨64, ⟨7⟩, 8⟩ (⟨71, ⟨9⟩⟩ : Tip) [] = .ok () := by decide
+
+/-- A certify of the head is admitted at a full tail (concrete). -/
+theorem certify_admitted_at_full_tail :
+    judge ⟨64, ⟨7⟩, 8⟩ tip72 [some ⟨72, ⟨9⟩, 8⟩] = .ok () := by decide
+
+/-- A certify that changes the tail bound is refused (concrete). -/
+theorem certify_cannot_move_bound :
+    judge ⟨64, ⟨7⟩, 8⟩ tip72 [some ⟨72, ⟨9⟩, 1000⟩] = .error .systemWriteRefused := by decide
+
+/-- A certify that names another chain value is refused (concrete). -/
+theorem certify_wrong_chain_refused :
+    judge ⟨64, ⟨7⟩, 8⟩ tip72 [some ⟨72, ⟨8⟩, 8⟩] = .error .systemWriteRefused := by decide
+
+/-- A log of six records, chain after `h` records `⟨h⟩`; certified at 4 with `L = 2`, so the
+next ordinary record (height 7) is past the bound. -/
+private def six : Prefixes := Prefixes.ofTruth (fun h => ⟨h⟩) 6
+
+/-- **The new liveness, concrete**: at that full tail, the ordinary record is refused, a
+certify of the prefix 5 (not the head) is admitted, and after it the record is admitted. -/
+theorem prefix_certify_reopens_writes :
+    judge ⟨4, ⟨4⟩, 2⟩ six [] = .error (.tailBound 7 4 2) ∧
+      judge ⟨4, ⟨4⟩, 2⟩ six [some ⟨5, ⟨5⟩, 2⟩] = .ok () ∧
+      judge ⟨5, ⟨5⟩, 2⟩ six [] = .ok () := by decide
+
+/-- A certify of a prefix at or below the certified height, or past the head, is refused. -/
+theorem prefix_certify_teeth :
+    judge ⟨4, ⟨4⟩, 2⟩ six [some ⟨4, ⟨4⟩, 2⟩] = .error .systemWriteRefused ∧
+      judge ⟨4, ⟨4⟩, 2⟩ six [some ⟨7, ⟨7⟩, 2⟩] = .error .systemWriteRefused ∧
+      judge ⟨4, ⟨4⟩, 2⟩ six [some ⟨5, ⟨6⟩, 2⟩] = .error .systemWriteRefused := by decide
+
+#assert_axioms judge_none_ok judge_write_ok tail_bounded certified_written_only_by_checkpoint
+  certified_true certified_monotone unavailable_refuses beyond_bound_refused at_bound_admitted
+  checkpoint_restores_progress tailBound_refuses_73 tailBound_admits_72 certify_admitted_at_full_tail
+  certify_cannot_move_bound certify_wrong_chain_refused prefix_certify_reopens_writes
+  prefix_certify_teeth
 
 end Minidregg.Kernel.TailBound
