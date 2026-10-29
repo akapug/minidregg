@@ -62,29 +62,30 @@ structure OpenedServed (config : Config) (store : StoreIdentity) where
   authority : ServedAuthority config.deployment served
   pins : FactoryPins
   lawful : cellsLawfulServed config served directory.directory = true
+  seedExact : seedIdentity served.seed = config.expectedSeed
+  logStartExact : served.logStart = config.logStart served.seed
 
 def validateServed (config : Config) {store : StoreIdentity} (served : State store) :
     Except String (OpenedServed config store) :=
-  (validateCore config served.seed served.logStart (loadServedDirectory served)
-    (loadServedAuthority config.deployment served) (·.directory) (·.cell.logical)
-    (fun loaded => cellsLawfulServed config served loaded.directory)
-    (PlatformCellDomain.recordAt config.deployment served.canonicalBytes)).map fun parts =>
-      ⟨served, parts.1.1, parts.1.2.1, parts.1.2.2, parts.2⟩
+  match core : validateCore config served.seed served.logStart (loadServedDirectory served)
+      (loadServedAuthority config.deployment served) (·.directory) (·.cell.logical)
+      (fun loaded => cellsLawfulServed config served loaded.directory)
+      (PlatformCellDomain.recordAt config.deployment served.canonicalBytes) with
+  | .error detail => .error detail
+  | .ok parts =>
+      let genesis := validateCore_genesis core
+      .ok ⟨served, parts.1.1, parts.1.2.1, parts.1.2.2, parts.2, genesis.1, genesis.2⟩
 
 /-- Validation wraps exactly the state it was given. -/
 theorem validateServed_served {config : Config} {store : StoreIdentity} {served : State store}
     {opened : OpenedServed config store} (validated : validateServed config served = .ok opened) :
     opened.served = served := by
   unfold validateServed at validated
-  cases parts : validateCore config served.seed served.logStart (loadServedDirectory served)
-      (loadServedAuthority config.deployment served) (·.directory) (·.cell.logical)
-      (fun loaded => cellsLawfulServed config served loaded.directory)
-      (PlatformCellDomain.recordAt config.deployment served.canonicalBytes) with
-  | error detail => simp [parts, Except.map] at validated
-  | ok value =>
-      simp only [parts, Except.map, Except.ok.injEq] at validated
-      subst validated
-      rfl
+  split at validated
+  · contradiction
+  · simp only [Except.ok.injEq] at validated
+    subst opened
+    rfl
 
 /-- A validated state's cell law holds at every identifier: outside the
 enumeration the bytes are the absent default, so the slot is absent. -/
@@ -110,6 +111,16 @@ theorem OpenedServed.cellLawful_all {config : Config} {store : StoreIdentity}
     | live cell =>
         rw [view] at bytes
         simp [ResourceBirthCodec.LifecycleImage.bytes] at bytes
+
+private theorem validateServed_pins_core {config : Config} {store : StoreIdentity}
+    (served : State store) :
+    (validateServed config served).map (·.pins) =
+      (validateCore config served.seed served.logStart (loadServedDirectory served)
+        (loadServedAuthority config.deployment served) (·.directory) (·.cell.logical)
+        (fun loaded => cellsLawfulServed config served loaded.directory)
+        (PlatformCellDomain.recordAt config.deployment served.canonicalBytes)).map (·.1.2.2) := by
+  unfold validateServed
+  split <;> simp_all [Except.map]
 
 /-- **The served validation of the full shape's state is the full validation**:
 the same refusal with the same message, or the same factory pins. -/
@@ -148,22 +159,23 @@ theorem validateServed_ofLoaded (config : Config) {store : StoreIdentity} (durab
   have sameLog : (Served.ofLoaded durable sameStart).logStart = durable.logStart := sameStart
   have samePlatform : PlatformCellDomain.recordAt config.deployment (Served.ofLoaded durable sameStart).canonicalBytes =
       PlatformCellDomain.recordAt config.deployment durable.snapshot.canonicalBytes := rfl
-  unfold validateServed validateLoaded validateParts validatePartsWith validatePartsVia
-  rw [sameSeed, sameLog, samePlatform]
-  revert served
-  generalize validateCore config durable.image.seed durable.logStart
-    (loadServedDirectory (Served.ofLoaded durable sameStart))
-    (loadServedAuthority config.deployment (Served.ofLoaded durable sameStart))
-    (·.directory) (·.cell.logical)
-    (fun loaded => cellsLawfulServed config (Served.ofLoaded durable sameStart) loaded.directory)
-    (PlatformCellDomain.recordAt config.deployment durable.snapshot.canonicalBytes) = light
-  generalize validateCore config durable.image.seed durable.logStart
-    (CredentialAuthorityDomainReceiver.loadDirectory durable)
-    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
-    (·.directory) (·.snapshot.logical) (fun loaded => cellsLawful config durable loaded.directory)
-    (PlatformCellDomain.recordAt config.deployment durable.snapshot.canonicalBytes) = full
-  intro served
-  cases light <;> cases full <;> simp_all [Except.map]
+  have lightCore :
+      validateCore config (Served.ofLoaded durable sameStart).seed (Served.ofLoaded durable sameStart).logStart
+        (loadServedDirectory (Served.ofLoaded durable sameStart))
+        (loadServedAuthority config.deployment (Served.ofLoaded durable sameStart))
+        (·.directory) (·.cell.logical)
+        (fun loaded => cellsLawfulServed config (Served.ofLoaded durable sameStart) loaded.directory)
+        (PlatformCellDomain.recordAt config.deployment (Served.ofLoaded durable sameStart).canonicalBytes) =
+      validateCore config durable.image.seed durable.logStart
+        (loadServedDirectory (Served.ofLoaded durable sameStart))
+        (loadServedAuthority config.deployment (Served.ofLoaded durable sameStart))
+        (·.directory) (·.cell.logical)
+        (fun loaded => cellsLawfulServed config (Served.ofLoaded durable sameStart) loaded.directory)
+        (PlatformCellDomain.recordAt config.deployment durable.snapshot.canonicalBytes) := by
+    rw [sameSeed, sameLog, samePlatform]
+  rw [← lightCore] at served
+  rw [validateServed_pins_core, validateLoaded_pins_core]
+  exact served
 
 /-- The basis a request on a validated served state is prepared against: the
 validated state, directory and authority, the Store's head, and the request's
@@ -179,7 +191,17 @@ def OpenedServed.basis {config : Config} {store : StoreIdentity} (opened : Opene
 paths: nothing an `OpenedServed` holds depends on `storage`. -/
 def OpenedServed.restorage {config : Config} {store : StoreIdentity} (opened : OpenedServed config store)
     (storage : DurableReceiverIO.NativeConfig) : OpenedServed { config with storage } store :=
-  ⟨opened.served, opened.directory, opened.authority, opened.pins, opened.lawful⟩
+  { served := opened.served
+    directory := opened.directory
+    authority := opened.authority
+    pins := opened.pins
+    lawful := opened.lawful
+    seedExact := by
+      change seedIdentity opened.served.seed = config.expectedSeed
+      exact opened.seedExact
+    logStartExact := by
+      rw [Config.logStart_restorage]
+      exact opened.logStartExact }
 
 /-- The full shape's ground of a validated opening (`ServedBasis.Ground.ofLoaded`):
 for the ratchet-listed full-shape callers (the audit walk). -/
@@ -234,11 +256,41 @@ def validateServedWith (config : Config) {store : StoreIdentity} (served : State
     (directory? : Option (ServedDirectory served))
     (authority? : Option (ServedAuthority config.deployment served))
     (lawfulCheck : ServedDirectory served → Bool)
-    (lawfulExact : ∀ loaded, lawfulCheck loaded = cellsLawfulServed config served loaded.directory) :
+    (lawfulExact : ∀ loaded, lawfulCheck loaded = cellsLawfulServed config served loaded.directory)
+    (seedExact? : ExactEvidence (seedIdentity served.seed = config.expectedSeed) := none)
+    (logStartExact? : ExactEvidence (served.logStart = config.logStart served.seed) := none) :
     Except String (OpenedServed config store) :=
-  (validateCore config served.seed served.logStart directory? authority? (·.directory) (·.cell.logical)
-    lawfulCheck (PlatformCellDomain.recordAt config.deployment served.canonicalBytes)).map fun parts =>
-      ⟨served, parts.1.1, parts.1.2.1, parts.1.2.2, (lawfulExact parts.1.1) ▸ parts.2⟩
+  match core : validateCore config served.seed served.logStart directory? authority? (·.directory)
+      (·.cell.logical) lawfulCheck (PlatformCellDomain.recordAt config.deployment served.canonicalBytes)
+      seedExact? logStartExact? with
+  | .error detail => .error detail
+  | .ok parts =>
+      let genesis := validateCore_genesis core
+      .ok ⟨served, parts.1.1, parts.1.2.1, parts.1.2.2, (lawfulExact parts.1.1) ▸ parts.2,
+        genesis.1, genesis.2⟩
+
+theorem validateServedWith_withExact_eq (config : Config) {store : StoreIdentity} (served : State store)
+    (directory? : Option (ServedDirectory served))
+    (authority? : Option (ServedAuthority config.deployment served))
+    (lawfulCheck : ServedDirectory served → Bool)
+    (lawfulExact : ∀ loaded, lawfulCheck loaded = cellsLawfulServed config served loaded.directory)
+    (seedExact? : ExactEvidence (seedIdentity served.seed = config.expectedSeed))
+    (logStartExact? : ExactEvidence (served.logStart = config.logStart served.seed))
+    (directoryExact : directory? = loadServedDirectory served)
+    (authorityExact : authority? = loadServedAuthority config.deployment served) :
+    validateServedWith config served directory? authority? lawfulCheck lawfulExact
+      seedExact? logStartExact? = validateServed config served := by
+  subst directoryExact
+  subst authorityExact
+  have same : lawfulCheck = fun loaded => cellsLawfulServed config served loaded.directory :=
+    funext lawfulExact
+  subst same
+  have sameCore := validateCore_withExact_eq config served.seed served.logStart
+    (loadServedDirectory served) (loadServedAuthority config.deployment served)
+    (·.directory) (·.cell.logical) (fun loaded => cellsLawfulServed config served loaded.directory)
+    (PlatformCellDomain.recordAt config.deployment served.canonicalBytes) seedExact? logStartExact?
+  unfold validateServed validateServedWith
+  split <;> split <;> simp_all [sameCore]
 
 theorem validateServedWith_eq (config : Config) {store : StoreIdentity} (served : State store)
     (directory? : Option (ServedDirectory served))
@@ -248,30 +300,45 @@ theorem validateServedWith_eq (config : Config) {store : StoreIdentity} (served 
     (directoryExact : directory? = loadServedDirectory served)
     (authorityExact : authority? = loadServedAuthority config.deployment served) :
     validateServedWith config served directory? authority? lawfulCheck lawfulExact =
-      validateServed config served := by
-  subst directoryExact
-  subst authorityExact
-  have same : lawfulCheck = fun loaded => cellsLawfulServed config served loaded.directory :=
-    funext lawfulExact
-  subst same
-  rfl
+      validateServed config served :=
+  validateServedWith_withExact_eq config served directory? authority? lawfulCheck lawfulExact
+    none none directoryExact authorityExact
+
+private def priorServedGenesisEvidence {config : Config} {earlier store : StoreIdentity}
+    (prior : OpenedServed config earlier) (served : State store) :
+    ExactEvidence (seedIdentity served.seed = config.expectedSeed) ×
+      ExactEvidence (served.logStart = config.logStart served.seed) :=
+  if sameSeed : prior.served.seed = served.seed then
+    (some ⟨sameSeed ▸ prior.seedExact⟩,
+      if sameStart : prior.served.logStart = served.logStart then
+        some ⟨by simpa only [sameSeed, sameStart] using prior.logStartExact⟩
+      else none)
+  else (none, none)
 
 /-- **Validation of a session's next served state, incrementally**: the
 directory decodes only rows whose bytes moved (`loadServedDirectoryFrom`), the
 authority cell is decoded only when its bytes moved (`loadServedAuthorityFrom`)
 and the cell law runs only on cells whose bytes moved (`cellsLawfulServedFrom`).
+The genesis checks are inherited when the seed and log start are unchanged.
 `validateServedFrom_eq`: it is `validateServed` -- the same result, the same refusal. -/
 def validateServedFrom (config : Config) {earlier store : StoreIdentity}
     (prior : OpenedServed config earlier) (served : State store) :
     Except String (OpenedServed config store) :=
+  let evidence := priorServedGenesisEvidence prior served
   validateServedWith config served (loadServedDirectoryFrom prior.directory served)
     (loadServedAuthorityFrom prior.authority served) (cellsLawfulServedFrom config prior served)
-    (cellsLawfulServedFrom_eq config prior served)
+    (cellsLawfulServedFrom_eq config prior served) evidence.1 evidence.2
 
 theorem validateServedFrom_eq (config : Config) {earlier store : StoreIdentity}
     (prior : OpenedServed config earlier) (served : State store) :
     validateServedFrom config prior served = validateServed config served :=
-  validateServedWith_eq config served _ _ _ _ (loadServedDirectoryFrom_eq prior.directory served)
+  validateServedWith_withExact_eq config served
+    (loadServedDirectoryFrom prior.directory served)
+    (loadServedAuthorityFrom prior.authority served)
+    (cellsLawfulServedFrom config prior served)
+    (cellsLawfulServedFrom_eq config prior served)
+    (priorServedGenesisEvidence prior served).1 (priorServedGenesisEvidence prior served).2
+    (loadServedDirectoryFrom_eq prior.directory served)
     (loadServedAuthorityFrom_eq prior.authority served)
 
 #assert_axioms validateServedFrom_eq
