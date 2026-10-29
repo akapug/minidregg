@@ -1,0 +1,116 @@
+{
+ "apps": [
+  {
+   "appId": "f3s5vv8g7xuay08e3x1g5zwuaycz0mt7170nmz3kf5e1g1q9ytr0",
+   "author": {
+    "name": "Mini"
+   },
+   "categories": [
+    "science"
+   ],
+   "class": "M",
+   "codeLink": "https://github.com/ocdtrekkie/datasette-sandstorm",
+   "isOpenSource": true,
+   "name": "Datasette",
+   "packageBuiltAt": "2026-10-29T07:51:48Z",
+   "packageId": "daafe47b15e9c8659cff5236746e5506",
+   "sha256": "daafe47b15e9c8659cff5236746e550649653cc14242a7a7d024473ff341f5f7",
+   "shortDescription": "Read-only data explorer",
+   "upstreamAuthor": "Simon Willison",
+   "upstreamVersion": "0.65.5",
+   "version": "0.65.5",
+   "versionNumber": 1,
+   "webLink": "https://datasette.io"
+  },
+  {
+   "appId": "umpy9re0saa7vtckd6mnprv6mc5vjgr0qh5qucs4na3qjrxrrzch",
+   "author": {
+    "name": "Mini"
+   },
+   "categories": [
+    "office",
+    "productivity"
+   ],
+   "class": "M",
+   "codeLink": "https://github.com/audreyt/ethercalc",
+   "isOpenSource": true,
+   "name": "EtherCalc",
+   "packageBuiltAt": "2026-10-29T08:08:19Z",
+   "packageId": "da9d64ca90e51cdf2643c3271f9ee9b1",
+   "sha256": "da9d64ca90e51cdf2643c3271f9ee9b17cbd5af73931ab79f588f72dcf69b785",
+   "shortDescription": "Multi-user Spreadsheet",
+   "upstreamAuthor": "Audrey Tang",
+   "upstreamVersion": "2026.10.26.0+sandstorm1",
+   "version": "2026.10.26.0+sandstorm1",
+   "versionNumber": 202610260,
+   "webLink": "https://ethercalc.net/"
+  },
+  {
+   "appId": "ksyn7qa4szjwa14v89r7znxwrpjs0dez5q2u8s810d0awnuswmfh",
+   "author": {
+    "name": "Mini"
+   },
+   "categories": [
+    "office",
+    "productivity"
+   ],
+   "class": "M",
+   "codeLink": "https://github.com/sandstorm-org/etherpad-lite-sandstorm",
+   "isOpenSource": true,
+   "name": "Etherpad",
+   "packageBuiltAt": "2026-10-29T06:50:17Z",
+   "packageId": "b7268b3e9946c1a18cfcae02b0d9dc3e",
+   "sha256": "b7268b3e9946c1a18cfcae02b0d9dc3ec4b95f93b8eb0a8d3ae60b829292ae25",
+   "shortDescription": "Collaborative document editor",
+   "upstreamAuthor": "Etherpad Foundation",
+   "upstreamVersion": "3.3.12-1",
+   "version": "3.3.12-1",
+   "versionNumber": 1,
+   "webLink": "https://etherpad.org/"
+  },
+  {
+   "appId": "a0wt1wk03g737k60grvphm2rxy9yjnkev8g4jjj9zgu9mm3ggay0",
+   "author": {
+    "name": "Mini"
+   },
+   "categories": [
+    "office"
+   ],
+   "class": "M",
+   "codeLink": "https://github.com/hedgedoc/hedgedoc",
+   "isOpenSource": true,
+   "name": "HedgeDoc",
+   "packageBuiltAt": "2026-10-29T07:58:29Z",
+   "packageId": "8452968c1fc59a324106009faa14dedd",
+   "sha256": "8452968c1fc59a324106009faa14dedd058e527b7efba16927174e02296df3ce",
+   "shortDescription": "Markdown editor",
+   "upstreamAuthor": "HedgeDoc App Team",
+   "upstreamVersion": "1.12.0",
+   "version": "1.12.0",
+   "versionNumber": 9,
+   "webLink": "https://hedgedoc.org"
+  },
+  {
+   "appId": "j4jvn386t7un76qu6yyw1vwc5ke50t07e38r82kzy4qqg6qq7msh",
+   "author": {
+    "name": "Mini"
+   },
+   "categories": [
+    "graphics"
+   ],
+   "class": "S",
+   "codeLink": "https://github.com/lovasoa/whitebophir",
+   "isOpenSource": true,
+   "name": "WBO",
+   "packageBuiltAt": "2026-10-29T09:22:26Z",
+   "packageId": "d3b06718d12bc377db7b494679440b91",
+   "sha256": "d3b06718d12bc377db7b494679440b91f4e6623a96f7856f6c7ba144c4a98303",
+   "shortDescription": "Collaborative whiteboard",
+   "upstreamAuthor": "Ophir Lojkine",
+   "upstreamVersion": "2.18.26",
+   "version": "2.18.26",
+   "versionNumber": 21826,
+   "webLink": "https://wbo.ophir.dev"
+  }
+ ]
+}
