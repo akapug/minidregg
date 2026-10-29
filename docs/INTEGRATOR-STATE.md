@@ -31,56 +31,53 @@ gate; hot-path sends it, wire it into the gate).
   /tank/dregg-build/rows-0ce31391/pw/node_modules (browsers ~/.cache/ms-playwright). Infra also offers `ssh composed-box`
   (a container on dregg-forge) for composed if hbox root setup gets crowded; not used yet.
 
-## Main and candidates
+## Main and candidates (2026-10-29 afternoon session)
 
-Main 6eb281668 = candidate d9661be99 (built green 06:55) + demo-path-web 0be1e5b4b (Rust, Mac-tested, not yet in a
-candidate) + root-state law 17 and SESSION-STATE-2026-10-29 (docs).
+Main 636b1baeb. Staging (`integration/staging`) = main + hot-path batch 1 f34b03095 (built green 08:18, Kimi review
+clear: no findings) + lane/spk-fresh bf49ce23a (Etherpad 3.3.12 r6, FEATURED rank 1 repointed to ksyn7qa4..., commit
+on staging) + lane/demo-path-market 27db3d1b7 (merge 8cb74aba5; its tests carried into main's appId-list FEATURED shape).
 
 | candidate | verdict |
 |---|---|
-| c7a632f7b | tour 65/73 (8 story reds), enrol-resume PASS; composed rooms/churn/documents/apps/store-restart PASS, connector red at register-route |
-| b39563f17 | composed: linkage fix holds (register-route PASS); connector red at journey capture |
-| 7001c0a9f | composed: same capture red; capture stderr now retained: `mini: export did not complete` (app_document.rs:457, curl --fail through the https route front) |
-| d9661be99 | MAIN's built base. Composed rerun with KEEP_WORLD at /ci/c-d9661b-k for infra to curl the front by hand (take it down after infra says done: world-down.sh /ci/c-d9661b-k/inputs, then jworld-scratch.sh down /ci/c-d9661b-k/w with dregg-infra-69c17a3) |
+| d9661be99 | main's last built base; composed apps:sheet and store-restart red (08:02) |
+| f34b03095 | hot-path batch 1: READY 08:18; umbrellas rc=1 (expected Fixtures re-records); not gated |
+| 8cb74aba5 | BUILDING 13:17 (integ-build2.sh, SEATS=4 MEM=40G, pid in integ/build.pid); gate with gate10.sh (adds law-17 flatness) |
 
-## Staging only (not on main)
+## In flight
 
-- hot-path batch 1 (lane/hot-path 1e207e402, merged as f34b03095): deep build running on hbox since 07:37
-  (integ/build.pid; COMMANDS.log "BUILD f34b03095"). Kimi review of its in-process Ed25519/SSHSIG shim and theorem-line
-  diff running (scratchpad integ2/kimi-hp.md). Lands on main when the host stage is green and the review is clear;
-  expect Fixtures.NativeAcceptedFixture `#assert_compiled` re-record. Its numbers: SandMD GET serving CPU 1.1 s -> 160 ms.
-- Kimi review of route v4 (apps-agents e6c5d4da4, already on main via d9661be99) is pending (integ2/kimi-route3.md):
-  fix forward on main if it finds something real.
+- Fixture regen for the market's installable test: the 8 qualified SPKs (packageIds = apps/interfaces/*.json) are
+  streamed from hbox:/tank/lanes/spk-fresh-*/cache to dregg-forge:/var/lib/spk-fresh/qualified-2026-10-29/in
+  (Mac script scratchpad integ2/xfer-spk.sh, pid xfer-spk.pid). Next: lay out in/<app>/out/<app>.spk, run
+  `fresh-index.py --apps ... --recipes repo/apps/packages --spk-tool /var/lib/spk-fresh/tools/spk --out .../out`
+  (adopt mode), copy out/local.json over native/resource-client/tests/fixtures/fresh-local-index-2026-10-29.json,
+  set BUILT_AT in apps_search_shows_the_featured_set_first_with_its_typed_tools to Etherpad's packageBuiltAt, run
+  `cargo test --bin mini -- apps::tests` (24 tests). Expect green: every FEATURED appId is then pinned or upstream.
+- WBO: qualified per landings.md but its repack declaration has not landed (wbo.json still upstream ac72e0d1);
+  FEATURED keeps the upstream WBO until spk-fresh sends the sha. Wekan, MediaWiki, Forgejo blocked (landings.md).
+- Codex workers (apps-agents, demo-path, hot-path) still running; each leaves target/*-commit.sh and
+  scratchpad cx-*/out.md. Land on finish: read report + diff, run its script, merge to staging, rebuild.
+- Infra (add189844d158e3a7) told the candidate is building and where the SPKs/local.json are.
+- Peers: SPK-fresh a58fcf100f4438710 sends shas.
 
 ## Reds
 
-- Connector: export through the route front fails (curl --fail: front leaf/CA, late attach, or grain 4xx/5xx); infra
-  a21547c57335a2932 is checking on the kept-up world.
-- Tour: tour-can-any + 7 story-* rows; demo-path's fix 0be1e5b4b is on main, re-run owed in a world window.
-- Umbrellas: two stale Fixtures (NativeAcceptedFixture:173, NativeDocWriteFixture:149; effects, ruling (c)).
-- Harness owed (mine): residents root hand-offs (provider-custody-copy v2 + controller register under sudo -n) in the
-  composed residents phase; distinct-management births signed by owner 7 with 8 as owner/manager (deployed shape:
-  scripts/workroom/provision.sh:151-154,292).
+- apps::tests installable + featured-search: red on staging until the fixture regen above lands (red by design).
+- Flatness (law 17): fails on main's code (60 ms at append 2, 1.7 s at append 141); hot-path codex is on it. Bench scripts/perf/flatness-bench.py (lane/hot-path); gate10.sh runs the candidate's scripts/perf/flatness-gate.sh and records FAIL when it is absent.
+- Composed: apps:sheet same-Store app and store-restart:shared:resolve (d9661be99); connector capture (7001c0a9f).
+- Umbrellas: Fixtures NativeAcceptedFixture, NativeDocWriteFixture, BirthPlanPoles re-records; Effects/Revival
+  EngineProofs.lean:45 materialize_logical.
+- Harness owed: composed residents root hand-offs; distinct-management birth signing.
 
 ## Not landed / held
 
-demo-path-market 27db3d1b7 (its featured test is red until four packages are built and the fixture regenerated);
 cx-oracle dd80466a1 and codex/oracle-v7-qualification b32f15604 (conflict with main; wait for the oracle7 batch);
-statement-fixes (WIP, no branch); qualify-doc-contention (WIP proofs). FEATURED: Etherpad/WBO/Wekan keep their declared
-appIds until their repackaging lands with its declarations; repackaged apps may be missing from the 10-27 index fixture.
+statement-fixes (WIP); qualify-doc-contention (WIP).
 
 ## Next steps
 
-1. When f34b03095 is READY and Kimi is clear: merge staging into main, push, gate it (tour + composed sponsor/route
-   front), send the READY path to hot-path, infra and demo-path; tell demo-path its world window is open.
-2. Take down /ci/c-d9661b-k when infra is done.
-3. Wire hot-path's flatness bench into the gate: scripts/perf/flatness-bench.py on lane/hot-path after 1e207e402
-   (doc-submit CPU early vs late, fails beyond a log factor). It FAILS today: 60 ms at append 2, 1.7 s at append 141.
-   Batch-1 umbrella reds on hot-path's tree: Fixtures NativeAcceptedFixture, NativeDocWriteFixture, BirthPlanPoles
-   (re-record: codec writer and `.process` -> `.native` receipt sources) and Effects/Revival/EngineProofs.lean:45
-   materialize_logical (needs `CellState.Materialized.ext rfl`; effects worker).
-4. Harness: residents root hand-offs; distinct-mode birth signing.
-5. Hand infra (a21547c57335a2932) the rehearsal-3 candidate once hot-path, demo-path and oracle7 are in.
+1. 8cb74aba5 READY -> merge staging into main, push, gate10 (tour + composed + flatness), hand READY + verdict to infra.
+2. Fixture regen (above) as a fix-forward commit; codex landings as they finish; rebuild once per batch.
+3. Wire residents/distinct-mode harness; take hot-path's Fixtures re-records.
 
 ## Hygiene done 2026-10-29
 
