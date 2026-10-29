@@ -51,6 +51,43 @@ socket) and the perf rake's verified backlog (docs/PERF-BACKLOG-2026-10-28.md, "
 | 8db6db77e | DeployedBridge `packOf_unpack` via `Materialized.ext` |
 | 023a13096 | merge of main (Host.Main String.take fix; census deleted). Host.Main + ClientConsentSession green on hbox |
 
+## Design: one persistent-state layer (what exists, what changes)
+
+The Host already has a process-resident session (`Kernel/NativeHostSession.lean`): the validated full opening
+(`Opened`: directory and authority decoded), the light opening (`NativeHostLight.Light`: served state, decoded
+directory/authority, revalidated per new suffix only over changed cells, `validateServedFrom_eq`), and the lazily
+built genesis walk (`Walked`/`NativeHostReplay.Verified`, extended per record by `extendVerified`/`extendExact`). The
+measured per-turn cost is NOT the absence of that layer; it is derived values computed per request beside it:
+
+1. Per cell value (in hand): bytes and root cached in `Materialized` (perf-batch1, `bytes_eq_bytesCached`,
+   `root_eq_rootCached`); decoded cells keep their accepted bytes (`decodeFast`). A cell value persists in the
+   session until a write replaces it, so its root is hashed once per cell version, not per turn.
+2. Per configuration: runtime profile and its semantics digest (worker `profile`); seed identity and log start
+   (worker `seed`).
+3. Per evaluation: the policy state indexed once (worker `pred`); document law decided in one pass (`contentlaw`).
+4. Per historical certificate: the record a `PriorIssue` names is compared by identity first, and record charges
+   are materialized once (worker `charge`), so a request never re-derives a historical intent.
+5. Across processes (cold start): the state is opened from the MAC'd checkpoint plus the suffix (v4 fast-forward,
+   on main). Left: the walk families (dispatch, lifecycle, grain session, fn frontier) still walk from GENESIS on a
+   process's first such request, and the consent provider re-admits from genesis without an anchor. Plan: seal the
+   walk's derived certificate lists (`Verified.issues/reserves/begins*/claims*/grants/retry/frontier`) beside each
+   checkpoint under the same operator MAC; start = checkpoint + certificate snapshot + `extendVerified` over the
+   suffix. DECISION NEEDED (ember): this adds the trust premise "a certificate list MAC'd by this operator key was
+   produced by a genesis walk", the same premise the state open already takes for the checkpoint body; it changes
+   `Verified.admitted` from "replayed from genesis in this process" to "replayed from genesis by a process holding
+   the checkpoint key". Not weakening what a client can check (clients never trusted operator checkpoints:
+   ConsentAnchor), but it is a new premise on the operator side.
+6. Seals: `storeCheckpoint` encodes every cell each `checkpointEvery` (64) records. Amortized O(state)/64; with
+   cached cell bytes the encode copies cached bytes. Delta checkpoints only if a measurement shows seals matter.
+7. Cell codecs: after 1-4 the remaining doc-submit cost is codec work on the written cell (encode ~27%, decode with
+   per-lookup key encoding and `List.Lex` compares ~15-30%). Next owner work: a decoded-store lookup keyed by the
+   wire's ordering bytes compared as ByteArray, and encode from the cached entry bytes of unchanged entries.
+   DECISION NEEDED (ember): blinded cells (Hyperdocument, DeclaredEffect, LegacyContentCarry; StoreCodec
+   K-HIDE-ROTATE) re-key EVERY entry's salt on every write, by design, so their root is O(entries) per append however
+   it is cached. O(changed) for documents needs per-entry salt epochs, which reveals to a holder of two views which
+   entries changed between them. Keep the ratchet (documents stay O(n) per append, made fast in constant factors) or
+   take per-entry epochs (O(log n) per append, weaker unlinkability)?
+
 ## Running
 
 - hbox: base build `build.sh b-host Host.Main Host.ClientConsentSession` (PID file build.pid, log b-host.log).
