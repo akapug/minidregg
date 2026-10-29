@@ -5,6 +5,8 @@ the DRC invocation, accepted historical share issuance, and one durable CAS.
 -/
 module
 
+public import Effects.Revival.HostedDav
+public import Effects.Revival.HostedConversation
 public import Kernel.ApplicationDispatchAdmissionIngress
 public import Kernel.ApplicationDispatchManifest
 public import Kernel.ApplicationDispatchWitness
@@ -191,7 +193,7 @@ def davTextBody (method : List UInt8) : Bool :=
 
 def exchangeMethod (method : List UInt8) : Bool :=
   (["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"] : List String).any
-    (fun allowed => method == allowed.toUTF8.toList) || davMethod method
+    (fun allowed => method == allowed.toUTF8.toList) || davMethod method || method == Effects.Revival.HostedConversation.method
 
 /-- The exact signed request is a bounded WebSession candidate. The received
 `generated` tag is never trusted: every incoming header must be ordinary,
@@ -208,6 +210,8 @@ def requestSafeFor (streamedOpen : Bool) (request : ApplicationDispatchCodec.Req
         request.method == "DELETE".toUTF8.toList ||
         streamed request || davBodyless request.method then
       request.body.isEmpty
+    else if request.method == Effects.Revival.HostedConversation.method then
+      Effects.Revival.HostedConversation.descriptorSafe request.body
     else if davTextBody request.method then
       (String.fromUTF8? request.body.toByteArray).isSome && !request.body.contains 0
     else true
@@ -223,7 +227,8 @@ def requestSafeFor (streamedOpen : Bool) (request : ApplicationDispatchCodec.Req
       !header.generated &&
       (ordinaryHeaderName header.name ||
         (streamed request && header.name == webSocketProtocolHeader) ||
-        (davMethod request.method && davHeaderName header.name)) &&
+        (davMethod request.method &&
+          Effects.Revival.HostedDav.headerAllowed request.method header.name header.value)) &&
       decide (header.name.length ≤ 128) &&
       decide (header.value.length ≤ 8192) &&
       cleanTransportText header.value)

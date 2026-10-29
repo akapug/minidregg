@@ -114,7 +114,7 @@ impl Request {
                     || !(matches!(
                         method.as_str(),
                         "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE"
-                    ) || crate::host_operations::dav_method(method))
+                    ) || crate::host_operations::dav_method(method) || method == crate::hosted_conversation::METHOD)
                     || minidregg_signed_api_path::route("/", path).is_err()
                     || query.len() > 8192
                     || query.contains('#')
@@ -129,10 +129,13 @@ impl Request {
                 {
                     return Err(refused("lifetime HTTP request refused"));
                 }
+                if method == crate::hosted_conversation::METHOD {
+                    let body = crate::canonical::unhex(body_hex).ok_or_else(|| refused("hosted body hex refused"))?;
+                    crate::hosted_conversation::descriptor(&body).map_err(refused)?;
+                }
                 for header in headers {
                     if !(allowed_header(&header.name)
-                        || (crate::host_operations::dav_method(method)
-                            && crate::host_operations::dav_header_name(&header.name)))
+                        || crate::host_operations::dav_header_allowed(method, &header.name, &header.value))
                         || header.name.len() > 128
                         || header.value.len() > 8192
                         || !control_free(&header.value)
