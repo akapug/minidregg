@@ -477,7 +477,7 @@ def intent (accepted : AcceptedRenounce deployment semantics ambient ground ingr
   writes := writes accepted.accepted
   readGuards := readGuards accepted.accepted
   nullifiers := [nullifier deployment.domain semantics ingress]
-  exactCharge := charge accepted
+  exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (charge accepted)).toCharge
   event := event deployment.domain semantics ingress
   subject := some ingress.command.subject
   postRootsBound := writes_roots_bound accepted.accepted

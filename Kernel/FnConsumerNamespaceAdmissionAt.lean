@@ -106,7 +106,8 @@ def Conditional.intent (config : NativeHost.Config) (opened : NativeHost.Opened 
     writes := []
     readGuards := guards
     nullifiers := [claimNullifier ingress.spec]
-    exactCharge := charge opened.durable.snapshot guards ingress
+    exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize
+      (charge opened.durable.snapshot guards ingress)).toCharge
     event := event ingress
     subject := some ingress.spec.gatewaySubject
     postRootsBound := by intro write present; cases present
