@@ -68,7 +68,15 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/../../.." && pwd)
 mode=${1:-hook}
 rows=0 fails=0
-row() { rows=$((rows + 1)); if [ "$2" = 1 ]; then printf 'PASS\t%s\t%s\n' "$1" "$3"; else fails=$((fails + 1)); printf 'FAIL\t%s\t%s\n' "$1" "$3"; fi; }
+row() {
+  rows=$((rows + 1))
+  if [ "$2" = 1 ]; then printf 'PASS\t%s\t%s\n' "$1" "$3"
+  else
+    fails=$((fails + 1)); printf 'FAIL\t%s\t%s\n' "$1" "$3"
+    # Keep the complete refusal, not only the headline (which can be uniform).
+    printf '%s' "${page:-}" >"$R/$1-failed.html"
+  fi
+}
 verdict() { local v="J-WEB-FRONTEND PASS $rows/$rows"; [ "$fails" = 0 ] || v="J-WEB-FRONTEND FAIL $fails/$rows"; echo "$v"; echo "$v" >&2; [ "$fails" = 0 ]; }
 unconfigured() { echo "UNCONFIGURED: $*" >&2; exit 5; }
 PIDS=()
@@ -560,7 +568,10 @@ row story-page-joined "$(grep -q "<tr data-story=\"$TALE\"><td><code>$TALE</code
 page=$(req POST /tour/11 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=go" --data-urlencode "alt=0" --data-urlencode "a1=north")
 row story-move "$(grep -q 'outcome admitted' <<<"$page" && grep -q 'anteroom' <<<"$page" && echo 1 || echo 0)" "$(st) $(headline "$page") $(pre_of <<<"$page" | head -1 | cut -c1-100)"
 page=$(req POST /tour/11 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=go" --data-urlencode "alt=0" --data-urlencode "a1=north")
-row story-refused "$(grep -q 'outcome refused' <<<"$page" && grep -q 'sealed_story_scene_monotone' <<<"$page" && grep -q "proved for the built-in tale" <<<"$page" && echo 1 || echo 0)" "$(st) $(headline "$page")"
+# The theorem's name is also static tour copy: a rate refusal must not pass
+# this row merely because that copy is present. Require the actual law clause.
+printf '%s' "$page" >"$R/story-refused.html"
+row story-refused "$(grep -q 'outcome refused' <<<"$page" && pre_of <<<"$page" | grep -q 'law-denied:' && grep -q 'sealed_story_scene_monotone' <<<"$page" && grep -q "proved for the built-in tale" <<<"$page" && echo 1 || echo 0)" "$(st) $(headline "$page")"
 # A used workspace: ~40 more grants (one document each). The Grants page answers at once and
 # judges one grant per request (never a 504); one judge answers; a bare `can` through the form
 # ends within the body's deadline, as the whole answer or as the named notice, never a 504.
