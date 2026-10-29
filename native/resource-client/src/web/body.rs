@@ -1447,6 +1447,8 @@ fn report_link(headline: &str, next: &[(&str, &str)]) -> String {
 pub(super) const EXPLAINED: &[(&str, &str, Option<&str>)] = &[
     ("oracle-not-granted", "Hermes may not ask the Oracle in this room: the room's hermes/tools field lacks bit 8. Only the room's founder grants it, under what Hermes may do here.", Some("/room/{room}/resident#hermes-tools")),
     ("oracle-not-configured", "This box's operator has bound no Oracle route for this Hermes, so no room grant reaches the Oracle.", None),
+    ("typed-apps-not-granted", "Hermes may not use the hosted apps' typed tools in this room: the room's hermes/tools field lacks bit 16. Only the room's founder grants it, under what Hermes may do here.", Some("/room/{room}/resident#hermes-tools")),
+    ("typed-apps-not-configured", "This box's operator has attached no hosted app to this Hermes, so no room grant reaches an app.", None),
     ("await-not-in-room", "Hermes answers only an await a member announced in this room (a say of await OBJECT TRANSACTION).", None),
     ("notDecider", "Only the slot's decider may answer it; the kernel refused an answer signed by anyone else (bend await names the decider).", None),
     ("member-day-ceiling", "Your share of the house Hermes's model calls for today is spent; it refills when the day turns.", None),
