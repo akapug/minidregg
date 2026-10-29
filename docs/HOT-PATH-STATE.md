@@ -17,22 +17,30 @@ socket) and the perf rake's verified backlog (docs/PERF-BACKLOG-2026-10-28.md, "
   `/Users/ember/dev/minidregg-lanes/hp-tools/hp-check <item> start|wait|log|stop`. Briefs:
   `/Users/ember/dev/minidregg-lanes/hp-tools/briefs/` (COMMON.md + one per item). Logs and PID files:
   `/Users/ember/dev/minidregg-lanes/hp-tools/logs/<item>.{out,pid}`. Items: seed (backlog 1), profile (2), pred (4),
-  history (5), index (6+7), verifier (in-process Ed25519 via mini-kernels), contentlaw (quadratic ContentLaw).
+  history (5), index (6+7), verifier (in-process Ed25519 via mini-kernels), contentlaw (quadratic ContentLaw), effects
+  (Effects/Revival reds from the Materialized change). hbox clones: `/othersys/lanes/hot-path/mkclone.sh ITEM`. Relaunch a
+  stopped worker: `hp-tools/hp-resume ITEM [note]` (Kimi runs out of context on big files; COMMON.md has a narrow-reading rule).
 - Bench: `/othersys/lanes/hot-path/bench-perf.py` (doc-submit-bench + `--perf-at N,M` perf record with DWARF stacks);
   symbols of the memfd-exec'd Host resolve with `perf report --symfs=DIR` where DIR holds the host binary under the
   names `memfd:mini-pinned-image (deleted)` and `memfd:mini-pinned-image`. Folding script: scratchpad `hotpath/fold.py`.
 
-## Measured
+## Measured (hbox)
 
-Doc-submit bench, candidate 349e59ef1 binaries, hbox SSD (`/othersys/lanes/hot-path/b349-1`): submit wall/CPU
-301/240 ms at append 1, 557/470 at 12, 745/640 at 19 (CPU +~22 ms per append); propose 224 -> 664 ms. (The earlier
-9-30 s walls were /tank HDD fsyncs.) Profile of append 20 (perf, 702 samples, inclusive): DeclaredResourceController
-admit/legs 18%; `contentLawDecidable`/`documentAt` 15% (ContentLaw decided as a support x support pair loop: the
-per-append growth); `DTreeMap.getD` 17% (store lookups under it); `StoreCodec.rootBytes` 13.5% and `encode` 10.8%;
-`Pred.State.get` + `List.find?` 12%; `CredentialAuthorityDomain.Snapshot.ofCell`/`authState` 11%;
-`ServedBasis.authoritySnapshot` 10.7%; `receiverSemanticsFrom` 4%; op1 prepare (`prepareAuthorizedLoaded`) 22%.
-Route GET (earlier, docs/review/2026-10-27-untouched-areas/ROUTE-LATENCY-STATE.md on main): ~5.3 s single-thread
-CPU per Host call, 2-3 calls per GET; whole-image codec/root work and receiverSemanticsFrom.
+- GET / via the SandMD route, fresh world on candidate 2b8f75dcb (`/tank/lanes/hot-path/w-2b8f`, standing;
+  `route-up.sh TAG LEAN_BIN RUST_BIN`, probe `python3 /tank/lanes/hot-path/worldcpu.py w-2b8f ROUTE_DIR N`, ROUTE_DIR
+  `/var/lib/mini-spk-worlds/521505e109919c5c/521505e109919c5c/host/apps/6101/routes/owner-web`): 1.3-1.5 s wall quiet,
+  1.1-1.2 s CPU, all in the serving Host. Host profile (`/tank/lanes/hot-path/prof-2b8f/get.script`): 45% policy law
+  check on the read path (`checkRead` -> `PreparedLaw.verifies` -> `PredCompile.wit`/`intOf`), nearly all
+  `Pred.State.get` (`List.find?`); `receiverSemanticsFrom` 9.5%; `StoreCodec.encode` 9.5%; roots 8%; share-issue and
+  birth `charge` 6% each; keccak 2%. POST /new (qualify write): 4.6 s.
+- Doc submit, paired, quiet-ish (`pair.sh p2`: `b-p2-base.log` 2b8f vs `b-p2-hp.log` lane 023a13096): submit CPU
+  a1 280 -> 170 ms, a10 490 -> 320, a20 780 -> 790 (growth ~30 ms/append both: ContentLaw pair loop + State.get).
+  Propose wall ~300 ms with 30 ms Host CPU: the client side (unexplained; an strace wrapper on `mini` hung genesis).
+- Earlier (349e59ef1, append 20): DeclaredResourceController legs 18%, `contentLawDecidable`/`documentAt` 15%,
+  `DTreeMap.getD` 17%, `rootBytes` 13.5%, `encode` 10.8%, `State.get` 12%, `authState` 11%.
+- Lane Host binary: `/othersys/lanes/hot-path/artifacts/minidregg-host` (`hostbuild.sh`), bench set
+  `/othersys/lanes/hot-path/cand-hp1` (2b8f75dcb with that Host). Packages are now a real copy on the SSD (the native
+  builder refuses a symlinked `.lake/packages`).
 
 ## Landed on lane/hot-path (not yet on main)
 
@@ -40,6 +48,8 @@ CPU per Host call, 2-3 calls per GET; whole-image codec/root work and receiverSe
 |---|---|
 | fd54bb732 | merge of lane/perf-batch1 (codec writer, cell roots/bytes cached per cell value, decodeFast) |
 | 703d0c0af | perf-batch1's red fixed (Theory/CellSlot `decode_eq_decodeFast`) |
+| 8db6db77e | DeployedBridge `packOf_unpack` via `Materialized.ext` |
+| 023a13096 | merge of main (Host.Main String.take fix; census deleted). Host.Main + ClientConsentSession green on hbox |
 
 ## Running
 
