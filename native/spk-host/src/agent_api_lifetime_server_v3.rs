@@ -311,6 +311,14 @@ impl ResidentLifetimeAgent<'_> {
         };
         let physical =
             physical_web_input(&matched, &http, self.display_name, self.preferred_handle, web_origin)?;
+        let hosted_custody=if method==crate::hosted_conversation::METHOD {
+            let api_prefix=match &binding.route {
+                Some(crate::agent_api_lifetime_v3::HostedRoute::Web {..})=>None,
+                Some(crate::agent_api_lifetime_v3::HostedRoute::Api {signed_prefix})=>Some(signed_prefix.clone()),
+                None=>Some(self.signed_api_path.to_owned()),
+            };
+            Some(crate::hosted_conversation::Custody::admitted(client_dir.clone(),api_prefix,operation_id,&body,&permit)?)
+        } else {None};
         caller_still_present(stream, cancelled)?;
         let record = self
             .journal
@@ -370,15 +378,8 @@ impl ResidentLifetimeAgent<'_> {
             return Err(error);
         }
         let delivery = if method == crate::hosted_conversation::METHOD {
-            let api_prefix = match &binding.route {
-                Some(crate::agent_api_lifetime_v3::HostedRoute::Web { .. }) => None,
-                Some(crate::agent_api_lifetime_v3::HostedRoute::Api { signed_prefix }) => Some(signed_prefix.clone()),
-                None => Some(self.signed_api_path.to_owned()),
-            };
             prequeue.dispatch_hosted(physical.binding,physical.request,MAX_APP_RESPONSE,
-                Duration::from_secs(30),Arc::clone(cancelled),crate::hosted_conversation::Custody {
-                    directory:client_dir.clone(),api_prefix,
-                })
+                Duration::from_secs(30),Arc::clone(cancelled),hosted_custody.expect("checked hosted custody"))
         } else {
             prequeue.dispatch(physical.binding,physical.request,MAX_APP_RESPONSE,
                 Duration::from_secs(30),Arc::clone(cancelled))

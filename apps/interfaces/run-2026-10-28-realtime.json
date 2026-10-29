@@ -1,0 +1,80 @@
+{
+  "runDate": "2026-10-28",
+  "host": "hbox",
+  "candidate": "b26630168b63024c9c46311745fa0b25fa09c13f",
+  "worldStore": "23d8ff9b7b2ed613",
+  "scope": "Member-browser-route Wekan diagnosis and FileDrop typed binary scenario; native typed/Hermes NOT_RUN",
+  "lifecycle": {
+    "wekan": {
+      "status": "PASS",
+      "seconds": 905,
+      "steps": [
+        "create",
+        "install",
+        "share",
+        "start",
+        "enroll",
+        "page"
+      ]
+    },
+    "filedrop": {
+      "status": "PASS",
+      "seconds": 554
+    },
+    "orgtodo": {
+      "status": "UNCERTAIN",
+      "reason": "issued claim pending during shared ZFS writeback stall; stopped without replay"
+    }
+  },
+  "authentication": {
+    "status": "FAIL",
+    "reason": "auth-rendezvous-refused",
+    "httpStatus": 500,
+    "ddpError": "timeout",
+    "appMutationDispatched": false
+  },
+  "physicalTiming": {
+    "ddpMethodSend": 1793207780.518615,
+    "appTimeoutTraffic": 1793207790.520328,
+    "firstPostSubmitMarker": 1793207786.739205,
+    "firstPostPhysicalSend": 1793207792.079292,
+    "first500Write": 1793207792.097302
+  },
+  "earlierLifecycleRefusals": {
+    "op26": "NOT_REPRODUCED",
+    "op82": "NOT_REPRODUCED",
+    "priorMissingFrames": "No retrospective diagnosis from size alone"
+  },
+  "privateEvidenceSha256": "78e16f2e197943afb541bce66ec7f7fe7d6f26487edeeef8e203b8896cd6c16c",
+  "nativeAgent": "NOT_RUN",
+  "hermes": "NOT_RUN",
+  "results": [
+    {
+      "app": "filedrop",
+      "packageId": "d13f67230d0a4f9a63fc2c0bba87fc52",
+      "interfaceDigest": "b1d7f01e9b49bccf137baf67980b0f2a4b109734eba4e864a9ee35dd4bcf1724",
+      "runId": "ai-0e87949b93ea430eb543",
+      "transport": "member-browser-route",
+      "hermes": "NOT_RUN",
+      "status": "PASS",
+      "row": "typed-write-readback"
+    },
+    {
+      "app": "orgtodo",
+      "status": "NOT_RUN",
+      "reason": "lifecycle claim unresolved before pressure stop"
+    },
+    {
+      "app": "prioritize",
+      "status": "NOT_RUN",
+      "reason": "parent pressure stop before lifecycle"
+    }
+  ],
+  "httpPrivateEvidenceSha256": "e05dc49dba5fbc9218c2a078503e5256aae1e57be1a5e7a4e46e771d65c40a13",
+  "cleanup": {
+    "worldDown": "PASS removal_assertions=0",
+    "registryRemoved": true,
+    "storeTermination": "complete: bounded watcher found no remaining guarded processes",
+    "watcherFinished": true
+  }
+}

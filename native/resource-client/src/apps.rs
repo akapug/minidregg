@@ -28,6 +28,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 pub(crate) const DEFAULT_INDEX: &str = "/var/lib/mini-market/index.json";
 pub(crate) const DEFAULT_META: &str = "/var/lib/mini-market/meta";
@@ -278,47 +279,47 @@ pub(crate) fn resolve<'a>(entries: &'a [Entry], selector: &str) -> Result<&'a En
 /// Case-insensitive substring search over the index's text fields.
 /// The demo's featured set (docs/APP-MARKET-2026-10-27.md section 2a), in the
 /// order the market shows it: apps chosen for the data model and the scriptable
-/// surface beneath their HTML that a resident drives through the agent API.
-/// `(appId, agent hook)`; the rest of the store follows them.
-pub(crate) const FEATURED: &[(&str, &str)] = &[
-    ("h37dm17aa89yrd8zuqpdn36p6zntumtv08fjpu8a8zrte7q1cn60", "HTTP /api: create pads, append text, read text or HTML, revisions"),
-    ("a0n6hwm32zjsrzes8gnjg734dh6jwt7x83xdgytspe761pe2asw0", "REST /_/<sheet>: PUT CSV, POST SocialCalc commands, GET the sheet as CSV or JSON"),
-    ("4uda6a9yfxk4v3x2mpxjdn2md9y54tj104091480qjr8h758u4dh", "POST /new with markdown makes a note; GET /<note>/download reads it"),
-    ("8aspz4sfjnp8u89000mh2v1xrdyx97ytn8hq71mdzv4p4d8n0n3h", "files over HTTP: PUT and GET by path (the WebDAV tree; PROPFIND/MKCOL/MOVE when the bridge grows the DAV verbs)"),
-    ("uawacvvx9f9ncex1sqj8njwpujf8s9fkmg7wmp55hg6xetrd45w0", "SQL over HTTP: /<db>.json?sql=... answers JSON"),
-    ("c6rk81r4qk6dm3k04x1kxmyccqewhh4npuxeyg1xrpfypn2ddy0h", "POST /<topic> with a body publishes; GET /<topic>/json?poll=1 reads"),
-    ("nx3dqcmz2sjjz939vkg4847vvxrzqsatqfjrt3ea50z3jac5kv7h", "flat-text pages: GET doku.php?id=<page>&do=export_raw, POST do=save"),
-    ("rhtntjye2n7p71vrcq0ae4f6n9nr139fdk4n884tw55k40vy4uph", "board events as JSON over socket.io (broadcast adds an item, getboard lists them); unproven beneath the HTML: the websocket closes before the first message reaches the app, and whether the board saves is unchecked"),
-    ("f5z8uwz7ynf89c286f9d5tse5dwjknv32nyd78qzsyema3zf9m8h", "events as forms and iCalendar over HTTP (CalDAV when the bridge grows REPORT/PROPFIND)"),
-    ("d9ygf47xrtnw12j92cyt6cu8ut75esx01u4q3kcrn8415w9qzzgh", "REST /api/v1 (repos, issues); git smart-HTTP when the bridge streams bodies"),
-    ("8x12h6p0x0nrzk73hfq6zh2jxtgyzzcty7qsatkg7jfg2mzw5n90", "a plain-text journal: POST /add a transaction, GET /accounts and the JSON API"),
-    ("7qvcjh7gk0rzdx1s3c8gufd288sesf6vvdt297756xcv4q8xxvhh", "the deck is slides.md: PUT /slides.md, GET it back; published at <grain>-www"),
-    ("m86q05rdvj14yvn78ghaxynqz7u2svw6rnttptxx49g1785cdv1h", "REST /api (boards, lists, cards) and DDP"),
-    ("61gh7gnns305cknp20v2ekvdex48g4d3rv6wghuzk6huzx5qmp7h", "hg over HTTP: POST /?cmd=unbundle pushes a changegroup; GET /raw-file/<rev>/<path> and /rev/<node> read it back"),
-    ("1gda5n8p8zsc0r9pcana2yjgtvsq169068k4ve8mk68z4x9fvzuh", "drawings over socket.io: draw:progress and draw:end add a stroke to a room; a subscriber's project:load reads it back"),
-    ("w544a46cjwtje73rfearjvszwa3nhjtxjanu5s83qkdutx6k0nz0", "sticky notes over socket.io: joinRoom then createCard; initializeMe answers initCards from the board's redis"),
-    ("1d3umpx9ug1jv5stepvqfrucx3yr8n2a4gd7y5cud2vsq6mmj8uh", "the spec is one file: PUT /editor/spec, GET it back"),
-    ("nn7axgy3y8kvd0m1mtk3cwca34t916p5d7m4j1j2e874nuz3t8y0", "files over HTTP: PUT /file/<name> uploads, GET /file/ lists, GET /file/<name> reads"),
-    ("5uh349d0kky2zp5whrh2znahn27gwha876xze3864n0fu9e5220h", "POST /upload a ZIM (multipart file + contentRange), then GET /kiwix/A/<article> reads it"),
-    ("wfg1r0qra2ewyvns05r0rddqttt57qxurz3nz5z95rjnm63et7e0", "a websocket gives the session token; POST /upload an audio file with it as the token cookie; the track appears in the library subscription and GET /library/<file>"),
-    ("70xjeuj6t85v3s9a3up583q97wu044mnt8aekf3pqs41e3ct2v70", "POST /upload a video (multipart video_file, video_title); GET / redirects to /v/<id>, which shows it"),
-    ("u0yh8xndrzewsfx7z0jemv9scvyxtkwr2qzepgg93hm6r77m6580", "POST /api.php saves the best score and the board; GET /api.php?action=getbestscore|getgamestate reads them back"),
-    ("r8y55acmnwm0r8a2k3jp8m74pdf2xg7v2v5pxc07mcsqpq0ag3zh", "JSON: POST /api/new-game makes a puzzle, PUT /api/game/<id> saves the board, GET /api/game/<id> reads it"),
-    ("zxent02jw0z9ckkagz1uscdxesaf1f1wgzdunx2wrcj0jt9uf9rh", "POST /api.php saves the high score; GET /api.php?action=getbestscore and /highscores.php read it"),
-    ("yp9xt15y8s0rsuntnhgnr510qpcvm2tatd9mn1gzwr2au8h2n4p0", "direct capnp, no bridge: POST /chats appends a line, PUT /topic sets the topic; GET /chats and /topic read them"),
-    ("p04q48xd2kgkystkrda5n77kdns6u569wnactgh904tf7s3vev70", "MediaWiki API: GET /api.php?action=query&meta=tokens, POST action=edit with the token, read back with action=parse or action=raw"),
-    ("uws252ya9mep4t77tevn85333xzsgrpgth8q4y1rhknn1hammw70", "the page's own forms: GET /accounts/create/asset for the CSRF token, POST /accounts/store, read the list at /accounts/asset"),
+/// capabilities. Ordering alone makes no claim about an installed attachment.
+/// App IDs determine curated order only; typed capabilities come from declarations.
+pub(crate) const FEATURED: &[&str] = &[
+    "h37dm17aa89yrd8zuqpdn36p6zntumtv08fjpu8a8zrte7q1cn60",
+    "a0n6hwm32zjsrzes8gnjg734dh6jwt7x83xdgytspe761pe2asw0",
+    "4uda6a9yfxk4v3x2mpxjdn2md9y54tj104091480qjr8h758u4dh",
+    "8aspz4sfjnp8u89000mh2v1xrdyx97ytn8hq71mdzv4p4d8n0n3h",
+    "uawacvvx9f9ncex1sqj8njwpujf8s9fkmg7wmp55hg6xetrd45w0",
+    "c6rk81r4qk6dm3k04x1kxmyccqewhh4npuxeyg1xrpfypn2ddy0h",
+    "nx3dqcmz2sjjz939vkg4847vvxrzqsatqfjrt3ea50z3jac5kv7h",
+    "rhtntjye2n7p71vrcq0ae4f6n9nr139fdk4n884tw55k40vy4uph",
+    "f5z8uwz7ynf89c286f9d5tse5dwjknv32nyd78qzsyema3zf9m8h",
+    "d9ygf47xrtnw12j92cyt6cu8ut75esx01u4q3kcrn8415w9qzzgh",
+    "8x12h6p0x0nrzk73hfq6zh2jxtgyzzcty7qsatkg7jfg2mzw5n90",
+    "7qvcjh7gk0rzdx1s3c8gufd288sesf6vvdt297756xcv4q8xxvhh",
+    "m86q05rdvj14yvn78ghaxynqz7u2svw6rnttptxx49g1785cdv1h",
+    "61gh7gnns305cknp20v2ekvdex48g4d3rv6wghuzk6huzx5qmp7h",
+    "1gda5n8p8zsc0r9pcana2yjgtvsq169068k4ve8mk68z4x9fvzuh",
+    "w544a46cjwtje73rfearjvszwa3nhjtxjanu5s83qkdutx6k0nz0",
+    "1d3umpx9ug1jv5stepvqfrucx3yr8n2a4gd7y5cud2vsq6mmj8uh",
+    "nn7axgy3y8kvd0m1mtk3cwca34t916p5d7m4j1j2e874nuz3t8y0",
+    "5uh349d0kky2zp5whrh2znahn27gwha876xze3864n0fu9e5220h",
+    "wfg1r0qra2ewyvns05r0rddqttt57qxurz3nz5z95rjnm63et7e0",
+    "70xjeuj6t85v3s9a3up583q97wu044mnt8aekf3pqs41e3ct2v70",
+    "u0yh8xndrzewsfx7z0jemv9scvyxtkwr2qzepgg93hm6r77m6580",
+    "r8y55acmnwm0r8a2k3jp8m74pdf2xg7v2v5pxc07mcsqpq0ag3zh",
+    "zxent02jw0z9ckkagz1uscdxesaf1f1wgzdunx2wrcj0jt9uf9rh",
+    "yp9xt15y8s0rsuntnhgnr510qpcvm2tatd9mn1gzwr2au8h2n4p0",
+    "p04q48xd2kgkystkrda5n77kdns6u569wnactgh904tf7s3vev70",
+    "uws252ya9mep4t77tevn85333xzsgrpgth8q4y1rhknn1hammw70",
 ];
 
-pub(crate) fn featured(app_id: &str) -> Option<(usize, &'static str)> {
-    FEATURED.iter().position(|(id, _)| *id == app_id).map(|rank| (rank + 1, FEATURED[rank].1))
+pub(crate) fn featured(app_id: &str) -> Option<usize> {
+    FEATURED.iter().position(|id| *id == app_id).map(|rank| rank + 1)
 }
 
 /// Matching entries, the featured set first in its order, then the rest of the
 /// store in index order.
 pub(crate) fn search<'a>(entries: &'a [Entry], term: &str, category: Option<&str>) -> Vec<&'a Entry> {
     let mut found = search_unordered(entries, term, category);
-    found.sort_by_key(|e| featured(&e.app_id).map_or(usize::MAX, |(rank, _)| rank));
+    found.sort_by_key(|e| featured(&e.app_id).unwrap_or(usize::MAX));
     found
 }
 
@@ -408,7 +409,8 @@ pub(crate) fn entry_json(entry: &Entry, verdict: &Verdict) -> Value {
             "signedAppId":verdict.signed_app_id,"running":verdict.running},
         "suggestedClass":entry.pinned.as_ref().and_then(|p| p.class.as_deref()).unwrap_or_else(|| suggested_class(verdict.raw_bytes)),
         "pinned":entry.pinned.as_ref().map(|p| json!({"sha256":p.sha256,"packageUrl":p.package_url,"class":p.class})),
-        "featured":featured(&entry.app_id).map(|(rank, hook)| json!({"rank":rank,"agentHook":hook})),
+        "featured":featured(&entry.app_id).map(|rank| json!({"rank":rank})),
+        "typedInterface":typed_interface(entry),
         "claims":"name, version, publisher and links are the index's claims; identity is the signed package's"
     })
 }
@@ -417,6 +419,51 @@ fn qualified_entry_json(entry: &Entry, verdict: &Verdict, qualification: &qualif
     let mut value = entry_json(entry, verdict);
     value["qualification"] = qualification.get(entry).cloned().unwrap_or(Value::Null);
     value
+}
+
+fn typed_interface(entry: &Entry) -> Value {
+    let mut packages = Vec::new();
+    for (source, value) in interfaces::declarations() {
+        if value["format"] != "mini-app-interface-v1" || value["appId"] != entry.app_id {
+            continue;
+        }
+        if let Some(package) = value["packageId"].as_str() { packages.push(package.to_owned()); }
+        if value["packageId"] != entry.package_id { continue; }
+        let declaration = match mini_sdk::app_interface::Declaration::load(source.as_bytes()) {
+            Ok(declaration) => declaration,
+            Err(_) => return json!({"status":"declaration-invalid","schemaAvailable":false}),
+        };
+        let tools = match declaration.tools() {
+            Ok(tools) => tools,
+            Err(_) => return json!({"status":"declaration-invalid","schemaAvailable":false}),
+        };
+        return json!({"status":"native-attachment-required","schemaAvailable":true,
+            "name":value["name"],"packageId":declaration.package_id,
+            "interfaceSha256":declaration.sha256,"tools":tools});
+    }
+    if packages.is_empty() {
+        json!({"status":"declaration-unavailable","schemaAvailable":false})
+    } else {
+        json!({"status":"package-mismatch","schemaAvailable":false,"declaredPackageIds":packages})
+    }
+}
+fn interface_summary(entry: &Entry) -> String {
+    let interface = typed_interface(entry);
+    match interface["tools"].as_array() {
+        Some(tools) => format!("\n      {} typed tools; native attachment required", tools.len()),
+        None => format!("\n      typed tools: {}", interface["status"].as_str().unwrap_or("unavailable")),
+    }
+}
+fn print_interface(entry: &Entry) {
+    let interface = typed_interface(entry);
+    println!("  typed tools {}", interface["status"].as_str().unwrap_or("unavailable"));
+    if let Some(tools) = interface["tools"].as_array() {
+        println!("  interface {} (package {})", interface["interfaceSha256"].as_str().unwrap_or(""), entry.package_id);
+        for tool in tools {
+            println!("    {}: {}", tool["operation"].as_str().unwrap_or(""), tool["description"].as_str().unwrap_or(""));
+        }
+        println!("  Attach this package on a live grain under current member grants to use its tools.");
+    }
 }
 
 /// Where the fetcher takes the package from: the pin's URL, the market's
@@ -706,20 +753,20 @@ fn catalogue(action: &str, mut args: Args, paths: &Paths, as_json: bool) -> Resu
             let mut rest_heading = false;
             for e in found {
                 let v = verdict(&paths.verdicts, &paths.meta, &e.package_id);
-                let hook = featured(&e.app_id);
-                if hook.is_none() && !rest_heading {
+                let rank = featured(&e.app_id);
+                if rank.is_none() && !rest_heading {
                     println!("  -- the rest of the store --");
                     rest_heading = true;
                 }
                 println!(
                     "  {}{:<28} {:<22} {:<24} {} [{}]{}",
-                    if hook.is_some() { "featured " } else { "" },
+                    if rank.is_some() { "featured " } else { "" },
                     truncate(&e.name, 28),
                     truncate(&e.version, 22),
                     truncate(&e.author, 24),
                     e.app_id,
                     format!("{}; {}", verdict_line(&v), qualification::line(qualification.get(e))),
-                    hook.map(|(_, h)| format!("\n      agent hook: {h}")).unwrap_or_default()
+                    interface_summary(e)
                 );
             }
             Ok(())
@@ -747,6 +794,7 @@ fn catalogue(action: &str, mut args: Args, paths: &Paths, as_json: bool) -> Resu
                 Some(pin) => println!("  class      {}  (operator-pinned; sha256 {})", pin.class.as_deref().unwrap_or(suggested_class(v.raw_bytes)), pin.sha256),
                 None => println!("  class      {}", suggested_class(v.raw_bytes)),
             }
+            print_interface(entry);
             println!("  refusals an install can meet: unknownApp, sizeOverProfile, unverifiedSignature, appIdMismatch, unsupportedBridge, funding, classRefused");
             Ok(())
         }
@@ -1639,7 +1687,7 @@ mod tests {
     }
 
     #[test]
-    fn apps_search_shows_the_featured_set_first_with_its_agent_hook() {
+    fn apps_search_preserves_featured_order_and_derives_typed_tools() {
         let entries = fixture();
         let all = search(&entries, "", None);
         assert_eq!(all.len(), entries.len());
@@ -1649,7 +1697,29 @@ mod tests {
         assert!(all[FEATURED.len()..].iter().all(|e| featured(&e.app_id).is_none()));
         let pad = entry_json(all[0], &Verdict { state: "unverified".into(), reason: None, raw_bytes: None, signed_app_id: None, running: 0 });
         assert_eq!(pad["featured"]["rank"], 1);
-        assert!(pad["featured"]["agentHook"].as_str().unwrap().contains("/api"));
+        assert!(pad["featured"].get("agentHook").is_none());
+        assert_eq!(pad["typedInterface"]["status"], "native-attachment-required");
+        assert!(pad["typedInterface"]["tools"].as_array().unwrap().iter().any(|tool| tool["operation"] == "document.replace"));
+    }
+
+    #[test]
+    fn apps_typed_discovery_requires_the_declared_package_and_hides_internal_tools() {
+        let entries = fixture();
+        let mut datasette = entries.iter().find(|entry| entry.name == "Datasette").unwrap().clone();
+        let verdict = Verdict { state: "unverified".into(), reason: None, raw_bytes: None, signed_app_id: None, running: 0 };
+        let shown = entry_json(&datasette, &verdict);
+        let interface = &shown["typedInterface"];
+        assert_eq!(interface["status"], "native-attachment-required");
+        let tools = interface["tools"].as_array().unwrap();
+        assert!(tools.iter().any(|tool| tool["operation"] == "records.upsert"));
+        assert!(tools.iter().all(|tool| tool["operation"] != "session.prepare"));
+        assert!(tools.iter().all(|tool| tool["inputSchema"].is_object() && tool["outputSchema"].is_object()));
+        datasette.package_id = "00000000000000000000000000000000".into();
+        let shown = entry_json(&datasette, &verdict);
+        let mismatch = &shown["typedInterface"];
+        assert_eq!(mismatch["status"], "package-mismatch");
+        assert_eq!(mismatch["schemaAvailable"], false);
+        assert!(mismatch.get("tools").is_none());
     }
 
     #[test]

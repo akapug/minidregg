@@ -51,4 +51,13 @@ class LinkDirectory(unittest.TestCase):
         self.assertEqual(rows[0],['#','Existing directory','',''])
         self.assertEqual(rows[1],['https://example.invalid/typed-link','Typed, quoted "link" typed-link','',''])
 
+    def test_link_input_matches_package_comment_rule(self):
+        from jsonschema import Draft202012Validator
+        schema=load('linksholder')['operations']['link.append']['input']
+        validator=Draft202012Validator(schema)
+        for title in ['Multiline\n非ASCII', ' # visibly starts with whitespace', 'S']:
+            self.assertEqual(list(validator.iter_errors({'url':'https://example.invalid/runs','title':title})),[])
+        for url,title in [('https://example.invalid/ok','#hidden'),('https://example.invalid/line\nbreak','Visible')]:
+            self.assertTrue(list(validator.iter_errors({'url':url,'title':title})))
+
 if __name__=='__main__':unittest.main()

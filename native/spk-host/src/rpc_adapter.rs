@@ -568,7 +568,7 @@ impl RpcDriver {
                     tokio::task::spawn_local(async move {
                         let _ = rpc.await;
                     });
-                    while let Some(command) = receiver.recv().await {
+                    while let Some(command) = conversations.receive_command(&mut receiver).await {
                         match command {
                             Command::View { deadline, reply } => {
                                 let result = async {
