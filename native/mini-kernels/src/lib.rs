@@ -9,11 +9,13 @@
 //! `tests/conformance.rs`) and the Lean conformance theorems, which evaluate the kernel at
 //! every build once the dynlib is loaded, pin the equality.
 //!
-//! A kernel COMPUTES bytes and decides nothing (ATLAS §7: `rust/` authors nothing): no
-//! framing of its own, no domain, no comparison, no admission. The Lean object marshalling
-//! lives in `shim/mini_kernels_lean.c`, compiled against the toolchain's `lean.h`; this crate
-//! never sees a `lean_object`.
+//! Hash kernels compute bytes; signature kernels return only a cryptographic verdict. Neither
+//! selects authority, parses a semantic request, or makes an admission decision. The Lean object
+//! marshalling lives in `shim/mini_kernels_lean.c`, compiled against the toolchain's `lean.h`;
+//! this crate never sees a `lean_object`.
 
+use ed25519_dalek::{Signature, VerifyingKey};
+use sha2::{Digest, Sha512};
 use sha3::{
     digest::{ExtendableOutput, Update, XofReader},
     CShake256, CShake256Core,
@@ -94,6 +96,58 @@ pub fn kmac256_32(key: &[u8], customization: &[u8], input: &[u8]) -> [u8; OUTPUT
     output
 }
 
+/// Strict Ed25519 verification over an opaque frame. Malformed keys and wrong-length inputs are
+/// input errors; a well-formed signature that does not verify is an ordinary negative verdict.
+pub fn verify_ed25519(public_key: &[u8], frame: &[u8], signature: &[u8]) -> Result<bool, String> {
+    let key_bytes: &[u8; 32] = public_key
+        .try_into()
+        .map_err(|_| "public key must be exactly 32 bytes".to_owned())?;
+    let signature_bytes: &[u8; 64] = signature
+        .try_into()
+        .map_err(|_| "signature must be exactly 64 bytes".to_owned())?;
+    let key = VerifyingKey::from_bytes(key_bytes)
+        .map_err(|_| "public key point decoding failed".to_owned())?;
+    Ok(key
+        .verify_strict(frame, &Signature::from_bytes(signature_bytes))
+        .is_ok())
+}
+
+/// An SSH `string`: a big-endian u32 length, then the bytes.
+fn ssh_string(out: &mut Vec<u8>, bytes: &[u8]) -> Result<(), String> {
+    let length =
+        u32::try_from(bytes.len()).map_err(|_| "SSH string exceeds 2^32 bytes".to_owned())?;
+    out.extend_from_slice(&length.to_be_bytes());
+    out.extend_from_slice(bytes);
+    Ok(())
+}
+
+/// OpenSSH PROTOCOL.sshsig: `"SSHSIG" || string namespace || string "" ||
+/// string "sha512" || string SHA-512(message)`. Lean pins the non-hash framing in
+/// `Kernel.PayEnrolMemo.sshsigSignedData`.
+fn sshsig_signed_data(namespace: &[u8], message: &[u8]) -> Result<Vec<u8>, String> {
+    if namespace.is_empty() {
+        return Err("SSHSIG namespace must not be empty".to_owned());
+    }
+    let digest = Sha512::digest(message);
+    let mut signed = b"SSHSIG".to_vec();
+    ssh_string(&mut signed, namespace)?;
+    ssh_string(&mut signed, b"")?;
+    ssh_string(&mut signed, b"sha512")?;
+    ssh_string(&mut signed, &digest)?;
+    Ok(signed)
+}
+
+/// SSHSIG signed-data construction, including SHA-512, followed by strict Ed25519 verification.
+pub fn verify_sshsig(
+    public_key: &[u8],
+    namespace: &[u8],
+    message: &[u8],
+    signature: &[u8],
+) -> Result<bool, String> {
+    let signed = sshsig_signed_data(namespace, message)?;
+    verify_ed25519(public_key, &signed, signature)
+}
+
 /// A byte slice from a (pointer, length) pair the C shim hands over; a null pointer with
 /// length zero is the empty slice (Lean's empty `ByteArray` may hand one over).
 ///
@@ -144,6 +198,62 @@ pub unsafe extern "C" fn mini_kernels_kmac256_32(
         slice(input, input_len),
     );
     std::ptr::copy_nonoverlapping(tag.as_ptr(), output, OUTPUT_BYTES);
+}
+
+/// C ABI verdicts shared with `Compiler.CredentialSignatureIO`: verified, invalid, input error.
+const VERDICT_VERIFIED: u8 = 0;
+const VERDICT_INVALID: u8 = 1;
+const VERDICT_INPUT_ERROR: u8 = 2;
+
+fn verification_verdict(result: Result<bool, String>) -> u8 {
+    match result {
+        Ok(true) => VERDICT_VERIFIED,
+        Ok(false) => VERDICT_INVALID,
+        Err(_) => VERDICT_INPUT_ERROR,
+    }
+}
+
+/// C ABI: strict Ed25519 verification over borrowed byte slices.
+///
+/// # Safety
+/// Every pointer must be valid for its length (or the length must be 0).
+#[no_mangle]
+pub unsafe extern "C" fn mini_kernels_ed25519_verify(
+    public_key: *const u8,
+    public_key_len: usize,
+    frame: *const u8,
+    frame_len: usize,
+    signature: *const u8,
+    signature_len: usize,
+) -> u8 {
+    verification_verdict(verify_ed25519(
+        slice(public_key, public_key_len),
+        slice(frame, frame_len),
+        slice(signature, signature_len),
+    ))
+}
+
+/// C ABI: SSHSIG signed-data construction and strict Ed25519 verification.
+///
+/// # Safety
+/// Every pointer must be valid for its length (or the length must be 0).
+#[no_mangle]
+pub unsafe extern "C" fn mini_kernels_sshsig_verify(
+    public_key: *const u8,
+    public_key_len: usize,
+    namespace: *const u8,
+    namespace_len: usize,
+    message: *const u8,
+    message_len: usize,
+    signature: *const u8,
+    signature_len: usize,
+) -> u8 {
+    verification_verdict(verify_sshsig(
+        slice(public_key, public_key_len),
+        slice(namespace, namespace_len),
+        slice(message, message_len),
+        slice(signature, signature_len),
+    ))
 }
 
 #[cfg(test)]

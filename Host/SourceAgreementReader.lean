@@ -229,20 +229,11 @@ def writeSessionFrame (output : IO.FS.Stream) (operation : UInt8)
   output.write (lengthBytes response.size ++ response)
   output.flush
 
+/-- Live signature checks use the linked native kernel. The configured artifact
+path remains available to carry pins, not to a launch-time helper process. -/
 def withPinnedSignature {α : Type} (config : NativeHost.Config)
     (body : NativeHost.Config → IO α) : IO α :=
-  IO.FS.withTempDir fun directory => do
-    let pinned := directory / "credential-verifier"
-    let bytes ← IO.FS.readBinFile config.signature.binary
-    IO.FS.writeBinFile pinned bytes
-    let permission ← IO.Process.output
-      { cmd := "/bin/chmod", args := #["0500", pinned.toString] }
-    unless permission.exitCode == 0 do
-      throw (IO.userError "cannot make pinned credential verifier executable")
-    -- A launch failure is detected before the first semantic replay. The
-    -- verifier's usage exit here is expected; it has no arguments yet.
-    discard <| IO.Process.output { cmd := pinned.toString, args := #[] }
-    body { config with signature := ⟨pinned⟩ }
+  body config
 
 
 def opened (config : NativeHost.Config) : IO (NativeHost.Opened config) := do

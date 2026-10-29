@@ -1,8 +1,8 @@
 /-
 # Compiler.NativeCoprocess — a Host's long-lived native helpers
 
-The Host calls its native helpers (the durable Store, the signature verifier)
-on every request. `IO.Process.output` forks the calling process, and a fork
+The Host calls its native helpers (the durable Store) on every request.
+`IO.Process.output` forks the calling process, and a fork
 copies the caller's page tables: measured on persvati (2026-10-01), one fork of
 a Host holding one 566 KB Nock program took 6.4 ms against 0.7 ms before it was
 born, and its `execve` 7.4 ms against 1.1 ms — a tax on every request that
@@ -13,8 +13,7 @@ So each helper binary runs once, as `<binary> serve`, for the Host's lifetime.
 own child (its files, stdout, stderr and exit code are the one-shot call's)
 and replies with exactly those three. The caller gets the same
 `IO.Process.Output` the one-shot call would have produced, so every parser and
-theorem over that output (`CredentialSignatureIO.positive_response_exact`,
-`DurableReceiverIO.parseCasOutput`) reads it unchanged.
+theorem over that output (`DurableReceiverIO.parseCasOutput`) reads it unchanged.
 
 Frames (big-endian): request `u32 argc, (u32 len, bytes)*`; reply
 `replyTag (8 bytes), u32 code, u64 len, stdout, u64 len, stderr`, each length

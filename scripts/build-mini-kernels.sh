@@ -7,15 +7,17 @@
 #                              shared library (the lakefile's moreLinkArgs; build-native-host.sh appends
 #                              them to its response file; channel-lib/build.sh links them)
 #   libmini_kernels_lean.so    the shim, the kernels AND the compiled objects of the seam's module
-#                              closure (Init + Spec, Fast, Native, Core, Kmac256), for `lean --load-dynlib`
-#                              at elaboration: the interpreter resolves an `@[extern]` declaration by its
-#                              module's compiled wrapper (`l_..._cshake256Kernel___boxed`), never by the C
-#                              symbol, so `#eval`/`native_decide` of anything that hashes needs these
-#                              objects loaded (the lakefile passes the path to every lean).
+#                              closure (Init + Spec, Fast, Native, Core, Kmac256,
+#                              CredentialSignatureKernel), for `lean --load-dynlib`
+#                              at elaboration and `lean --run`: the interpreter resolves an
+#                              `@[extern]` declaration by its module's compiled wrapper
+#                              (`l_..._cshake256Kernel___boxed`), never by the C symbol, so
+#                              evaluating anything that hashes or verifies needs these objects
+#                              loaded (the lakefile passes the path to every lean).
 # Two stages, because Lake passes --load-dynlib to the very lean that compiles the seam modules:
 # stage 1 is the shim and the kernels alone (enough for lean to start); the module objects are then
 # built by Lake and stage 2 relinks the library with them. Re-run after editing any of those modules
-# (a stale library makes native_decide evaluate the old compiled hash). Idempotent.
+# (a stale library makes interpreted or compiled evaluation use the old kernel). Idempotent.
 set -euo pipefail
 root=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
 cd "$root"
@@ -44,7 +46,7 @@ link_dynlib() {
 # up when lean runs under Lake's module setup (a bare `lean FILE` has no package and looks for `l_...`:
 # check these modules with `lake build`/`lake env lean`, never bare `lean`).
 seam=(Theory.Sp800185Cshake256Spec Theory.Sp800185Cshake256Fast Theory.Sp800185Cshake256Native
-  Theory.Sp800185Cshake256Core Compiler.Sp800185Kmac256)
+  Theory.Sp800185Cshake256Core Compiler.Sp800185Kmac256 Compiler.CredentialSignatureKernel)
 targets=()
 for module in "${seam[@]}"; do targets+=("$module:o.export"); done
 lake build "${targets[@]}" >"$out/lake.log" 2>&1 || {
