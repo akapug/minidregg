@@ -455,7 +455,7 @@ row tour-lose-retry "$(grep -q 'outcome admitted' <<<"$page" && [ "$(grep -c "$L
 # the editor (the pinned read, then the save) is refused by the note's law (`content/atom-edits
 # == 0`); `can --any` on the note answers the law and one write it admits (as slot witnesses: the
 # shell line to paste is lawsat's to print); the append, the write the law admits, is admitted.
-pre_of() { python3 -I -c 'import sys,re,html; m=re.search(r"<pre>(.*?)</pre>", sys.stdin.read(), re.S); print(html.unescape(m.group(1)) if m else "")'; }
+pre_of() { python3 -I -c 'import sys,re,html; page=re.sub(r"<section class=\"ops.*?</section>", "", sys.stdin.read(), flags=re.S); m=re.search(r"<pre>(.*?)</pre>", page, re.S); print(html.unescape(m.group(1)) if m else "")'; }
 page=$(req GET "/doc/$DOC/edit")
 EDIT_URL=$(grep -o 'action="/doc/[^"]*/edit/[^"/]*"' <<<"$page" | head -1 | sed 's/action="//; s/"$//')
 NEWTEXT=$(python3 -I -c 'import sys,re,html; m=re.search(r"<textarea name=text[^>]*>\n?(.*?)</textarea>", sys.stdin.read(), re.S); t=html.unescape(m.group(1)) if m else ""; lines=t.split("\n"); lines[0]="edited: " + lines[0] if lines else ["edited"]; print("\n".join(lines))' <<<"$page")
