@@ -7,7 +7,7 @@ The proof-native semantic computer.
 **Start with `HANDOFF.md`**, then the plan `docs/DEMO-PREFIX-2026-10-26.md` (the work
 and the public-opening contract) and **`docs/COORDINATION-2026-10-27.md` (how we work:
 what we optimise, the gates and their verdicts, how a lane and the orchestrator work,
-the boxes, the cadence)**. `ATLAS.md` §6 carries the sixteen design laws.
+the boxes, the cadence)**. `ATLAS.md` §6 carries the seventeen design laws.
 
 ## The laws that bind every session here
 

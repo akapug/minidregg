@@ -2,8 +2,8 @@
   "format": "mini-app-interface-v1",
   "name": "davros",
   "interfaceVersion": 1,
-  "appId": "8aspz4sfjnp8u89000mh2v1xrdyx97ytn8hq71mdzv4p4d8n0n3h",
-  "packageId": "15bf92664a1b14a784bf737e502e13b7",
+  "appId": "g9vdgqnn4dnj6r7tyaw9duydgmgskxzq9564fxceekqhvcds33zh",
+  "packageId": "5485d227d04a1af26e08358dcb92accf",
   "appVersion": "0.33.4",
   "status": "prototype-unqualified",
   "limits": {
@@ -46,7 +46,7 @@
   },
   "operations": {
     "directory.create": {
-      "description": "Create a directory beneath this grain\u2019s DAV root.",
+      "description": "Create a directory beneath this grain’s DAV root.",
       "input": {
         "type": "object",
         "properties": {
@@ -153,6 +153,66 @@
         }
       }
     },
+    "file.put_text": {
+      "description": "Write a UTF-8 text file at a relative file path (the model supplies plain text; no base64).",
+      "input": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "format": "relative-path"
+          },
+          "content": {
+            "type": "string",
+            "maxLength": 16384
+          }
+        },
+        "required": [
+          "path",
+          "content"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "PUT",
+        "path": [
+          "dav/",
+          {
+            "arg": "path",
+            "encoding": "path"
+          }
+        ],
+        "decode": "status",
+        "status": [
+          200,
+          201,
+          204
+        ],
+        "headers": {
+          "content-type": "text/plain; charset=utf-8"
+        },
+        "text": {
+          "arg": "content"
+        }
+      }
+    },
     "file.get": {
       "description": "Read exact binary bytes as base64.",
       "input": {
@@ -196,6 +256,44 @@
           }
         ],
         "decode": "base64",
+        "status": [
+          200
+        ]
+      }
+    },
+    "file.get_text": {
+      "description": "Read a UTF-8 text file as plain text.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "format": "relative-path"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string",
+        "maxLength": 1048576
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "dav/",
+          {
+            "arg": "path",
+            "encoding": "path"
+          }
+        ],
+        "decode": "text",
         "status": [
           200
         ]

@@ -1,0 +1,29 @@
+#!/bin/bash
+# fresh-adopt [INDEX_DIR]: make the market list and install the packages we build ourselves.
+# Runs as root on the box (ship.sh), after the candidate and mini-market are installed. INDEX_DIR
+# (default /srv/spk-fresh/index) holds what deploy/market/fresh-index.py wrote on the build host:
+#   local.json  the operator-pinned entries (whole sha256, no packageUrl in adopt mode)
+#   adopt.tsv   PACKAGE-ID <tab> SHA256 <tab> absolute path of the .spk on THIS box (a read-only bind)
+# The steps are the market's own, run as its uid: local.json is installed 0644 root-written, `refresh`
+# merges it with the upstream index (index-check --local; a collision or an unpinned local entry is
+# refused by name), and every package is adopted by pinned SHA-256 into the quarantine, where install
+# verifies it by packageId like any package. Nothing here reaches the network except refresh's index
+# fetch; a re-run is a no-op for packages already in the quarantine (they are re-verified).
+set -euo pipefail
+DIR=${1:-/srv/spk-fresh/index}
+STATE=${MINI_MARKET_STATE:-/var/lib/mini-market}
+FETCH=${MINI_MARKET_FETCH:-/usr/local/lib/mini/market/mini-market-fetch}
+[[ $EUID == 0 ]] || { echo 'fresh-adopt: run as root (ship.sh)' >&2; exit 2; }
+[[ -f $DIR/local.json && -f $DIR/adopt.tsv ]] || { echo "fresh-adopt: $DIR lacks local.json or adopt.tsv" >&2; exit 2; }
+jq -e '.apps | length > 0 and all(.[]; .sha256 != null and .packageUrl == null)' "$DIR/local.json" >/dev/null \
+  || { echo 'fresh-adopt: local.json must pin every entry by sha256 and carry no packageUrl (adopt mode)' >&2; exit 2; }
+install -m 0644 -o root -g root "$DIR/local.json" "$STATE/local.json"
+as_market() { runuser -u mini-market -- "$FETCH" --state "$STATE" "$@"; }
+as_market refresh
+n=0
+while IFS=$'\t' read -r id sha file; do
+  [[ -n $id ]] || continue
+  as_market adopt "$id" "$sha" "$file"
+  n=$((n + 1))
+done <"$DIR/adopt.tsv"
+echo "fresh-adopt: $n packages adopted from $DIR"

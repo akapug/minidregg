@@ -69,6 +69,9 @@ pub struct ToolCatalog {
     pub applications: Vec<String>,
     pub api_applications: Vec<String>,
     pub oracle_applications: Vec<String>,
+    /// Typed application attachments the operator configured (discovery and encoding only;
+    /// every call is still admitted by the controller under the room's apps grant).
+    pub typed_applications: Vec<crate::typed_applications::CatalogEntry>,
     pub resource_workspace: bool,
     pub resource_workspace_create: bool,
     /// The grain's Hermes was summoned into a room: the room tools.
@@ -189,6 +192,7 @@ fn serve_broker_connection(
                 "applications":snapshot.applications,
                 "apiApplications":snapshot.api_applications,
                 "oracleApplications":snapshot.oracle_applications,
+                "typedApplications":snapshot.typed_applications,
                 "resourceWorkspace":snapshot.resource_workspace,
                 "resourceWorkspaceCreate":snapshot.resource_workspace_create,
                 "roomTools":snapshot.room_tools})
@@ -261,6 +265,11 @@ fn catalog_from_reply(reply: &Value) -> Result<ToolCatalog, String> {
         oracle_applications: if reply.get("oracleApplications").is_some() {
             catalog_names(reply, "oracleApplications", 16)?
         } else { Vec::new() },
+        typed_applications: match reply.get("typedApplications") {
+            None => Vec::new(),
+            Some(value) => serde_json::from_value(value.clone())
+                .map_err(|e| format!("controller typed application catalog: {e}"))?,
+        },
         resource_workspace: reply
             .get("resourceWorkspace")
             .and_then(Value::as_bool)
@@ -284,6 +293,17 @@ fn catalog_from_reply(reply: &Value) -> Result<ToolCatalog, String> {
     }
     if catalog.oracle_applications.iter().any(|name| !catalog.api_applications.contains(name)) {
         return Err("controller Oracle application is not an API route".into());
+    }
+    if catalog.typed_applications.len() > 8 {
+        return Err("controller typed application catalog exceeds bound".into());
+    }
+    let mut typed_names = std::collections::HashSet::new();
+    for entry in &catalog.typed_applications {
+        for tool in crate::typed_applications::listed_tools(entry)? {
+            if !typed_names.insert(tool["name"].as_str().unwrap_or_default().to_owned()) {
+                return Err("controller typed application tool names collide".into());
+            }
+        }
     }
     Ok(catalog)
 }
@@ -408,6 +428,11 @@ fn tools_for_catalog(catalog: &ToolCatalog) -> Value {
                 "additionalProperties":false}}));
     }
     tools.extend(crate::oracle_tools::tool_specs(&catalog.oracle_applications));
+    for entry in &catalog.typed_applications {
+        if let Ok(typed) = crate::typed_applications::listed_tools(entry) {
+            tools.extend(typed);
+        }
+    }
     json!({"tools":tools})
 }
 
@@ -557,11 +582,28 @@ pub fn serve_stdio(path: &Path) -> Result<(), String> {
                         Ok(value) => json!({"isError":false,"text":value.to_string()}),
                         Err(error) => json!({"isError":true,"text":error}),
                     }
+                } else if name.starts_with("mini_app_") {
+                    // A typed application tool: the SDK executor runs here, in the confined
+                    // worker; each HTTP request it prepares is one controller dispatch.
+                    let catalog = call_controller(path, "__catalog", json!({}));
+                    match catalog_from_reply(&catalog) {
+                        Ok(catalog) => match catalog.typed_applications.iter().find(|entry| crate::typed_applications::owns_tool(entry, name)) {
+                            Some(entry) => crate::typed_applications::call_tool(entry, name, &arguments, &mut |request| {
+                                call_controller(path, crate::typed_applications::RAW_TOOL, request)
+                            }),
+                            None => json!({"isError":true,"text":json!({"refusal":"typed-app-not-attached","uncertain":false,"nativeReceipts":[]}).to_string()}),
+                        },
+                        Err(reason) => json!({"isError":true,"text":json!({"refusal":"typed-catalog-unavailable","uncertain":false,"detail":reason,"nativeReceipts":[]}).to_string()}),
+                    }
                 } else {
                     call_controller(path, name, arguments)
                 };
-                json!({"content":[{"type":"text","text":response.get("text").and_then(Value::as_str).unwrap_or("tool returned no text")}],
-                    "isError":response.get("isError").and_then(Value::as_bool).unwrap_or(true)})
+                let mut result = json!({"content":[{"type":"text","text":response.get("text").and_then(Value::as_str).unwrap_or("tool returned no text")}],
+                    "isError":response.get("isError").and_then(Value::as_bool).unwrap_or(true)});
+                if let Some(structured) = response.get("structured") {
+                    result["structuredContent"] = structured.clone();
+                }
+                result
             }
             _ => json!({"error":format!("unsupported MCP method {method}")}),
         };
@@ -724,6 +766,7 @@ mod tests {
                     applications: vec!["office-0-app".into()],
                     api_applications: vec![],
                     oracle_applications: vec![],
+                    typed_applications: vec![],
                     resource_workspace: false,
                     resource_workspace_create: false,
                     room_tools: false,

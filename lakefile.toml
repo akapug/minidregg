@@ -1,10 +1,11 @@
 name = "minidregg"
 defaultTargets = ["Minidregg"]
-# HOT-PATH 2d (docs/HOT-PATH-2026-10-27.md): the compiled hashes are Rust kernels behind @[extern]
-# (Theory/Sp800185Cshake256Native.lean, Compiler/Sp800185Kmac256.lean; native/mini-kernels).
+# HOT-PATH 2d (docs/HOT-PATH-2026-10-27.md): compiled hashes and signature checks are Rust kernels
+# behind @[extern] (Theory/Sp800185Cshake256Native.lean, Compiler/Sp800185Kmac256.lean,
+# Compiler/CredentialSignatureKernel.lean; native/mini-kernels).
 # `scripts/build-mini-kernels.sh` writes both forms under .lake/native/ BEFORE any lake build:
-# the shared library `lean` loads so `#eval`/`native_decide` of anything that hashes resolve the
-# symbol at elaboration, and the two link inputs every Lean executable needs. Paths are relative
+# the shared library `lean` loads so elaboration and `lean --run` resolve the compiled wrappers,
+# and the two link inputs every Lean executable needs. Paths are relative
 # to this package root (Lake runs lean and leanc here).
 moreLeanArgs = ["--load-dynlib=.lake/native/libmini_kernels_lean.so", "-Dbackward.privateInPublic.warn=false"]
 moreLinkArgs = [".lake/native/mini_kernels_lean.o", ".lake/native/libmini_kernels.a"]
@@ -19,9 +20,8 @@ restoreAllArtifacts = true
 # Its .warn sub-option is silenced in moreLeanArgs above (a TOML key cannot be both a value and a table).
 [leanOptions]
 backward.privateInPublic = true
-# Proofs nested in a public definition stay inline, as before the module system: abstracting them into
-# `_proof_N` theorems changes definition VALUES, and the persisted-codec census hashes values into the
-# StoreEpoch (measured: PolicyRecordCodec.stringStream's value hash returns to main's with this on).
+# Retain the existing visibility of proofs nested in public definitions during
+# the module-system transition. Proof implementation details are not wire identities.
 backward.proofsInPublic = true
 compiler.relaxedMetaCheck = true
 

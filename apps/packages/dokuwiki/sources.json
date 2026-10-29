@@ -1,0 +1,26 @@
+{
+  "upstream": {
+    "project": "DokuWiki",
+    "version": "2026-07-14c",
+    "release": "https://github.com/dokuwiki/dokuwiki/releases/tag/release-2026-07-14c",
+    "publishedUtc": "2026-09-02T18:53:37Z",
+    "archive": "https://github.com/dokuwiki/dokuwiki/releases/download/release-2026-07-14c/dokuwiki-2026-07-14c.tgz",
+    "sha256": "7e9b4dcb5ecb91a57f71b9b77dcec7bcf929959881464796611349ed1d183176",
+    "tagCommit": "e674707568da10ecfdba47a1c21acccefd168ff9"
+  },
+  "adapterBase": {
+    "repository": "https://github.com/johnbintz/dokuwiki-sandstorm",
+    "commit": "180dd4343573ff0b3af78b1daea42793b471bf87"
+  },
+  "runtime": {
+    "distribution": "Debian 13 (trixie)",
+    "architecture": "x86_64",
+    "php": "8.4"
+  },
+  "sandstorm": {
+    "bundle": 308,
+    "bundleSha256": "f1317754765b11f260a757724b28e92d5318d8b277f970c99662c01bd9291879",
+    "releaseKeyFingerprint": "160D2D577518B58D94C9800B63F227499DA8CCBD",
+    "apiPath": "/"
+  }
+}

@@ -452,7 +452,7 @@ pub(crate) fn submit_fresh_once(
     let reply = operator.invoke(crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, &assembled.ingress)?;
     write_new(attempt_dir, "op26-frame.bin", &reply)?;
     crate::lifecycle_v3_native::host_refusal(operator, attempt_dir, "op26-claim-submit", true, &reply)?;
-    let committed = framed_payload("lifecycle claim submit", &reply, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, COMMITTED_TAG)?.to_vec();
+    let committed = crate::lifecycle_v3_native::committed_payload(operator, attempt_dir, "op26-claim-submit", &reply, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, COMMITTED_TAG)?.to_vec();
     let committed_path = write_new(attempt_dir, "committed-v3.bin", &committed)?;
     let inspection = operator.tool(
         "inspect",

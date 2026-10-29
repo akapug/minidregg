@@ -21,7 +21,7 @@ set_option autoImplicit false
 
 abbrev Consent (config : Config) (opened : Opened config) :=
   Prepared config.deployment config.profile
-    ⟨config.federation,logicalHeight config opened.durable⟩ opened.durable
+    ⟨config.federation,logicalHeight config opened.durable⟩ opened.ground opened.durable
 
 private def history {config : Config} (opened : Opened config) : List (List UInt8) :=
   opened.durable.image.accepted.map DurableCheckpointCodec.recordFrame.encode

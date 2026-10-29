@@ -99,7 +99,7 @@ impl Sandbox {
 /// assignment (`sandboxTools`), from the prompt the controller was handed.
 fn room_grant(prompt: &str) -> Option<u64> {
     let assignment: Value = serde_json::from_str(prompt.strip_prefix(room_resident::ASSIGNMENT_PREFIX)?).ok()?;
-    assignment.get("sandboxTools")?.as_u64().filter(|bits| *bits <= 15)
+    assignment.get("sandboxTools")?.as_u64().filter(|bits| *bits <= 31)
 }
 
 /// The room's `hermes/tools` bit 8: the oracle (Oracle tools through the operator's lifetime
@@ -107,6 +107,14 @@ fn room_grant(prompt: &str) -> Option<u64> {
 pub(crate) const ORACLE_BIT: u64 = 8;
 pub(crate) fn oracle_granted(prompt: Option<&str>) -> bool {
     prompt.and_then(room_grant).is_some_and(|bits| bits & ORACLE_BIT != 0)
+}
+
+/// The room's `hermes/tools` bit 16: the typed application tools the operator attached to this
+/// resident (`toolTask.typedApplications`). Separate from the Oracle bit: granting one never
+/// grants the other, and the apps' own member permissions are checked independently.
+pub(crate) const APPS_BIT: u64 = 16;
+pub(crate) fn apps_granted(prompt: Option<&str>) -> bool {
+    prompt.and_then(room_grant).is_some_and(|bits| bits & APPS_BIT != 0)
 }
 
 /// The exact upstream names the granted toolsets add to the catalogue.
@@ -198,9 +206,13 @@ mod tests {
         assert_eq!(sandbox.grant(Some(&prompt(json!(7)))), vec!["file"]);
         assert!(sandbox.grant(Some(&prompt(json!(2)))).is_empty(), "the ceiling withholds the terminal");
         assert!(sandbox.grant(Some(&prompt(json!(8)))).is_empty(), "the oracle bit grants no sandbox toolset");
-        assert!(sandbox.grant(Some(&prompt(json!(16)))).is_empty(), "an out-of-range grant is none");
+        assert!(sandbox.grant(Some(&prompt(json!(32)))).is_empty(), "an out-of-range grant is none");
+        assert!(sandbox.grant(Some(&prompt(json!(16)))).is_empty(), "the apps bit grants no sandbox toolset");
         assert!(oracle_granted(Some(&prompt(json!(8)))) && oracle_granted(Some(&prompt(json!(15)))));
         assert!(!oracle_granted(Some(&prompt(json!(7)))) && !oracle_granted(Some(&prompt(json!(16)))) && !oracle_granted(None));
+        assert!(apps_granted(Some(&prompt(json!(16)))) && apps_granted(Some(&prompt(json!(31)))));
+        assert!(!apps_granted(Some(&prompt(json!(15)))) && !apps_granted(Some(&prompt(json!(32)))) && !apps_granted(None),
+            "the oracle and sandbox bits never grant apps");
         assert!(sandbox.grant(Some("Assignment: {}")).is_empty());
         assert!(sandbox.grant(None).is_empty(), "a non-resident prompt gets none");
     }

@@ -85,6 +85,7 @@ fn planted(lines: &[String]) -> Ending {
     let ok = |stdout: String| Ending { code: 0, stdout, stderr: String::new() };
     if first.starts_with("apps search") {
         let app = json!({"appId": PAYLOADS[0], "name": PAYLOADS[1], "version": PAYLOADS[2], "publisher": PAYLOADS[7],
+            "packageBuiltAt": PAYLOADS[0], "upstreamVersion": PAYLOADS[1],
             "suggestedClass": PAYLOADS[3], "categories":[PAYLOADS[0]], "featured":{"rank":1},
             "interface":{"status":PAYLOADS[2],"operations":[{"name":PAYLOADS[1],"description":h,"input":{PAYLOADS[0]:PAYLOADS[6]},"output":PAYLOADS[3]}]},
             "verdict": {"state": PAYLOADS[2], "reason": h}});
@@ -304,6 +305,8 @@ fn catalogue_breadth_and_category_are_derived() {
     site.front.read_only = true;
     let apps: Vec<Value> = (1..=37).map(|i| json!({
         "appId":format!("app{i}"), "name":format!("Tool {i}"),
+        "packageBuiltAt":if i == 1 { json!("2026-10-29T05:00:00Z") } else { Value::Null },
+        "upstreamVersion":if i == 1 { json!("3.3.12") } else { Value::Null },
         "shortDescription":"A useful tool. ".repeat(160), "categories":["Office"],
         "featured":if i <= 36 { json!({"rank":i}) } else { Value::Null },
         "verdict":{"state":"unverified"}
@@ -318,6 +321,10 @@ fn catalogue_breadth_and_category_are_derived() {
     assert_eq!(front.body.matches("data-app=").count(), 36, "every featured app, no arbitrary cap");
     assert!(!front.body.contains("data-app=\"app37\""));
     assert_eq!(market.body.matches("data-app=").count(), 37);
+    assert!(market.body.contains("Package version"));
+    assert!(market.body.contains("Built 2026-10-29T05:00:00Z"));
+    assert!(market.body.contains("Upstream version 3.3.12"));
+    assert!(market.body.contains("Built not reported"));
     assert!(market.body.contains("name=\"category\""));
     assert!(market.body.contains("Office"));
     assert!(market.body.find("Featured apps").unwrap() < market.body.find("More from the catalogue").unwrap());
@@ -338,4 +345,24 @@ fn catalogue_filters_use_the_shell_and_keep_failures_explained() {
     fs::remove_dir_all(root).unwrap();
     assert!(page.body.contains("catalogue temporarily unavailable"), "category must reach the shell, and its refusal stays visible");
     assert!(page.body.contains("value=\"Office\" selected"));
+}
+
+#[test]
+fn the_operations_room_is_a_note_until_this_session_joined_it_and_the_turns_after() {
+    // demo-path, the tour's web story reds on 2b8f75dcb: a workspace that holds the reference `operations`
+    // but no room record for it printed the shell's "this session has no room operations" in a red
+    // outcome <pre>, which the journey's first-<pre> reader took for the story's own output.
+    let (root, site) = site("ops-room");
+    fs::write(root.join("refs").join("operations.json"), "{}").unwrap();
+    FAKE_SHELL.with(|f| *f.borrow_mut() = Some(Box::new(|_| Ending { code: 1, stdout: String::new(), stderr: "error: this session has no room operations (chat new operations, or chat join operations INVITATION)\n".into() })));
+    let before = operations(&site);
+    assert!(before.contains("has not joined it") && before.contains("chat join operations INVITATION"), "{before}");
+    assert!(!before.contains("outcome error") && !before.contains("<pre"), "no red outcome, no pre: {before}");
+    fs::create_dir_all(root.join("home").join("chat").join("rooms")).unwrap();
+    fs::write(root.join("home").join("chat").join("rooms").join("operations.json"), "{}").unwrap();
+    FAKE_SHELL.with(|f| *f.borrow_mut() = Some(Box::new(|_| Ending { code: 0, stdout: "alice: shipped\n".into(), stderr: String::new() })));
+    let after = operations(&site);
+    FAKE_SHELL.with(|f| *f.borrow_mut() = None);
+    fs::remove_dir_all(root).unwrap();
+    assert!(after.contains("From the operations room") && after.contains("alice: shipped"), "{after}");
 }

@@ -65,12 +65,13 @@ namespace Engine
 variable (rootBytes : List UInt8 → Digest)
 
 /-- The engine's state as a checkpoint state: its cells in ascending order (`CellTable.entries`). -/
-def headState (engine : Engine) : State :=
+def headState {rootBytes : List UInt8 → Digest} (engine : Engine rootBytes) : State :=
   ⟨engine.absent, engine.cells.entries, engine.available⟩
 
 /-- `left` is `right` with the prefix `pre` beneath it: the same cells, fresh bytes and allowance;
 the prefix's nullifiers, transaction ids, journal and history added. -/
-structure Beneath (pre : List IntentRecord) (left right : Engine) : Prop where
+structure Beneath {rootBytes : List UInt8 → Digest} (pre : List IntentRecord)
+    (left right : Engine rootBytes) : Prop where
   absent : left.absent = right.absent
   cells : left.cells = right.cells
   available : left.available = right.available
@@ -84,7 +85,7 @@ structure Beneath (pre : List IntentRecord) (left right : Engine) : Prop where
     (pre.map fun record => (IntentRecord.erase record).event).reverse
 
 theorem beneath_ofState (state : State) (pre : List IntentRecord) :
-    Beneath pre (ofState state pre) (ofState state []) := by
+    Beneath pre (ofState rootBytes state pre) (ofState rootBytes state []) := by
   refine ⟨rfl, rfl, rfl, ?_, ?_, ?_, ?_⟩
   · intro nullifier
     simp [consumed, ofState, Std.HashSet.contains_ofList]
@@ -95,13 +96,13 @@ theorem beneath_ofState (state : State) (pre : List IntentRecord) :
   · show List.reverse _ = [] ++ _
     rw [List.nil_append]
 
-theorem consumed_install (engine : Engine) (intent : DataIntent rootBytes) (nullifier : StableNullifier) :
+theorem consumed_install (engine : Engine rootBytes) (intent : DataIntent rootBytes) (nullifier : StableNullifier) :
     (engine.install rootBytes intent).consumed nullifier =
       (decide (nullifier ∈ intent.nullifiers) || engine.consumed nullifier) := by
   simp only [consumed, install, contains_foldl, Bool.or_assoc]
   simp
 
-theorem isRecorded_install (engine : Engine) (intent : DataIntent rootBytes) (transactionId : TransactionId) :
+theorem isRecorded_install (engine : Engine rootBytes) (intent : DataIntent rootBytes) (transactionId : TransactionId) :
     (engine.install rootBytes intent).isRecorded transactionId =
       (decide (intent.transactionId = transactionId) || engine.isRecorded transactionId) := by
   show ((engine.recorded.insert intent.transactionId).contains transactionId ||
@@ -109,7 +110,7 @@ theorem isRecorded_install (engine : Engine) (intent : DataIntent rootBytes) (tr
   rw [Std.HashSet.contains_insert, Bool.or_assoc, beq_eq_decide]
   rfl
 
-theorem Beneath.install {pre : List IntentRecord} {left right : Engine} (below : Beneath pre left right)
+theorem Beneath.install {pre : List IntentRecord} {left right : Engine rootBytes} (below : Beneath pre left right)
     (intent : DataIntent rootBytes) :
     Beneath pre (left.install rootBytes intent) (right.install rootBytes intent) := by
   refine ⟨below.absent, ?_, ?_, ?_, ?_, ?_, ?_⟩
@@ -140,7 +141,7 @@ theorem preflight_ok_erase (before : DataSnapshot rootBytes) (intent : DataInten
 
 /-- **Preflight reads the consumed set only at the intent's nullifiers**: two engines with the same
 cells, fresh bytes and allowance that agree on those nullifiers preflight alike. -/
-theorem preflight_light_congr (left right : Engine) (intent : DataIntent rootBytes)
+theorem preflight_light_congr (left right : Engine rootBytes) (intent : DataIntent rootBytes)
     (absent : left.absent = right.absent) (cells : left.cells = right.cells)
     (available : left.available = right.available)
     (fresh : ∀ nullifier ∈ intent.nullifiers, left.consumed nullifier = right.consumed nullifier) :
@@ -151,8 +152,8 @@ theorem preflight_light_congr (left right : Engine) (intent : DataIntent rootByt
     rw [absent, cells]
   have roots : (left.light rootBytes).model.roots = (right.light rootBytes).model.roots := by
     funext cellId
-    show rootBytes (left.bytes cellId) = rootBytes (right.bytes cellId)
-    rw [bytes]
+    show left.root cellId = right.root cellId
+    rw [root_eq, root_eq, bytes]
   have funds : (left.light rootBytes).model.available = (right.light rootBytes).model.available :=
     available
   have check : intent.erase.nullifiersFreshCheck (left.light rootBytes).model =
@@ -184,7 +185,7 @@ theorem bind_fields {record : IntentRecord} {intent : DataIntent rootBytes}
 
 /-- **The prefix-free replay is the checkpoint's replay, under disjointness** (weak to real). -/
 theorem replay_beneath (pre : List IntentRecord) :
-    ∀ (suf : List IntentRecord) (left right right' : Engine), Beneath pre left right → Disjoint pre suf →
+    ∀ (suf : List IntentRecord) (left right right' : Engine rootBytes), Beneath pre left right → Disjoint pre suf →
       right.replay rootBytes suf = some right' →
       ∃ left', left.replay rootBytes suf = some left' ∧ Beneath pre left' right'
   | [], left, right, right', below, _, weak => by
@@ -221,7 +222,7 @@ theorem replay_beneath (pre : List IntentRecord) :
 (real to weak): a suffix the protocol replays from the checkpoint carries no prefix nullifier or
 transaction id. -/
 theorem replay_beneath_of_left (pre : List IntentRecord) :
-    ∀ (suf : List IntentRecord) (left right left' : Engine), Beneath pre left right →
+    ∀ (suf : List IntentRecord) (left right left' : Engine rootBytes), Beneath pre left right →
       left.replay rootBytes suf = some left' →
       Disjoint pre suf ∧ ∃ right', right.replay rootBytes suf = some right' ∧ Beneath pre left' right'
   | [], left, right, left', below, real => by
@@ -300,14 +301,14 @@ theorem State.snapshot_congr (rootBytes : List UInt8 → Digest) {left right : S
 the whole log, a suffix carrying no prefix nullifier or transaction id, and the suffix replayed from
 the checkpoint with no prefix known: the head state, over every record, is `resume`'s snapshot. -/
 theorem resume_suffix (rootBytes : List UInt8 → Digest) {seed : Seed} {pre suf : List IntentRecord}
-    {state : State} {right' : Engine}
-    (admissible : state.Admissible ⟨seed, pre ++ suf⟩) (disjoint : Disjoint pre suf)
-    (weak : (Engine.ofState state []).replay rootBytes suf = some right') :
-    resume rootBytes ⟨seed, pre ++ suf⟩ pre.length state =
+    {state : State} {right' : Engine rootBytes}
+    (admissible : state.Admissible (Image.ofAccepted seed (pre ++ suf))) (disjoint : Disjoint pre suf)
+    (weak : (Engine.ofState rootBytes state []).replay rootBytes suf = some right') :
+    resume rootBytes (Image.ofAccepted seed (pre ++ suf)) pre.length state =
       some ((Engine.headState right').snapshot rootBytes (pre ++ suf)) := by
   obtain ⟨left', real, below⟩ := Engine.replay_beneath rootBytes pre suf _ _ right'
-    (Engine.beneath_ofState state pre) disjoint weak
-  have found : resumeEngine rootBytes ⟨seed, pre ++ suf⟩ pre.length state = some left' := by
+    (Engine.beneath_ofState rootBytes state pre) disjoint weak
+  have found : resumeEngine rootBytes (Image.ofAccepted seed (pre ++ suf)) pre.length state = some left' := by
     unfold resumeEngine
     rw [if_pos ((admissibleFast_iff _ _).mpr admissible)]
     simpa using real
@@ -317,7 +318,8 @@ theorem resume_suffix (rootBytes : List UInt8 → Digest) {seed : Seed} {pre suf
   have rebased := resume_rebase resumed
   unfold resume at rebased
   rw [if_pos (ofSnapshot_admissible _ _), List.drop_length, List.take_length] at rebased
-  simp only [DurableReceiver.replay, Option.some.injEq] at rebased
+  simp only [DurableReceiver.replay, Option.some.injEq, Image.accepted_ofAccepted,
+    Image.ofAccepted_seed] at rebased
   rw [← rebased]
   apply State.snapshot_congr
   · intro cellId
@@ -330,25 +332,25 @@ theorem resume_suffix (rootBytes : List UInt8 → Digest) {seed : Seed} {pre suf
 prefix-free replay's head state over every record. -/
 theorem resume_disjoint (rootBytes : List UInt8 → Digest) {seed : Seed} {pre suf : List IntentRecord}
     {state : State} {snapshot : DataSnapshot rootBytes}
-    (resumed : resume rootBytes ⟨seed, pre ++ suf⟩ pre.length state = some snapshot) :
-    state.Admissible ⟨seed, pre ++ suf⟩ ∧ Disjoint pre suf ∧ ∃ right',
-      (Engine.ofState state []).replay rootBytes suf = some right' ∧
+    (resumed : resume rootBytes (Image.ofAccepted seed (pre ++ suf)) pre.length state = some snapshot) :
+    state.Admissible (Image.ofAccepted seed (pre ++ suf)) ∧ Disjoint pre suf ∧ ∃ right',
+      (Engine.ofState rootBytes state []).replay rootBytes suf = some right' ∧
       snapshot = (Engine.headState right').snapshot rootBytes (pre ++ suf) := by
-  have admissible : state.Admissible ⟨seed, pre ++ suf⟩ := by
+  have admissible : state.Admissible (Image.ofAccepted seed (pre ++ suf)) := by
     unfold resume at resumed
     split at resumed
     · assumption
     · cases resumed
   rw [resume_eq_resumeEngine] at resumed
-  cases found : resumeEngine rootBytes ⟨seed, pre ++ suf⟩ pre.length state with
+  cases found : resumeEngine rootBytes (Image.ofAccepted seed (pre ++ suf)) pre.length state with
   | none => simp [found] at resumed
   | some left' =>
-      have real : (Engine.ofState state pre).replay rootBytes suf = some left' := by
+      have real : (Engine.ofState rootBytes state pre).replay rootBytes suf = some left' := by
         unfold resumeEngine at found
         rw [if_pos ((admissibleFast_iff _ _).mpr admissible)] at found
         simpa using found
       obtain ⟨disjoint, right', weak, _⟩ := Engine.replay_beneath_of_left rootBytes pre suf _ _ left'
-        (Engine.beneath_ofState state pre) real
+        (Engine.beneath_ofState rootBytes state pre) real
       refine ⟨admissible, disjoint, right', weak, ?_⟩
       have := resume_suffix rootBytes admissible disjoint weak
       rw [resume_eq_resumeEngine, found] at this

@@ -1,62 +1,120 @@
-# HOT-PATH lane state (2026-10-27 night)
+# HOT-PATH lane state (2026-10-29)
 
-Branch `lane/hot-path-v4` (from main cut 12 f1ce1626). Mac worktree `/Users/ember/dev/minidregg-lanes/hot-path-world-checkpoint`
-(edit and git only). **No Lean on the Mac at all** (coordinator, after the Mac ran out of swap): every elaboration runs
-on dregg-ref (`ssh -o IdentitiesOnly=yes -i ~/.ssh/id_portable lanes@2.31.71.194`; packages warm at
-`/build/minidregg/.lake/packages`; per-file `lake env lean --load-dynlib=.lake/native/libmini_kernels_lean.so F.lean` there,
-closures through `closure-lock swarm-build`). Integration is continuous (pushes land on main as they arrive); no lane waits
-on its own closure; the continuous build names reds, fix them forward. Statements go to the auditor (agent
-af7a93e7b8ba729d4) with a copy to the coordinator. Stop processes only by PID file or the harness task that started them.
-Rulings: snapshots fast-forwarded, replay = `store audit` (ember); option A now, B next; re-genesis is free.
+Present state; rewritten whole. Branch `lane/hot-path` (= main 1baf18816 + lane/perf-batch1 + fixes). Owner: the
+hot-path Opus agent. Brief ground: docs/STATE-OF-MINIDREGG-2026-10-28.md (lane/root-state). Goal: a turn costs
+what it changes; rehearsal 3 ships with turns in milliseconds. Scope added by the root: one persistent-state layer
+(cold start from snapshot, per-document state, in-process verifier, O(changed) seals, helper ops on the operator
+socket) and the perf rake's verified backlog (docs/PERF-BACKLOG-2026-10-28.md, "Ranked backlog").
 
-## Landed on lane/hot-path-v4
+## Where things are
+
+- Mac worktree `/Users/ember/dev/minidregg-lanes/hot-path` (edit + git only; no Lean on the Mac).
+- hbox base tree (SSD): `/othersys/lanes/hot-path/src` (clone of lane/hot-path; `.lake/packages` -> `/tank/lanes/hot-path/packages`).
+  `/othersys/lanes/hot-path/build.sh LOG TARGET...` (lake build under swarm-build, 16 threads, 28G; log `LOG.log`, EXIT= line);
+  PID file `/othersys/lanes/hot-path/build.pid`. Single-file check: `lake lean F.lean` in that tree.
+- Workers (claude-kimi, one item each): Mac worktrees `/Users/ember/dev/minidregg-lanes/hp-<item>` on `lane/hp-<item>`,
+  hbox clones `/othersys/lanes/hp-<item>/src` (clone-warm of the base), checks via
+  `/Users/ember/dev/minidregg-lanes/hp-tools/hp-check <item> start|wait|log|stop`. Briefs:
+  `/Users/ember/dev/minidregg-lanes/hp-tools/briefs/` (COMMON.md + one per item). Logs and PID files:
+  `/Users/ember/dev/minidregg-lanes/hp-tools/logs/<item>.{out,pid}`. Items: seed (backlog 1), profile (2), pred (4),
+  history (5), index (6+7), verifier (in-process Ed25519 via mini-kernels), contentlaw (quadratic ContentLaw), effects
+  (Effects/Revival reds from the Materialized change). hbox clones: `/othersys/lanes/hot-path/mkclone.sh ITEM`. Relaunch a
+  stopped worker: `hp-tools/hp-resume ITEM [note]` (Kimi runs out of context on big files; COMMON.md has a narrow-reading rule).
+- Bench: `/othersys/lanes/hot-path/bench-perf.py` (doc-submit-bench + `--perf-at N,M` perf record with DWARF stacks);
+  symbols of the memfd-exec'd Host resolve with `perf report --symfs=DIR` where DIR holds the host binary under the
+  names `memfd:mini-pinned-image (deleted)` and `memfd:mini-pinned-image`. Folding script: scratchpad `hotpath/fold.py`.
+
+## Measured (hbox)
+
+- GET / via the SandMD route, fresh world on candidate 2b8f75dcb (`/tank/lanes/hot-path/w-2b8f`, standing;
+  `route-up.sh TAG LEAN_BIN RUST_BIN`, probe `python3 /tank/lanes/hot-path/worldcpu.py w-2b8f ROUTE_DIR N`, ROUTE_DIR
+  `/var/lib/mini-spk-worlds/521505e109919c5c/521505e109919c5c/host/apps/6101/routes/owner-web`): 1.3-1.5 s wall quiet,
+  1.1-1.2 s CPU, all in the serving Host. Host profile (`/tank/lanes/hot-path/prof-2b8f/get.script`): 45% policy law
+  check on the read path (`checkRead` -> `PreparedLaw.verifies` -> `PredCompile.wit`/`intOf`), nearly all
+  `Pred.State.get` (`List.find?`); `receiverSemanticsFrom` 9.5%; `StoreCodec.encode` 9.5%; roots 8%; share-issue and
+  birth `charge` 6% each; keccak 2%. POST /new (qualify write): 4.6 s.
+- Doc submit, paired, quiet-ish (`pair.sh p2`: `b-p2-base.log` 2b8f vs `b-p2-hp.log` lane 023a13096): submit CPU
+  a1 280 -> 170 ms, a10 490 -> 320, a20 780 -> 790 (growth ~30 ms/append both: ContentLaw pair loop + State.get).
+  Propose wall ~300 ms with 30 ms Host CPU: the client side (unexplained; an strace wrapper on `mini` hung genesis).
+- Earlier (349e59ef1, append 20): DeclaredResourceController legs 18%, `contentLawDecidable`/`documentAt` 15%,
+  `DTreeMap.getD` 17%, `rootBytes` 13.5%, `encode` 10.8%, `State.get` 12%, `authState` 11%.
+- Lane Host binary: `/othersys/lanes/hot-path/artifacts/minidregg-host` (`hostbuild.sh`), bench set
+  `/othersys/lanes/hot-path/cand-hp1` (2b8f75dcb with that Host). Packages are now a real copy on the SSD (the native
+  builder refuses a symlinked `.lake/packages`).
+
+## Landed on lane/hot-path (not yet on main)
 
 | sha | what |
 |---|---|
-| e4e22cb0, aa025c8d, fce764f7, cfc70253 (spec part) | `Compiler/DurableFastForwardSpec.lean`, auditor passes 5–14, NOTHING FURTHER from the auditor (pass 14 addendum, lane/audit-platform c8f30e7bb). One `Impl`, one `Spec`. `FastForward` takes the prefix ENTRIES; `Impl.ff` = `ffState` (prefix-free) then the gate (count, prefix tags from the seed's chain, chain = checkpoint's) then decode + root log from tags. `ofOpened : Opened → Except String Loaded4` (the session build may refuse); laws `viewOpened` (on success), `reopens` (succeeds under `exact`'s hypotheses), `buildSound` (a built session's snapshot is `resume` of the whole image from `stateCheckpoint` at its height: a reused prefix nullifier makes the build refuse); `suffixGate`/`genesisGate` pin `stateCheckpoint` to `body.state` / `State.ofSeed`. Plus MAC gate, `exact`, `representsFromDerived`, keystone over `Wrote`, `inhabited`, `cutHonest`, audit, `headSealZero`. |
-| 107f040d | option A code: v4 body (`system`, `semantics`), frame v4, epoch `checkpoint/v5`, `.foreignSemantics`; every sealer seals the session's World; the light session advances its World; `sealHead` + Host verb `checkpoint` + seal at a session's clean end. |
-| cfc70253 | `Kernel/DurableEngineSuffix.lean` (standard axioms): `Engine.Beneath`, `preflight_light_congr`, `replay_beneath` (+`_of_left`), `resume_suffix` (admissible + `Disjoint` + the prefix-free replay reaching `e` ⇒ `resume = some ((headState e).snapshot all)`), `resume_disjoint` (converse), `disjointFast_iff`. |
-| ebf92e7b | the open split: `openState` (executing; checkpoint + suffix only: suffix tags from `body.chain`, decode, frontier walk, replay from `Engine.ofState state []`, World fold from the checkpoint's World) then `openLoaded` (the gate; accumulator vs the prefix's last tag; prefix decode; `admissibleFast` + `disjointFast`; resume proof by `resume_suffix`; engine = `Engine.ofState (headState e) all`; chains = prefix's ++ suffix's tail; indexes, root log, track via `trackOfWorld`; head root check). `trackFrom` deleted; `trackOf` = `trackOfWorld` over the genesis fold. Proofs: `firstBadTag_append`, `firstBadTag_head`, `verifyTags_append` (the tag split at a checkpoint). |
-| 77b8f896, af8dd3a1, 5e554051 | proofs: `headState_snapshot`, `resume_honest`, `foldRecords_append`, `worldAt_fastForward`, `openSealed_foreign_semantics`. |
+| fd54bb732 | merge of lane/perf-batch1 (codec writer, cell roots/bytes cached per cell value, decodeFast) |
+| 703d0c0af | perf-batch1's red fixed (Theory/CellSlot `decode_eq_decodeFast`) |
+| 8db6db77e | DeployedBridge `packOf_unpack` via `Materialized.ext` |
+| 023a13096 | merge of main (Host.Main String.take fix; census deleted). Host.Main + ClientConsentSession green on hbox |
+| 2bd0ad095 | contentlaw d81cb88ce: ContentLaw + EventHistoryLaw document equality decided in one pass (proved equivalent) |
+| 05f843a71 | index 8c78cc96a: `packBits` single pass, `deployedRoot` one-pass canonicalization (csimp) |
+| bb73d02c6 | charge e403b95bf: historical records identity-first (`withPtrEqDecEq`), receiver charges materialized once |
+| (merge) | pred f463d78f2: policy state indexed once per evaluation (`IndexedState`, csimp) |
+| (merge) | profile 346136236: `Config` carries its profile (`Config.ofInputs`), `Profile` its semantics digest |
+| 2009a6eb8 | receiver semantics cached in `Profile`; `compilerProfile` via csimp (the GET's 9.5%) |
+| pending | seed (worker running), history (worker running), verifier 172d90188 (worker finishing; fix at merge: its `@[extern] def ... := 2` must become `opaque` externs) |
 
-Checked: Mac per file (before the rule) the core, HostRefinesWorldCore, DurableHistoryStoreCore, DurableEngineSuffix, the
-Spec at fce764f7+gate pins, the tag lemmas in a scratch module. UNCHECKED: DurableReceiverIO, CredentialAuthorityDomainReceiver,
-DurableServed, DurableStoreAudit, Host.Main, DurableFastForwardProofs at ebf92e7b (the appended tag lemmas).
+## Design: one persistent-state layer (what exists, what changes)
 
-## Measured: the compaction (dregg-build, 2026-10-27 20:11Z, load 15-19, the 483-record snapshot)
+The Host already has a process-resident session (`Kernel/NativeHostSession.lean`): the validated full opening
+(`Opened`: directory and authority decoded), the light opening (`NativeHostLight.Light`: served state, decoded
+directory/authority, revalidated per new suffix only over changed cells, `validateServedFrom_eq`), and the lazily
+built genesis walk (`Walked`/`NativeHostReplay.Verified`, extended per record by `extendVerified`/`extendExact`). The
+measured per-turn cost is NOT the absence of that layer; it is derived values computed per request beside it:
 
-Paired cold opens (`HOST CONFIG describe`), alternating: candidate 6236826f Host **189.4 s, 193.7 s**; the same plus the
-compaction (8f66d6cc, built on dregg-ref) **69.1 s, 64.1 s**: 2.9x, `describe` output byte-identical. Sampled (121
-samples, `/build/lanes/hpc-laps/compact-n483/profile.txt`): still 98% in `trackOf` -> `foldRecords` (the genesis fold):
-`DFinsupp.update` 62%, `TurnOfIntent.ofCells` 52%, `World.admit` 40%. v4 (no genesis fold at open) is the fix; the
-`TurnOfIntent` written-keys item shrinks each suffix step.
+1. Per cell value (in hand): bytes and root cached in `Materialized` (perf-batch1, `bytes_eq_bytesCached`,
+   `root_eq_rootCached`); decoded cells keep their accepted bytes (`decodeFast`). A cell value persists in the
+   session until a write replaces it, so its root is hashed once per cell version, not per turn.
+2. Per configuration: runtime profile and its semantics digest (worker `profile`); seed identity and log start
+   (worker `seed`).
+3. Per evaluation: the policy state indexed once (worker `pred`); document law decided in one pass (`contentlaw`).
+4. Per historical certificate: the record a `PriorIssue` names is compared by identity first, and record charges
+   are materialized once (worker `charge`), so a request never re-derives a historical intent.
+5. Across processes (cold start). RULED (ember 10-29): trust walk snapshots on our own filesystem, sealed under the
+   operator checkpoint MAC. Design, from the code (Kernel/NativeHostReplay.lean):
+   - The walk families need `Verified config target`: the genesis `AdmittedReplay` plus 13 certificate lists
+     (`PriorIssue`, `PriorDispatchReserve`, `PriorBegin*`, `PriorClaim*`, `PriorCreatedV3`, `PriorRunningV3`,
+     `PriorLifetimeGrant`, `RetryHistory`, `FnConsumerFrontierReplay.Audit`, `PriorSelectedRelease`). Each certificate is
+     data (index, ingress, record, receipt) plus `admitted : ∃ original : Opened, ∃ accepted, record = ofIntent
+     accepted.intent` (or `ingress.Admitted config record`); consumers use the data, `present` (re-checked against the
+     current image) and occasionally the proof (`ApplicationDispatchAgentReserveCore` destructures `raw.sourceExact`).
+   - `SuffixVerified config anchor target` (+ `walkSuffix`, `SuffixContext`) already admits natively from an anchor,
+     but starts from an empty context: a dispatch naming a pre-anchor issue refuses.
+   - Plan: (a) a derived codec for the certificate data (`WalkSnapshot`), sealed beside each stored checkpoint under
+     the checkpoint key with its own domain tag (height, chain, world root bind it to the prefix); (b) each
+     certificate's proof field becomes `Provenance P` = `walked (h : P)` or `sealed (s : SealedAt config index)`, where
+     `SealedAt` carries the MAC check and membership of this certificate in the verified snapshot; consumers take the
+     disjunction, so statements gain the explicit premise "or present in a snapshot this operator sealed" (the ruled
+     trust), never a silent one; (c) `NativeHostSession.walkPhysical` starts from the newest sealed snapshot at or below
+     the head: fast-forward open at its height, restore the context, `walkSuffix` over the records after it; the
+     genesis walk remains for `audit`/`store-audit` and when no snapshot verifies; (d) `Verified` and `SuffixVerified`
+     unify behind one interface the walk families read (they read only the lists and `opened`).
+   - Order: land the per-turn batch first; then (a)+(c) with an interface over the two verified kinds; then (b).
+6. Seals: `storeCheckpoint` encodes every cell each `checkpointEvery` (64) records. Amortized O(state)/64; with
+   cached cell bytes the encode copies cached bytes. Delta checkpoints only if a measurement shows seals matter.
+7. Cell codecs: after 1-4 the remaining doc-submit cost is codec work on the written cell (encode ~27%, decode with
+   per-lookup key encoding and `List.Lex` compares ~15-30%). Next owner work: a decoded-store lookup keyed by the
+   wire's ordering bytes compared as ByteArray, and encode from the cached entry bytes of unchanged entries.
+   RULED (ember 10-29): keep the ratchet; make it fast in constant factors. Blinded cells (Hyperdocument, DeclaredEffect, LegacyContentCarry; StoreCodec
+   K-HIDE-ROTATE) re-key EVERY entry's salt on every write, by design, so their root is O(entries) per append however
+   it is cached. O(changed) for documents needs per-entry salt epochs, which reveals to a holder of two views which
+   entries changed between them; ember keeps the ratchet.
 
 ## Running
 
-- dregg-ref: the v4 closure `/build/lanes/hot-path-v4-build.sh e4e22cb0` (PID file `/build/lanes/hot-path-v4.pid`, log
-  `/build/lanes/hot-path-v4-build.log`, tree `/build/lanes/hot-path-v4`; queued on `closure-lock`). It checks 107f040d's
-  DurableStoreAudit and Host.Main, NOT the split (ebf92e7b).
-- dregg-build: BEFORE workload, PID file `/build/lanes/hot-path-codec-perf-before.pid`, output `/build/lanes/hot-path-codec-perf/`.
+- hbox: integrated batch build `build.sh b-batch1 Host.Main Host.ClientConsentSession` at 2009a6eb8 (PID file build.pid). Then
+  `after.sh TAG SHA` measures (doc bench pair + SandMD route world on the new Host + 20 GETs).
+- Mac: seven claude-kimi workers (PID files above).
 
-## Next (successor: start here)
+## Next
 
-1. The continuous main build on dregg-build checks the split's importers, DurableStoreAudit and Host.Main once the
-   integrator lands ebf92e7b; fix forward what it names. When the v4 closure ends: fix forward what it names. Then overlay the files changed since e4e22cb0 into its tree
-   (`git archive ebf92e7b Kernel/DurableEngineSuffix.lean Compiler/DurableReceiverCore.lean Compiler/DurableFastForwardSpec.lean
-   Compiler/DurableFastForwardProofs.lean docs | tar -x -C /build/lanes/hot-path-v4/<src>`) and rebuild incrementally through
-   `closure-lock swarm-build` (the core's ~430 dependents, Host.Main included): the check of the split.
-2. Instantiate `Spec` (one more amendment first, statement to the auditor; its draft is UNCOMMITTED in the Mac worktree's
-   `Compiler/DurableFastForwardSpec.lean`, patch at
-   `/private/tmp/claude-501/-Users-ember-dev-minidregg/698fc87d-1ed5-4b8d-a00d-67388a9da60b/scratchpad/opened-below.patch`: elaborate it
-   per file on dregg-ref once its warm tree from cut 13 arrives, then send it): the session build reads the entries BELOW the
-   checkpoint (the last prefix tag for the accumulator check, the tags for the root log and head tag, the bytes for the
-   chain proof), so `Opened` needs `below : List Entry` (opaque, never executed). Then `Loaded4 := Loaded`,
-   `State4 := Σ suffix, OpenState rootBytes suffix`, `ffState := openState`, `stateBase := (base.1, baseChain)`,
-   `stateCheckpoint := base.2.1`, `stateHead := headState engine`, `stateWorld := world.toOption`, `ofOpened` = the
-   session half of `openLoaded`. Proofs in hand: `buildSound` from `Loaded.resumed`; `reopens` and `exact` from
-   `resume_disjoint` + `resume_honest` + `verifyTags_append` + `worldAt_fastForward`; teeth pole: a reused prefix nullifier
-   makes `resume` none (`nullifiersFreshCheck`, `.alreadyConsumed`).
-3. When the BEFORE run ends: its reopen row at ~1.7k (`/build/lanes/hot-path-codec-perf/`).
-4. v4 measurement on the cut's candidate: a world born under it (~500, ~1.7k records), cold open before/after; the
-   `checkpoint` verb then an open (zero fast-forward).
-5. Option B statement-first (journal read at use; ~50 consumers); the `TurnOfIntent` written-keys statement.
+1. Base green -> clone-warm worker clones; harvest worker shas; merge into lane/hot-path; full build; doc bench on
+   the built Host (needs a candidate-shaped bin dir: build the host exe from the base tree); profile again.
+2. Persistent-state layer (owner): decoded cells and per-cell derived views held by the session across turns
+   (Engine cells with decoded/law-view thunks + exactness), the authority snapshot built once per cell image,
+   seals over changed cells only, cold start from a derived-state snapshot. Design note in this file before code.
+3. Batch landing to the integrator (agent aca7a1fd39def735a) with before/after numbers.

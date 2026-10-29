@@ -1,0 +1,33 @@
+{
+  "schema": "mini-spk-sources-v1",
+  "upstream": {
+    "project": "Etherpad",
+    "repository": "https://github.com/ether/etherpad",
+    "release": "https://github.com/ether/etherpad/releases/tag/v3.3.12",
+    "releaseEvidence": "https://api.github.com/repos/ether/etherpad/releases/latest",
+    "releasePublishedAt": "2026-10-28T09:58:57Z",
+    "tag": "v3.3.12",
+    "annotatedTagObject": "29978fd8e06fafefb3b76827da064354884df0b4",
+    "commit": "f534756571d1c816e85af08acdc472a5822f5761",
+    "sourceUrl": "https://codeload.github.com/ether/etherpad/tar.gz/refs/tags/v3.3.12",
+    "sourceSha256": "ed0632716df6e6cfd693b8b2ca314a74fceb47f18a07f4944b2a8338bcefc800",
+    "binaryUrl": "https://github.com/ether/etherpad/releases/download/v3.3.12/etherpad_3.3.12-1_amd64.deb",
+    "binarySha256": "db8e27e6d1cb0dae562fb245268b79070b581c177b28bca0031a64726c9121e9",
+    "binaryDigestEvidence": "The upstream GitHub release API publishes this SHA-256 as the asset digest."
+  },
+  "node": {
+    "version": "v24.22.2",
+    "url": "https://nodejs.org/dist/v24.22.2/node-v24.22.2-linux-x64.tar.xz",
+    "sha256": "48cc0e21e048790e54c0cf5749c2725005313d652651c40b7a21feb9697aaf75",
+    "checksumEvidence": "https://nodejs.org/dist/v24.22.2/SHASUMS256.txt"
+  },
+  "sandstormAdapter": {
+    "repository": "https://github.com/sandstorm-org/etherpad-lite-sandstorm",
+    "commit": "129febbbab38d19fcf0efd71f0cab43d233f1865"
+  },
+  "sandstorm": {
+    "version": "308",
+    "spkTool": "/var/lib/spk-fresh/tools/spk",
+    "includeTree": "/var/lib/spk-fresh/tools/sandstorm-308/usr/include"
+  }
+}

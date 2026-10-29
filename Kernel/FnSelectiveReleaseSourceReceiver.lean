@@ -98,7 +98,8 @@ def Accepted.intent (config : NativeHost.Config) (opened : NativeHost.Opened con
     writes := []
     readGuards := guards
     nullifiers := [nullifier ingress.spec]
-    exactCharge := charge opened.durable.snapshot guards ingress
+    exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize
+      (charge opened.durable.snapshot guards ingress)).toCharge
     event := event ingress
     subject := some ⟨ingress.spec.packet.release.owner.subject⟩
     postRootsBound := by intro write present; cases present

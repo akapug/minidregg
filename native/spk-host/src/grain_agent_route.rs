@@ -75,7 +75,9 @@ fn shape(r: &Registration, app_uid: u32) -> io::Result<()> {
         || !(60..=1740).contains(&r.reverse_timeout_seconds)
         || !(120..=1800).contains(&r.controller_worker_wall_seconds)
         || r.reverse_timeout_seconds > r.controller_worker_wall_seconds - 60
-        || minidregg_signed_api_path::checked_prefix(&r.signed_api_path).is_err()
+        // Empty is a web route's registration (checked against the custody in `route_path`).
+        || (!r.signed_api_path.is_empty()
+            && minidregg_signed_api_path::checked_prefix(&r.signed_api_path).is_err())
     {
         return Err(invalid("operator lifetime route shape refused"));
     }
@@ -228,6 +230,29 @@ fn signed_path(placement: &Placement) -> io::Result<String> {
         .api_path
         .ok_or_else(|| invalid("signed application has no API path"))
 }
+/// A registration's API path agrees with its custody's route: a v3 or v4 API route names the
+/// package's signed bridge prefix; a v4 web route is reached through the member's WebSession
+/// at a protected origin and names no API prefix (the package may have none).
+fn route_path(
+    r: &Registration,
+    c: &LifetimeCustodyV3,
+    package_path: impl FnOnce() -> io::Result<String>,
+) -> io::Result<()> {
+    match &c.route {
+        Some(crate::agent_api_lifetime_v3::HostedRoute::Web { .. }) => {
+            if !r.signed_api_path.is_empty() {
+                return Err(invalid("a web agent route names no signed API path"));
+            }
+            Ok(())
+        }
+        _ => {
+            if r.signed_api_path != package_path()? {
+                return Err(invalid("agent route differs from signed API path"));
+            }
+            Ok(())
+        }
+    }
+}
 fn physical(r: &Registration, c: &LifetimeCustodyV3, app_uid: u32) -> io::Result<()> {
     protected_parent(&r.socket, app_uid)?;
     protected_parent(&r.reverse_socket, app_uid)?;
@@ -278,9 +303,7 @@ pub(super) fn register(host: &Host, app: &str, request: &Path) -> io::Result<Val
     let c = custody(&bytes, app)?;
     binding(&c, &placement, app)?;
     physical(&r, &c, placement.app_uid)?;
-    if r.signed_api_path != signed_path(&placement)? {
-        return Err(invalid("agent route differs from signed API path"));
-    }
+    route_path(&r, &c, || signed_path(&placement))?;
     let policy = host.profile.agent_route_profile.unwrap_or_default();
     let mut records = retained(&app_dir, app, placement.app_uid, policy)?;
     if records.len() >= policy.revisions() || records.contains_key(&r.name) {
@@ -330,17 +353,13 @@ pub(super) fn configs(
         return Ok(vec![]);
     }
     authority_coordinates(&active, app)?;
-    let path = signed_path(placement)?;
     let mut out = vec![];
     for record in active {
         let r = &record.registration;
-        if r.signed_api_path != path {
-            return Err(invalid(
-                "registered agent path differs from current signed package",
-            ));
-        }
         let bytes = decode(record)?;
         let c = custody(&bytes, app)?;
+        route_path(r, &c, || signed_path(placement))
+            .map_err(|_| invalid("registered agent path differs from current signed package"))?;
         binding(&c, placement, app)?;
         physical(r, &c, placement.app_uid)?;
         let custody = journal.join(format!("agent-{}-custody.json", r.name));
@@ -508,6 +527,33 @@ mod tests {
         let second = &mut all.get_mut("two").unwrap().registration;
         second.socket = "/operator/one/api.sock".into();
         assert!(selected(&all, AgentRouteProfile::Standard).is_err());
+    }
+
+    #[test]
+    fn a_web_route_registers_without_a_package_api_path_and_an_api_route_still_must_match() {
+        let mut value: Value = serde_json::from_slice(&custody_bytes()).unwrap();
+        value["protocol"] = json!("mini-spk-agent-lifetime-custody-v4");
+        value["route"] = json!({"kind":"web","origin":"https://gogs.example.test"});
+        let web = custody(&serde_json::to_vec(&value).unwrap(), "800").unwrap();
+        let no_api_path = || -> io::Result<String> { Err(invalid("signed application has no API path")) };
+        let mut r = registration("one", None);
+        r.signed_api_path = String::new();
+        shape(&r, 100000).unwrap();
+        route_path(&r, &web, no_api_path).unwrap();
+        r.signed_api_path = "/".into();
+        assert!(route_path(&r, &web, || Ok("/".into())).is_err(), "a web route names no API prefix");
+        // The v3 custody keeps its exact check, and an empty prefix is no API route.
+        let api = custody(&custody_bytes(), "800").unwrap();
+        route_path(&r, &api, || Ok("/".into())).unwrap();
+        assert!(route_path(&r, &api, || Ok("/other/".into())).is_err());
+        assert!(route_path(&r, &api, no_api_path).is_err());
+        r.signed_api_path = String::new();
+        assert!(route_path(&r, &api, || Ok("/".into())).is_err());
+        // A v4 custody must carry a valid route, and the protocol and route must agree.
+        value["route"] = json!({"kind":"web","origin":"http://gogs.example.test"});
+        assert!(custody(&serde_json::to_vec(&value).unwrap(), "800").is_err());
+        value["route"] = Value::Null;
+        assert!(custody(&serde_json::to_vec(&value).unwrap(), "800").is_err());
     }
 
     #[test]

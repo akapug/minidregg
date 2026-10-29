@@ -1,0 +1,33 @@
+# 20261026.0+sandstorm1
+
+- Updated to upstream EtherCalc 0.20261026.0 (commit 964efab030d17a78fb2d9b2358c4cd8ef4c6af93).
+- Replaced the legacy Node/LiveScript runtime with the upstream TypeScript worker on standalone workerd; retained Bun for legacy-grain migration.
+- Preserved CSV and SocialCalc replacement, CSV/CSV-JSON exports, multi-sheet behavior, and legacy dump migration.
+- Carried upstream private-room authorization, WebSocket mutation validation, bounded imports/commands, stored-XSS fixes, and other release security hardening.
+- Generated an explicit runtime package file list and used a new SPK-FRESH signing identity.
+
+# 20201228.1
+
+- Significantly sped up grain loading.
+- Improved mobile responsiveness.
+- Imports now add new sheets instead of replacing existing content.
+- Several upstream improvements and changes, particularly localization.
+
+# 20160501.1
+
+- Fixed charting in Graph tab.
+- Add F2 for input mode toggle.
+- Add Russian translation; updated other translations.
+
+# 20160122.5
+
+- Fixed Excel multi-spreadsheet export.
+- Allow selecting entire rows and columns.
+
+# 20150901.1
+
+- Updated "Description" metadata as per Kenton.
+
+# 20150822.1
+
+- Initial release to Sandstorm App Market.

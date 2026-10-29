@@ -1,0 +1,49 @@
+diff --git a/src/node/handler/SocketIORouter.ts b/src/node/handler/SocketIORouter.ts
+--- a/src/node/handler/SocketIORouter.ts
++++ b/src/node/handler/SocketIORouter.ts
+@@ -78,6 +78,17 @@
+     }
+
+     socket.on('message', (message: any, ack: any = () => {}) => (async () => {
++      // Sandstorm's proxy supplies a stable identity even though grain cookies
++      // are ephemeral. Keep Etherpad authorship stable across sessions.
++      if (process.env.SANDSTORM) {
++        const sandstormUserId = socket.request.headers['x-sandstorm-user-id'];
++        const sandstormTabId = socket.request.headers['x-sandstorm-tab-id'];
++        if (sandstormUserId) {
++          message.token = `u${sandstormUserId}`;
++        } else if (sandstormTabId) {
++          message.token = `a${sandstormTabId}`;
++        }
++      }
+       if (!message.component || !components[message.component]) {
+         throw new Error(`unknown message component: ${message.component}`);
+       }
+diff --git a/src/node/handler/PadMessageHandler.ts b/src/node/handler/PadMessageHandler.ts
+--- a/src/node/handler/PadMessageHandler.ts
++++ b/src/node/handler/PadMessageHandler.ts
+@@ -1167,6 +1167,14 @@
+   ]);
+   ({colorId: authorColorId, name: authorName} = await authorManager.getAuthor(sessionInfo.author));
+
++  if (process.env.SANDSTORM && !authorName) {
++    const sandstormUsername = socket.client.request.headers['x-sandstorm-username'];
++    if (sandstormUsername) {
++      authorName = decodeURIComponent(sandstormUsername);
++      await authorManager.setAuthorName(sessionInfo.author, authorName);
++    }
++  }
++
+   // Pad retention: an overdue pad is deleted here, before it loads, so the
+   // client gets a new pad rather than content that should already be gone.
+   const padRetention = await checkPadRetentionOnOpen(sessionInfo.padId);
+@@ -1221,7 +1229,8 @@
+   // stable identity across windows and devices, so concurrent same-author
+   // sessions are legitimate and must not be kicked.
+   const roomSockets = _getRoomSockets(pad.id);
+-  if (user == null && !sessionInfo.embed) {
++  // Sandstorm identities are stable too, so do not kick a user's other tabs.
++  if (user == null && !sessionInfo.embed && !process.env.SANDSTORM) {
+     for (const otherSocket of roomSockets) {
+       // The user shouldn't have joined the room yet, but check anyway just in case.
+       if (otherSocket.id === socket.id) continue;

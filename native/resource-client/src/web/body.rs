@@ -678,6 +678,12 @@ fn operations(site: &Site) -> String {
     if !site.names().iter().any(|n| n == "operations") {
         return "<section class=\"ops\"><h2>Operations room</h2><p class=note>The box's operations room (<code>operations</code>, posted into by the box's own member <code>mini-s-box</code>) is not yet shared with the public reader: nothing to show by that name.</p></section>\n".to_owned();
     }
+    // The reference alone is not the room: this session reads it once it holds the room record
+    // (`chat join operations INVITATION`). Without one the shell's refusal ("this session has no room
+    // operations") is not news worth a red outcome on the front page and the tour: say what is missing.
+    if site.shell.as_ref().is_some_and(|shell| !shell.home.join("chat").join("rooms").join("operations.json").is_file()) {
+        return "<section class=\"ops\"><h2>Operations room</h2><p class=note>The box's operations room (<code>operations</code>) is shared with this workspace, but this session has not joined it: <code>chat join operations INVITATION</code> brings its signed turns here.</p></section>\n".to_owned();
+    }
     match verb(site, &["tail -n 20 --in operations".to_owned()]) {
         Some(ending) if ending.code == 0 => format!(
             "<section class=\"ops chat\" data-live=\"30000\" data-live-path=\"/activity\"><p class=\"eyebrow\">From the operations room</p><h2>Life in this world</h2><p class=note>Ships, drills, checkpoints and backups, as signed turns of <code>mini-s-box</code>.</p><pre class=\"turns\">{}</pre><p><a href=\"/room/operations\">the room</a></p></section>\n",
@@ -1447,6 +1453,8 @@ fn report_link(headline: &str, next: &[(&str, &str)]) -> String {
 pub(super) const EXPLAINED: &[(&str, &str, Option<&str>)] = &[
     ("oracle-not-granted", "Hermes may not ask the Oracle in this room: the room's hermes/tools field lacks bit 8. Only the room's founder grants it, under what Hermes may do here.", Some("/room/{room}/resident#hermes-tools")),
     ("oracle-not-configured", "This box's operator has bound no Oracle route for this Hermes, so no room grant reaches the Oracle.", None),
+    ("typed-apps-not-granted", "Hermes may not use the hosted apps' typed tools in this room: the room's hermes/tools field lacks bit 16. Only the room's founder grants it, under what Hermes may do here.", Some("/room/{room}/resident#hermes-tools")),
+    ("typed-apps-not-configured", "This box's operator has attached no hosted app to this Hermes, so no room grant reaches an app.", None),
     ("await-not-in-room", "Hermes answers only an await a member announced in this room (a say of await OBJECT TRANSACTION).", None),
     ("notDecider", "Only the slot's decider may answer it; the kernel refused an answer signed by anyone else (bend await names the decider).", None),
     ("member-day-ceiling", "Your share of the house Hermes's model calls for today is spent; it refills when the day turns.", None),

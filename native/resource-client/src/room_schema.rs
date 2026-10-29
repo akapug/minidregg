@@ -52,7 +52,7 @@ pub(crate) const TARIFF_FIELDS: &[(&str, &str)] = &[
     // it at summon; a reader names the route by that purse's tariff model.
     ("hermes/provider", PROVIDER_FIELD),
     // The founder's grant of upstream Hermes's sandbox toolsets to the
-    // resident (bits: 1 files, 2 terminal, 4 Python, 8 the oracle; 0 = none), and the
+    // resident (bits: 1 files, 2 terminal, 4 Python, 8 the oracle, 16 typed apps; 0 = none), and the
     // sandbox CPU seconds per paid `hermes/turn` (0 = the operator's
     // default). docs/HERMES-TOOLS-2026-10-27.md.
     ("hermes/tools", SANDBOX_TOOLS_FIELD),

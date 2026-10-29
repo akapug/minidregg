@@ -1,0 +1,26 @@
+--- a/yarn.lock
++++ b/yarn.lock
+@@ -1617,6 +1617,7 @@
+     nanoid: "npm:3.3.18"
+     optimize-css-assets-webpack-plugin: "npm:6.0.1"
+     passport: "patch:passport@npm%3A0.7.0#~/.yarn/patches/passport-npm-0.7.0-df02531736.patch"
++    passport-custom: "npm:1.1.1"
+     passport-dropbox-oauth2: "npm:1.1.0"
+     passport-facebook: "npm:3.0.0"
+     passport-github: "npm:1.1.0"
+@@ -12145,6 +12146,15 @@
+   languageName: node
+   linkType: hard
+ 
++"passport-custom@npm:1.1.1":
++  version: 1.1.1
++  resolution: "passport-custom@npm:1.1.1"
++  dependencies:
++    passport-strategy: "npm:1.x.x"
++  checksum: 10/245b265491c83186002a19db1c812565bb95fd2a7b842f8e8de58f3e22d669f680178b623db6a4be22aecacecd75097b96fa06f35c2b35fe3ef71e9ec77a538d
++  languageName: node
++  linkType: hard
++
+ "passport-dropbox-oauth2@npm:1.1.0":
+   version: 1.1.0
+   resolution: "passport-dropbox-oauth2@npm:1.1.0"

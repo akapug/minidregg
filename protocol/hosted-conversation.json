@@ -199,5 +199,52 @@
   },
   "maxChannels": 32,
   "channelLifetimeMs": 300000,
-  "maxChannelIds": 4096
+  "maxChannelIds": 4096,
+  "transitions": [
+    {
+      "name": "open",
+      "code": 0,
+      "initial": 0,
+      "pending": 2,
+      "settled": 1,
+      "isolated": false
+    },
+    {
+      "name": "send",
+      "code": 1,
+      "initial": 1,
+      "pending": 2,
+      "settled": 1,
+      "isolated": true
+    },
+    {
+      "name": "receive",
+      "code": 2,
+      "initial": 1,
+      "pending": 2,
+      "settled": 1,
+      "isolated": true
+    },
+    {
+      "name": "rendezvous",
+      "code": 3,
+      "initial": 1,
+      "pending": 2,
+      "settled": 1,
+      "isolated": true
+    },
+    {
+      "name": "close",
+      "code": 4,
+      "initial": 1,
+      "pending": 2,
+      "settled": 2,
+      "isolated": true
+    }
+  ],
+  "states": {
+    "absent": 0,
+    "live": 1,
+    "terminal": 2
+  }
 }

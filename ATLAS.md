@@ -238,6 +238,13 @@ n=1 and n=all coincide by construction. Nothing lands beside; everything replace
 16. **One lane can hold it.** The 19-concurrent-lanes-one-tree process produced the
     parked pins, the baseline laundering, the committed merge conflicts. Minidregg's
     size target is also a *process* target.
+17. **Never slower over time.** Per-operation cost is at most O(log n) in accumulated history and state:
+    no turn, read or check does work that grows linearly with history length, document size, cell count or member
+    count. Whole-state recomputation per turn made a GET cost 1.3 s and a document append grow 26 ms per append
+    already present (28 Oct 2026). Persistent maps, Merkle paths, indexes and incremental checkpoints; a flatness
+    bench in the gate (small vs large history within a log factor) is the one performance property that gates.
+
+
 ## 7. The architecture carve
 
 ```

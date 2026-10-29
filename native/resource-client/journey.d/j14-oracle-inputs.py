@@ -60,7 +60,7 @@ def provision(c):
     for index,name in enumerate(['appOwnerCapability','appControlCapability','packageOwnerCapability',
         'packageControlCapability','snapshotOwnerCapability','snapshotControlCapability']):app[name]=str(9890101+index)
     d={'subject':a['owner'],'session':'9892001','descriptor':'9892002','ticket':'9892003',
-       'sessionKind':'api','expectedHost':'oracle-j14.localhost'}
+       'sessionKind':'api','expectedHost':c.get('expectedHost','oracle-j14.localhost')}
     for index,name in enumerate(['cap','sessionControlCapability','descriptorOwnerCapability','descriptorControlCapability',
                                 'appObserve','pkgObserve','ticketOwner','ticketControl','ticketObserve']):d[name]=str(9892101+index)
     config=read(c['hostConfig']); native=read(c['nativeProfile'])
@@ -70,7 +70,7 @@ def provision(c):
             'publicSocket':c['publicSocket'],'privateSocket':c['operatorSocket'],
             'workspace':c['sponsorWorkspace'],'genesis':str(w/'genesis.json'),
             'profileResult':c['profileResult'],'initStoreResult':profile['initStoreResult'],'grainsRoot':profile['grainsRoot'],
-            'brokerSocket':profile['brokerSocket'],'spk':c['spk'],'spkSha256':sha(c['spk']),'sizeClass':'L',
+            'brokerSocket':profile['brokerSocket'],'spk':c['spk'],'spkSha256':sha(c['spk']),'sizeClass':c.get('sizeClass','L'),
             'authority':a,'namespace':{'domain':str(config['domain']),'semantics':str(native['semantics'])},
             'room':c['room'],'application':app,'delegates':{'bootstrap':d},
             'keys':{a['owner']:{'keyId':str(params['sponsor']['keyId']),'keyEpoch':str(params['sponsor']['keyEpoch']),
@@ -107,7 +107,7 @@ def attachment(c):
             'application':read(c['preparedApplication'])['applications']['bootstrap'],
             'issuer':{'subject':a['owner'],'keyPath':str(w/'sponsor.key'),'payer':a['owner'],'funding':[],
                       'sourceCapabilities':[a['ownerAccountCapability']],'tool':a['tool'],'parent':a['parent'],'reserveAmount':'5'},
-            'signers':signers,'sessionProfile':session}
+            'signers':signers,'sessionProfile':session,**c.get('attachmentExtras',{})}
 
 
 def main():

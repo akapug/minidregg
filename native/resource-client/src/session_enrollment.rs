@@ -34,6 +34,37 @@ fn reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
     }
 }
 
+fn author_reply_with_outcome<'a>(frame: &'a [u8], operation: u8,
+    decode: impl FnOnce(&[u8]) -> Result<Value>) -> Result<&'a [u8]> {
+    let is_outcome = matches!(frame.first(), Some(&mini_sdk::host_operations::RESPONSE_NO_RECORD) | Some(&mini_sdk::host_operations::RESPONSE_HOST_OUTCOME))
+        || (frame.first() == Some(&operation)
+            && frame.get(1..).is_some_and(|body| body.starts_with(b"DREGG/NATIVE-HOST/OUTCOME/v8")));
+    if is_outcome {
+        let body = frame.get(1..).filter(|body| !body.is_empty())
+            .ok_or_else(|| format!("enrollment op{operation} returned an invalid frame"))?;
+        let view = decode(body).map_err(|error| format!(
+            "enrollment op{operation} outcome could not decode: {error}; frame retained"))?;
+        let status = match frame[0] {
+            mini_sdk::host_operations::RESPONSE_NO_RECORD => "no record",
+            mini_sdk::host_operations::RESPONSE_HOST_OUTCOME => "undecided",
+            _ => "same-opcode outcome, no authoring plan",
+        };
+        return Err(format!("enrollment Host outcome op{operation} ({status}): {}; frame retained, not retried", view));
+    }
+    reply(frame, operation)
+}
+
+fn author_reply<'a>(host: &Path, config: &Path, directory: &Path,
+    frame: &'a [u8], operation: u8) -> Result<&'a [u8]> {
+    author_reply_with_outcome(frame, operation, |body| {
+        let input = directory.join(format!("op{operation}-outcome.bin"));
+        create_private(&input, body)?;
+        sync_directory_ancestors(directory)?;
+        source_inspect(host, config, "outcome", &input,
+            &directory.join(format!("op{operation}-outcome.json")))
+    })
+}
+
 fn inspected(directory: &Path, name: &str) -> Result<Value> {
     serde_json::from_slice(&private_bytes(&directory.join(name), JSON_LIMIT)?)
         .map_err(|error| format!("invalid retained enrollment inspection: {error}"))
@@ -158,7 +189,7 @@ pub(super) fn plan(
     let frame = session_invoke(&host, &socket, &config, PLAN_OP, &request)?;
     create_private(&directory.join("plan.frame"), &frame)?;
     sync_directory_ancestors(&directory)?;
-    let plan_bytes = reply(&frame, PLAN_OP)?;
+    let plan_bytes = author_reply(&host, &config, &directory, &frame, PLAN_OP)?;
     let plan_path = directory.join("plan.bin");
     create_private(&plan_path, plan_bytes)?;
     let plan_view = source_inspect(
@@ -292,7 +323,7 @@ pub(super) fn seal(directory: &Path, approval_json: &Path) -> Result<()> {
     create_private(&directory.join("assembly.frame"), &frame)?;
     sync_directory_ancestors(&directory)?;
     same_pin(&directory, &pinned)?;
-    let ingress = reply(&frame, ASSEMBLE_OP)?;
+    let ingress = author_reply(&pinned.host, &pinned.config, &directory, &frame, ASSEMBLE_OP)?;
     create_private(&directory.join("ingress.bin"), ingress)?;
     sync_retained_call(&directory, &directory.join("ingress.bin"))?;
     let inspection = source_inspect(
@@ -491,6 +522,34 @@ mod tests {
     use super::*;
     use std::cell::Cell;
     use std::os::unix::fs::DirBuilderExt;
+
+    #[test]
+    fn enrollment_authoring_outcomes_keep_no_record_and_uncertain_distinct() {
+        for (marker, kind, tail) in [(253, "contention", vec![1,1,1,0,0]),
+            (255, "uncertain", vec![1,1,1,1,1,255])] {
+            let mut frame = vec![marker];
+            frame.extend_from_slice(b"DREGG/NATIVE-HOST/OUTCOME/v8");
+            frame.extend(tail);
+            let error = author_reply_with_outcome(&frame, PLAN_OP, |body| {
+                assert_eq!(body, &frame[1..]);
+                Ok(json!({"type":kind,"detail":"retained diagnostic"}))
+            }).unwrap_err();
+            assert!(error.contains(kind), "{error}");
+            assert!(error.contains(if marker == 253 {"no record"} else {"undecided"}), "{error}");
+        }
+    }
+
+    #[test]
+    fn enrollment_authoring_outcome_decode_failure_never_yields_plan() {
+        let mut malformed = vec![253];
+        malformed.extend_from_slice(b"DREGG/NATIVE-HOST/OUTCOME/v8");
+        malformed.push(9);
+        let error = author_reply_with_outcome(&malformed, PLAN_OP, |_| Err("noncanonical outcome".into())).unwrap_err();
+        assert!(error.contains("noncanonical outcome"), "{error}");
+        for frame in [vec![], vec![PLAN_OP], vec![42,1]] {
+            assert!(author_reply_with_outcome(&frame, PLAN_OP, |_| panic!("invalid frame decoded")).is_err());
+        }
+    }
 
     #[test]
     fn plan_and_ingress_must_echo_exact_source_request_and_receipt() {

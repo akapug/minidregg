@@ -527,12 +527,43 @@ def scenario_assertions(step, value, context, results):
             raise Refusal('readback-mismatch', step['id'])
 
 
+def compound_readback(op):
+    """A returned event after a compound mutation can be its only observable readback."""
+    binding = op.get('binding', {})
+    if binding.get('protocol') != 'conversation':
+        return False
+    steps = binding['steps']
+    sent = [i for i, step in enumerate(steps) if any(k in step for k in ('send', 'emit', 'http'))]
+    if not sent:
+        return False
+    captures = set()
+    for step in steps[max(sent) + 1:]:
+        if 'receive' in step and step['receive'].get('where'):
+            captures.add(step['id'])
+        for terminal in step.get('receiveAll', []):
+            if terminal.get('where'):
+                captures.add(terminal['id'])
+
+    def uses_capture(value):
+        if isinstance(value, dict):
+            if set(value) == {'result'}:
+                path = value['result']
+                return isinstance(path, list) and bool(path) and path[0] in captures
+            return any(uses_capture(v) for v in value.values())
+        return isinstance(value, list) and any(uses_capture(v) for v in value)
+
+    return uses_capture(binding['result'])
+
+
 def require_write_readback(d):
     """Qualification is stricter than offering useful read-only tools."""
     wrote = False
     for step in d['qualification']:
-        if d['operations'][step['op']]['write']:
+        op = d['operations'][step['op']]
+        if op['write']:
             wrote = True
+            if step.get('assert') and compound_readback(op):
+                return
         elif wrote and step.get('assert'):
             return
     raise Refusal('qualification-write-readback-absent')

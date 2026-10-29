@@ -63,3 +63,10 @@ derived StoreEpoch moved: the next candidate re-geneses (DEMO-PREFIX §5).
    scratch; hbox ZFS has block cloning enabled on the pool but `zfs_bclone_enabled=0`, so real copies there).
    Trace check on hbox (2026-10-28): every trace in the pipeline base and 9 lane trees agrees with its olean;
    no re-seeding needed.
+
+## Lane pool (stopped mid-quest, 2026-10-28, on the root's word)
+
+- `scripts/pipeline/lane-tree` (acquire LANE [REF] | release | renew | status | gc | init SEED N), configured per box by `pool.env`; `lane-check` renews a pooled tree's lease and both refuse loudly when swarm-build cannot reach the user bus (lib.sh `pipeline_user_bus`). Not yet in COORDINATION or the lane brief.
+- dregg-ref only: `/build/pool/{pool.env,bin/lane-tree,repo.git,t1,t2,t3}`; shared read-only packages `/build/shared/packages-ed3deb884a05` (7.6 GB, one copy: 516 s, today's per-lane packages cost); cache `/build/lake-cache`. t1 holds a real-copied `.lake/build` from 694415d5d; t2/t3 have none. No leases held.
+- Use: `. /build/pool/pool.env; t=$(/build/pool/bin/lane-tree acquire <lane> origin/lane/<lane>)`, sync or check out there, `scripts/pipeline/lane-check FILE`, `lane-tree release <lane>`. Never as root, never inside closure-lock.
+- Not done: the measurement (t1 cache fill, t2 build from the cache, incremental lane-check), hbox and dregg-build pools, reclaim, docs. A queued `closure-lock swarm-build lake build Host.Main Host.ClientConsentSession` from the stopped measurement (PID 2023359, cwd /build/pool, no PID file) is still waiting for the lock: when it runs it fails at once (not a Lake project); left for the owner to stop.

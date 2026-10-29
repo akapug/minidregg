@@ -1,0 +1,185 @@
+{
+ "apps": [
+  {
+   "appId": "f3s5vv8g7xuay08e3x1g5zwuaycz0mt7170nmz3kf5e1g1q9ytr0",
+   "author": {
+    "name": "Mini"
+   },
+   "categories": [
+    "science"
+   ],
+   "class": "M",
+   "codeLink": "https://github.com/ocdtrekkie/datasette-sandstorm",
+   "isOpenSource": true,
+   "name": "Datasette",
+   "packageBuiltAt": "2026-10-29T07:58:54Z",
+   "packageId": "daafe47b15e9c8659cff5236746e5506",
+   "sha256": "daafe47b15e9c8659cff5236746e550649653cc14242a7a7d024473ff341f5f7",
+   "shortDescription": "Read-only data explorer",
+   "upstreamAuthor": "Simon Willison",
+   "upstreamVersion": "0.65.5",
+   "version": "0.65.5",
+   "versionNumber": 1,
+   "webLink": "https://datasette.io"
+  },
+  {
+   "appId": "g9vdgqnn4dnj6r7tyaw9duydgmgskxzq9564fxceekqhvcds33zh",
+   "author": {
+    "name": "Mini"
+   },
+   "categories": [
+    "productivity",
+    "media"
+   ],
+   "class": "M",
+   "codeLink": "https://github.com/mnutt/davros/",
+   "isOpenSource": true,
+   "name": "Davros",
+   "packageBuiltAt": "2026-10-29T07:07:38Z",
+   "packageId": "5485d227d04a1af26e08358dcb92accf",
+   "sha256": "5485d227d04a1af26e08358dcb92accf37b3a8855194caae3ad8b5919396155d",
+   "shortDescription": "File storage",
+   "upstreamAuthor": "Michael Nutt",
+   "upstreamVersion": "0.33.4",
+   "version": "0.33.4",
+   "versionNumber": 334,
+   "webLink": "https://github.com/mnutt/davros/"
+  },
+  {
+   "appId": "f3c9rjszvmqgvnhan8c6m5cpwkqmwu6t6de0qxa8vnx0rqreafqh",
+   "author": {
+    "name": "Mini"
+   },
+   "categories": [
+    "webPublishing",
+    "productivity"
+   ],
+   "class": "S",
+   "codeLink": "https://github.com/johnbintz/dokuwiki-sandstorm",
+   "isOpenSource": true,
+   "name": "DokuWiki",
+   "packageBuiltAt": "2026-10-29T09:08:09Z",
+   "packageId": "f6af420324fd459439330089819c9c27",
+   "sha256": "f6af420324fd459439330089819c9c27fcb3f91eeda4e24ae1a53f393deed730",
+   "shortDescription": "Wiki",
+   "upstreamAuthor": "DokuWiki Team",
+   "upstreamVersion": "2026-07-14c",
+   "version": "2026-07-14c",
+   "versionNumber": 1,
+   "webLink": "https://www.dokuwiki.org"
+  },
+  {
+   "appId": "umpy9re0saa7vtckd6mnprv6mc5vjgr0qh5qucs4na3qjrxrrzch",
+   "author": {
+    "name": "Mini"
+   },
+   "categories": [
+    "office",
+    "productivity"
+   ],
+   "class": "M",
+   "codeLink": "https://github.com/audreyt/ethercalc",
+   "isOpenSource": true,
+   "name": "EtherCalc",
+   "packageBuiltAt": "2026-10-29T08:09:45Z",
+   "packageId": "da9d64ca90e51cdf2643c3271f9ee9b1",
+   "sha256": "da9d64ca90e51cdf2643c3271f9ee9b17cbd5af73931ab79f588f72dcf69b785",
+   "shortDescription": "Multi-user Spreadsheet",
+   "upstreamAuthor": "Audrey Tang",
+   "upstreamVersion": "2026.10.26.0+sandstorm1",
+   "version": "2026.10.26.0+sandstorm1",
+   "versionNumber": 202610260,
+   "webLink": "https://ethercalc.net/"
+  },
+  {
+   "appId": "ksyn7qa4szjwa14v89r7znxwrpjs0dez5q2u8s810d0awnuswmfh",
+   "author": {
+    "name": "Mini"
+   },
+   "categories": [
+    "office",
+    "productivity"
+   ],
+   "class": "M",
+   "codeLink": "https://github.com/ether/etherpad",
+   "isOpenSource": true,
+   "name": "Etherpad",
+   "packageBuiltAt": "2026-10-29T10:27:05Z",
+   "packageId": "e6d71fa0205f177c6cd7d8d49dfc79e0",
+   "sha256": "e6d71fa0205f177c6cd7d8d49dfc79e0622d0bfde3ddb81ec0d16078dc9fbc7c",
+   "shortDescription": "Collaborative document editor",
+   "upstreamAuthor": "Etherpad Foundation",
+   "upstreamVersion": "3.3.12-1",
+   "version": "3.3.12-1",
+   "versionNumber": 1,
+   "webLink": "https://etherpad.org/"
+  },
+  {
+   "appId": "a0wt1wk03g737k60grvphm2rxy9yjnkev8g4jjj9zgu9mm3ggay0",
+   "author": {
+    "name": "Mini"
+   },
+   "categories": [
+    "office"
+   ],
+   "class": "M",
+   "codeLink": "https://github.com/hedgedoc/hedgedoc",
+   "isOpenSource": true,
+   "name": "HedgeDoc",
+   "packageBuiltAt": "2026-10-29T08:01:24Z",
+   "packageId": "8452968c1fc59a324106009faa14dedd",
+   "sha256": "8452968c1fc59a324106009faa14dedd058e527b7efba16927174e02296df3ce",
+   "shortDescription": "Markdown editor",
+   "upstreamAuthor": "HedgeDoc App Team",
+   "upstreamVersion": "1.12.0",
+   "version": "1.12.0",
+   "versionNumber": 9,
+   "webLink": "https://hedgedoc.org"
+  },
+  {
+   "appId": "894fztp7d6e4u8fgw2qtm8jv904jw6w19frfqgc0pwytj0q10s80",
+   "author": {
+    "name": "Mini"
+   },
+   "categories": [
+    "office",
+    "productivity"
+   ],
+   "class": "M",
+   "codeLink": "https://github.com/hledgerorg/hledger",
+   "isOpenSource": true,
+   "name": "Hledger Web",
+   "packageBuiltAt": "2026-10-29T09:15:01Z",
+   "packageId": "7c0c42cbc414380ded0f0f5c1e743e06",
+   "sha256": "7c0c42cbc414380ded0f0f5c1e743e06874102ff2ce86f71d856075a81d27a1f",
+   "shortDescription": "Plain-text accounting",
+   "upstreamAuthor": "Hledger Team",
+   "upstreamVersion": "1.52.4",
+   "version": "1.52.4",
+   "versionNumber": 15204,
+   "webLink": "https://hledger.org"
+  },
+  {
+   "appId": "k2drffaa4xx1mq1gz6hh5cnw2kfqr6mkpvz51h54xkp4eawx6wn0",
+   "author": {
+    "name": "Mini"
+   },
+   "categories": [
+    "other"
+   ],
+   "class": "M",
+   "codeLink": "https://github.com/orblivion/ntfy",
+   "isOpenSource": true,
+   "name": "sntfy",
+   "packageBuiltAt": "2026-10-29T08:05:00Z",
+   "packageId": "f1570de10690a0de3af76437ad836cd0",
+   "sha256": "f1570de10690a0de3af76437ad836cd00d0a3f89f4880b75b4650e921f3d5990",
+   "shortDescription": "Push notifications",
+   "upstreamAuthor": "Philipp C. Heckel",
+   "upstreamVersion": "v2.34.0-sandstorm-20",
+   "version": "v2.34.0-sandstorm-20",
+   "versionNumber": 20,
+   "webLink": "https://ntfy.sh"
+  }
+ ]
+}

@@ -2030,7 +2030,7 @@ def applicationBirthContext (path specField : String) (json : Lean.Json)
             throw s!"{path}.height: differs from verifier-loaded current height"
         pure supplied
   let template ← factoryTemplate (path ++ ".template") (← field path "template" obj)
-  let nativeConfig : NativeHost.Config := {
+  let nativeConfig : NativeHost.Config := NativeHost.Config.ofInputs {
     deployment := source.deployment, federation := source.federation, template := template,
     tariff := source.tariff, genesisHeight := source.genesisHeight, expectedSeed := ⟨0⟩,
     storage := { binary := "", root := "", key := "" }, signature := ⟨""⟩, grainBirthTariff := grainBirthTariff }

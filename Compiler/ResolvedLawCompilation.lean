@@ -49,6 +49,25 @@ def witness {F : Type} [Field F] [DecidableEq F]
   newState := newState
   auxiliary := wit profile (predicate resolved) oldState newState
 
+/-- `witness` as compiled: the auxiliary assignment closes over the two state indexes,
+built once per witness (here the result is a structure, so the bindings are not moved under
+the assignment's lambda by eta-expansion). -/
+def witnessFast {F : Type} [Field F] [DecidableEq F]
+    (profile : CompilerProfile) {input : GraphInput} (resolved : ResolvedDAG input)
+    (sourceAddress : Digest) (oldState newState : State) : CompiledPolicyWitness F :=
+  let oldIndexed := indexState oldState
+  let newIndexed := indexState newState
+  { address := sourceAddress
+    oldState := oldState
+    newState := newState
+    auxiliary := witIndexed profile (predicate resolved) oldIndexed newIndexed }
+
+@[csimp] theorem witness_eq_fast : @witness = @witnessFast := by
+  funext F _ _ profile input resolved sourceAddress oldState newState
+  unfold witness witnessFast
+  dsimp only
+  rw [wit_eq_indexed]
+
 /-- The closure identity must be authenticated by the receiving constructor;
 it is never substituted for the policy membership address. -/
 structure Witness (F : Type) where

@@ -2,9 +2,9 @@
   "format": "mini-app-interface-v1",
   "name": "etherpad",
   "interfaceVersion": 1,
-  "appId": "h37dm17aa89yrd8zuqpdn36p6zntumtv08fjpu8a8zrte7q1cn60",
-  "packageId": "aee0806c9547d1f53c1ccef38ac195ba",
-  "appVersion": "1.8.18-1",
+  "appId": "ksyn7qa4szjwa14v89r7znxwrpjs0dez5q2u8s810d0awnuswmfh",
+  "packageId": "e6d71fa0205f177c6cd7d8d49dfc79e0",
+  "appVersion": "3.3.12-1",
   "status": "prototype-unqualified",
   "limits": {
     "bodyBytes": 16384,
@@ -151,7 +151,7 @@
   "sources": [
     "https://github.com/sandstorm-org/etherpad-lite-sandstorm",
     "scripts/spk-platform/market-writes/japps.sh:3",
-    "https://github.com/ether/etherpad-lite/blob/1.8.18/src/node/handler/ImportHandler.js",
-    "package:aee0806c9547d1f53c1ccef38ac195ba/opt/app/etherpad-lite/src/node/handler/ImportHandler.js"
+    "https://github.com/ether/etherpad/blob/v3.3.12/src/node/handler/ImportHandler.ts",
+    "package:e6d71fa0205f177c6cd7d8d49dfc79e0/opt/app/etherpad-lite/src/node/handler/ImportHandler.ts"
   ]
 }

@@ -36,9 +36,9 @@ the prefix is the replay of the prefix (`Body4.Honest.state`), admissible for th
 resumes over the suffix to the replay of the whole log. -/
 theorem resume_honest {seed : Seed} {pre suf : List IntentRecord} {state : State}
     (seedValid : (seed.cells.map Prod.fst).Nodup)
-    (admissible : state.Admissible ⟨seed, pre ++ suf⟩)
-    (honest : replaySnapshot rootBytes ⟨seed, pre⟩ = some (state.snapshot rootBytes pre)) :
-    resume rootBytes ⟨seed, pre ++ suf⟩ pre.length state = replaySnapshot rootBytes ⟨seed, pre ++ suf⟩ := by
+    (admissible : state.Admissible (Image.ofAccepted seed (pre ++ suf)))
+    (honest : replaySnapshot rootBytes (Image.ofAccepted seed pre) = some (state.snapshot rootBytes pre)) :
+    resume rootBytes (Image.ofAccepted seed (pre ++ suf)) pre.length state = replaySnapshot rootBytes (Image.ofAccepted seed (pre ++ suf)) := by
   have prefixReplay : replay rootBytes (seed.snapshot rootBytes) pre = some (state.snapshot rootBytes pre) := by
     unfold replaySnapshot at honest
     rw [resume_genesis] at honest
@@ -46,7 +46,7 @@ theorem resume_honest {seed : Seed} {pre suf : List IntentRecord} {state : State
     simpa [if_pos seedValid] using honest
   unfold replaySnapshot
   rw [resume_genesis]
-  apply resume_sound rootBytes ⟨seed, pre ++ suf⟩ pre.length state (state.snapshot rootBytes pre) seedValid
+  apply resume_sound rootBytes (Image.ofAccepted seed (pre ++ suf)) pre.length state (state.snapshot rootBytes pre) seedValid
     admissible
   · simpa [List.take_left'] using prefixReplay
   · simp
@@ -80,10 +80,10 @@ theorem worldAt_fastForward {seed : Seed} {pre suf : List IntentRecord}
     {genesis base : HostRefinesWorld.DWorld}
     (fromSeed : TurnLog.genesisOfSeed seed = .ok genesis)
     (atPrefix : DurableReceiverIO.foldRecords rootBytes genesis 0 pre = .ok base) :
-    worldAt rootBytes ⟨seed, pre ++ suf⟩ =
+    worldAt rootBytes (Image.ofAccepted seed (pre ++ suf)) =
       (DurableReceiverIO.foldRecords rootBytes base pre.length suf).toOption := by
   unfold worldAt
-  simp only [fromSeed, foldRecords_append, atPrefix, Nat.zero_add]
+  simp only [Image.ofAccepted_seed, Image.accepted_ofAccepted, fromSeed, foldRecords_append, atPrefix, Nat.zero_add]
   rfl
 
 #assert_axioms worldAt_fastForward

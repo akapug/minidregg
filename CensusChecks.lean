@@ -8,4 +8,3 @@ environment, the second a recording). The merge gate builds each by name.
 -/
 import TokenCensus.SelfTest
 import TokenCensus.Fixtures
-import Compiler.PersistedCodecTagCensusSelfTest

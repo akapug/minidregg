@@ -143,7 +143,7 @@ theorem Session.rememberReadback_newer {config : Config} (session : Session conf
   intro same
   have heights := congrArg (fun image : DurableReceiver.Image => image.accepted.length) same
   dsimp only at heights
-  unfold DurableReceiverIO.Loaded.height at newer
+  simp only [DurableReceiverIO.Loaded.height_eq] at newer
   omega
 
 /-- Rendering facts remain representation-only; all per-query scope/current

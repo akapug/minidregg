@@ -1,0 +1,388 @@
+{
+  "format": "mini-app-interface-v1",
+  "name": "wbo",
+  "interfaceVersion": 1,
+  "appId": "rhtntjye2n7p71vrcq0ae4f6n9nr139fdk4n884tw55k40vy4uph",
+  "packageId": "ac72e0d103d7f5c21e79dc74fc616b33",
+  "appVersion": "1.20",
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 16384,
+    "replyBytes": 1048576,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "$defs": {},
+  "operations": {
+    "board.read": {
+      "description": "Read the complete bounded in-memory board snapshot; empty board is []. Board identity is grain plus name. This does not prove disk persistence and has no pagination.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "board": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          }
+        },
+        "required": [
+          "board"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "array",
+        "maxItems": 1000,
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "tool": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "id",
+            "tool"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "write": false,
+      "binding": {
+        "protocol": "conversation",
+        "wire": "socket.io-eio4",
+        "path": [
+          "socket.io/"
+        ],
+        "query": {},
+        "steps": [
+          {
+            "emit": "getboard",
+            "args": [
+              {
+                "arg": "board"
+              }
+            ]
+          },
+          {
+            "id": "board",
+            "receive": {
+              "event": "broadcast",
+              "where": [
+                {
+                  "path": [
+                    0,
+                    "_children"
+                  ],
+                  "exists": true
+                }
+              ]
+            }
+          }
+        ],
+        "result": {
+          "result": [
+            "board",
+            0,
+            "_children"
+          ]
+        }
+      }
+    },
+    "rectangle.write": {
+      "description": "Send rectangle data into this board; an existing ID may be replaced. Package has no sender acknowledgement: delivery=sent is physical send only. Require independent board.read and saved-file readback for persistence; never replay uncertain send.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "board": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          },
+          "color": {
+            "type": "string",
+            "pattern": "^#[0-9a-fA-F]{6}$"
+          },
+          "size": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "x": {
+            "type": "number",
+            "minimum": -1000000,
+            "maximum": 1000000
+          },
+          "y": {
+            "type": "number",
+            "minimum": -1000000,
+            "maximum": 1000000
+          },
+          "x2": {
+            "type": "number",
+            "minimum": -1000000,
+            "maximum": 1000000
+          },
+          "y2": {
+            "type": "number",
+            "minimum": -1000000,
+            "maximum": 1000000
+          }
+        },
+        "required": [
+          "board",
+          "id",
+          "color",
+          "size",
+          "x",
+          "y",
+          "x2",
+          "y2"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "delivery": {
+            "const": "sent"
+          },
+          "id": {
+            "type": "string",
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "delivery",
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "write": true,
+      "binding": {
+        "protocol": "conversation",
+        "wire": "socket.io-eio4",
+        "path": [
+          "socket.io/"
+        ],
+        "query": {},
+        "steps": [
+          {
+            "emit": "getboard",
+            "args": [
+              {
+                "arg": "board"
+              }
+            ]
+          },
+          {
+            "id": "board",
+            "receive": {
+              "event": "broadcast",
+              "where": [
+                {
+                  "path": [
+                    0,
+                    "_children"
+                  ],
+                  "exists": true
+                }
+              ]
+            }
+          },
+          {
+            "emit": "broadcast",
+            "args": [
+              {
+                "board": {
+                  "arg": "board"
+                },
+                "data": {
+                  "tool": "Rectangle",
+                  "type": "rect",
+                  "id": {
+                    "arg": "id"
+                  },
+                  "color": {
+                    "arg": "color"
+                  },
+                  "size": {
+                    "arg": "size"
+                  },
+                  "x": {
+                    "arg": "x"
+                  },
+                  "y": {
+                    "arg": "y"
+                  },
+                  "x2": {
+                    "arg": "x2"
+                  },
+                  "y2": {
+                    "arg": "y2"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "result": {
+          "delivery": "sent",
+          "id": {
+            "arg": "id"
+          }
+        }
+      }
+    },
+    "board.saved.read": {
+      "description": "Read the saved board JSON object, keyed by element ID. Save is asynchronous and errors can be logged by package; memory delivery is not saved-file evidence. Missing or unreadable history refuses.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "board": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          }
+        },
+        "required": [
+          "board"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "tool": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "id",
+            "tool"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "download/",
+          {
+            "arg": "board",
+            "encoding": "segment"
+          }
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ]
+      }
+    }
+  },
+  "qualification": [
+    {
+      "id": "write",
+      "op": "rectangle.write",
+      "args": {
+        "board": {
+          "context": "runId"
+        },
+        "id": "typed-rectangle",
+        "color": "#123456",
+        "size": 4,
+        "x": 10,
+        "y": 10,
+        "x2": 120,
+        "y2": 90
+      }
+    },
+    {
+      "id": "read",
+      "op": "board.read",
+      "args": {
+        "board": {
+          "context": "runId"
+        }
+      },
+      "assert": [
+        {
+          "contains": {
+            "id": "typed-rectangle",
+            "tool": "Rectangle",
+            "x": 10,
+            "y": 10,
+            "x2": 120,
+            "y2": 90
+          }
+        }
+      ],
+      "await": {
+        "attempts": 6,
+        "intervalSeconds": 1,
+        "retryStatuses": []
+      }
+    },
+    {
+      "id": "saved",
+      "op": "board.saved.read",
+      "args": {
+        "board": {
+          "context": "runId"
+        }
+      },
+      "await": {
+        "attempts": 6,
+        "intervalSeconds": 2,
+        "retryStatuses": []
+      },
+      "assert": [
+        {
+          "path": [
+            "typed-rectangle",
+            "tool"
+          ],
+          "equals": "Rectangle"
+        },
+        {
+          "path": [
+            "typed-rectangle",
+            "x2"
+          ],
+          "equals": 120
+        },
+        {
+          "path": [
+            "typed-rectangle",
+            "y2"
+          ],
+          "equals": 90
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "kind": "member-route"
+  },
+  "sources": [
+    "https://github.com/ocdtrekkie/whitebophir-sandstorm",
+    "package:ac72e0d103d7f5c21e79dc74fc616b33/opt/app/whitebophir/server/sockets.js",
+    "package:ac72e0d103d7f5c21e79dc74fc616b33/opt/app/whitebophir/server/boardData.js",
+    "package:ac72e0d103d7f5c21e79dc74fc616b33/opt/app/whitebophir/node_modules/engine.io-parser/build/cjs/index.js"
+  ]
+}
