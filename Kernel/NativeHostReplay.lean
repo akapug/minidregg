@@ -3407,21 +3407,8 @@ theorem validateLoaded_headTag (config : Config) (durable : Durable) (headTag : 
     (fun loaded => cellsLawful config { durable with headTag := headTag } loaded.directory)
     (PlatformCellDomain.recordAt config.deployment durable.snapshot.canonicalBytes)
     directories lawfuls rfl
-  unfold validateLoaded validateParts validatePartsWith validatePartsVia
-  revert core
-  generalize validateCore config durable.image.seed durable.logStart
-    (CredentialAuthorityDomainReceiver.loadDirectory durable)
-    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
-    (·.directory) (·.snapshot.logical) (fun loaded => cellsLawful config durable loaded.directory)
-    (PlatformCellDomain.recordAt config.deployment durable.snapshot.canonicalBytes) = right
-  generalize validateCore config durable.image.seed durable.logStart
-    (CredentialAuthorityDomainReceiver.loadDirectory { durable with headTag := headTag })
-    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
-    (·.directory) (·.snapshot.logical)
-    (fun loaded => cellsLawful config { durable with headTag := headTag } loaded.directory)
-    (PlatformCellDomain.recordAt config.deployment durable.snapshot.canonicalBytes) = left
-  intro core
-  cases left <;> cases right <;> simp_all [Except.map]
+  rw [validateLoaded_pins_core, validateLoaded_pins_core]
+  exact core
 
 /-- **`tail_bounded`, on the replayed history.**  Every step of the replay walk
 that is not a certify record sits at most `L` heights past the certified height
