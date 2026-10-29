@@ -564,7 +564,7 @@ pub(crate) fn prepare_resident(tools: &RoomToolsConfig, inbox: &Path, state: &Pa
     Ok(assignment)
 }
 
-/// `hermes/tools` (bits 1 files, 2 terminal, 4 Python) and `hermes/compute`
+/// `hermes/tools` (bits 1 files, 2 terminal, 4 Python, 8 the oracle, 16 typed apps) and `hermes/compute`
 /// (sandbox CPU seconds per paid turn) from `credit --action tariff`'s
 /// listing; an unset or undeclared field reads 0.
 pub(crate) fn sandbox_fields(tariff: &str) -> (u64, u64) {
@@ -572,7 +572,7 @@ pub(crate) fn sandbox_fields(tariff: &str) -> (u64, u64) {
         .filter_map(|line| line.trim_start().strip_prefix(name))
         .find_map(|rest| rest.starts_with(' ').then(|| rest.trim().parse::<u64>().ok()).flatten())
         .unwrap_or(0);
-    (field("hermes/tools").min(15), field("hermes/compute"))
+    (field("hermes/tools").min(31), field("hermes/compute"))
 }
 
 /// One attach: recover, adopt, return the budget when dismissed, else run the
@@ -697,6 +697,6 @@ mod sandbox_field_tests {
         assert_eq!(super::sandbox_fields(listing), (5, 10));
         assert_eq!(super::sandbox_fields("  hermes/tools -\n"), (0, 0));
         assert_eq!(super::sandbox_fields("  hermes/turn 10\n"), (0, 0), "an older room declares neither");
-        assert_eq!(super::sandbox_fields("  hermes/tools 99\n").0, 15);
+        assert_eq!(super::sandbox_fields("  hermes/tools 99\n").0, 31);
     }
 }
