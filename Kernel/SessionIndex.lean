@@ -210,13 +210,12 @@ def CellIds.admit (ids : CellIds) (record : IntentRecord) : CellIds :=
   ids.addAll (record.writes.map DataWrite.cellId)
 
 theorem rawIds_snoc (image : Image) (record : IntentRecord) :
-    rawIds { image with accepted := image.accepted ++ [record] } =
-      rawIds image ++ record.writes.map DataWrite.cellId := by
+    rawIds (image.snoc record) = rawIds image ++ record.writes.map DataWrite.cellId := by
   simp [rawIds, List.flatMap_append, List.append_assoc]
 
 theorem CellIds.admit_exact {ids : CellIds} {image : Image} (exact : ids.Exact (rawIds image))
     (record : IntentRecord) :
-    (ids.admit record).Exact (rawIds { image with accepted := image.accepted ++ [record] }) := by
+    (ids.admit record).Exact (rawIds (image.snoc record)) := by
   rw [rawIds_snoc]
   exact CellIds.addAll_exact exact _
 

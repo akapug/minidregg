@@ -269,7 +269,7 @@ private def readerWith (mint : DurableCheckpointCodec.MacKey → Digest → Stor
   let some frontier := loaded.frontier
     | return .error "this opening carries no accumulator frontier (it was not read from the Store)"
   let store := mint key loaded.logStart
-  let height := loaded.image.accepted.length
+  let height := loaded.height
   let head ← if height = 0 then pure (Head.genesis store loaded.worldRoot) else do
     let tag ← match ← loaded.headTagOrRead transport with
       | .ok tag => pure tag

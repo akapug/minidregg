@@ -130,7 +130,10 @@ def seedStream : StreamCodec Seed :=
 def imageStream : StreamCodec Image :=
   StreamCodec.xmap (StreamCodec.product seedStream (StreamCodec.list intentStream))
     (fun image => (image.seed, image.accepted))
-    (fun tuple => ⟨tuple.1, tuple.2⟩) (by intro value; cases value; rfl)
+    (fun tuple => Image.ofAccepted tuple.1 tuple.2) (by
+      intro value
+      cases value
+      simp [Image.ofAccepted, Image.accepted])
 
 /-- Version 3: every record carries its signing subject and its meter credit. A
 version-1 or version-2 image refuses (the frame is compared exactly). -/

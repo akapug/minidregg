@@ -185,7 +185,7 @@ theorem mem_cellIds_append {rootBytes : List UInt8 → Digest} {image : Image}
     (member : cellId ∈ image.cellIds) : cellId ∈ (image.append intent).cellIds := by
   unfold Image.cellIds at member ⊢
   rw [List.mem_eraseDups] at member ⊢
-  simp only [Image.append, List.flatMap_append, List.mem_append] at member ⊢
+  simp only [Image.accepted_append, List.flatMap_append, List.mem_append] at member ⊢
   rcases member with seeded | written
   · exact Or.inl seeded
   · exact Or.inr (Or.inl written)
@@ -270,7 +270,7 @@ theorem resume_append (rootBytes : List UInt8 → Digest) (image : Image) (heigh
     have stillValid : state.Admissible (image.append intent) :=
       ⟨valid.1, valid.2.1, fun cellId member => mem_cellIds_append (valid.2.2 cellId member)⟩
     rw [if_pos stillValid]
-    simp only [Image.append, List.take_append_of_le_length withinLog,
+    simp only [Image.accepted_append, List.take_append_of_le_length withinLog,
       List.drop_append_of_le_length withinLog, replay_append, resumed, Option.bind_some]
     simp [replay, IntentRecord.bind_ofIntent, accepted]
   next => simp at resumed

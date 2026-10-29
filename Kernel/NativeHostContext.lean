@@ -457,7 +457,8 @@ def logicalHeight (config : Config) (durable : Durable) : Height :=
   config.genesisHeight + durable.height
 
 theorem logicalHeight_exact (config : Config) (durable : Durable) :
-    logicalHeight config durable = config.genesisHeight + durable.image.accepted.length := rfl
+    logicalHeight config durable = config.genesisHeight + durable.image.accepted.length := by
+  rw [logicalHeight, DurableReceiverIO.Loaded.height_eq]
 
 /-- Every policy whose revision the authority cell records has a complete
 current head, and that head's address loads a source cell of the same policy,
@@ -1064,7 +1065,8 @@ def validateLoadedFrom (config : Config) (prior : Opened config) (durable : Dura
   let evidence := priorGenesisEvidence prior durable
   (validatePartsVia config durable
     (CredentialAuthorityDomainReceiver.loadDirectoryFrom prior.directory durable)
-    (CredentialAuthorityDomainReceiver.loadDeploymentFrom prior.authority durable.snapshot)
+    (CredentialAuthorityDomainReceiver.loadDeploymentFromAt prior.authority durable.snapshot
+      durable.height (DurableReceiverIO.Loaded.history_length_eq_height durable).symm)
     (cellsLawfulFrom config prior durable) (cellsLawfulFrom_eq config prior durable)
     evidence.1 evidence.2).map
     fun parts => ⟨durable, parts.directory, parts.authority, parts.pins, parts.lawful,
@@ -1077,7 +1079,10 @@ theorem validateLoadedFrom_eq (config : Config) (prior : Opened config) (durable
   rw [validatePartsVia_withExact_eq config durable _ _ _ _
     (priorGenesisEvidence prior durable).1 (priorGenesisEvidence prior durable).2
     (CredentialAuthorityDomainReceiver.loadDirectoryFrom_eq prior.directory durable)
-    (CredentialAuthorityDomainReceiver.loadDeploymentFrom_eq prior.authority durable.snapshot)]
+    ((CredentialAuthorityDomainReceiver.loadDeploymentFromAt_eq prior.authority durable.snapshot
+      durable.height (DurableReceiverIO.Loaded.history_length_eq_height durable).symm).trans
+    (CredentialAuthorityDomainReceiver.loadDeploymentAt_eq config.deployment durable.snapshot
+      durable.height (DurableReceiverIO.Loaded.history_length_eq_height durable).symm))]
 
 /-- Validation wraps exactly the image it was given. -/
 theorem validateLoaded_durable {config : Config} {durable : Durable} {opened : Opened config}
