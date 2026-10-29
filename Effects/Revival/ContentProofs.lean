@@ -502,7 +502,8 @@ theorem contentComplete : ContentComplete := by
 
 /-- A transaction context: every field a zero, the authority cell empty. -/
 def sampleCtx : LiveCtx where
-  snapshot := CredentialAuthorityDomain.Snapshot.ofCell ⟨0⟩ 0 (fun _ => false) ⟨0⟩
+  snapshot := CredentialAuthorityDomain.Snapshot.ofCell ⟨0⟩ 0 (fun _ => false)
+    (materialize CredentialAuthorityCell.materializer 0)
   semantics := ⟨0⟩
   ambient := { federation := ⟨0⟩, height := 0 }
   command := { subject := ⟨0⟩, nonce := 0, targets := [] }
@@ -568,9 +569,10 @@ theorem store_run_iff {L : Layout.{0, 0, 0}} :
 post followed by the kernel's blinding rotation. -/
 theorem computeTarget_content_header (ctx : LiveCtx) (command : ContentResource.Command)
     (pre : ContentResource.ContentCell) (observe : Option CapabilityId) (epoch : Option Nat)
-    (roster : Option ObjectAudienceRoster.Roster) (object : ctx.kind = .object) :
+    (roster : Option ObjectAudienceRoster.Roster) (root : Digest) (object : ctx.kind = .object)
+    (fresh : root = pre.root ∨ contentSpec.commutes command = true) :
     DeclaredResourceController.computeTarget ctx.snapshot ctx.semantics ctx.ambient ctx.command
-        (contentTarget ctx contentSpec.version pre.root command observe epoch roster) pre =
+        (contentTarget ctx contentSpec.version root command observe epoch roster) pre =
       match ContentResource.prepareCell ⟨ctx.command.subject, ctx.kind, ctx.capability⟩
           (DeclaredResourceController.contentOperation ctx.snapshot ctx.semantics ctx.command)
           (ContentResource.documentOf ctx.target)
@@ -581,14 +583,17 @@ theorem computeTarget_content_header (ctx : LiveCtx) (command : ContentResource.
   simp [DeclaredResourceController.computeTarget, contentTarget, contentSpec, object, bind,
     Except.bind, pure, Except.pure]
   split
+  · rename_i stale
+    rcases fresh with same | commuting
+    · exact absurd same stale.1
+    · simp [contentSpec] at commuting
+      simp [commuting] at stale
   · generalize ContentResource.prepareCell ⟨ctx.command.subject, ctx.kind, ctx.capability⟩
         (DeclaredResourceController.contentOperation ctx.snapshot ctx.semantics ctx.command)
         (ContentResource.documentOf ctx.target)
         (DeclaredResourceController.contentContext ctx.snapshot ctx.ambient ctx.command) pre command =
       result
     cases result <;> rfl
-  · rename_i differs
-    exact absurd rfl differs
 
 theorem contentAgreement : ContentAgreement contentSpec := by
   intro ctx command pre observe epoch roster
@@ -602,15 +607,16 @@ theorem contentAgreement : ContentAgreement contentSpec := by
     have wrongVersion' : version ≠ ContentResource.commandVersion := wrongVersion
     simp [DeclaredResourceController.computeTarget, contentTarget, object, wrongVersion', bind,
       Except.bind, pure, Except.pure]
-  · intro root accepted stale
+  · intro root accepted commutes stale
     have object : ctx.kind = .object := by simpa [contentSpec] using accepted
-    simp [DeclaredResourceController.computeTarget, contentTarget, contentSpec, object, bind,
-      Except.bind, pure, Except.pure]
+    have commutes' : command.commutes = false := commutes
+    simp [DeclaredResourceController.computeTarget, contentTarget, contentSpec, object, commutes',
+      bind, Except.bind, pure, Except.pure]
     intro same
     exact absurd same stale
-  · intro accepted
+  · intro root accepted fresh
     have object : ctx.kind = .object := by simpa [contentSpec] using accepted
-    rw [computeTarget_content_header ctx command pre observe epoch roster object]
+    rw [computeTarget_content_header ctx command pre observe epoch roster root object fresh]
     by_cases empty : command.actions.isEmpty
     · have refused : contentSpec.sem ctx command pre.logical = .error .emptyActions := by
         simp [contentSpec, contentSem, empty]
@@ -682,7 +688,7 @@ theorem contentAgreement : ContentAgreement contentSpec := by
           rw [prepared.post_exact, sameProgress]
           exact (ContentResource.run_executes _ _ _ _ _ command progress ran).2.symm
         have patch : DeclaredResourceController.targetPatch ctx.snapshot ctx.semantics ctx.ambient
-            ctx.command (contentTarget ctx contentSpec.version pre.root command observe epoch roster) pre =
+            ctx.command (contentTarget ctx contentSpec.version root command observe epoch roster) pre =
               progress.2 ++ HyperdocumentCell.contentBlinding.patch pre.logical ctx.ambient.height := by
           simp [DeclaredResourceController.targetPatch, contentTarget, ran, contentSpec]
         have complete := contentComplete ctx command pre.logical progress.2 emitted
@@ -767,7 +773,7 @@ theorem contentAccepted : ContentAccepted := by
   obtain ⟨post, executed⟩ := exec_ok_of_complete (code := 1) contentComplete emitted
   obtain ⟨-, -, -, live, -⟩ := contentAgreement sampleCtx sampleLinkCommand (cellOf blindedStore)
     none none none
-  obtain ⟨accepted, -, -⟩ := live rfl
+  obtain ⟨accepted, -, -⟩ := live _ rfl (Or.inl rfl)
   obtain ⟨computed, valid⟩ := (accepted post).1 executed
   exact ⟨sampleCtx, sampleLinkCommand, cellOf blindedStore, none, none, none, post, rfl,
     by simp [sampleLinkCommand], computed, valid⟩
@@ -781,11 +787,11 @@ theorem contentGhost_disagrees : ¬ ContentAgreement contentGhost := by
     none none none
   obtain ⟨-, -, -, live, -⟩ := contentAgreement sampleCtx sampleLinkCommand (cellOf blindedStore)
     none none none
-  have withRotation := (live rfl).2.2 ps emitted
+  have withRotation := (live _ rfl (Or.inl rfl)).2.2 ps emitted
   have withoutRotation : DeclaredResourceController.targetPatch sampleCtx.snapshot sampleCtx.semantics
       sampleCtx.ambient sampleCtx.command
       (contentTarget sampleCtx contentSpec.version (cellOf blindedStore).root sampleLinkCommand none none none)
-      (cellOf blindedStore) = ps ++ [] := (liveGhost rfl).2.2 ps emitted
+      (cellOf blindedStore) = ps ++ [] := (liveGhost _ rfl (Or.inl rfl)).2.2 ps emitted
   rw [withRotation] at withoutRotation
   have rotation : HyperdocumentCell.contentBlinding.patch blindedStore sampleCtx.ambient.height ≠ [] := by
     unfold StoreCodec.Blinding.patch
@@ -831,7 +837,7 @@ theorem hostDispatch_blinded : ∃ post,
   refine ⟨post, executed, ?_⟩
   obtain ⟨-, -, -, live, -⟩ := contentAgreement sampleCtx sampleLinkCommand (cellOf blindedStore)
     none none none
-  obtain ⟨computed, valid⟩ := ((live rfl).1 post).1 executed
+  obtain ⟨computed, valid⟩ := ((live _ rfl (Or.inl rfl)).1 post).1 executed
   have decoded : DeclaredResourceController.payloadStream.toLawful.decode
       (UInt8.ofNat 1 :: ContentResource.commandStream.encode sampleLinkCommand) =
         some (.content sampleLinkCommand) :=

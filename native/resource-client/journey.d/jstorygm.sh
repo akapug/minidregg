@@ -168,27 +168,47 @@ check story "the second invite reprints the same invitation" test "$(sed -n "s/^
 check story "and says it is already invited" grep -q 'already invited' "$OUT"
 fails story sponsor "story invite $S 424242 gm" 2 "not $S's GM"
 
+# Two invites of one home at once (the door's beside the seed's; demo-dry 9bd52317c: "cannot create
+# .../reads/story-tale/table.N/view.bin: No such file or directory"): a finished signed read must not sweep
+# the other process's in-flight read directory. Several rounds, each pair started together.
+CONC_FAIL=""
+for round in 1 2 3 4 5 6; do
+  for who in a b; do
+    "$SHELL_BIN" shell --socket "$SOCKET" --host "$HOST" --config "$CONFIG" --workspace "$SPONSOR_WS" \
+      --home "$H/sponsor" --line "story invite $S $G" >"$L/conc-$round-$who.out" 2>"$L/conc-$round-$who.err" &
+    eval "CPID_$who=\$!"
+  done
+  wait "$CPID_a"; RA=$?; wait "$CPID_b"; RB=$?
+  for who in a b; do
+    grep -q 'No such file or directory' "$L/conc-$round-$who.err" && CONC_FAIL="round $round $who: $(grep -m1 'No such file' "$L/conc-$round-$who.err")"
+  done
+  [ "$RA$RB" = 00 ] || CONC_FAIL="${CONC_FAIL:-round $round: rc $RA/$RB: $(grep -m1 -E '^(refused|error|usage): ' "$L/conc-$round-a.err" "$L/conc-$round-b.err")}"
+done
+N=$((N + 1)); RC=-
+if [ -z "$CONC_FAIL" ]; then record story check "six pairs of concurrent invites of one home all succeed" - ok ""
+else record story check "six pairs of concurrent invites of one home all succeed" - FAIL "$CONC_FAIL"; fi
+
 # An enrolment whose submit marker was written and whose process then died before the Host took the ingress
 # (the demo-dry dryguest4 wedge: every retry looked the same absent ingress up forever). The marker is forged
 # the way the dead process left it; a later `enroll lookup` retires the attempt, and the same name enrols.
-L=late
-mkdir -p -m 700 "$H/$L"
-ok setup "$L" "keygen mini.key"
-operator setup "CUSTODY: copy $L's secret into the sponsor home" install_private 0600 "$H/$L/keys/mini.key" "$H/sponsor/keys/$L.key"
-LPLAN="enroll plan $L $L.key $(xxd -p -c 256 "$H/$L/keys/mini.key.next.pub") $(xxd -p -c 256 "$H/$L/keys/mini.key.next.cosign")"
+LATE=late
+mkdir -p -m 700 "$H/$LATE"
+ok setup "$LATE" "keygen mini.key"
+operator setup "CUSTODY: copy $LATE's secret into the sponsor home" install_private 0600 "$H/$LATE/keys/mini.key" "$H/sponsor/keys/$LATE.key"
+LPLAN="enroll plan $LATE $LATE.key $(xxd -p -c 256 "$H/$LATE/keys/mini.key.next.pub") $(xxd -p -c 256 "$H/$LATE/keys/mini.key.next.cosign")"
 ok setup sponsor "$LPLAN"
-ok setup sponsor "enroll seal $L"
-EDIR=$H/sponsor/enroll/$L
+ok setup sponsor "enroll seal $LATE"
+EDIR=$H/sponsor/enroll/$LATE
 check setup "the sealed attempt exists" test -s "$EDIR/ingress.bin"
 printf '{"format":"minidregg-participant-enrollment-custody-v1","ingressSha256":"%s","operation":88,"status":"may-have-submitted"}\n' \
   "$(sha256sum "$EDIR/ingress.bin" | cut -d' ' -f1)" >"$EDIR/submit-marker.json"
-say sponsor "enroll lookup $L"
+say sponsor "enroll lookup $LATE"
 check setup "a later lookup of an ingress the Host never took retires the attempt by name" grep -q 'absent from the Host' "$ERR"
 check setup "and leaves the refused-no-record record, not the marker, to plan from" test -e "$EDIR/submit-refused.json" -o -e "$EDIR/replanned"
 ok setup sponsor "$LPLAN"
-ok setup sponsor "enroll seal $L"
-ok setup sponsor "enroll submit $L"
-ok setup sponsor "enroll lookup $L"
+ok setup sponsor "enroll seal $LATE"
+ok setup sponsor "enroll submit $LATE"
+ok setup sponsor "enroll lookup $LATE"
 check setup "the retried name is enrolled as its own subject" test -n "$(jq -r '.subject // empty' "$OUT")"
-operator setup "CUSTODY: remove the copy" rm -f "$H/sponsor/keys/$L.key"
+operator setup "CUSTODY: remove the copy" rm -f "$H/sponsor/keys/$LATE.key"
 finish

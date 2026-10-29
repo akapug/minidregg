@@ -1,0 +1,8 @@
+sandstorm-http-bridge
+sandstorm-http-bridge-config
+sandstorm-manifest
+bin/sh
+lib/x86_64-linux-gnu/libc.so.6
+lib64/ld-linux-x86-64.so.2
+opt/app/hledger-web
+opt/app/launcher.sh

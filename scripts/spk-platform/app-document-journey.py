@@ -149,8 +149,11 @@ def journey(path):
                 if value is not None and (accepted or retained_effect_exit(value) == process.returncode):
                     evidence["result"] = value
                     accepted = True
+            if not accepted:
+                # The refusal text is the evidence a failed phase leaves; hashes alone cannot be read.
+                evidence["stderrTail"] = process.stderr[-4000:].decode("utf-8", "replace")
             save(run / (label + ".json"), evidence)
-            require(accepted, "Mini " + label + " did not complete; inspect retained operation")
+            require(accepted, "Mini " + label + " did not complete; inspect retained operation " + str(run / (label + ".json")))
             return process.stdout if raw else evidence["result"]
 
         def action(label, op, extra=()):
