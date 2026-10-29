@@ -51,16 +51,13 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             let input = value(&PathBuf::from(args.required("args")?))?;
             let tool = args.required("tool")?.to_string_lossy().into_owned();
             let alias = args.required("attachment")?.to_string_lossy().into_owned();
-            if alias.is_empty()
-                || alias.len() > 32
-                || !alias.as_bytes()[0].is_ascii_alphabetic()
-                || !alias
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || b == b'_')
-            {
-                return Err("attachment-alias-invalid".into());
+            let expected = if qualification {
+                mini_sdk::app_interface::qualification_tool_name(&alias)
+            } else {
+                mini_sdk::app_interface::bound_tool_name(&alias, &op)
             }
-            if tool != format!("mini_app_{}_{}", alias, op.replace('.', "_")) {
+            .map_err(|e| e.to_string())?;
+            if tool != expected {
                 return Err("typed-tool-operation-mismatch".into());
             }
             let runtime = PathBuf::from(args.required("runtime")?);
