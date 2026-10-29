@@ -67,7 +67,7 @@ open Minidregg.Compiler.CanonicalCellRegistry (registry)
 open Minidregg.Kernel.DurableDataIntent
 open Minidregg.Kernel.SystemCell (System certifyNext admitsHead admitsHead_iff)
 open Minidregg.Theory.TypedAuthorization (Digest)
-open Minidregg.Kernel (ChainHistory Tip Prefixes)
+open Minidregg.Kernel (ChainHistory ChainTip Prefixes)
 
 set_option autoImplicit false
 
@@ -273,13 +273,13 @@ theorem checkpoint_restores_progress (pre : System) (history : H) (n : Nat) (cha
 /-! ## Built witnesses -/
 
 /-- Certified at 64 with `L = 8`; the log's head is 72 at chain 9, so a record takes 73. -/
-private def tip72 : Tip := ⟨72, ⟨9⟩⟩
+private def tip72 : ChainTip := ⟨72, ⟨9⟩⟩
 
 /-- **Refuting pole** (concrete): the ordinary record at height 73 is refused `tailBound 73 64 8`. -/
 theorem tailBound_refuses_73 : judge ⟨64, ⟨7⟩, 8⟩ tip72 [] = .error (.tailBound 73 64 8) := by decide
 
 /-- **Satisfiable pole** (concrete): with the head at 71, the record at 72 is admitted. -/
-theorem tailBound_admits_72 : judge ⟨64, ⟨7⟩, 8⟩ (⟨71, ⟨9⟩⟩ : Tip) [] = .ok () := by decide
+theorem tailBound_admits_72 : judge ⟨64, ⟨7⟩, 8⟩ (⟨71, ⟨9⟩⟩ : ChainTip) [] = .ok () := by decide
 
 /-- A certify of the head is admitted at a full tail (concrete). -/
 theorem certify_admitted_at_full_tail :
