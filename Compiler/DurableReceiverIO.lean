@@ -189,7 +189,7 @@ def prepareAppend (transport : Transport) {rootBytes : List UInt8 → Digest}
     (loaded : Loaded rootBytes) {intent : DataIntent rootBytes}
     (ready : Ready rootBytes loaded.image loaded.baseHeight loaded.base loaded.snapshot intent)
     (key : MacKey) : IO (Except String (PreparedAppend loaded intent)) := do
-  let height := loaded.image.accepted.length + 1
+  let height := loaded.height + 1
   let recordBytes := recordFrame.encode (IntentRecord.ofIntent intent)
   let chain := loaded.chainAfterIntent intent
   let some frontier := loaded.frontier
@@ -199,7 +199,7 @@ def prepareAppend (transport : Transport) {rootBytes : List UInt8 → Digest}
     | .ok root => pure root
     | .error message => return .error message
   let keys := DurableIndex.IndexRows.keys intent.transactionId intent.nullifiers
-  let (indexAfter, indexWrites) ← match ← withIndexRows transport loaded.image.accepted.length keys
+  let (indexAfter, indexWrites) ← match ← withIndexRows transport loaded.height keys
       (fun rows => DurableIndex.IndexRows.apply rows indexBefore height intent.transactionId
         intent.nullifiers) with
     | .ok result => pure result
@@ -224,7 +224,7 @@ exact readback (seal a due checkpoint), or report contention. -/
 def publishAfter (transport : Transport) (rootBytes : List UInt8 → Digest) (loaded : Loaded rootBytes)
     (intent : DataIntent rootBytes) (prepared : PreparedAppend loaded intent)
     (observation : CasObservation) : IO (Bool × DetailedResult rootBytes loaded intent) := do
-  let height := loaded.image.accepted.length + 1
+  let height := loaded.height + 1
   let entry := prepared.entry
   let extended := prepared.extended
   let indexAfter := prepared.indexAfter
@@ -258,7 +258,7 @@ def publish (transport : Transport) (rootBytes : List UInt8 → Digest) (loaded 
     {candidate : Candidate loaded} (_commit : Commit transport loaded candidate)
     (prepared : PreparedAppend loaded candidate.intent) :
     IO (Bool × DetailedResult rootBytes loaded candidate.intent) :=
-  transport.append (loaded.image.accepted.length + 1) prepared.entry prepared.nodes >>=
+  transport.append (loaded.height + 1) prepared.entry prepared.nodes >>=
     publishAfter transport rootBytes loaded candidate.intent prepared
 
 /-- A conflicting append is contention, and nothing else is read or written. -/
@@ -379,9 +379,9 @@ these records. -/
 def Loaded.replay {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
     (records : List IntentRecord) →
     Except String {next : Loaded rootBytes //
-      next.image = ⟨loaded.image.seed, loaded.image.accepted ++ records⟩ ∧
+      next.image = Image.ofAccepted loaded.image.seed (loaded.image.accepted ++ records) ∧
         next.logStart = loaded.logStart}
-  | [] => .ok ⟨loaded, by rw [List.append_nil], rfl⟩
+  | [] => .ok ⟨loaded, by simp, rfl⟩
   | record :: rest =>
       match bound : record.bind? rootBytes with
       | none => .error "durable log record does not bind its roots"
@@ -396,9 +396,12 @@ def Loaded.replay {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes
               | .ok ⟨next, imaged, started⟩ =>
                   .ok ⟨next, by
                     rw [imaged]
-                    show (⟨loaded.image.seed, (loaded.image.accepted ++
-                      [IntentRecord.ofIntent intent]) ++ rest⟩ : Image) = _
-                    rw [IntentRecord.bind_exact bound, List.append_assoc, List.singleton_append],
+                    change Image.ofAccepted (loaded.extend ready).image.seed
+                      ((loaded.extend ready).image.accepted ++ rest) = _
+                    rw [show (loaded.extend ready).image = loaded.image.append intent from rfl,
+                      Image.accepted_append, IntentRecord.bind_exact bound]
+                    simp only [Image.append, Image.snoc_seed, List.append_assoc,
+                      List.singleton_append],
                     started⟩
           | .inr _ => .error "durable log suffix does not replay through the canonical executor"
 
@@ -417,7 +420,7 @@ def extendFrom (transport : Transport) (rootBytes : List UInt8 → Digest)
   let key ← match ← transport.key with
     | .error message => return .error message
     | .ok key => pure key
-  let height := loaded.image.accepted.length
+  let height := loaded.height
   match ← transport.read (height + 1) false with
   | .error message => return .error message
   | .ok none => return .error "durable store is not initialized"
@@ -454,7 +457,7 @@ def extendFrom (transport : Transport) (rootBytes : List UInt8 → Digest)
             some ((trailerCarried entry.tag).map (·.root) |>.getD ⟨0⟩)) then
           return .error "durable log root tag differs from the replayed root"
         let current := { current with headTag := stored.entries.getLast?.map (·.tag) }
-        if current.image.accepted.length ≥ current.baseHeight + 2 * max 1 transport.checkpointEvery then
+        if current.height ≥ current.baseHeight + 2 * max 1 transport.checkpointEvery then
           return .ok ⟨current.rebase, extended⟩
         return .ok ⟨current, extended⟩
 

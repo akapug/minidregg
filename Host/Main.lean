@@ -1451,7 +1451,8 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
       | .error refusal => throw (IO.userError refusal.message)
       | .ok read =>
         let kept := read.verified.root
-        let spec := NativeHost.worldRoot config ⟨durable.image.seed, log.take (i + 1)⟩
+        let spec := NativeHost.worldRoot config
+          (DurableReceiver.Image.ofAccepted durable.image.seed (log.take (i + 1)))
         checked := checked + 1
         if kept != spec then
           differ := differ + 1

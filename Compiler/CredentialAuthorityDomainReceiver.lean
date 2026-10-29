@@ -147,16 +147,30 @@ structure Loaded (deployment : CanonicalCellRegistry.Deployment) (physical : Phy
   spentExact : snapshot.spent = spentOf deployment.domain physical
   observed : physical.canonicalBytes (cellIdOf deployment) = cellBytes snapshot.cell
 
-def loadDeployment (deployment : CanonicalCellRegistry.Deployment) (physical : PhysicalSnapshot) :
+/-- Load at an already established clock. The exactness argument makes the
+supplied height the snapshot's history length; a loaded durable image supplies
+it in O(1). -/
+def loadDeploymentAt (deployment : CanonicalCellRegistry.Deployment) (physical : PhysicalSnapshot)
+    (height : Nat) (heightExact : height = clockOf physical) :
     Option (Loaded deployment physical) :=
   if valid : deployment.Valid then
     match decoded : decodeCell (physical.canonicalBytes (cellIdOf deployment)) with
     | none => none
     | some cell =>
-        some ⟨Snapshot.ofCell deployment.domain (clockOf physical)
-            (spentOf deployment.domain physical) cell, valid, rfl, rfl, rfl,
+        some ⟨Snapshot.ofCell deployment.domain height
+            (spentOf deployment.domain physical) cell, valid, rfl, heightExact, rfl,
           (decodeCell_canonical decoded).symm⟩
   else none
+
+def loadDeployment (deployment : CanonicalCellRegistry.Deployment) (physical : PhysicalSnapshot) :
+    Option (Loaded deployment physical) :=
+  loadDeploymentAt deployment physical (clockOf physical) rfl
+
+theorem loadDeploymentAt_eq (deployment : CanonicalCellRegistry.Deployment) (physical : PhysicalSnapshot)
+    (height : Nat) (heightExact : height = clockOf physical) :
+    loadDeploymentAt deployment physical height heightExact = loadDeployment deployment physical := by
+  cases heightExact
+  rfl
 
 /-- Refuting pole: a pinned identifier that does not hold a live authority cell
 (a retired image, a fresh slot, another role, or a retired catalogue frame)
@@ -164,7 +178,7 @@ loads nothing. -/
 theorem loadDeployment_refuses (deployment : CanonicalCellRegistry.Deployment) (physical : PhysicalSnapshot)
     (undecodable : decodeCell (physical.canonicalBytes (cellIdOf deployment)) = none) :
     loadDeployment deployment physical = none := by
-  unfold loadDeployment
+  unfold loadDeployment loadDeploymentAt
   split
   · split
     · rfl
@@ -173,12 +187,15 @@ theorem loadDeployment_refuses (deployment : CanonicalCellRegistry.Deployment) (
       cases decoded
   · rfl
 
-/-- Satisfiable pole: the cell the physical snapshot holds is loaded exactly. -/
-theorem loadDeployment_exact (deployment : CanonicalCellRegistry.Deployment) (physical : PhysicalSnapshot)
+/-- Satisfiable pole at a supplied clock: the cell the physical snapshot holds
+is loaded exactly. -/
+theorem loadDeploymentAt_exact (deployment : CanonicalCellRegistry.Deployment)
+    (physical : PhysicalSnapshot) (height : Nat) (heightExact : height = clockOf physical)
     (valid : deployment.Valid) (cell : CredentialAuthorityDomain.Cell)
     (holds : physical.canonicalBytes (cellIdOf deployment) = cellBytes cell) :
-    ∃ loaded, loadDeployment deployment physical = some loaded ∧ loaded.snapshot.cell = cell := by
-  unfold loadDeployment
+    ∃ loaded, loadDeploymentAt deployment physical height heightExact = some loaded ∧
+      loaded.snapshot.cell = cell := by
+  unfold loadDeploymentAt
   rw [dif_pos valid]
   split
   · rename_i decoded
@@ -187,6 +204,13 @@ theorem loadDeployment_exact (deployment : CanonicalCellRegistry.Deployment) (ph
   · rename_i found decoded
     rw [holds, decodeCell_bytes] at decoded
     exact ⟨_, rfl, (Option.some.inj decoded).symm⟩
+
+/-- Satisfiable pole: the cell the physical snapshot holds is loaded exactly. -/
+theorem loadDeployment_exact (deployment : CanonicalCellRegistry.Deployment) (physical : PhysicalSnapshot)
+    (valid : deployment.Valid) (cell : CredentialAuthorityDomain.Cell)
+    (holds : physical.canonicalBytes (cellIdOf deployment) = cellBytes cell) :
+    ∃ loaded, loadDeployment deployment physical = some loaded ∧ loaded.snapshot.cell = cell :=
+  loadDeploymentAt_exact deployment physical (clockOf physical) rfl valid cell holds
 
 /-- Two loads of the same deployment from the same physical snapshot are the
 same authority snapshot: the pinned cell's bytes determine it. -/
@@ -218,25 +242,37 @@ theorem Loaded.unique {deployment : CanonicalCellRegistry.Deployment}
 bytes equal `held`'s snapshot's, the held cell and its projection are reused
 under this snapshot's clock and spent markers; otherwise the bytes are decoded.
 `loadDeploymentFrom_eq`: it is `loadDeployment`. -/
+def loadDeploymentFromAt {deployment : CanonicalCellRegistry.Deployment} {before : PhysicalSnapshot}
+    (held : Loaded deployment before) (physical : PhysicalSnapshot)
+    (height : Nat) (heightExact : height = clockOf physical) : Option (Loaded deployment physical) :=
+  if same : physical.canonicalBytes (cellIdOf deployment) == before.canonicalBytes (cellIdOf deployment) then
+    some ⟨⟨deployment.domain, height, spentOf deployment.domain physical, held.snapshot.cell,
+        held.snapshot.authState, held.snapshot.authStateExact⟩, held.valid, rfl, heightExact, rfl,
+      (beq_iff_eq.mp same).trans held.observed⟩
+  else loadDeploymentAt deployment physical height heightExact
+
 def loadDeploymentFrom {deployment : CanonicalCellRegistry.Deployment} {before : PhysicalSnapshot}
     (held : Loaded deployment before) (physical : PhysicalSnapshot) : Option (Loaded deployment physical) :=
-  if same : physical.canonicalBytes (cellIdOf deployment) == before.canonicalBytes (cellIdOf deployment) then
-    some ⟨⟨deployment.domain, clockOf physical, spentOf deployment.domain physical, held.snapshot.cell,
-        held.snapshot.authState, held.snapshot.authStateExact⟩, held.valid, rfl, rfl, rfl,
-      (beq_iff_eq.mp same).trans held.observed⟩
-  else loadDeployment deployment physical
+  loadDeploymentFromAt held physical (clockOf physical) rfl
 
-theorem loadDeploymentFrom_eq {deployment : CanonicalCellRegistry.Deployment} {before : PhysicalSnapshot}
-    (held : Loaded deployment before) (physical : PhysicalSnapshot) :
-    loadDeploymentFrom held physical = loadDeployment deployment physical := by
-  unfold loadDeploymentFrom
+theorem loadDeploymentFromAt_eq {deployment : CanonicalCellRegistry.Deployment} {before : PhysicalSnapshot}
+    (held : Loaded deployment before) (physical : PhysicalSnapshot)
+    (height : Nat) (heightExact : height = clockOf physical) :
+    loadDeploymentFromAt held physical height heightExact =
+      loadDeploymentAt deployment physical height heightExact := by
+  unfold loadDeploymentFromAt
   split
   · rename_i same
-    obtain ⟨loaded, found, _⟩ := loadDeployment_exact deployment physical held.valid held.snapshot.cell
-      ((beq_iff_eq.mp same).trans held.observed)
+    obtain ⟨loaded, found, _⟩ := loadDeploymentAt_exact deployment physical height heightExact
+      held.valid held.snapshot.cell ((beq_iff_eq.mp same).trans held.observed)
     rw [found]
     exact congrArg some (Loaded.unique _ loaded)
   · rfl
+
+theorem loadDeploymentFrom_eq {deployment : CanonicalCellRegistry.Deployment} {before : PhysicalSnapshot}
+    (held : Loaded deployment before) (physical : PhysicalSnapshot) :
+    loadDeploymentFrom held physical = loadDeployment deployment physical :=
+  loadDeploymentFromAt_eq held physical (clockOf physical) rfl
 
 #assert_axioms loadDeploymentFrom_eq
 
