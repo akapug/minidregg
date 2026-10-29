@@ -586,3 +586,31 @@ mod controller_tests {
         fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[cfg(test)]
+mod text_tests {
+    use super::*;
+
+    #[test]
+    fn davros_text_helpers_need_no_base64_and_round_trip() {
+        let text = include_str!("../../../apps/interfaces/davros.json");
+        let declaration = Declaration::load(text.as_bytes()).unwrap();
+        let entry = CatalogEntry {
+            alias: "dav".into(), declaration: text.into(), declaration_sha256: declaration.sha256.clone(),
+            package_id: declaration.package_id.clone(), subject: "7".into(), app: "6101".into(),
+            generation: "ab".repeat(32), session: "6209".into(), session_generation: "456".into(),
+        };
+        let mut seen = Vec::new();
+        let mut forward = |request: Value| {
+            seen.push(request.clone());
+            let body = if request["method"] == "PUT" { String::new() } else { mini_sdk::hex::encode("Issue: http://x/alice/notes/issues/1\n".as_bytes()) };
+            let status = if request["method"] == "PUT" { 201 } else { 200 };
+            json!({"isError":false,"text":json!({"type":"http-v3","status":status,"headers":[],"bodyHex":body,"operationId":"1"}).to_string()})
+        };
+        let put = call_tool(&entry, "mini_app_dav_file_put_text", &json!({"path":"issue.txt","content":"Issue: http://x/alice/notes/issues/1\n"}), &mut forward);
+        assert_eq!(put["structured"]["value"]["status"], 201, "{put}");
+        let got = call_tool(&entry, "mini_app_dav_file_get_text", &json!({"path":"issue.txt"}), &mut forward);
+        assert_eq!(got["structured"]["value"], "Issue: http://x/alice/notes/issues/1\n", "{got}");
+        assert_eq!(seen[0]["bodyHex"], mini_sdk::hex::encode(b"Issue: http://x/alice/notes/issues/1\n"));
+    }
+}
