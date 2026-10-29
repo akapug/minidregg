@@ -1,0 +1,6 @@
+lib64/ld-linux-x86-64.so.2
+opt/app/bootstrap.mjs
+proc/cpuinfo
+sandstorm-http-bridge
+sandstorm-http-bridge-config
+sandstorm-manifest
