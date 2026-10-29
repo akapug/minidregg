@@ -262,7 +262,7 @@ pub(crate) fn submit_once(
     write_new(attempt_dir, "op26-frame.bin", &response)?;
     // Only the pinned Host's fresh installed CAS-winner path emits this tag;
     // replay and op27 return a distinct receipt-only Outcome. Retain first.
-    let committed = framed_payload("lifecycle claim submit", &response, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, COMMITTED_TAG)?.to_vec();
+    let committed = crate::lifecycle_v3_native::committed_payload(operator, attempt_dir, "op26-claim-submit", &response, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, COMMITTED_TAG)?.to_vec();
     let committed_path = write_new(attempt_dir, "committed-v3.bin", &committed)?;
     let committed_json = operator.tool(
         "inspect",
