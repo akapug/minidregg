@@ -36,7 +36,6 @@ function; it is recomputed from the checkpoint's cells, never trusted.
 module
 
 public import Compiler.PersistedCodecTags
-public import Compiler.PersistedCodecShapes
 public import Compiler.CanonicalCellRegistry
 public import Compiler.DurableReceiverCodec
 public import Compiler.Sp800185Cshake256
@@ -47,7 +46,6 @@ public import Kernel.WorldSystemCodec
 public import Theory.AssertAxioms
 public import Theory.AssertCompiled
 meta import Compiler.PersistedCodecTags
-meta import Compiler.PersistedCodecShapes
 meta import Compiler.CanonicalCellRegistry
 meta import Compiler.DurableReceiverCodec
 meta import Compiler.Sp800185Cshake256
@@ -188,31 +186,24 @@ def persistedCellDescriptors : List (Nat × Nat × Nat × List UInt8) :=
       | none => []
     pure (tag, schema.schemaId.value, schema.version, descriptor)
 
-/-- Canonical, length-prefixed corpus: the automatically collected source tag
-entries, their structural fingerprints (`Compiler.PersistedCodecShapes`, checked
-by the census), and the actual exhaustive cell schema/layout descriptors: a codec
-whose structure moves moves the epoch. -/
+/-- Canonical, length-prefixed receiving identities and actual cell layout
+descriptors. Implementation bodies and proof terms are not persisted formats. -/
 def persistedCodecCorpus : List UInt8 :=
   let entries := PersistedCodecTags.canonicalSet (PersistedCodecTags.entries.map (·.bytes))
-  let shapes := PersistedCodecShapes.pins.map fun (identity, fingerprint) =>
-    (identity ++ ":" ++ fingerprint).toUTF8.toList
-  (StreamCodec.product
-    (StreamCodec.product (StreamCodec.list bytesStream) (StreamCodec.list bytesStream))
+  (StreamCodec.product (StreamCodec.list bytesStream)
     (StreamCodec.list (StreamCodec.product StreamCodec.nat
       (StreamCodec.product StreamCodec.nat
         (StreamCodec.product StreamCodec.nat bytesStream))))).encode
-    ((entries, shapes), persistedCellDescriptors)
+    (entries, persistedCellDescriptors)
 
-/-- Derived from the content of every registered persisted tag and cell
-descriptor. This is a flag day: every old schema-refs/v5 Store requires
-re-genesis. The late `#assert_persisted_codec_tags` check closes the corpus over
-actual receiving codecs, including byte-erased activity event payloads. -/
+/-- The content of the persisted identities and cell descriptors. Removing the
+implementation fingerprints changes this corpus once; old Stores refuse through
+`SeedEpoch.refusalFor`, before their log records are decoded. -/
 def persistedSchemaRefs : String :=
   s!"schema-refs/{(Sp800185Cshake256.hash
     "MINI.PERSISTED-CODEC-CORPUS/v1".toUTF8.toList persistedCodecCorpus).digest.value}"
 
-/-- The epoch this Host writes and reads. The registry supplies the
-schema component, and the named census checks equality against receiving tags. -/
+/-- The epoch this Host writes and reads, including the cell layout descriptors. -/
 def StoreEpoch.current : StoreEpoch :=
   ⟨DeclaredEffectCell.stateKeyCodecId, persistedSchemaRefs, logTagLabel,
     "history/mmr-v1;index/trie-v1;checkpoint/v5", "commands/v2"⟩

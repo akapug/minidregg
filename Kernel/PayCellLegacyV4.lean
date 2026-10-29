@@ -1,5 +1,5 @@
 /- Frozen v4 payload codec for the explicit v4→v5 paid-claim carry. Never decode old bytes using the v5 wire.
-codec-shapes-regen: frozen -- it spells the v4 cell's OLD codec names; a regen bump never rewrites them. -/
+It spells the v4 cell's OLD codec names. -/
 /-
 # Kernel.PayCell — the pay cell: tariff, deposit address book, assignment, enrolment
 
