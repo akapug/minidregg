@@ -1693,21 +1693,25 @@ mod tests {
     }
 
     #[test]
-    fn apps_search_preserves_featured_order_and_derives_typed_tools() {
-        let entries = fixture();
+    fn apps_search_shows_the_featured_set_first_with_its_typed_tools() {
+        let entries = demo_index();
         let all = search(&entries, "", None);
         assert_eq!(all.len(), entries.len());
         let names: Vec<&str> = all.iter().take(FEATURED.len()).map(|e| e.name.as_str()).collect();
         assert_eq!(names[0], "Etherpad");
-        assert_eq!(names.len(), 21, "every featured appId is in the recorded index: {names:?}");
+        assert_eq!(names.len(), FEATURED.len(), "search shows the whole featured set first: {names:?}");
         assert!(all[FEATURED.len()..].iter().all(|e| featured(&e.app_id).is_none()));
         let pad = entry_json(all[0], &Verdict { state: "unverified".into(), reason: None, raw_bytes: None, signed_app_id: None, running: 0 });
         assert_eq!(pad["featured"]["rank"], 1);
-        assert_eq!(pad["packageBuiltAt"], "", "the store createdAt is never promoted to a build time");
-        assert_eq!(pad["upstreamVersion"], "");
+        assert_eq!(pad["packageBuiltAt"], "BUILT_AT", "a fresh package reports its recorded build time");
+        assert_eq!(pad["upstreamVersion"], "3.3.12-1");
         assert!(pad["featured"].get("agentHook").is_none());
-        assert_eq!(pad["typedInterface"]["status"], "native-attachment-required");
+        assert_eq!(pad["typedInterface"]["status"], "native-attachment-required", "the pinned package is the declared one");
         assert!(pad["typedInterface"]["tools"].as_array().unwrap().iter().any(|tool| tool["operation"] == "document.replace"));
+        let old = all.iter().find(|e| e.pinned.is_none()).unwrap();
+        let old = entry_json(old, &Verdict { state: "unverified".into(), reason: None, raw_bytes: None, signed_app_id: None, running: 0 });
+        assert_eq!(old["packageBuiltAt"], "", "the store createdAt is never promoted to a build time");
+        assert_eq!(old["upstreamVersion"], "");
     }
 
     #[test]
@@ -1736,6 +1740,55 @@ mod tests {
         assert_eq!(mismatch["status"], "package-mismatch");
         assert_eq!(mismatch["schemaAvailable"], false);
         assert!(mismatch.get("tools").is_none());
+    }
+
+    const FRESH: &[u8] = include_bytes!("../tests/fixtures/fresh-local-index-2026-10-29.json");
+
+    /// The index the demo box serves: the upstream index with the operator's pinned entries for the
+    /// packages we build ourselves merged in (deploy/market/fresh-index.py writes them; the fixture is
+    /// its output for the packages built so far).
+    fn demo_index() -> Vec<Entry> {
+        merge_local(fixture(), parse_index(FRESH).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn apps_every_featured_app_id_resolves_to_an_installable_package() {
+        // Installable: the entry exists in the merged index AND its bytes have a source, either the
+        // upstream store's package URL (an unpinned entry) or an operator pin that names the whole
+        // SHA-256 (which must begin with the packageId, the package's identity); a pin with no URL is
+        // adopted from a box-local file (deploy/market/fresh-adopt). A featured appId that no index lists cannot be searched or installed.
+        let entries = demo_index();
+        let mut unresolved = Vec::new();
+        for app_id in FEATURED {
+            match entries.iter().find(|e| e.app_id == *app_id) {
+                None => unresolved.push(format!("{app_id}: in neither the upstream index nor the operator pins")),
+                Some(e) => match &e.pinned {
+                    None => {}
+                    Some(pin) if !pin.sha256.starts_with(&e.package_id) => {
+                        unresolved.push(format!("{app_id}: pin {} does not begin with packageId {}", pin.sha256, e.package_id))
+                    }
+                    Some(_) => {}
+                },
+            }
+        }
+        assert!(unresolved.is_empty(), "featured appIds that cannot be installed:\n{}", unresolved.join("\n"));
+    }
+
+    #[test]
+    fn apps_fresh_pins_are_listed_searched_and_resolved_beside_the_upstream_index() {
+        let entries = demo_index();
+        let fresh = parse_index(FRESH).unwrap();
+        assert!(!fresh.is_empty());
+        for pinned in &fresh {
+            let found = resolve(&entries, &pinned.package_id).unwrap();
+            assert_eq!(found.app_id, pinned.app_id);
+            let pin = found.pinned.as_ref().expect("a fresh package is operator-pinned");
+            assert!(pin.sha256.starts_with(&pinned.package_id), "the pin is the package's own SHA-256");
+            assert!(pin.package_url.is_none(), "adopt mode: the demo box has no egress to the build host");
+            assert!(!found.package_built_at.is_empty(), "{}: a fresh package reports its real build time", found.name);
+            assert!(search(&entries, &found.name, None).iter().any(|e| e.package_id == pinned.package_id), "{} is searchable", found.name);
+        }
+        assert_eq!(entries.len(), 98 + fresh.len());
     }
 
     #[test]
