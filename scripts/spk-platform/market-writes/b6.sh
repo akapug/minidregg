@@ -33,15 +33,6 @@ write_Badgepack() {
   [[ $post =~ ^20 && $got == 200 ]] && grep -q 'Featured badge by a resident' "$body" && echo "1 POST /api/badges multipart $post; GET /api/badges $got"
 }
 
-# Hummingbird (mnutt/hummingbird as packaged: /opt/app/sandstorm.js, lib/tracker.js, lib/dashboard.js,
-# lib/metrics/*.js, lib/auth.js). Row evidence (e89fe7b8b): lifecycle failed with get-m exit=22, HTTP 403 on /.
-# Cause: dashboard.js defaultHandler answers 403 "Forbidden: invalid permissions" unless X-Sandstorm-Permissions
-# holds `view-data`, and the harness then gave the owner role 0, "tracker", which may only beacon. The owner
-# now holds allAccess (6b5f87872), which includes view-data. The package has no HTTP read of its data: the
-# dashboard is socket.io, and each metric emits its count by io.volatile.emit (view_totals every 50 ms). So the
-# write is the beacon GET /tracking_pixel* (permission `tracker`, answers the GIF, Metric.insert) and the read
-# is a view_totals event of at least 1 on socket.io, both in b6-hb.py over the owner route.
-write_Hummingbird() {
-  local res; res=$(python3 -I "$(dirname "${BASH_SOURCE[0]}")/b6-hb.py" "$dir" 2>&1 | tail -1)
-  [[ $res == *'"ok": true'* ]] && echo "1 GET /tracking_pixel.gif 200; socket.io view_totals >= 1: ${res:0:120}" || echo "0 ${res:0:200}"
-}
+# Hummingbird now uses apps/interfaces/hummingbird.json: transient analytics
+# require opening Socket.IO before the beacon and reading a correlated hit
+# before the 200 ms interval resets. The native shared conversation owns this.
