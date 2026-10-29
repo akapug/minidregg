@@ -939,7 +939,8 @@ def unchanged_worker_config(previous, current, state):
 def unchanged_worker_tool(previous, current):
     """Allow one initial account reference selection; native handoff still grants access."""
     allowed = {'registeredSharedApplications', 'allowedSessionFamilies', 'currentBirthHostSha256',
-               'allowedApplicationLifetimeRoutes', 'lifetimeApiHostSha256', 'applicationServices'}
+               'allowedApplicationLifetimeRoutes', 'lifetimeApiHostSha256', 'applicationServices',
+               'typedApplications'}
     old = {k:v for k,v in previous.items() if k not in allowed}
     new = {k:v for k,v in current.items() if k not in allowed}
     if old == new:

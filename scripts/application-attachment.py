@@ -22,8 +22,9 @@ Input protocol: mini-application-attachment-v1. All paths are absolute.
   route (optional): {"kind":"web","origin":"https://HOST"} binds a v4 web route for an app whose
          package declares no api interface; the session kind is then web, the pins carry the route
          and the agent-route registration names no signed API path.
-  typed (optional): {"alias","declarationPath","declarationSha256","packageId"} adds a typed
-         application attachment (toolTask.typedApplications) for this route instead of a service profile.
+  typed (optional): {"alias","declarationSource","declarationSha256","packageId"} adds a typed
+         application attachment (toolTask.typedApplications) for this route instead of a service profile;
+         the declaration file is carried in the controller bundle (state/shared-app-refs).
 For a private controller home, paths.controllerHostConfigExport may select the
 root installer's controller-host-config-export snapshot instead of directly
 reading the controller's private Host metadata file.
@@ -164,7 +165,7 @@ class Attachment:
             raise ValueError("route must be {kind: web, origin: https://HOST}")
         self.session_kind = "web" if self.web_route else "api"
         self.typed = c.get("typed")
-        if self.typed is not None and set(self.typed) != {"alias", "declarationPath", "declarationSha256", "packageId"}:
+        if self.typed is not None and set(self.typed) != {"alias", "declarationSource", "declarationSha256", "packageId"}:
             raise ValueError("typed attachment fields differ")
         # Names enter private artifact paths as well as native route selectors.
         for field in ("application", "family", "route", "handle"):
@@ -774,7 +775,13 @@ class Attachment:
         if self.names["serviceProtocol"] is not None:
             append_named(config["toolTask"], "applicationServices", {"application": self.names["application"], "protocol": self.names["serviceProtocol"]}, "application")
         if self.typed is not None:
-            append_named(config["toolTask"], "typedApplications", {**self.typed, "routeName": self.names["application"]}, "alias")
+            declaration = Path(self.typed["declarationSource"]).read_bytes()
+            relative = Path("state/shared-app-refs") / (self.typed["alias"] + ".declaration.json")
+            write(bundle / relative, declaration)
+            append_named(config["toolTask"], "typedApplications", {
+                "alias": self.typed["alias"], "declarationPath": str(home / relative),
+                "declarationSha256": self.typed["declarationSha256"], "packageId": self.typed["packageId"],
+                "routeName": self.names["application"]}, "alias")
         config["toolTask"]["lifetimeApiHostSha256"] = sha(self.host)
         self.validate_layout(layout, config)
         check_current("current-start-before-publication")
