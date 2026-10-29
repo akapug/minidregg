@@ -54,9 +54,9 @@ def select (supplied : NativeHost.Config) (deployed : Option NativeHost.Config) 
 /-- A JSON schema without the physical custodian field must still author
 under the complete deployed profile, for every configured custodian key. -/
 theorem select_without_custodian (config : NativeHost.Config) :
-    select { config with completionCustodianKey := none } (some config) =
-      .ok config.profile := by
-  simp [select]
+    select (NativeHost.Config.ofInputs { config.toInputs with completionCustodianKey := none })
+      (some config) = .ok config.profile := by
+  simp [select, NativeHost.Config.ofInputs]
 
 theorem select_unconfigured (config : NativeHost.Config) :
     select config none = .ok config.profile := by
