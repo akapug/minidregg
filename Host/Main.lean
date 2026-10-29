@@ -7255,7 +7255,7 @@ def runToolSession (settings : Settings) (command : String) (kind : Option Strin
         pure (Except.ok code)
       catch error => pure (Except.error (toString error))
     match outcome with
-    | .error message => return 1 :: (message.take 4096).toUTF8.toList
+    | .error message => return 1 :: (message.take 4096).toString.toUTF8.toList
     | .ok 0 =>
         let output ← readBytes outPath.toString
         if output.length + 2 > FnEvidenceCodec.maxHostFrameBytes then return [2]
