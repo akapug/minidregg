@@ -39,7 +39,7 @@ true fact but reopens no writes. The certifier names the newest head it observed
 within L of the head whenever writes were being admitted at all.
 
 **Implementations.** `Prefixes` (every prefix, below) is the reference; the durable store's
-loaded image keeps its chain log (`DurableReceiverIO.Loaded`); `ChainTip` holds only the head, for
+loaded image keeps its chain log (`DurableReceiverIO.Loaded`); `ChainHistory.Tip` holds only the head, for
 a state that keeps no history (the light served path): it certifies the head and nothing
 else, which is sound.
 -/
@@ -209,11 +209,11 @@ end Prefixes
 /-! ## A history that holds only the head -/
 
 /-- The head and its chain: all a state without history knows. -/
-structure ChainTip where
+structure ChainHistory.Tip where
   height : Nat
   chain : Digest
 
-instance : ChainHistory ChainTip where
+instance : ChainHistory ChainHistory.Tip where
   head tip := tip.height
   chainAt tip height := if height = tip.height then some tip.chain else none
   chainAt_le_head tip height digest held := by
@@ -222,7 +222,7 @@ instance : ChainHistory ChainTip where
     · simp [at_] at held
 
 /-- A tip whose chain is the log's chain at its height is faithful to that log. -/
-theorem ChainTip.faithful (truth : Nat → Digest) (tip : ChainTip) (exact : tip.chain = truth tip.height) :
+theorem ChainHistory.Tip.faithful (truth : Nat → Digest) (tip : ChainHistory.Tip) (exact : tip.chain = truth tip.height) :
     ChainHistory.Faithful tip truth := by
   refine ⟨?_, ?_⟩
   · intro height digest held
@@ -261,7 +261,7 @@ theorem five_faithful : Faithful five (fun h => ⟨10 + h⟩) := by
 #assert_axioms certifiable_ok_iff certifiable_sound at_or_below_certified_refused unheld_refused
   past_head_refused other_chain_refused untrue_refused head_admitted_iff
   Prefixes.ofTruth_faithful prefix_below_head_admitted head_admitted past_head_refused_6
-  wrong_chain_refused_3 at_certified_refused_2 five_faithful ChainTip.faithful
+  wrong_chain_refused_3 at_certified_refused_2 five_faithful Tip.faithful
 
 end ChainHistory
 
