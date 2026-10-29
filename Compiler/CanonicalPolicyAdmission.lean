@@ -411,6 +411,29 @@ def compiledLawAccepts {F : Type} [Field F] [DecidableEq F]
     (stepAsg witness.oldState witness.newState witness.auxiliary)
     (lower profile.compiler predicate))
 
+/-- `compiledLawAccepts` as compiled: the two state indexes (`PredCompile.indexState`) are
+built once per check. They are bound here, in a definition whose result is a `Bool`: a
+definition whose result is a function is eta-expanded by the compiler, which moves such
+bindings under the lambda, so they would run once per wire read. -/
+def compiledLawAcceptsFast {F : Type} [Field F] [DecidableEq F]
+    (profile : PolicyCompilerProfile F) (predicate : Pred)
+    (witness : CompiledPolicyWitness F) : Bool :=
+  let oldIndexed := indexState witness.oldState
+  let newIndexed := indexState witness.newState
+  supported profile.compiler predicate &&
+  inputsInRange profile.compiler predicate witness.oldState witness.newState &&
+  decide (castInjOn F (intsOf predicate witness.oldState witness.newState)) &&
+  decide (systemAccepts
+    (stepAsgIndexed oldIndexed newIndexed witness.auxiliary)
+    (lower profile.compiler predicate))
+
+@[csimp] theorem compiledLawAccepts_eq_fast :
+    @compiledLawAccepts = @compiledLawAcceptsFast := by
+  funext F _ _ profile predicate witness
+  unfold compiledLawAccepts compiledLawAcceptsFast
+  dsimp only
+  rw [stepAsgIndexed_eq]
+
 theorem compiledLawAccepts_sound {F : Type} [Field F] [DecidableEq F]
     (profile : PolicyCompilerProfile F) (predicate : Pred)
     (witness : CompiledPolicyWitness F)

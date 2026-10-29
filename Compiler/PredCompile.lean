@@ -400,16 +400,6 @@ def stepAsgIndexed (old new : IndexedState) (A : List ℕ → ℕ → F) : Wire 
   | opened v b c => simp [stepAsgIndexed, stepAsg]
   | aux p k => rfl
 
-/-- Compiled step assignment: build the two lookup tables once per assignment. -/
-def stepAsgFast (old new : State) (A : List ℕ → ℕ → F) : Wire → F :=
-  let oldIndexed := indexState old
-  let newIndexed := indexState new
-  fun wire => stepAsgIndexed oldIndexed newIndexed A wire
-
-@[csimp] theorem stepAsg_eq_fast : @stepAsg = @stepAsgFast := by
-  funext F field old new A
-  exact (stepAsgIndexed_eq old new A).symm
-
 /-- The `Int`s a state exposes (for the cast-injectivity label). -/
 def stateVals (st : State) : List ℤ := st.slots.map (·.2)
 
@@ -1084,16 +1074,6 @@ theorem witL_eq_indexed (profile : CompilerProfile) :
           · simp only [same, if_true, wit_eq_indexed]
           · simp only [same, if_false, witL_eq_indexed]
 end
-
-/-- Compiled witness generation: two indexes per emitted assignment, not two scans per atom. -/
-def witFast (profile : CompilerProfile) (p : Pred) (old new : State) : List ℕ → ℕ → F :=
-  let oldIndexed := indexState old
-  let newIndexed := indexState new
-  fun path k => witIndexed profile p oldIndexed newIndexed path k
-
-@[csimp] theorem wit_eq_fast : @wit = @witFast := by
-  funext F field decEq profile p old new
-  exact wit_eq_indexed profile p old new
 
 end DecEqF
 
