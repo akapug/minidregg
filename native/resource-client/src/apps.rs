@@ -289,10 +289,10 @@ pub(crate) fn resolve<'a>(entries: &'a [Entry], selector: &str) -> Result<&'a En
 /// surface beneath their HTML that a resident drives through the agent API.
 /// `(appId, agent hook)`; the rest of the store follows them.
 pub(crate) const FEATURED: &[(&str, &str)] = &[
-    ("h37dm17aa89yrd8zuqpdn36p6zntumtv08fjpu8a8zrte7q1cn60", "HTTP /api: create pads, append text, read text or HTML, revisions"),
+    ("ksyn7qa4szjwa14v89r7znxwrpjs0dez5q2u8s810d0awnuswmfh", "POST /p/<pad>/import replaces text; GET /p/<pad>/export/txt reads it"),
     ("a0n6hwm32zjsrzes8gnjg734dh6jwt7x83xdgytspe761pe2asw0", "REST /_/<sheet>: PUT CSV, POST SocialCalc commands, GET the sheet as CSV or JSON"),
     ("4uda6a9yfxk4v3x2mpxjdn2md9y54tj104091480qjr8h758u4dh", "POST /new with markdown makes a note; GET /<note>/download reads it"),
-    ("8aspz4sfjnp8u89000mh2v1xrdyx97ytn8hq71mdzv4p4d8n0n3h", "files over HTTP: PUT and GET by path (the WebDAV tree; PROPFIND/MKCOL/MOVE when the bridge grows the DAV verbs)"),
+    ("g9vdgqnn4dnj6r7tyaw9duydgmgskxzq9564fxceekqhvcds33zh", "files over HTTP: PUT and GET by path (the WebDAV tree; PROPFIND/MKCOL/MOVE when the bridge grows the DAV verbs)"),
     ("uawacvvx9f9ncex1sqj8njwpujf8s9fkmg7wmp55hg6xetrd45w0", "SQL over HTTP: /<db>.json?sql=... answers JSON"),
     ("c6rk81r4qk6dm3k04x1kxmyccqewhh4npuxeyg1xrpfypn2ddy0h", "POST /<topic> with a body publishes; GET /<topic>/json?poll=1 reads"),
     ("nx3dqcmz2sjjz939vkg4847vvxrzqsatqfjrt3ea50z3jac5kv7h", "flat-text pages: GET doku.php?id=<page>&do=export_raw, POST do=save"),
