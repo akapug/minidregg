@@ -9,18 +9,18 @@ socket) and the perf rake's verified backlog (docs/PERF-BACKLOG-2026-10-28.md, "
 ## Where things are
 
 - Mac worktree `/Users/ember/dev/minidregg-lanes/hot-path` (edit + git only; no Lean on the Mac).
-- hbox base tree (SSD): `/othersys/lanes/hot-path/src` (clone of lane/hot-path; `.lake/packages` -> `/tank/lanes/hot-path/packages`).
-  `/othersys/lanes/hot-path/build.sh LOG TARGET...` (lake build under swarm-build, 16 threads, 28G; log `LOG.log`, EXIT= line);
-  PID file `/othersys/lanes/hot-path/build.pid`. Single-file check: `lake lean F.lean` in that tree.
+- hbox base tree (SSD): `/home/hbox/lanes/hot-path/src` (clone of lane/hot-path; `.lake/packages` -> `/tank/lanes/hot-path/packages`).
+  `/home/hbox/lanes/hot-path/build.sh LOG TARGET...` (lake build under swarm-build, 16 threads, 28G; log `LOG.log`, EXIT= line);
+  PID file `/home/hbox/lanes/hot-path/build.pid`. Single-file check: `lake lean F.lean` in that tree.
 - Workers (claude-kimi, one item each): Mac worktrees `/Users/ember/dev/minidregg-lanes/hp-<item>` on `lane/hp-<item>`,
   hbox clones `/othersys/lanes/hp-<item>/src` (clone-warm of the base), checks via
   `/Users/ember/dev/minidregg-lanes/hp-tools/hp-check <item> start|wait|log|stop`. Briefs:
   `/Users/ember/dev/minidregg-lanes/hp-tools/briefs/` (COMMON.md + one per item). Logs and PID files:
   `/Users/ember/dev/minidregg-lanes/hp-tools/logs/<item>.{out,pid}`. Items: seed (backlog 1), profile (2), pred (4),
   history (5), index (6+7), verifier (in-process Ed25519 via mini-kernels), contentlaw (quadratic ContentLaw), effects
-  (Effects/Revival reds from the Materialized change). hbox clones: `/othersys/lanes/hot-path/mkclone.sh ITEM`. Relaunch a
+  (Effects/Revival reds from the Materialized change). hbox clones: `/home/hbox/lanes/hot-path/mkclone.sh ITEM`. Relaunch a
   stopped worker: `hp-tools/hp-resume ITEM [note]` (Kimi runs out of context on big files; COMMON.md has a narrow-reading rule).
-- Bench: `/othersys/lanes/hot-path/bench-perf.py` (doc-submit-bench + `--perf-at N,M` perf record with DWARF stacks);
+- Bench: `/home/hbox/lanes/hot-path/bench-perf.py` (doc-submit-bench + `--perf-at N,M` perf record with DWARF stacks);
   symbols of the memfd-exec'd Host resolve with `perf report --symfs=DIR` where DIR holds the host binary under the
   names `memfd:mini-pinned-image (deleted)` and `memfd:mini-pinned-image`. Folding script: scratchpad `hotpath/fold.py`.
 
@@ -38,25 +38,35 @@ socket) and the perf rake's verified backlog (docs/PERF-BACKLOG-2026-10-28.md, "
   Propose wall ~300 ms with 30 ms Host CPU: the client side (unexplained; an strace wrapper on `mini` hung genesis).
 - Earlier (349e59ef1, append 20): DeclaredResourceController legs 18%, `contentLawDecidable`/`documentAt` 15%,
   `DTreeMap.getD` 17%, `rootBytes` 13.5%, `encode` 10.8%, `State.get` 12%, `authState` 11%.
-- Lane Host binary: `/othersys/lanes/hot-path/artifacts/minidregg-host` (`hostbuild.sh`), bench set
-  `/othersys/lanes/hot-path/cand-hp1` (2b8f75dcb with that Host). Packages are now a real copy on the SSD (the native
+- Lane Host binary: `/home/hbox/lanes/hot-path/artifacts/minidregg-host` (`hostbuild.sh`), bench set
+  `/home/hbox/lanes/hot-path/cand-hp1` (2b8f75dcb with that Host). Packages are now a real copy on the SSD (the native
   builder refuses a symlinked `.lake/packages`).
 
-## Landed on lane/hot-path (not yet on main)
+## Batch 1 (sent to the integrator as lane/hot-path 1e207e402)
 
-| sha | what |
-|---|---|
-| fd54bb732 | merge of lane/perf-batch1 (codec writer, cell roots/bytes cached per cell value, decodeFast) |
-| 703d0c0af | perf-batch1's red fixed (Theory/CellSlot `decode_eq_decodeFast`) |
-| 8db6db77e | DeployedBridge `packOf_unpack` via `Materialized.ext` |
-| 023a13096 | merge of main (Host.Main String.take fix; census deleted). Host.Main + ClientConsentSession green on hbox |
-| 2bd0ad095 | contentlaw d81cb88ce: ContentLaw + EventHistoryLaw document equality decided in one pass (proved equivalent) |
-| 05f843a71 | index 8c78cc96a: `packBits` single pass, `deployedRoot` one-pass canonicalization (csimp) |
-| bb73d02c6 | charge e403b95bf: historical records identity-first (`withPtrEqDecEq`), receiver charges materialized once |
-| (merge) | pred f463d78f2: policy state indexed once per evaluation (`IndexedState`, csimp) |
-| (merge) | profile 346136236: `Config` carries its profile (`Config.ofInputs`), `Profile` its semantics digest |
-| 2009a6eb8 | receiver semantics cached in `Profile`; `compilerProfile` via csimp (the GET's 9.5%) |
-| pending | seed (worker running), history (worker running), verifier 172d90188 (worker finishing; fix at merge: its `@[extern] def ... := 2` must become `opaque` externs) |
+Contents: perf-batch1 (codec writer, cell bytes/root cached per cell value, decodeFast) + its two reds fixed (CellSlot,
+DeployedBridge); contentlaw d81cb88ce (one-pass document laws); index 8c78cc96a (packBits single pass, deployedRoot one-pass
+canonicalization); charge e403b95bf (historical records identity-first, charges materialized once); pred f463d78f2 + owner fix
+0bcf19b71 (policy-state index built once per law check: the first version rebuilt it per wire read, a 15x regression, caught
+by the bench); profile 346136236 + owner 2009a6eb8 (profile and receiver-semantics digest cached per config); seed 95ab8cc3b
+(genesis evidence reused on session advance); history a6e414ce8 + owner fixes (journal newest-first, `Loaded.height` =
+`rootLog.size`); verifier 172d90188 + owner c733612ec (Ed25519/SSHSIG in-process through mini-kernels; opaque externs);
+merge of main 64fa47015 + owner fixes 6e11bed52, 1e207e402 (journal x chainLog proofs). Host.Main + ClientConsentSession green
+on hbox; umbrella build running (`b-umb.log`).
+
+Numbers (hbox; baseline candidate 2b8f75dcb):
+| measure | before | after |
+|---|---|---|
+| doc submit CPU, append 1 / 10 / 20 | 280 / 490 / 780 ms | 50 / 130 / 200 ms |
+| doc submit wall, append 1 / 19 | 384 / 842 ms | 133 / 303 ms |
+| per-append growth (submit CPU) | ~26 ms | ~8 ms |
+| GET / via SandMD route, serving-Host CPU | 1,100-1,200 ms | 150-170 ms |
+| GET / wall (fresh world, /tank Store) | 1.3-1.5 s | 0.53-1.1 s |
+| POST /new (qualify write) | 4.6 s | 1.3 s |
+| SandMD qualify (create..page) | 367 s | 136 s |
+Left on the turn after batch 1 (append 20 profile): encoding ~16%, policy-state index ~13% (once per law check, several
+checks per turn), store decode/lookup ~10%; GET wall is now mostly outside the Host (Store fsync on HDD, app, spk-host).
+Propose wall grows 254 -> 555 ms over 20 appends with 10-60 ms Host CPU: client side (mini), unexplained yet.
 
 ## Design: one persistent-state layer (what exists, what changes)
 
@@ -106,8 +116,9 @@ measured per-turn cost is NOT the absence of that layer; it is derived values co
 
 ## Running
 
-- hbox: integrated batch build `build.sh b-batch1 Host.Main Host.ClientConsentSession` at 2009a6eb8 (PID file build.pid). Then
-  `after.sh TAG SHA` measures (doc bench pair + SandMD route world on the new Host + 20 GETs).
+- hbox (base tree moved to `/home/hbox/lanes/hot-path`, clones `/home/hbox/lanes/hp-*`; /othersys is not ours): umbrella
+  build `b-umb.log`; `coldwalk.sh b2c 150` (ages world w-b2c, times `audit` with both Hosts; `coldwalk-b2c.log`).
+  `after.sh TAG SHA` = build, Host binary, doc bench, SandMD world on the new Host, 20 GETs.
 - Mac: seven claude-kimi workers (PID files above).
 
 ## Next
