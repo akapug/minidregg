@@ -122,8 +122,8 @@ structure OwnBase (rootBytes : List UInt8 → Digest) where
   fold : ∃ records : List IntentRecord, records.length = height ∧
     chainAfter logStart records = chain ∧
     ∃ snapshot : DataSnapshot rootBytes,
-      Minidregg.Kernel.DurableReceiver.Image.restore rootBytes ⟨seed, records⟩ = some snapshot ∧
-      state = Minidregg.Kernel.DurableCheckpoint.State.ofSnapshot ⟨seed, records⟩ snapshot
+      Minidregg.Kernel.DurableReceiver.Image.restore rootBytes (Minidregg.Kernel.DurableReceiver.Image.ofAccepted seed records) = some snapshot ∧
+      state = Minidregg.Kernel.DurableCheckpoint.State.ofSnapshot (Minidregg.Kernel.DurableReceiver.Image.ofAccepted seed records) snapshot
 
 /-- The state after `height` records, with what makes it authentic:
 * the base is the seed (height 0, the pinned genesis) or a checkpoint whose

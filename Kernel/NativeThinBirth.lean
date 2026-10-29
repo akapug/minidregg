@@ -853,8 +853,13 @@ theorem opened_pins_public : OpenedPinsPublicStatement := by
   unfold NativeHost.validateLoaded at validated
   obtain ⟨parts, partsOk, rfl⟩ := map_ok validated
   unfold NativeHost.validateParts NativeHost.validatePartsWith NativeHost.validatePartsVia at partsOk
-  obtain ⟨core, coreOk, rfl⟩ := map_ok partsOk
-  exact validateCore_pins coreOk
+  split at partsOk
+  · contradiction
+  · simp only [Except.ok.injEq] at partsOk
+    subst parts
+    dsimp only
+    have pins := validateCore_pins (by assumption)
+    exact pins
 
 /-- The executor's pins against the config's public pins, on the Host's own open. -/
 theorem publicPins_exact {config : NativeHost.Config} {durable' : ResourceBirthController.Concrete.Durable}

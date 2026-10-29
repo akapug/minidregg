@@ -84,14 +84,11 @@ theorem extraGuards_current {config : Config} {store : StoreIdentity} {head : He
 /-- Storage charge is the DRC's actual output write bytes plus the special
 event ingress and new nullifier bytes. The ordinary event does not occupy a
 second stored record. Extra work counts the package observation and physical
-custodian verification, without charging an unperformed OS effect. -/
-def charge {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
+custodian verification, without charging an unperformed OS effect. `chargeOf`
+takes the already-derived writes and source charge, so its lane closure captures values. -/
+def chargeOf {config : Config} {ground : Ground config.deployment}
     {ingress : ApplicationFailedStartRecoveryIngress.Ingress}
-    (accepted : ApplicationFailedStartRecoveryAdmission.Candidate config head ground ingress) :
-    Charge :=
-  let ws := DeclaredResourceController.writes accepted.prepared
-  let guards := DeclaredResourceController.readGuards accepted.prepared ++ extraGuards accepted
-  let base := DeclaredResourceController.sourceChargeFrom accepted.prepared ingress.signed ws guards
+    (ws : List DataWrite) (base : Charge) : Charge :=
   fun dimension => match dimension with
     | .incidences => base .incidences + 1
     | .turnBytes => ingress.canonicalBytes.length
@@ -101,12 +98,22 @@ def charge {config : Config} {store : StoreIdentity} {head : Head store} {ground
     | .storageBytes => DeployedCharge.storageCharge ground.view ws (ApplicationFailedStartRecoveryIngress.event ingress)
     | other => base other
 
+def charge {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
+    {ingress : ApplicationFailedStartRecoveryIngress.Ingress}
+    (accepted : ApplicationFailedStartRecoveryAdmission.Candidate config head ground ingress) :
+    Charge :=
+  let ws := DeclaredResourceController.writes accepted.prepared
+  let guards := DeclaredResourceController.readGuards accepted.prepared ++ extraGuards accepted
+  chargeOf (config := config) (ground := ground) (ingress := ingress) ws
+    (DeclaredResourceController.sourceChargeFrom accepted.prepared ingress.signed ws guards)
+
 def intent {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
     {ingress : ApplicationFailedStartRecoveryIngress.Ingress}
     (accepted : ApplicationFailedStartRecoveryAdmission.Candidate config head ground ingress) :
     DataIntent rootBytes := by
   let ws := DeclaredResourceController.writes accepted.prepared
   let guards := DeclaredResourceController.readGuards accepted.prepared ++ extraGuards accepted
+  let base := DeclaredResourceController.sourceChargeFrom accepted.prepared ingress.signed ws guards
   have guarded : ∀ guard ∈ guards, guard.cellId ∉ ws.map DataWrite.cellId := by
     intro guard member
     rcases List.mem_append.mp member with old | extra
@@ -122,11 +129,18 @@ def intent {config : Config} {store : StoreIdentity} {head : Head store} {ground
           config.profile.semantics (ingress.source.command config.deployment.domain config.profile.semantics)),
         ApplicationFailedStartRecoveryIngress.stableNullifier ingress] ++
         ingress.creationMarker.toList
-      exactCharge := charge accepted
+      exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize
+        (chargeOf (config := config) (ground := ground) (ingress := ingress) ws base)).toCharge
       event := ApplicationFailedStartRecoveryIngress.event ingress
       subject := some (ingress.source.command config.deployment.domain config.profile.semantics).subject
       postRootsBound := DeclaredResourceController.writes_roots_bound accepted.prepared
       guardsReadOnly := guarded }
+
+theorem intent_exactCharge {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
+    {ingress : ApplicationFailedStartRecoveryIngress.Ingress}
+    (accepted : ApplicationFailedStartRecoveryAdmission.Candidate config head ground ingress) :
+    (intent accepted).exactCharge = charge accepted := by
+  exact Minidregg.Theory.ResourceCost.Charge.materialize_eq _
 
 theorem intent_event {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
     {ingress : ApplicationFailedStartRecoveryIngress.Ingress}

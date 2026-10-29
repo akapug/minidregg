@@ -64,29 +64,33 @@ def ScalarCodec.codecId : ScalarCodec → String
   | .integer => IntStream.intCodecId
   | .bytes => "bytes/length-prefix-v1"
 
-def scalarCodecStream : StreamCodec ScalarCodec where
-  encode
-    | .natural => [0]
-    | .integer => [1]
-    | .bytes => [2]
-  decodePrefix
-    | 0 :: rest => some (.natural, rest)
-    | 1 :: rest => some (.integer, rest)
-    | 2 :: rest => some (.bytes, rest)
-    | _ => none
-  decodePrefix_encode := by intro codec suffix; cases codec <;> rfl
+def scalarCodecStream : StreamCodec ScalarCodec :=
+  withTagCursor
+  { encode := fun
+      | .natural => [0]
+      | .integer => [1]
+      | .bytes => [2]
+    decodePrefix := fun
+      | 0 :: rest => some (.natural, rest)
+      | 1 :: rest => some (.integer, rest)
+      | 2 :: rest => some (.bytes, rest)
+      | _ => none
+    decodePrefix_encode := by intro codec suffix; cases codec <;> rfl }
+    rfl (by one_octet_tag)
 
-def disciplineStream : StreamCodec Discipline where
-  encode
-    | .rom => [0]
-    | .ram => [1]
-    | .appendOnly => [2]
-  decodePrefix
-    | 0 :: rest => some (.rom, rest)
-    | 1 :: rest => some (.ram, rest)
-    | 2 :: rest => some (.appendOnly, rest)
-    | _ => none
-  decodePrefix_encode := by intro discipline suffix; cases discipline <;> rfl
+def disciplineStream : StreamCodec Discipline :=
+  withTagCursor
+  { encode := fun
+      | .rom => [0]
+      | .ram => [1]
+      | .appendOnly => [2]
+    decodePrefix := fun
+      | 0 :: rest => some (.rom, rest)
+      | 1 :: rest => some (.ram, rest)
+      | 2 :: rest => some (.appendOnly, rest)
+      | _ => none
+    decodePrefix_encode := by intro discipline suffix; cases discipline <;> rfl }
+    rfl (by one_octet_tag)
 
 /-- Semantic identity and its definition are canonical schema data. Equal
 storage types or equal numeric field IDs do not establish equal authority.
@@ -170,27 +174,6 @@ def layout (descriptor : Descriptor) : Layout.{0, 0, 0} where
   Value := fun space => (descriptor.fields.get space).codec.Value
   discipline := fun space => (descriptor.fields.get space).discipline
 
-def finStream (size : Nat) : StreamCodec (Fin size) where
-  encode index := StreamCodec.nat.encode index.val
-  decodePrefix bytes := do
-    let (index, suffix) ← StreamCodec.nat.decodePrefix bytes
-    if bound : index < size then some (⟨index, bound⟩, suffix) else none
-  decodePrefix_encode := by
-    intro index suffix
-    simp [StreamCodec.nat.decodePrefix_encode, index.isLt]
-  encode_decodePrefix := by
-    intro bytes index suffix decoded
-    cases ok : StreamCodec.nat.decodePrefix bytes with
-    | none => simp [ok] at decoded
-    | some pair =>
-      obtain ⟨wire, rest⟩ := pair
-      by_cases bound : wire < size
-      · simp only [ok, bind, Option.bind, dif_pos bound, Option.some.injEq,
-          Prod.mk.injEq] at decoded
-        obtain ⟨rfl, rfl⟩ := decoded
-        exact StreamCodec.nat.encode_decodePrefix _ _ _ ok
-      · simp [ok, bound] at decoded
-
 /-- StoreCodec's frame commits to the complete descriptor identity, including
 field meanings. Its namespace order is not an implicit grant interpretation.
 Hash collision resistance remains an explicit external assumption. -/
@@ -198,7 +181,7 @@ def wire (descriptor : Descriptor) : StoreCodec.Wire (layout descriptor) where
   name := "minidregg/world-kind/v1/" ++ toString descriptor.identity.value
   namespaces := List.finRange descriptor.fields.length
   namespaces_complete := fun space => List.mem_finRange space
-  namespaceStream := finStream descriptor.fields.length
+  namespaceStream := StreamCodec.fin descriptor.fields.length
   keyStream := fun _ => StreamCodec.nat
   valueStream := fun space => (descriptor.fields.get space).codec.stream
   keyCodecId := fun _ => "nat/base255-v1"

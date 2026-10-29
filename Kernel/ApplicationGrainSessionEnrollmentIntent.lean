@@ -90,11 +90,10 @@ theorem readGuards_readonly {config : Config} {opened : Opened config}
   · subst guard; exact checked.manifestRead.readonly
   · subst guard; exact checked.ticketRead.readonly
 
-def charge {config : Config} {opened : Opened config}
-    {ingress : Ingress} {spec : ApplicationShareIssueSource.Spec}
-    {receipt : NativeHostCodec.Receipt}
-    (checked : Checked config opened ingress spec receipt) : Charge :=
-  let ordinary := checked.accepted.dataIntent checked.shape
+/-- The enrollment tariff over an already-derived ordinary intent. Keeping `ordinary` as a
+parameter prevents the lane closure from re-deriving its writes and guards for every lane. -/
+def chargeOf {config : Config} {opened : Opened config} {ingress : Ingress}
+    (ordinary : DataIntent rootBytes) : Charge :=
   fun dimension => match dimension with
     | .incidences => ordinary.exactCharge .incidences + 3
     | .turnBytes => ingress.canonicalBytes.length
@@ -104,6 +103,13 @@ def charge {config : Config} {opened : Opened config}
     | .storageBytes => DeployedCharge.storageCharge opened.ground.view ordinary.writes
         (ApplicationGrainSessionEnrollmentSource.event config.deployment.domain ingress)
     | other => ordinary.exactCharge other
+
+def charge {config : Config} {opened : Opened config}
+    {ingress : Ingress} {spec : ApplicationShareIssueSource.Spec}
+    {receipt : NativeHostCodec.Receipt}
+    (checked : Checked config opened ingress spec receipt) : Charge :=
+  chargeOf (config := config) (opened := opened) (ingress := ingress)
+    (checked.accepted.dataIntent checked.shape)
 
 def intent {config : Config} {opened : Opened config}
     {ingress : Ingress} {spec : ApplicationShareIssueSource.Spec}
@@ -122,11 +128,19 @@ def intent {config : Config} {opened : Opened config}
       writes := ordinary.writes
       readGuards := ordinary.readGuards ++ readGuards checked
       nullifiers := ordinary.nullifiers
-      exactCharge := charge checked
+      exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize
+        (chargeOf (config := config) (opened := opened) (ingress := ingress) ordinary)).toCharge
       event := ApplicationGrainSessionEnrollmentSource.event config.deployment.domain ingress
       subject := ordinary.subject
       postRootsBound := ordinary.postRootsBound
       guardsReadOnly := readonly }
+
+theorem intent_exactCharge {config : Config} {opened : Opened config}
+    {ingress : Ingress} {spec : ApplicationShareIssueSource.Spec}
+    {receipt : NativeHostCodec.Receipt}
+    (checked : Checked config opened ingress spec receipt) :
+    (intent checked).exactCharge = charge checked := by
+  exact Minidregg.Theory.ResourceCost.Charge.materialize_eq _
 
 theorem intent_event_version {config : Config} {opened : Opened config}
     {ingress : Ingress} {spec : ApplicationShareIssueSource.Spec}

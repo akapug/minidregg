@@ -96,12 +96,12 @@ def Accepted.intent {config : Config} {store : StoreIdentity} {head : Head store
     (accepted : Accepted config head ground ingress) : DataIntent rootBytes :=
   let legacy := accepted.base.intent
   { legacy with
-    exactCharge := fun dimension => match dimension with
+    exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (fun dimension => match dimension with
       | .turnBytes => ingress.canonicalBytes.length
       | .witnessBytes => ingress.canonicalBytes.length
       | .storageBytes => DeployedCharge.storageCharge ground.view legacy.writes
           (event ingress)
-      | other => legacy.exactCharge other
+      | other => legacy.exactCharge other)).toCharge
     event := event ingress }
 
 theorem Accepted.intent_no_retry_consumption {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}

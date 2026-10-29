@@ -361,40 +361,11 @@ theorem ofLoaded_cellIds (loaded : Loaded rootBytes) (sameStart : store.logStart
     (ofLoaded loaded sameStart).cellIds = loaded.image.cellIds :=
   Loaded.cellIds_eq loaded
 
-theorem replay_history_length :
-    ∀ (records : List IntentRecord) (before after : DataSnapshot rootBytes),
-      replay rootBytes before records = some after →
-        after.model.history.length = before.model.history.length + records.length
-  | [], before, after, replayed => by cases Option.some.inj replayed; rfl
-  | record :: records, before, after, replayed => by
-      unfold replay at replayed
-      cases bound : record.bind? rootBytes with
-      | none => simp [bound] at replayed
-      | some intent =>
-          simp only [bound, bind, Option.bind] at replayed
-          cases executed : DurableDataIntent.execute .complete before intent with
-          | accepted next =>
-              simp only [executed] at replayed
-              have installed := DurableReceiver.execute_accepted_install before intent next executed
-              rw [replay_history_length records next after replayed, installed]
-              simp [DataSnapshot.install_model, List.length_append]
-              omega
-          | replayed recorded => simp [executed] at replayed
-          | rejected reason => simp [executed] at replayed
-          | crashed point next => simp [executed] at replayed
-
 /-- **The full shape's authority clock is its height**: its history has one
 event per accepted record (`CredentialAuthorityDomainReceiver.clockOf`). -/
 theorem history_length_eq_height (loaded : Loaded rootBytes) :
-    loaded.snapshot.model.history.length = loaded.height := by
-  have resumed := loaded.resumed
-  unfold DurableCheckpoint.resume at resumed
-  split at resumed
-  next =>
-    rw [replay_history_length _ _ _ resumed]
-    simp only [State.snapshot, List.length_reverse, List.length_map, Loaded.height]
-    rw [← List.length_append, List.take_append_drop]
-  next => simp at resumed
+    loaded.snapshot.model.history.length = loaded.height :=
+  DurableReceiverIO.Loaded.history_length_eq_height loaded
 
 /-- A served state from a snapshot whose cells outside `ids` hold `absentBytes`
 and the records replayed after it: `ids` plus every cell the records wrote, the

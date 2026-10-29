@@ -392,7 +392,8 @@ theorem admitted_append_within_checked_prefix {NativeError : Type}
   have bounded := receiving_prepare_deadline subject domain message state registry oldEnvelope
     prepared accepted
   rw [sameGenesisHeight] at bounded
-  unfold NativeHost.logicalHeight DurableReceiverIO.Loaded.height at beyondDeadline
+  unfold NativeHost.logicalHeight at beyondDeadline
+  rw [DurableReceiverIO.Loaded.height_eq] at beyondDeadline
   omega
 
 /-- The same old signed deadline cannot be admitted against any extension of
@@ -400,8 +401,8 @@ the exact checked image. Both walked images share the fixed configuration;
 the explicit image equality retains the same seed and every old record. -/
 theorem no_new_admission_after_checked_prefix {NativeError : Type}
     {config : NativeHost.Config} (checked future : NativeHostSession.Walked config)
-    (samePrefix : ∃ suffix, future.target.image =
-      { checked.target.image with accepted := checked.target.image.accepted ++ suffix })
+    (samePrefix : ∃ suffix, future.target.image = DurableReceiver.Image.ofAccepted
+      checked.target.image.seed (checked.target.image.accepted ++ suffix))
     (subject : Nat) (domain message state registry oldEnvelope : List UInt8)
     (prepared : CredentialSignedEnvelopeController.Prepared) (oldDeadline : Nat)
     (accepted : CredentialSignedEnvelopeController.prepare (NativeError := NativeError)
@@ -414,8 +415,9 @@ theorem no_new_admission_after_checked_prefix {NativeError : Type}
   rw [sameGenesisHeight, sameSignedDeadline] at bounded
   rcases samePrefix with ⟨suffix, exactImage⟩
   have lengthExact := congrArg (fun image : DurableReceiver.Image => image.accepted.length) exactImage
-  simp only [List.length_append] at lengthExact
-  unfold NativeHost.logicalHeight DurableReceiverIO.Loaded.height at bounded beyondDeadline
+  simp only [DurableReceiver.Image.accepted_ofAccepted, List.length_append] at lengthExact
+  unfold NativeHost.logicalHeight at bounded beyondDeadline
+  rw [DurableReceiverIO.Loaded.height_eq] at bounded beyondDeadline
   omega
 
 end Minidregg.Kernel.NativePlanHeight

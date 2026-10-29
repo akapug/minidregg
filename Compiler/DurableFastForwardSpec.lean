@@ -149,7 +149,7 @@ structure View.Honest (image : Image) (view : View rootBytes) : Prop where
   /-- Every served receipt root is the replay's world root at that height. -/
   rootLogLength : view.rootLog.length = image.accepted.length
   rootLog : ∀ i (lt : i < view.rootLog.length),
-    replayRoot rootBytes logStart ⟨image.seed, image.accepted.take (i + 1)⟩ = some view.rootLog[i]
+    replayRoot rootBytes logStart (Image.ofAccepted image.seed (image.accepted.take (i + 1))) = some view.rootLog[i]
 
 /-! ## The implementation's v4 pieces, shared by every law -/
 
@@ -171,7 +171,7 @@ def rebuildDerived (seed : Seed) (records : List IntentRecord) (world : Option H
     Derived where
   presence := PresenceIndex.ofRecords records
   links := LinkIndex.ofRecords records
-  ids := SessionIndex.CellIds.ofImage ⟨seed, records⟩
+  ids := SessionIndex.CellIds.ofImage (Image.ofAccepted seed records)
   txs := SessionIndex.TxIndex.ofRecords records
   spentAt := SessionIndex.KeyIndex.ofRecords IntentRecord.nullifiers records
   writesAt := SessionIndex.KeyIndex.ofRecords (fun record => record.writes.map DataWrite.cellId) records
@@ -271,7 +271,7 @@ structure Written where
   records : List IntentRecord
   checkpoints : List (Nat × Body4)
 
-def Written.image (store : Written) : Image := ⟨store.seed, store.records⟩
+def Written.image (store : Written) : Image := Image.ofAccepted store.seed store.records
 
 /-- The stored entries of a Store's records: each record decodes from its entry and every tag
 verifies chained from the seed's chain. -/
@@ -376,31 +376,31 @@ structure Spec (impl : Impl rootBytes) (ofOpened : Opened impl → Except String
   executed head state whose snapshot over the records is the replay's, and the fold's World. -/
   exact : ∀ key seed (entries : List Entry) (pre suf : List IntentRecord) checkpoint snapshot,
     OwnEntries logStart key seed entries (pre ++ suf) →
-    replaySnapshot rootBytes ⟨seed, pre ++ suf⟩ = some snapshot →
+    replaySnapshot rootBytes (Image.ofAccepted seed (pre ++ suf)) = some snapshot →
     (match checkpoint with
       | none => pre = []
       | some bytes => ∃ body, impl.open4 key bytes = .ok body ∧
-          Body4.Honest rootBytes logStart semanticsId ⟨seed, pre⟩ body ∧ pre ≠ []) →
+          Body4.Honest rootBytes logStart semanticsId (Image.ofAccepted seed pre) body ∧ pre ≠ []) →
     ∃ state, impl.ffState key seed checkpoint (entries.drop pre.length) entries.length = .ok state ∧
       (impl.stateHead state).snapshot rootBytes (pre ++ suf) = snapshot ∧
-      impl.stateWorld state = worldAt rootBytes ⟨seed, pre ++ suf⟩
+      impl.stateWorld state = worldAt rootBytes (Image.ofAccepted seed (pre ++ suf))
   /-- A reopened session serves the open's view. -/
   viewOpened : ∀ opened loaded, ofOpened opened = .ok loaded → impl.view loaded = Opened.view logStart opened
   /-- A successful build serves the protocol's resume of the whole image from the checkpoint state
   at its height, on any Store that passed the gates (not only Stores this Host wrote). -/
   buildSound : ∀ opened loaded, ofOpened opened = .ok loaded →
-    resume rootBytes ⟨opened.seed, opened.records⟩ (impl.stateBase opened.state).1
+    resume rootBytes (Image.ofAccepted opened.seed opened.records) (impl.stateBase opened.state).1
       (impl.stateCheckpoint opened.state) = some (impl.view loaded).snapshot
   /-- The session build succeeds on a Store's own entries, from genesis or an honest checkpoint
   (the hypotheses of `exact`): its admissibility and disjointness checks refuse only what no
   replay accepts. -/
   reopens : ∀ key seed (entries : List Entry) (pre suf : List IntentRecord) checkpoint snapshot opened,
     OwnEntries logStart key seed entries (pre ++ suf) →
-    replaySnapshot rootBytes ⟨seed, pre ++ suf⟩ = some snapshot →
+    replaySnapshot rootBytes (Image.ofAccepted seed (pre ++ suf)) = some snapshot →
     (match checkpoint with
       | none => pre = []
       | some bytes => ∃ body, impl.open4 key bytes = .ok body ∧
-          Body4.Honest rootBytes logStart semanticsId ⟨seed, pre⟩ body ∧ pre ≠ []) →
+          Body4.Honest rootBytes logStart semanticsId (Image.ofAccepted seed pre) body ∧ pre ≠ []) →
     impl.ff logStart key seed checkpoint (entries.take pre.length) (entries.drop pre.length)
       entries.length = .ok opened →
     ∃ loaded, ofOpened opened = .ok loaded
@@ -417,7 +417,7 @@ structure Spec (impl : Impl rootBytes) (ofOpened : Opened impl → Except String
   keystone : ∀ key store session, Wrote rootBytes logStart impl ofOpened key store session →
     View.Honest rootBytes logStart store.image (impl.sessionView session) ∧
     ∀ height body, (height, body) ∈ store.checkpoints →
-      Body4.Honest rootBytes logStart semanticsId ⟨store.seed, store.records.take height⟩ body
+      Body4.Honest rootBytes logStart semanticsId (Image.ofAccepted store.seed (store.records.take height)) body
   /-- Inhabitation: an append, a seal at height 1, a reopen from that checkpoint and the session
   build succeed. -/
   inhabited : ∃ (key : MacKey) (seed : Seed) (record : IntentRecord) (loaded1 loaded2 : impl.Loaded4)
@@ -438,24 +438,24 @@ structure Spec (impl : Impl rootBytes) (ofOpened : Opened impl → Except String
       impl.ff logStart key store.seed (openInputs impl key store.checkpoints entries head).1
         (openInputs impl key store.checkpoints entries head).2.1
         (openInputs impl key store.checkpoints entries head).2.2 head = .ok opened ∧
-      View.Honest rootBytes logStart ⟨store.seed, store.records.take head⟩ (Opened.view logStart opened)
+      View.Honest rootBytes logStart (Image.ofAccepted store.seed (store.records.take head)) (Opened.view logStart opened)
   -- ### 5. `store audit`
   auditSound : ∀ key seed records checkpoints, impl.audit key seed records checkpoints = .ok () →
     ∀ height bytes, (height, bytes) ∈ checkpoints →
       ∃ body, impl.open4 key bytes = .ok body ∧
-        Body4.Honest rootBytes logStart semanticsId ⟨seed, records.take height⟩ body
+        Body4.Honest rootBytes logStart semanticsId (Image.ofAccepted seed (records.take height)) body
   /-- A dishonest checkpoint (a fold divergence included: caught here, never at open) makes the
   audit refuse, naming a height whose checkpoint is dishonest. -/
   auditRefuses : ∀ key seed records checkpoints,
     (∃ height bytes, (height, bytes) ∈ checkpoints ∧ ∀ body, impl.open4 key bytes = .ok body →
-      ¬ Body4.Honest rootBytes logStart semanticsId ⟨seed, records.take height⟩ body) →
+      ¬ Body4.Honest rootBytes logStart semanticsId (Image.ofAccepted seed (records.take height)) body) →
     ∃ height message, impl.audit key seed records checkpoints = .error (height, message) ∧
       ∃ bytes, (height, bytes) ∈ checkpoints ∧ ∀ body, impl.open4 key bytes = .ok body →
-        ¬ Body4.Honest rootBytes logStart semanticsId ⟨seed, records.take height⟩ body
+        ¬ Body4.Honest rootBytes logStart semanticsId (Image.ofAccepted seed (records.take height)) body
   -- ### 6. A head seal fast-forwards zero records
   headSealZero : ∀ key seed (entries : List Entry) (records : List IntentRecord) (view : View rootBytes),
     OwnEntries logStart key seed entries records →
-    View.Honest rootBytes logStart ⟨seed, records⟩ view → records ≠ [] →
+    View.Honest rootBytes logStart (Image.ofAccepted seed records) view → records ≠ [] →
     ∃ opened, impl.ff logStart key seed (some (impl.seal4 key (impl.bodyOf key view)))
         entries [] entries.length = .ok opened ∧
       (Opened.view logStart opened).height = view.height ∧

@@ -121,13 +121,15 @@ def instanceLayout : Layout.{0, 0, 0} where
 def descriptorAddress : Address instanceLayout := ⟨.descriptor, ()⟩
 def payloadAddress : Address instanceLayout := ⟨.payload, ()⟩
 
-def instanceSpaceStream : StreamCodec InstanceSpace where
-  encode | .descriptor => [0] | .payload => [1]
-  decodePrefix
-    | 0 :: rest => some (.descriptor, rest)
-    | 1 :: rest => some (.payload, rest)
-    | _ => none
-  decodePrefix_encode := by intro space suffix; cases space <;> rfl
+def instanceSpaceStream : StreamCodec InstanceSpace :=
+  withTagCursor
+  { encode := fun | .descriptor => [0] | .payload => [1]
+    decodePrefix := fun
+      | 0 :: rest => some (.descriptor, rest)
+      | 1 :: rest => some (.payload, rest)
+      | _ => none
+    decodePrefix_encode := by intro space suffix; cases space <;> rfl }
+    rfl (by one_octet_tag)
 
 def instanceWire : StoreCodec.Wire instanceLayout where
   name := "minidregg/world-kind/instance-carrier/v1"
