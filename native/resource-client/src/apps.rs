@@ -81,6 +81,11 @@ pub(crate) struct Entry {
     pub web_link: String,
     pub code_link: String,
     pub created_at: String,
+    /// Actual package build time and upstream release, recorded by our pinned
+    /// packages. The store's createdAt is neither; old entries stay explicit
+    /// "not reported" in the CLI and web instead of borrowing that timestamp.
+    pub package_built_at: String,
+    pub upstream_version: String,
     pub open_source: bool,
     /// Operator-pinned entries only (`index-check --local`): the whole raw
     /// SHA-256 of the package, the URL it is fetched from when it is not
@@ -190,6 +195,8 @@ fn parse_entry(value: &Value) -> Result<Entry> {
         web_link: bounded_text(value, "webLink", false)?,
         code_link: bounded_text(value, "codeLink", false)?,
         created_at: bounded_text(value, "createdAt", false)?,
+        package_built_at: bounded_text(value, "packageBuiltAt", false)?,
+        upstream_version: bounded_text(value, "upstreamVersion", false)?,
         open_source: value.get("isOpenSource").and_then(Value::as_bool).unwrap_or(false),
         pinned,
     })
@@ -229,7 +236,8 @@ pub(crate) fn render_index(entries: &[Entry]) -> Value {
         "appId":e.app_id,"packageId":e.package_id,"name":e.name,"version":e.version,
         "versionNumber":e.version_number,"author":{"name":e.author},"upstreamAuthor":e.upstream_author,
         "shortDescription":e.short_description,"categories":e.categories,"webLink":e.web_link,
-        "codeLink":e.code_link,"createdAt":e.created_at,"isOpenSource":e.open_source});
+        "codeLink":e.code_link,"createdAt":e.created_at,"packageBuiltAt":e.package_built_at,
+        "upstreamVersion":e.upstream_version,"isOpenSource":e.open_source});
         if let Some(pin) = &e.pinned {
             app["sha256"] = json!(pin.sha256);
             if let Some(url) = &pin.package_url { app["packageUrl"] = json!(url); }
@@ -402,6 +410,7 @@ pub(crate) fn entry_json(entry: &Entry, verdict: &Verdict) -> Value {
         "appId":entry.app_id,"packageId":entry.package_id,"name":entry.name,"version":entry.version,
         "interface":interfaces::summary(&entry.app_id, &entry.package_id),
         "versionNumber":entry.version_number,"publisher":entry.author,"upstreamAuthor":entry.upstream_author,
+        "packageBuiltAt":entry.package_built_at,"upstreamVersion":entry.upstream_version,
         "shortDescription":entry.short_description,"categories":entry.categories,"webLink":entry.web_link,
         "codeLink":entry.code_link,"packageUrl":package_url(entry),
         "verdict":{"state":verdict.state,"reason":verdict.reason,"rawBytes":verdict.raw_bytes,
@@ -737,6 +746,9 @@ fn catalogue(action: &str, mut args: Args, paths: &Paths, as_json: bool) -> Resu
             println!("  appId      {}", entry.app_id);
             println!("  packageId  {}  ({})", entry.package_id, package_url(entry));
             println!("  publisher  {}  upstream {}", entry.author, entry.upstream_author);
+            println!("  built      {}  upstream version {}",
+                if entry.package_built_at.is_empty() { "not reported" } else { &entry.package_built_at },
+                if entry.upstream_version.is_empty() { "not reported" } else { &entry.upstream_version });
             println!("  about      {}", entry.short_description);
             println!("  categories {}", entry.categories.join(", "));
             println!("  links      {}  {}", entry.web_link, entry.code_link);
@@ -1649,6 +1661,8 @@ mod tests {
         assert!(all[FEATURED.len()..].iter().all(|e| featured(&e.app_id).is_none()));
         let pad = entry_json(all[0], &Verdict { state: "unverified".into(), reason: None, raw_bytes: None, signed_app_id: None, running: 0 });
         assert_eq!(pad["featured"]["rank"], 1);
+        assert_eq!(pad["packageBuiltAt"], "", "the store createdAt is never promoted to a build time");
+        assert_eq!(pad["upstreamVersion"], "");
         assert!(pad["featured"]["agentHook"].as_str().unwrap().contains("/api"));
     }
 
@@ -1704,6 +1718,7 @@ mod tests {
         let oracle = json!({"apps":[{
             "appId":"ephaf4h4cx8f9s36hmukm4yzkznyhqjhvj8efp3at9cru2zn10mh","packageId":"bded240f916b93d51ad5e90ffc12d8a8",
             "name":"veri7vn oracle","version":"4","versionNumber":4,"author":{"name":"ember"},
+            "packageBuiltAt":"2026-10-29T05:00:00Z","upstreamVersion":"1.2.3",
             "sha256":"bded240f916b93d51ad5e90ffc12d8a8cc9985e35306105eff69f926b3333ed0","class":"L"}]});
         let local = parse_index(&serde_json::to_vec(&oracle).unwrap()).unwrap();
         let pin = local[0].pinned.clone().unwrap();
@@ -1716,6 +1731,8 @@ mod tests {
         assert_eq!(again, merged, "the pin survives the round trip");
         let shown = entry_json(&merged[98], &verdict(Path::new("/nonexistent"), Path::new("/nonexistent"), "bded240f916b93d51ad5e90ffc12d8a8"));
         assert_eq!(shown["suggestedClass"], "L");
+        assert_eq!(shown["packageBuiltAt"], "2026-10-29T05:00:00Z");
+        assert_eq!(shown["upstreamVersion"], "1.2.3");
         assert!(shown["packageUrl"].as_str().unwrap().starts_with("file: adopted"));
         // A pin whose sha256 does not start with its packageId, or without a pin at all, refuses.
         let mut bad = oracle.clone();

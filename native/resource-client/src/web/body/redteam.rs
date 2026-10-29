@@ -85,6 +85,7 @@ fn planted(lines: &[String]) -> Ending {
     let ok = |stdout: String| Ending { code: 0, stdout, stderr: String::new() };
     if first.starts_with("apps search") {
         let app = json!({"appId": PAYLOADS[0], "name": PAYLOADS[1], "version": PAYLOADS[2], "publisher": PAYLOADS[7],
+            "packageBuiltAt": PAYLOADS[0], "upstreamVersion": PAYLOADS[1],
             "suggestedClass": PAYLOADS[3], "categories":[PAYLOADS[0]], "featured":{"rank":1},
             "interface":{"status":PAYLOADS[2],"operations":[{"name":PAYLOADS[1],"description":h,"input":{PAYLOADS[0]:PAYLOADS[6]},"output":PAYLOADS[3]}]},
             "verdict": {"state": PAYLOADS[2], "reason": h}});
@@ -304,6 +305,8 @@ fn catalogue_breadth_and_category_are_derived() {
     site.front.read_only = true;
     let apps: Vec<Value> = (1..=37).map(|i| json!({
         "appId":format!("app{i}"), "name":format!("Tool {i}"),
+        "packageBuiltAt":if i == 1 { json!("2026-10-29T05:00:00Z") } else { Value::Null },
+        "upstreamVersion":if i == 1 { json!("3.3.12") } else { Value::Null },
         "shortDescription":"A useful tool. ".repeat(160), "categories":["Office"],
         "featured":if i <= 36 { json!({"rank":i}) } else { Value::Null },
         "verdict":{"state":"unverified"}
@@ -318,6 +321,10 @@ fn catalogue_breadth_and_category_are_derived() {
     assert_eq!(front.body.matches("data-app=").count(), 36, "every featured app, no arbitrary cap");
     assert!(!front.body.contains("data-app=\"app37\""));
     assert_eq!(market.body.matches("data-app=").count(), 37);
+    assert!(market.body.contains("Package version"));
+    assert!(market.body.contains("Built 2026-10-29T05:00:00Z"));
+    assert!(market.body.contains("Upstream version 3.3.12"));
+    assert!(market.body.contains("Built not reported"));
     assert!(market.body.contains("name=\"category\""));
     assert!(market.body.contains("Office"));
     assert!(market.body.find("Featured apps").unwrap() < market.body.find("More from the catalogue").unwrap());
