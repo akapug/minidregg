@@ -114,6 +114,7 @@ fn agent_interface(app: &Value) -> String {
 
 fn app_card(app: &Value, writes: bool, level: u8) -> String {
     let text = |key: &str| escape(app[key].as_str().unwrap_or(""));
+    let reported = |key: &str| app[key].as_str().filter(|value| !value.is_empty()).unwrap_or("not reported");
     let id = text("appId");
     let name = text("name");
     let mark = escape(&app["name"].as_str().unwrap_or("?").chars().next().unwrap_or('?').to_string());
@@ -126,10 +127,11 @@ fn app_card(app: &Value, writes: bool, level: u8) -> String {
     } else { String::new() };
     format!(
         "<article class=\"app-card\" data-app=\"{id}\"><header><span class=\"app-mark\" aria-hidden=\"true\">{mark}</span><div><h{level}><a href=\"/apps/{id}\">{name}</a></h{level}><span class=\"publisher\">{}</span></div></header>\
-         <p class=\"app-description\">{}</p><p class=\"app-categories\">{categories}</p>{}<p class=\"note\">Version {} · Size {}</p>\
+         <p class=\"app-description\">{}</p><p class=\"app-categories\">{categories}</p>{}<p class=\"note\">Package version {} · Built {}<br>Upstream version {} · Size {}</p>\
          <div class=\"verdict {state}\"><span class=\"badge\">{state}</span><p class=\"note\">{reason}</p></div>\
          <div class=\"actions\"><a href=\"/apps/{id}\">View app →</a>{install}</div></article>",
-        text("publisher"), text("shortDescription"), agent_interface(app), text("version"), text("suggestedClass")
+        text("publisher"), text("shortDescription"), agent_interface(app), text("version"),
+        escape(reported("packageBuiltAt")), escape(reported("upstreamVersion")), text("suggestedClass")
     )
 }
 
