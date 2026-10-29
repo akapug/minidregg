@@ -2,8 +2,12 @@
 Exact-CAS reservation for a launch-bound lifecycle claim. V1 claims can
 remain in historical replay but never produce this SPK launch handoff.
 -/
-import Kernel.ApplicationLifecycleClaimV3Projection
-import Kernel.NativeHostReplay
+module
+
+public import Kernel.ApplicationLifecycleClaimV3Projection
+public import Kernel.NativeHostReplay
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleClaimV3Receiver
 

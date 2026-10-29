@@ -4,7 +4,11 @@ to the same native-admitted chronological Replay context, the host custodian
 report and current law are checked, and the exact event-25 intent is submitted
 once through one CAS with complete physical post-image readback.
 -/
-import Kernel.NativeHostReplay
+module
+
+public import Kernel.NativeHostReplay
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleCompletionV2Receiver
 

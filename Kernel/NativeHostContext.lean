@@ -3,16 +3,38 @@ Shared source-owned host configuration and structural validation. Semantic
 history verification imports this module; ordinary host APIs import the verifier.
 There is one profile, one world-root commitment, and one validation path.
 -/
-import Compiler.NativeHostCodec
-import Kernel.PlatformCellLayout
-import Compiler.GenericSimplexSourceAnchor
-import Compiler.GrainResourceBirthController
+module
 
-import Compiler.JointControlFrame
-import Kernel.ProtectedContentGate
-import Kernel.ObjectiveActivityGate
-import Compiler.NativeInvocationProfile
-import Compiler.GenericSimplexCodec
+public import Compiler.NativeHostCodec
+public import Kernel.PlatformCellLayout
+public import Kernel.PlatformCellDomain
+public import Compiler.GenericSimplexSourceAnchor
+public import Compiler.GrainResourceBirthController
+public import Compiler.JointControlFrame
+public import Kernel.ProtectedContentGate
+public import Kernel.ObjectiveActivityGate
+public import Compiler.NativeInvocationProfile
+public import Compiler.GenericSimplexCodec
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
+
 namespace Minidregg.Kernel.NativeHost
 
 open Minidregg.Theory
@@ -467,6 +489,16 @@ structure Validated (config : Config) (durable : Durable) where
   pins : FactoryPins
   lawful : cellsLawful config durable directory.directory = true
 
+/-- The creation tariff an opened state's factory pins carry: the platform record's. Where
+the image holds no platform record, the config's genesis tariff stands in, and every
+ordinary birth on that image is refused `platformUnavailable`
+(`ResourceBirthPolicyController.Concrete.preparePending`), so the stand-in prices nothing. -/
+def pinnedTariff (config : Config) (platform? : Option PlatformCellLayout.Platform) :
+    CreationTariff :=
+  match platform? with
+  | some record => record.creation
+  | none => config.tariff
+
 /-- The checks every opened state passes, over its seed, its log start, its
 decoded directory, its authority cell's logical store and its cell-law verdict
 (`none` where the directory did not decode). Shared by the full shape
@@ -474,7 +506,8 @@ decoded directory, its authority cell's logical store and its cell-law verdict
 the two run these checks with the same refusals in the same order. -/
 def validateChecks (config : Config) (seed : DurableReceiver.Seed) (logStart : Digest)
     (directory? : Option (Directory Nat CanonicalCellRegistry.registry))
-    (logical? : Option (Store.Store CredentialAuthorityState.layout)) (lawful? : Option Bool) :
+    (logical? : Option (Store.Store CredentialAuthorityState.layout)) (lawful? : Option Bool)
+    (platform? : Option PlatformCellLayout.Platform) :
     Except String FactoryPins := do
   if config.grainBirthTariff.isSome then
     let _ ← config.grainBirthTariffValue
@@ -504,7 +537,7 @@ def validateChecks (config : Config) (seed : DurableReceiver.Seed) (logStart : D
       federation := config.federation
       policyId := ⟨config.deployment.factoryId⟩
       policyAddress := factoryHead.address
-      tariff := config.tariff }
+      tariff := pinnedTariff config platform? }
 
 /-- `validateChecks` over a typed directory and authority, keeping them and the
 cell-law proof. -/
@@ -512,10 +545,10 @@ def validateCore {D A : Type} (config : Config) (seed : DurableReceiver.Seed) (l
     (directory? : Option D) (authority? : Option A)
     (directoryOf : D → Directory Nat CanonicalCellRegistry.registry)
     (logicalOf : A → Store.Store CredentialAuthorityState.layout)
-    (lawfulCheck : D → Bool) :
+    (lawfulCheck : D → Bool) (platform? : Option PlatformCellLayout.Platform) :
     Except String {parts : D × A × FactoryPins // lawfulCheck parts.1 = true} := do
   let pins ← validateChecks config seed logStart (directory?.map directoryOf) (authority?.map logicalOf)
-    (directory?.map lawfulCheck)
+    (directory?.map lawfulCheck) platform?
   let directory ← need "noncanonical native directory" directory?
   let authority ← need "complete deployment authority unavailable" authority?
   if checked : lawfulCheck directory = true then pure ⟨(directory, authority, pins), checked⟩
@@ -530,17 +563,18 @@ theorem validateCore_map {D A D' A' : Type} (config : Config) (seed : DurableRec
     (directory'? : Option D') (authority'? : Option A')
     (directoryOf' : D' → Directory Nat CanonicalCellRegistry.registry)
     (logicalOf' : A' → Store.Store CredentialAuthorityState.layout) (lawfulCheck' : D' → Bool)
+    (platform? : Option PlatformCellLayout.Platform)
     (directories : directory'?.map directoryOf' = directory?.map directoryOf)
     (lawfuls : directory'?.map lawfulCheck' = directory?.map lawfulCheck)
     (authorities : authority'?.map logicalOf' = authority?.map logicalOf) :
-    (validateCore config seed logStart directory'? authority'? directoryOf' logicalOf' lawfulCheck').map
-        (·.1.2.2) =
-      (validateCore config seed logStart directory? authority? directoryOf logicalOf lawfulCheck).map
-        (·.1.2.2) := by
+    (validateCore config seed logStart directory'? authority'? directoryOf' logicalOf' lawfulCheck'
+        platform?).map (·.1.2.2) =
+      (validateCore config seed logStart directory? authority? directoryOf logicalOf lawfulCheck
+        platform?).map (·.1.2.2) := by
   unfold validateCore
   rw [directories, lawfuls, authorities]
   cases validateChecks config seed logStart (directory?.map directoryOf) (authority?.map logicalOf)
-      (directory?.map lawfulCheck) with
+      (directory?.map lawfulCheck) platform? with
   | error detail => rfl
   | ok pins =>
       simp only [bind, Except.bind]
@@ -567,7 +601,8 @@ def validatePartsVia (config : Config) (durable : Durable)
     (lawfulExact : ∀ loaded, lawfulCheck loaded = cellsLawful config durable loaded.directory) :
     Except String (Validated config durable) :=
   (validateCore config durable.image.seed durable.logStart directory? authority?
-    (·.directory) (·.snapshot.logical) lawfulCheck).map fun parts =>
+    (·.directory) (·.snapshot.logical) lawfulCheck
+    (PlatformCellDomain.recordAt config.deployment durable.snapshot.canonicalBytes)).map fun parts =>
       ⟨parts.1.1, parts.1.2.1, parts.1.2.2, (lawfulExact parts.1.1) ▸ parts.2⟩
 
 /-- `validatePartsVia` over the image's own authority load. The caller's

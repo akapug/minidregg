@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# J-PAY-2 (PAY.md P2): the pay cell on a fresh private Store.
+# J-PAY-2 (PAY P2): the pay cell on a fresh private Store.
 #
 # Follows the journey hook contract (journey.sh header): executed with HOST,
 # MINI, STORE, VERIFIER and JOURNEY_STEP_DIR exported; it starts its OWN Host on

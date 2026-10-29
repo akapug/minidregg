@@ -575,6 +575,7 @@ fn allowed_operator_operation(request: &[u8]) -> bool {
         [208 | 209, ingress @ ..] => !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME,
         [151, payload @ ..] => continuity_request(payload),
         [153, payload @ ..] => carried_lookup_request(payload),
+        [156, ingress @ ..] => !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME,
         // STOP inspection only joins retained bytes to current verified history.
         [155, pair @ ..] => pair.len() < HOST_MAX_FRAME && exact_pair(pair).is_some(),
         // Read-only signed stream authority checks remain operator-private.
@@ -1688,6 +1689,8 @@ fn queue_job(
     job: HostJob,
 ) -> Result<(), TrySendError<HostJob>> {
     if let Some(displaced) = jobs.try_send(peer, job)? {
+        eprintln!("mini: socket refused queued op {} (its share displaced by uid {peer}): {DISPLACED_REFUSAL}",
+            displaced.request.first().copied().unwrap_or(0));
         let _ = displaced.reply.send(refusal_frame(DISPLACED_REFUSAL));
     }
     Ok(())
@@ -1710,7 +1713,19 @@ struct EnvelopeRules<'a> {
     read_deadline: Duration,
 }
 
+/// The client receives the 254 frame (its bytes unchanged); the operator's log, this
+/// service's stderr, receives the same reason with the peer and, once the envelope is
+/// open, the operation that was refused.
 fn refuse(stream: &mut UnixStream, reason: &str) {
+    refuse_operation(stream, None, reason)
+}
+
+fn refuse_operation(stream: &mut UnixStream, operation: Option<u8>, reason: &str) {
+    let peer = peer_uid(stream).map_or_else(|_| "unknown".to_owned(), |uid| uid.to_string());
+    match operation {
+        Some(operation) => eprintln!("mini: socket refused op {operation} from uid {peer}: {reason}"),
+        None => eprintln!("mini: socket refused uid {peer}: {reason}"),
+    }
     let _ = write_frame(stream, &refusal_frame(reason));
 }
 
@@ -1952,10 +1967,7 @@ fn serve_connection(
     }) {
         Ok(Some(frame)) => frame,
         Ok(None) => return,
-        Err(e) => {
-            eprintln!("mini: refused invalid socket frame: {e}");
-            return refuse(&mut stream, &format!("invalid socket frame: {e}"));
-        }
+        Err(e) => return refuse(&mut stream, &format!("invalid socket frame: {e}")),
     };
     let request_start = match request_from_envelope(&envelope, rules.config_bytes, rules.host_sha256) {
         Ok(request) => envelope.len() - request.len(),
@@ -1963,11 +1975,12 @@ fn serve_connection(
     };
     envelope.drain(..request_start);
     let request = envelope;
+    let operation = request.first().copied();
     if !request_within_bound(&request) {
-        return refuse(&mut stream, "host frame exceeds bound");
+        return refuse_operation(&mut stream, operation, "host frame exceeds bound");
     }
     if let Some(reason) = operation_body_refusal(&request) {
-        return refuse(&mut stream, reason);
+        return refuse_operation(&mut stream, operation, reason);
     }
     if !(if rules.operator.is_some() {
         // The owner-private listener is the single Host endpoint for both
@@ -1975,11 +1988,11 @@ fn serve_connection(
         allowed_operator_operation(&request) || allowed_operation(&request, rules.catalog_enabled)
     } else {
         if let Some(reason) = public_route_refusal(&request) {
-            return refuse(&mut stream, reason);
+            return refuse_operation(&mut stream, operation, reason);
         }
         allowed_operation(&request, rules.catalog_enabled)
     }) {
-        return refuse(&mut stream, "operation unavailable on selected socket");
+        return refuse_operation(&mut stream, operation, "operation unavailable on selected socket");
     }
     let (reply, answer) = mpsc::sync_channel(1);
     // Without a duplicate the job cannot be observed for hangup; it is still
@@ -1993,7 +2006,7 @@ fn serve_connection(
         caller,
     }) {
         Ok(()) => {}
-        Err(TrySendError::Full(_)) => return refuse(&mut stream, "busy: host queue full"),
+        Err(TrySendError::Full(_)) => return refuse_operation(&mut stream, operation, "busy: host queue full"),
         Err(TrySendError::Disconnected(_)) => return,
     }
     // No reply means the Host stopped during this request (or the service is
@@ -3464,6 +3477,15 @@ done"#;
         assert!(!response_operation_matches(mini_sdk::host_operations::APPLICATION_DISPATCH_SUBMIT, &[164]));
         assert!(!response_operation_matches(mini_sdk::host_operations::APPLICATION_ROUTE_INSPECT, &[34, 1]));
         assert!(!response_operation_matches(mini_sdk::host_operations::APPLICATION_DISPATCH_SUBMIT, &[]));
+    }
+
+    #[test]
+    fn accepted_grant_inspection_is_private_and_bounded() {
+        assert!(allowed_operator_operation(&[156, 1]));
+        assert!(!allowed_operation(&[156, 1], false));
+        assert!(!allowed_operation(&[156, 1], true));
+        assert!(!allowed_operator_operation(&[156]));
+        assert!(!allowed_operator_operation(&vec![156; HOST_MAX_FRAME + 1]));
     }
 
     #[test]

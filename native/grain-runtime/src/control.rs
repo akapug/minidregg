@@ -114,10 +114,10 @@ pub fn start_admin(path: &Path) -> Result<AdminServer, String> {
 
 fn admin_action_timeout(command: &str) -> Duration {
     // Leave thirty seconds inside the installer's 1800-second outer bound
-    // for the framed reply and process exit. Other admin actions keep 300s.
+    // for the framed reply and process exit. Idle preparation shares this bound. Other admin actions keep 300s.
     let exact_session = command.strip_prefix("recover foreground session ")
         .is_some_and(|id| id.len() == 32 && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
-    Duration::from_secs(if exact_session { 1770 } else { 300 })
+    Duration::from_secs(if exact_session || command == "prepare idle" { 1770 } else { 300 })
 }
 
 fn serve_admin_connection(mut stream: UnixStream, tx: SyncSender<AdminRequest>) {
@@ -1127,9 +1127,10 @@ mod tests {
 mod session_recovery_deadline_tests {
     use super::*;
     #[test]
-    fn only_exact_recovery_request_gets_extended_admin_deadline() {
+    fn only_exact_recovery_or_idle_preparation_gets_extended_admin_deadline() {
         assert_eq!(admin_action_timeout("recover foreground session 839a6731941b62b1179b4de9c076f0df"), Duration::from_secs(1770));
-        for command in ["reconcile effects", "recover foreground session", "recover foreground session bad", "recover foreground session 839A6731941b62b1179b4de9c076f0df", "recover foreground session 839a6731941b62b1179b4de9c076f0df extra"] {
+        assert_eq!(admin_action_timeout("prepare idle"), Duration::from_secs(1770));
+        for command in ["prepare idle extra", "prepare", "reconcile effects", "recover foreground session", "recover foreground session bad", "recover foreground session 839A6731941b62b1179b4de9c076f0df", "recover foreground session 839a6731941b62b1179b4de9c076f0df extra"] {
             assert_eq!(admin_action_timeout(command), Duration::from_secs(300));
         }
     }

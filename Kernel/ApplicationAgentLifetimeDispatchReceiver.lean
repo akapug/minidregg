@@ -4,7 +4,11 @@ must be joined by Replay, then the caller must win this exact physical CAS and
 validate the complete successor. A recovered/already-present exact image is
 receipt evidence, never another fd3 delivery permit.
 -/
-import Kernel.ApplicationAgentLifetimeDispatchProjection
+module
+
+public import Kernel.ApplicationAgentLifetimeDispatchProjection
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationAgentLifetimeDispatchReceiver
 

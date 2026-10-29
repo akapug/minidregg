@@ -4,9 +4,13 @@ must obtain the cursor and prior event13 record/receipt from its *private*
 native-verified replay walk. Passing an arbitrary Cursor or Original to this
 function is not a receiving-authority claim; live Host uses a Verified wrapper.
 -/
-import Kernel.FnConsumerFrontierProposal
-import Kernel.FnSelectedPollReleaseShape
-import Kernel.FnConsumerNamespaceHistory
+module
+
+public import Kernel.FnConsumerFrontierProposal
+public import Kernel.FnSelectedPollReleaseShape
+public import Kernel.FnConsumerNamespaceHistory
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnSelectedPollAdmissionAt
 

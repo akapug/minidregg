@@ -3,8 +3,27 @@ Canonical source coordinates for the native grain-backed birth draft. This is
 input data, never an authority verdict or a proposed post-state. The receiver
 recomputes the command, checks both old grain cells, and admits signatures.
 -/
-import Compiler.GrainResourceBirthController
-import Compiler.CanonicalResourcePageMaterializer
+module
+
+public import Compiler.GrainResourceBirthController
+public import Compiler.CanonicalResourcePageMaterializer
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.GrainResourceBirthHostCodec
 

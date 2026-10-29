@@ -13,8 +13,27 @@ holds at the store its prefix produced (`Patch.ValidFrom`).  Footprints are not
 declared; they are derived from the patch's syntax, so the frame law that the
 application satisfies is `Store.Patch.run_frame` itself.
 -/
-import Theory.Store
-import Theory.ReactiveController
+module
+
+public import Theory.Store
+public import Theory.ReactiveController
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Theory.CellState
 

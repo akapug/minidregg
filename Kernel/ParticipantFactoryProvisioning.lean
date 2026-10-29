@@ -12,7 +12,29 @@ the new subject, which the birth controller already admits. This operation
 supplies the remaining permission: reading the factory, which current resource
 birth authoring requires as a signed observation.
 -/
-import Kernel.CapabilityRevocationController
+module
+
+public import Kernel.CapabilityRevocationController
+public import Kernel.ResourceBirthPolicyController
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ParticipantFactoryProvisioning
 
@@ -223,6 +245,9 @@ def request (deployment : Deployment) (template : CanonicalRuntimeProfile.Factor
 
 inductive Reject where
   | malformedIngress | directoryUnavailable | authorityUnavailable | factoryUnavailable
+  /-- The image holds no platform record: the observe grant's window and budget have no
+  source (`ResourceBirthPolicyController.Concrete.platformRecordAt`). -/
+  | platformUnavailable
   | staleAuthority | holderNotEnrolled | capabilityExists | capabilityRevoked | replayedMarker
   | validation | physicalPreparation
   | policyUnavailable | capabilityRejected | policyRejected | policyInputRange | policyCastAlias
@@ -243,11 +268,15 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
     deployment.factoryId command.expectedFactoryRoot
   holderEnrolled :
     (show Option Epoch from authority.snapshot.logical ⟨.subjectKeyEpoch, command.holder⟩).isSome = true
+  /-- The platform record of the image: the observe grant's window and budget are its. -/
+  record : PlatformCellLayout.Platform
+  recordExact : ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable =
+    some record
   candidate : Candidate
     (family deployment authority.snapshot profile.semantics ambient command)
     authority.snapshot.cell
-    (declaration deployment profile.template authority.snapshot.domain profile.semantics
-      authority.snapshot.cell ambient command) ()
+    (declaration deployment (ResourceBirthPolicyController.Concrete.templateAt profile.template record)
+      authority.snapshot.domain profile.semantics authority.snapshot.cell ambient command) ()
   source : CanonicalCellRegistry.LoadedPolicySource authority.snapshot.domain directory.directory
     (authority.snapshot.authState.policyAddress ⟨deployment.factoryId⟩
       (authority.snapshot.authState.policyRevision ⟨deployment.factoryId⟩))
@@ -257,8 +286,32 @@ theorem Prepared.sound {F : Type} [Field F] {deployment : Deployment}
     command.expectedFactoryRoot = prepared.factory.before.payload.root ∧
       prepared.directory.directory.slots deployment.factoryId = .present prepared.factory.before ∧
       (show Option Epoch from
-        prepared.authority.snapshot.logical ⟨.subjectKeyEpoch, command.holder⟩).isSome = true :=
-  ⟨prepared.factory.rootExact, prepared.factory.present, prepared.holderEnrolled⟩
+        prepared.authority.snapshot.logical ⟨.subjectKeyEpoch, command.holder⟩).isSome = true ∧
+      ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable =
+        some prepared.record :=
+  ⟨prepared.factory.rootExact, prepared.factory.present, prepared.holderEnrolled,
+    prepared.recordExact⟩
+
+/-- The factory template the prepared grant is bound by: `templateAt` of the image's platform
+record, the same template a resource birth at this image is bound by. -/
+def Prepared.template {F : Type} [Field F] {deployment : Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
+    {command : Command} (prepared : Prepared deployment profile ambient durable command) :
+    CanonicalRuntimeProfile.FactoryTemplate :=
+  ResourceBirthPolicyController.Concrete.templateAt profile.template prepared.record
+
+/-- The image's platform record with its equation. -/
+private def recordOf (deployment : Deployment) (durable : Durable) :
+    Option {record : PlatformCellLayout.Platform //
+      ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable = some record} :=
+  go _ rfl
+where
+  go : (found : Option PlatformCellLayout.Platform) →
+      ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable = found →
+      Option {record : PlatformCellLayout.Platform //
+        ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable = some record}
+    | none, _ => none
+    | some record, recorded => some ⟨record, recorded⟩
 
 def prepare {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
@@ -268,8 +321,9 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
   let factory ← requireSome .factoryUnavailable
     (ResourceTargetAdmission.observe deployment directory.directory .object
       deployment.factoryId command.expectedFactoryRoot)
+  let ⟨record, recordExact⟩ ← requireSome .platformUnavailable (recordOf deployment durable)
   let snapshot := authority.snapshot
-  let template := profile.template
+  let template := ResourceBirthPolicyController.Concrete.templateAt profile.template record
   let d := declaration deployment template snapshot.domain profile.semantics snapshot.cell
     ambient command
   if rootExact : command.expectedAuthorityRoot = snapshot.cell.root then
@@ -306,7 +360,8 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
                     modeEvidence := evidence
                     validated := validated
                     postcondition := validated.resultAt }
-                pure ⟨directory, authority, factory, holderEnrolled, candidate, source⟩
+                pure ⟨directory, authority, factory, holderEnrolled, record, recordExact,
+                  candidate, source⟩
           else throw .replayedMarker
          else throw .capabilityExists
         else throw .capabilityRevoked
@@ -332,7 +387,7 @@ def project (prepared : Prepared deployment profile ambient durable command)
     (logical : Store CredentialAuthorityState.layout) : Minidregg.Pred.State :=
   ⟨WorldKindLawDependencies.targetSelectorSlots prepared.directory.directory deployment.factoryId ++
     CanonicalRuntimeProfile.requestSlots
-      (request deployment profile.template prepared.authority.snapshot profile.semantics
+      (request deployment prepared.template prepared.authority.snapshot profile.semantics
         ambient command) ++
     [("authority/operation/provision-factory-observe", 1)] ++
     DeclaredResourceController.bytesSlots "command/bytes" 0 (commandCodec.encode command) ++
@@ -374,9 +429,9 @@ abbrev Prepared.SemanticAccepted [DecidableEq F]
   AcceptedCellEffect (portal := (policyConfig prepared).portal)
     (authState := prepared.authority.snapshot.authState)
     (family deployment prepared.authority.snapshot profile.semantics ambient command)
-    (request deployment profile.template prepared.authority.snapshot profile.semantics ambient command)
+    (request deployment prepared.template prepared.authority.snapshot profile.semantics ambient command)
     prepared.authority.snapshot.cell
-    (declaration deployment profile.template prepared.authority.snapshot.domain profile.semantics
+    (declaration deployment prepared.template prepared.authority.snapshot.domain profile.semantics
       prepared.authority.snapshot.cell ambient command) ()
 
 /-- Capability-mode authorization only: the presented factory control grant
@@ -385,7 +440,7 @@ def authorize [DecidableEq F]
     (prepared : Prepared deployment profile ambient durable command)
     (receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot) :
     Except Reject prepared.SemanticAccepted := do
-  let wanted := request deployment profile.template prepared.authority.snapshot
+  let wanted := request deployment prepared.template prepared.authority.snapshot
     profile.semantics ambient command
   let config := policyConfig prepared
   let _ ← requireSome .policyUnavailable (kindDependencies prepared)
@@ -417,7 +472,7 @@ theorem Accepted.sound [DecidableEq F]
     (accepted : Accepted prepared ingress) :
     accepted.receipt.envelopeBytes = ingress.ingress.sponsorEnvelope ∧
       Nonempty (Authorized (policyConfig prepared).portal prepared.authority.snapshot.authState
-        (request deployment profile.template prepared.authority.snapshot profile.semantics ambient command)) :=
+        (request deployment prepared.template prepared.authority.snapshot profile.semantics ambient command)) :=
   ⟨accepted.envelopeExact, ⟨accepted.semantic.authorization⟩⟩
 
 def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
@@ -425,7 +480,7 @@ def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
     (ingress : DecodedIngress) : IO (Except Reject (Accepted prepared ingress)) := do
   match ← CredentialSignatureAdmission.verifyNative native prepared.authority.snapshot
       (marker prepared.authority.snapshot.domain profile.semantics command)
-      (request deployment profile.template prepared.authority.snapshot profile.semantics
+      (request deployment prepared.template prepared.authority.snapshot profile.semantics
         ambient command)
       ingress.ingress.sponsorEnvelope with
   | .error reason => return .error (.signature reason)

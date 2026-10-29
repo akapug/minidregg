@@ -4,12 +4,34 @@ This joins the verified original versioned retry claim, the separately pinned ph
 custodian, current installed law and capabilities, and exact current app and
 package content. It produces no CAS or host permit by itself.
 -/
-import Kernel.ApplicationLifecycleRetryCompletionV4History
-import Kernel.ApplicationLifecycleRetryCompletionV4Ingress
-import Kernel.ApplicationLifecycleRetryCompletionV4Policy
-import Kernel.ApplicationLifecycleClaimCurrent
-import Kernel.PhysicalResourceReadGuard
-import Kernel.ResourceObservationAdmission
+module
+
+public import Kernel.ApplicationLifecycleRetryCompletionV4History
+public import Kernel.ApplicationLifecycleRetryCompletionV4Ingress
+public import Kernel.ApplicationLifecycleRetryCompletionV4Policy
+public import Kernel.ApplicationLifecycleClaimCurrent
+public import Kernel.CompletionCustodianKey
+public import Kernel.PhysicalResourceReadGuard
+public import Kernel.ResourceObservationAdmission
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Admission
 
@@ -252,7 +274,7 @@ def checkPackage (config : Config) (ground : Ground config.deployment)
 
 /-- This conditional candidate is not constructed from a valid report alone. It also
 re-admits the exact claim at a structural prefix of the same Store, uses the custodian key
-pinned into today's NativeHost profile, checks current app/package content,
+of the platform record on this ground (guarded at its root), checks current app/package content,
 and admits the source-derived management command under current signatures.
 Only Replay may bind its structural historical prefix to an admitted walk. -/
 structure Candidate (config : Config) {store : StoreIdentity} (head : Head store)
@@ -262,10 +284,9 @@ structure Candidate (config : Config) {store : StoreIdentity} (head : Head store
   profileExact : ingress.domain = config.deployment.domain ∧
     ingress.semantics = config.profile.semantics
   sourceValid : ingress.source.valid = true
-  key : List UInt8
-  keyPinned : config.completionCustodianKey = some key
+  custodian : CompletionCustodianKey.Read config.deployment ground
   physical : ApplicationLifecycleRetryCompletionV4Report.Checked
-    config.deployment.domain config.profile.semantics key
+    config.deployment.domain config.profile.semantics custodian.key
     ingress.source.originalBegin
   historical : ApplicationLifecycleRetryCompletionV4History.Candidate config head ingress.source
   prepared : DeclaredResourceController.PreparedInvocation
@@ -294,6 +315,8 @@ structure Candidate (config : Config) {store : StoreIdentity} (head : Head store
     (ApplicationLifecycleClaimCurrent.observationGuard
       ingress.source.originalBegin.base.source.packageManifest packageCell).cellId ∉
       (DeclaredResourceController.writes prepared).map DataWrite.cellId
+  platformReadOnly : custodian.guard.cellId ∉
+    (DeclaredResourceController.writes prepared).map DataWrite.cellId
   invocation : ApplicationLifecycleRetryCompletionV4Policy.Accepted prepared
     ingress.signed physical
 
@@ -306,12 +329,10 @@ def prepareConditional (config : Config) {store : StoreIdentity}
   if profileExact : ingress.domain = config.deployment.domain ∧
       ingress.semantics = config.profile.semantics then
     if sourceValid : ingress.source.valid = true then
-      let keySelected ← match requirePresent config.completionCustodianKey
-          "physical custodian key unavailable" with
-        | .error detail => return .error detail
+      let custodian ← match CompletionCustodianKey.select config.deployment ground with
+        | .error reason => return .error reason.describe
         | .ok selected => pure selected
-      let key := keySelected.val
-      have keyPinned : config.completionCustodianKey = some key := keySelected.property
+      let key := custodian.key
       let physical ← match ← ApplicationLifecycleRetryCompletionV4Report.check config.signature
           config.deployment.domain config.profile.semantics key
           ingress.source.originalBegin ingress.source.physical with
@@ -358,15 +379,18 @@ def prepareConditional (config : Config) {store : StoreIdentity}
                   if packageGuardReadOnly : ingress.source.needsPackageWrite = false →
                       (ApplicationLifecycleClaimCurrent.observationGuard resource packageCell).cellId ∉
                         (DeclaredResourceController.writes prepared).map DataWrite.cellId then
-                    match ← ApplicationLifecycleRetryCompletionV4Policy.admit config.signature
-                        prepared ingress.signed physical with
-                    | .error reason => return .error s!"completion current signed policy admission refused: {repr reason}"
-                    | .ok invocation =>
-                        return .ok ⟨profileExact, sourceValid, key, keyPinned,
-                          physical, historical, prepared, linked, shape,
-                          appCell, appCurrent, appExact, packageCell, packageCurrent,
-                          packageAtomExact, installed, markers, packageRead,
-                          packageGuardReadOnly, invocation⟩
+                    if platformReadOnly : custodian.guard.cellId ∉
+                        (DeclaredResourceController.writes prepared).map DataWrite.cellId then
+                      match ← ApplicationLifecycleRetryCompletionV4Policy.admit config.signature
+                          prepared ingress.signed physical with
+                      | .error reason => return .error s!"completion current signed policy admission refused: {repr reason}"
+                      | .ok invocation =>
+                          return .ok ⟨profileExact, sourceValid, custodian,
+                            physical, historical, prepared, linked, shape,
+                            appCell, appCurrent, appExact, packageCell, packageCurrent,
+                            packageAtomExact, installed, markers, packageRead,
+                            packageGuardReadOnly, platformReadOnly, invocation⟩
+                    else return .error "completion would write the platform cell"
                   else return .error "completion package read/write overlap refused"
                 else return .error "completion creation marker state refused"
               else return .error "current installed package differs from descriptor"

@@ -11,7 +11,26 @@ controller-bound `DataIntent`. Decoding a journal does not authenticate a new
 user request. The physical store must preserve the exact image bytes supplied
 by that trusted controller; SQLite/OS durability remains an external floor.
 -/
-import Kernel.DurableDataIntent
+module
+
+public import Kernel.DurableDataIntent
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.DurableDataIntent.DataSnapshot
 
@@ -72,11 +91,14 @@ structure IntentRecord where
   event : StableEvent
   /-- The signing subject (`DataIntent.subject`). -/
   subject : Option SubjectId
+  /-- The meter credit (`DataIntent.credit`): zero but for the seed-meter refill. Replay
+  reproduces the meter from it (durable log and image frame v3). -/
+  credit : Charge := 0
 
 def IntentRecord.ofIntent {rootBytes : List UInt8 → Digest}
     (intent : DataIntent rootBytes) : IntentRecord :=
   ⟨intent.transactionId, intent.writes, intent.readGuards, intent.nullifiers,
-    intent.exactCharge, intent.event, intent.subject⟩
+    intent.exactCharge, intent.event, intent.subject, intent.credit⟩
 
 def IntentRecord.bind? (rootBytes : List UInt8 → Digest) (record : IntentRecord) :
     Option (DataIntent rootBytes) :=
@@ -93,7 +115,8 @@ def IntentRecord.bind? (rootBytes : List UInt8 → Digest) (record : IntentRecor
           event := record.event
           subject := record.subject
           postRootsBound := by simpa using roots
-          guardsReadOnly := by simpa using guards }
+          guardsReadOnly := by simpa using guards
+          credit := record.credit }
     else none
   else none
 

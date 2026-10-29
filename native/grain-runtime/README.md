@@ -31,6 +31,45 @@ grain-runtime admin /var/lib/mini/grains/task-7001/admin.sock 'reconcile provide
 grain-runtime admin /var/lib/mini/grains/task-7001/admin.sock 'reconcile effects'
 ```
 
+Before submitting the first tool after a cold start, an operator can run:
+
+```sh
+grain-runtime admin /absolute/state/admin.sock 'prepare idle'
+```
+
+This performs ordinary native recovery and soft attachment if needed, then
+requires a fresh signed idle-task observation. Its `mini-grain-idle-readiness-v1`
+reply has `ready: true` only when no worker, foreground call, held allowance, or
+unresolved effect blocks admission. A listening socket alone is not readiness.
+Retained foreground/API attempts require their exact recovery command first.
+
+The optional controller setting `startupTimeoutSeconds` gives cold startup,
+recovery, and idle attachment one shared wall-clock budget: 1200 seconds by
+default, configurable from 60 to 1500. Nested maintenance cannot restart that
+clock. The upper bound leaves room inside the private admin transport and
+installer deadlines. Ordinary native helper calls retain their 300-second
+limit, and this setting cannot extend an active worker or foreground API
+budget. Expiry still stops/reaps the helper and leaves its outcome undecided;
+it does not authorize another submission.
+
+With a Mini, consent provider, and delegated consent proxy that support full
+readiness, set `consentFullReadiness: true` to make `prepare idle` complete verified
+full-history consent loading before its final signed task read. The command uses
+the same consent resident as signing, within the startup budget, and returns its
+acknowledgement as `fullConsent`. Unsupported protocols, missing acknowledgements,
+and timeouts fail preparation. The setting is omitted by default for older binary
+cohorts; an idle-task receipt with `fullConsent: null` makes no full-consent claim.
+It does not extend an active call's budget or promise that future Store changes
+will require no further verification.
+
+New `grain-runtime create` controllers with a dispatch purse enable this setting
+automatically after the selected Mini and its actual consent provider confirm
+full readiness. This bounded preparation precedes signed work in the Whole
+phase and retains its acknowledgement and input hashes in `create/`. It requires
+a supporting toolchain; unsupported or failed preparation refuses provisioning.
+Plain grains retain thin consent, and an already published controller keeps its
+existing setting unchanged.
+
 Hard EOF or explicit disconnect signals the owned process group immediately;
 the persistent controller then stops its remaining members and sends Mini a
 signed `interrupt` generation fence. A soft transport close leaves its current
@@ -377,15 +416,6 @@ ordinary Mini events after reserve but refuses a later provider write; it is a
 check at send time, not an atomic lease across the external HTTP request.
 Missing or changed evidence keeps the provider allowance held for audit.
 
-The [local-provider acceptance](../../native/hermes-test-provider/evidence/2026-09-26/gateway-r1/)
-used real upstream Hermes with a deterministic local HTTP endpoint and signed
-Mini provider reserve, tool publication and fixed-charge settlement. That
-earlier runtime used the conservative whole-world root; the op17
-continuity consumer requires a separate source-matched native run before its
-receiving claim. The existing
-Mini/fn two-Store evidence is in fn's `planning/evidence/two-store-join-1a9dd747-2026-09-24.md`;
-this runtime does not reinterpret that synthetic acceptance as a hosted agent.
-
 A delivered provider response whose original settlement already committed can be
 retired by ordinary `recover`. The controller requires exact replay/response/quote
 custody, physical quiescence, and lookup of the original settlement receipt on the
@@ -411,3 +441,14 @@ never transparent re-signing. A before-signing guard refusal can retire only its
 exact unsubmitted Pending after fresh sender-stop proof and retained artifact
 validation; the financial hold and response remain. These source consumers require
 the corresponding native feature bundle and native qualification before deployment.
+
+## Other documents in this directory
+
+- [TERMINAL.md](TERMINAL.md): `grain-runtime terminal`, one controller as a text conversation (hard or soft attach).
+- [SYSTEMD-MANAGERS.md](SYSTEMD-MANAGERS.md): the root-owned controller registration
+  (`mini-controller-registration-v1`) and which systemd manager runs the controller and its workers.
+- [BYOK.md](BYOK.md): member provider keys and the member's choice of controller route.
+- [RESIDENT-REQUESTS.md](RESIDENT-REQUESTS.md): custody of a room resident's accepted assignments
+  (`grain-runtime hermes-room resident`).
+- [RESIDENT-DELIVERY.md](RESIDENT-DELIVERY.md): a completed model turn versus a delivered room reply.
+- [fixture/RECEIPT-RECOVERY.md](fixture/RECEIPT-RECOVERY.md): the `publicationReceipts` lost-reply fixture.

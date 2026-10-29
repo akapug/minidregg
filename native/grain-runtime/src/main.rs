@@ -2,6 +2,8 @@
 //! exclusively a signed call to the native Lean host through `mini`.
 mod journal_io;
 mod deadline;
+#[cfg(test)]
+mod startup_budget_tests;
 mod controller_digest;
 mod public_status;
 mod application_api_tools;
@@ -92,6 +94,12 @@ struct Config {
     host_config: PathBuf,
     #[serde(default)]
     host_socket: Option<PathBuf>,
+    /// Operator budget for cold startup/recovery and idle attachment only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    startup_timeout_seconds: Option<u64>,
+    /// Opt in only with a qualified Mini/consent/proxy supporting full readiness.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    consent_full_readiness: Option<bool>,
     control_socket: PathBuf,
     custody_key: PathBuf,
     state_dir: PathBuf,
@@ -239,20 +247,22 @@ struct DispatchSignerPin {
     key_epoch: String,
 }
 
-/// A one-target observed `NativeHost.prepareLoaded (.invoke ...)` has the
-/// target, observation, and authority signing incidences in this order. They
-/// all use the controller's pinned payer identity; the resident never gets
-/// that key. V2's separate signing profile is unaffected.
+/// Lifetime reserve and payer authoring each invoke one mutating purse target.
+/// Native Command.requiresObservation is false for that shape: the ordered
+/// incidences are target (4) and authority (1), with no observation (8).
+/// Both use the pinned payer identity; the resident never gets its key.
+/// The exact source plan is independently rederived by native consent before
+/// signing. V2's separate signing profile is unaffected.
 fn lifetime_purse_signers(
     slots: &[Value],
     signer: &DispatchSignerPin,
     key_path: &Path,
 ) -> Result<Vec<Value>> {
-    if !matches!(signer.role.as_str(), "4" | "8" | "1") || signer.index != "0" || slots.len() != 3 {
-        return Err("lifetime purse requires exact target/observe/authority slots".into());
+    if !matches!(signer.role.as_str(), "4" | "1") || signer.index != "0" || slots.len() != 2 {
+        return Err("lifetime purse requires exact target/authority slots".into());
     }
-    let mut approved = Vec::with_capacity(3);
-    for (slot, role) in slots.iter().zip(["4", "8", "1"]) {
+    let mut approved = Vec::with_capacity(2);
+    for (slot, role) in slots.iter().zip(["4", "1"]) {
         let signing = slot
             .get("signing")
             .ok_or("lifetime purse signing header absent")?;
@@ -434,6 +444,34 @@ fn provider_command_route(command: &AllowedCommand, required_network: &str) -> b
             .args
             .get(7)
             .is_some_and(|arg| arg == "/agent/hermes-acp")
+}
+
+const FOREGROUND_API_WALL_SECONDS: u64 = 1800;
+
+/// Physical foreground API budget. A reverse caller may narrow the actual
+/// deadline, never extend it or borrow the identity of a Hermes worker.
+struct ForegroundApiBudget {
+    operation_id: u64,
+    started: Instant,
+    deadline: Instant,
+}
+
+impl ForegroundApiBudget {
+    fn new(operation_id: u64) -> Self {
+        let started = Instant::now();
+        Self { operation_id, started, deadline: started + Duration::from_secs(FOREGROUND_API_WALL_SECONDS) }
+    }
+    fn tighten(&mut self, requested: u64) -> Result<u64> {
+        if requested == 0 || requested > FOREGROUND_API_WALL_SECONDS {
+            return Err("lifetime foreground wall exceeds controller API policy".into());
+        }
+        let deadline = self.deadline.min(self.started + Duration::from_secs(requested));
+        if Instant::now() >= deadline {
+            return Err("lifetime foreground API budget expired".into());
+        }
+        self.deadline = deadline;
+        Ok(requested)
+    }
 }
 
 fn checked_lifetime_worker_wall(
@@ -940,11 +978,76 @@ fn bounded_foreground_result(mut result: Value) -> Result<(Value, Vec<u8>)> {
     Ok((result, bytes))
 }
 
+/// Birth and later renewal must encode the same ordered role list.
+fn ordered_worker_subjects(
+    tool: Option<&str>,
+    provider: Option<&str>,
+    dispatch: Option<&str>,
+) -> Vec<String> {
+    [tool, provider, dispatch]
+        .into_iter()
+        .flatten()
+        .map(str::to_owned)
+        .collect()
+}
+
 fn managed_worker_policy_source(owner: &str, workers: &[String], generation: &str) -> Value {
     if workers.len() == 1 {
         json!({"owner":owner,"workerSubject":workers[0],"workerGeneration":generation})
     } else {
         json!({"owner":owner,"workerSubjects":workers,"workerGeneration":generation})
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ToolSurface {
+    Resident,
+    OperatorForeground,
+}
+
+fn operator_foreground_tool(name: &str) -> bool {
+    matches!(name,
+            "mini_grain_status"
+                | "mini_workspace_list"
+                | "mini_workspace_describe"
+                | "mini_workspace_read"
+                | "mini_workspace_propose"
+                | "mini_workspace_submit"
+                | "mini_workspace_create"
+                | "mini_workspace_recover"
+                | "mini_workspace_attempts"
+                | "mini_workspace_import_reference"
+                | "mini_workspace_export_reference"
+                | "mini_read_resource"
+                | "mini_create_resource"
+                | "mini_create_application"
+                | "mini_create_application_session"
+                | "mini_publish"
+                | "mini_application_api"
+                | "mini_oracle_discover"
+                | "mini_oracle_call"
+    )
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConsentFullReadiness {
+    #[serde(rename = "type")]
+    kind: String,
+    ready: bool,
+}
+
+impl ConsentFullReadiness {
+    fn parse(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() > 1024 {
+            return Err("full-consent readiness reply exceeds 1024 bytes".into());
+        }
+        let receipt: Self = serde_json::from_slice(bytes)
+            .map_err(|e| format!("full-consent readiness reply: {e}"))?;
+        if receipt.kind != "mini-consent-full-readiness-v1" || !receipt.ready {
+            return Err("full-consent provider did not confirm readiness".into());
+        }
+        Ok(receipt)
     }
 }
 
@@ -2887,6 +2990,7 @@ fn validate(c: &Config) -> Result<()> {
     validate_with_workspace(c, None)
 }
 fn validate_with_workspace(c: &Config, prospective_workspace: Option<&[u8]>) -> Result<()> {
+    deadline::startup_limit(c.startup_timeout_seconds)?;
     if let Some(sandbox) = &c.sandbox {
         sandbox.validate()?;
         if c.tool_task.as_ref().and_then(|t| t.room.as_ref()).is_none() {
@@ -3528,6 +3632,9 @@ struct Runtime {
     /// reached at its boundary; written as one typed record when it ends.
     prompt_decision: Option<(u64, Option<prompt_outcome::Outcome>)>,
     foreground_operation: Option<u64>,
+    foreground_api_budget: Option<ForegroundApiBudget>,
+    /// Process-local total budget; never persisted as authority or reused by work.
+    startup_deadline: Option<Instant>,
     output: Option<control::OutputHandle>,
     /// First controller operation ID allocated by this process. Earlier
     /// attempts were started by a previous process.
@@ -4214,9 +4321,11 @@ impl Runtime {
                     "http":application_api_tools::routed_reserve_http(
                         &retained, &route.signed_api_path)?,
                 },
+                // Native application command is authored as the session participant;
+                // the payer's delegated parent witness belongs to ordinary task IO.
                 "parentTask":self.config.task,
-                "parentCapability":dispatch.parent_capability,
-                "parentObserve":dispatch.parent_observe_capability,
+                "parentCapability":self.config.capability,
+                "parentObserve":self.config.query_capability,
                 "purseTask":dispatch.task,
                 "purseCapability":dispatch.capability,
                 "purseObserve":dispatch.query_capability,
@@ -4239,6 +4348,30 @@ impl Runtime {
     /// exact op80 plan and current signed parent/purse are checked before the
     /// protected signer is opened. The client durably marks one public op2;
     /// any lost reply can only take the receipt-only op3 path.
+    fn checked_lifetime_dispatch_wall(&mut self, requested: u64) -> Result<u64> {
+        if let Some(operation_id) = self.foreground_operation {
+            let attempt = self.journal.foreground_attempt.as_ref()
+                .ok_or("lifetime foreground operation has no durable attempt")?;
+            let budget = self.foreground_api_budget.as_mut()
+                .ok_or("lifetime foreground API budget absent")?;
+            if self.config.foreground_tool.is_none() || self.prompt_active
+                || self.child.is_some() || self.journal.child.is_some()
+                || attempt.operation_id != operation_id || budget.operation_id != operation_id
+                || attempt.phase != ForegroundPhase::Executing
+                || !(attempt.name == "mini_application_api" || oracle_tools::is_tool(&attempt.name)) {
+                return Err("lifetime reserve differs from active foreground API invocation".into());
+            }
+            return budget.tighten(requested);
+        }
+        if self.foreground_api_budget.is_some() {
+            return Err("lifetime foreground budget has no active invocation".into());
+        }
+        let selected = self.config.commands.iter().find(|command| command.name == "hermes-acp")
+            .ok_or("selected Hermes worker command absent")?;
+        checked_lifetime_worker_wall(selected, requested, self.prompt_active, self.child.is_some(),
+            self.journal.child.as_ref().map(|child| child.program.as_path()), false)
+    }
+
     fn dispatch_reserve_v3(
         &mut self,
         route_name: &str,
@@ -4247,29 +4380,13 @@ impl Runtime {
         worker_wall_seconds: u64,
         fixed_request: &Value,
     ) -> Result<Value> {
-        let selected = self
-            .config
-            .commands
-            .iter()
-            .find(|command| command.name == "hermes-acp")
-            .ok_or("selected Hermes worker command absent")?;
-        let effective_wall = checked_lifetime_worker_wall(
-            selected,
-            worker_wall_seconds,
-            self.prompt_active,
-            self.child.is_some(),
-            self.journal
-                .child
-                .as_ref()
-                .map(|child| child.program.as_path()),
-            self.foreground_operation.is_some(),
-        )?;
         let (route, retained_forward) = self.verified_reverse_lifetime_fixed_request(
             route_name,
             forward_operation_id,
             binding_sha256,
             fixed_request,
         )?;
+        let effective_wall = self.checked_lifetime_dispatch_wall(worker_wall_seconds)?;
         if self.journal.dispatch_pending.is_some()
             || self.journal.dispatch_hold.is_some()
             || self.journal.dispatch_attempt.is_some()
@@ -4294,26 +4411,8 @@ impl Runtime {
             .reserve_signer
             .as_ref()
             .ok_or("reserve signer absent")?;
-        let parent = self.query()?;
-        let parent_generation = parent
-            .pointer("/grain/generation")
-            .and_then(Value::as_str)
-            .ok_or("parent generation absent")?
-            .to_owned();
-        let parent_root = parent
-            .get("targetRoot")
-            .and_then(Value::as_str)
-            .ok_or("parent physical root absent")?
-            .to_owned();
-        if !matches!(
-            parent.pointer("/grain/status").and_then(Value::as_str),
-            Some("3" | "4")
-        ) || self.journal.prompt_witness.is_none()
-        {
-            return Err("lifetime parent prompt is not reserved".into());
-        }
         let authority = self.dispatch()?;
-        let mut purse = self.query_as(&authority)?;
+        let purse = self.query_as(&authority)?;
         let status = purse
             .pointer("/grain/status")
             .and_then(Value::as_str)
@@ -4327,27 +4426,10 @@ impl Runtime {
                 "agent lifetime dispatch attach",
                 vec![],
             )?;
-            purse = self.query_as(&authority)?;
         } else if status != "1" {
             return Err("dispatch purse is not available for lifetime reserve".into());
         }
-        if purse.pointer("/grain/status").and_then(Value::as_str) != Some("1")
-            || purse.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
-        {
-            return Err("lifetime purse is not running and unreserved".into());
-        }
-        let purse_generation = purse
-            .pointer("/grain/generation")
-            .and_then(Value::as_str)
-            .ok_or("purse generation absent")?
-            .to_owned();
-        let purse_root = purse
-            .get("targetRoot")
-            .and_then(Value::as_str)
-            .ok_or("purse physical root absent")?
-            .to_owned();
         let reserve_operation_id = self.next_id()?;
-        let attempt_id = self.next_id()?;
         let mut source = fixed_request.clone();
         source["fixed"]["reserveOperationId"] = json!(reserve_operation_id.to_string());
         let source_path = self.config.state_dir.join(format!(
@@ -4358,44 +4440,84 @@ impl Runtime {
             &serde_json::to_vec(&source)
                 .map_err(|error| format!("lifetime source JSON: {error}"))?,
         )?;
-        let directory = self
-            .config
-            .state_dir
-            .join(format!("agent-lifetime-reserve-{attempt_id:016}"));
         fn path(value: &Path) -> Result<&str> {
             value
                 .to_str()
                 .ok_or_else(|| format!("{} is not UTF-8", value.display()))
         }
-        self.check_not_cancelled()?;
-        let plan_stdout = self.supervised_json_command({
-            let mut command = Command::new(&self.config.mini);
-            command.args([
-                "agent-lifetime-reserve-plan",
-                "--host",
-                path(&self.config.host)?,
-                "--config",
-                path(&self.config.host_config)?,
-                "--operator-socket",
-                path(operator_socket)?,
-                "--public-socket",
-                path(&public_socket)?,
-                "--request",
-                path(&source_path)?,
-                "--dir",
-                path(&directory)?,
-            ]);
-            command
-        })?;
+        let (parent, purse, plan, (attempt_id, directory, request)) =
+            application_api_tools::lifetime_reserve_snapshot(|| {
+                self.check_not_cancelled()?;
+                // Attach may have advanced the Store. Both signed observations
+                // and the native unsigned plan must name one exact image.
+                let parent = self.query()?;
+                if !matches!(
+                    parent.pointer("/grain/status").and_then(Value::as_str),
+                    Some("3" | "4")
+                ) || self.journal.prompt_witness.is_none()
+                {
+                    return Err("lifetime parent prompt is not reserved".into());
+                }
+                let purse = self.query_as(&authority)?;
+                if purse.pointer("/grain/status").and_then(Value::as_str) != Some("1")
+                    || purse.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
+                {
+                    return Err("lifetime purse is not running and unreserved".into());
+                }
+                let attempt_id = self.next_id()?;
+                let directory = self
+                    .config
+                    .state_dir
+                    .join(format!("agent-lifetime-reserve-{attempt_id:016}"));
+                self.check_not_cancelled()?;
+                let plan_stdout = self.supervised_json_command({
+                    let mut command = Command::new(&self.config.mini);
+                    command.args([
+                        "agent-lifetime-reserve-plan",
+                        "--host",
+                        path(&self.config.host)?,
+                        "--config",
+                        path(&self.config.host_config)?,
+                        "--operator-socket",
+                        path(operator_socket)?,
+                        "--public-socket",
+                        path(&public_socket)?,
+                        "--request",
+                        path(&source_path)?,
+                        "--dir",
+                        path(&directory)?,
+                    ]);
+                    command
+                })?;
+                let read_json = |name: &str| -> Result<Value> {
+                    serde_json::from_slice(&bounded_regular_file(&directory.join(name), 2_097_152)?)
+                        .map_err(|error| format!("retained lifetime {name}: {error}"))
+                };
+                let request = read_json("request-inspected.json")?;
+                let plan = read_json("plan-inspected.json")?;
+                if plan_stdout != plan {
+                    return Err(
+                        "lifetime plan stdout differs from retained source inspection".into(),
+                    );
+                }
+                Ok((parent, purse, plan, (attempt_id, directory, request)))
+            })?;
+        let get = |object: &Value, field: &str| -> Result<String> {
+            object
+                .get(field)
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .ok_or_else(|| format!("lifetime source {field} absent"))
+        };
+        let parent_generation = get(&parent["grain"], "generation")?;
+        let purse_generation = get(&purse["grain"], "generation")?;
+        // Ordinary task transitions use the logical root; lifetime bindings
+        // below use the source author's lifecycle root for the same snapshot.
+        let parent_root = get(&parent, "targetRoot")?;
         let read_json = |name: &str| -> Result<Value> {
             serde_json::from_slice(&bounded_regular_file(&directory.join(name), 2_097_152)?)
                 .map_err(|error| format!("retained lifetime {name}: {error}"))
         };
-        let request = read_json("request-inspected.json")?;
-        let plan = read_json("plan-inspected.json")?;
-        if plan_stdout != plan {
-            return Err("lifetime plan stdout differs from retained source inspection".into());
-        }
         let fixed_selectors = json!({
             "issueIndex":route.dispatch_selectors.issue_index,
             "ticketResource":route.ticket_resource,
@@ -4405,8 +4527,8 @@ impl Runtime {
             "manifestObserve":route.dispatch_selectors.manifest_observe,
             "enrollmentObserve":route.dispatch_selectors.enrollment_observe,
             "parentTask":self.config.task,
-            "parentCapability":task.parent_capability,
-            "parentObserve":task.parent_observe_capability,
+            "parentCapability":self.config.capability,
+            "parentObserve":self.config.query_capability,
             "purseTask":task.task,
             "purseCapability":task.capability,
             "purseObserve":task.query_capability,
@@ -4423,17 +4545,12 @@ impl Runtime {
         let bindings = plan
             .get("bindings")
             .ok_or("lifetime reserve bindings absent")?;
-        let get = |object: &Value, field: &str| -> Result<String> {
-            object
-                .get(field)
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-                .ok_or_else(|| format!("lifetime source {field} absent"))
-        };
         let app_generation = get(context, "appGeneration")?;
         let session_generation = get(context, "sessionGeneration")?;
         let app_physical_root = get(bindings, "appPhysicalRoot")?;
         let session_physical_root = get(bindings, "sessionPhysicalRoot")?;
+        let parent_physical_root = get(bindings, "parentPhysicalRoot")?;
+        let purse_physical_root = get(bindings, "pursePhysicalRoot")?;
         application_api_tools::verify_lifetime_reserve_inspection(
             application_api_tools::LifetimeReserveInspection {
                 route: &route,
@@ -4442,10 +4559,8 @@ impl Runtime {
                 reserve_operation_id: &reserve_operation_id.to_string(),
                 signed_parent_generation: &parent_generation,
                 signed_purse_generation: &purse_generation,
-                signed_app_physical_root: &app_physical_root,
-                signed_session_physical_root: &session_physical_root,
-                signed_parent_physical_root: &parent_root,
-                signed_purse_physical_root: &purse_root,
+                signed_parent: &parent,
+                signed_purse: &purse,
                 request: &request,
                 plan: &plan,
             },
@@ -4478,8 +4593,8 @@ impl Runtime {
             purse_generation: purse_generation.clone(),
             app_physical_root: app_physical_root.clone(),
             session_physical_root: session_physical_root.clone(),
-            parent_physical_root: parent_root.clone(),
-            purse_physical_root: purse_root.clone(),
+            parent_physical_root: parent_physical_root.clone(),
+            purse_physical_root: purse_physical_root.clone(),
         };
         let fingerprint = application_api_tools::lifetime_operation_fingerprint(
             binding_sha256,
@@ -4557,8 +4672,8 @@ impl Runtime {
                 purse_generation,
                 app_physical_root,
                 session_physical_root,
-                parent_physical_root: parent_root,
-                pre_reserve_purse_physical_root: purse_root,
+                parent_physical_root,
+                pre_reserve_purse_physical_root: purse_physical_root,
                 reserve_index: None,
                 reserve_receipt: None,
                 post_reserve_purse_physical_root: None,
@@ -4616,8 +4731,7 @@ impl Runtime {
             || receipt.get("eventId").and_then(Value::as_str) != Some(anchor.event_id.as_str())
             || receipt.get("acceptedCount").and_then(Value::as_str)
                 != Some(anchor.accepted_count.as_str())
-            || receipt.get("worldRoot").and_then(Value::as_str)
-                != Some(anchor.world_root.as_str())
+            || receipt.get("worldRoot").and_then(Value::as_str) != Some(anchor.world_root.as_str())
             || receipt.get("reserveIndex").and_then(Value::as_str)
                 != Some(previous_accepted_index(&anchor.accepted_count)?.as_str())
         {
@@ -4684,12 +4798,9 @@ impl Runtime {
             .as_mut()
             .ok_or("lifetime attempt disappeared")?;
         saved.dispatch_generation = Some(generation);
-        saved.dispatch_post_root = Some(post_root.clone());
-        saved
-            .lifetime
-            .as_mut()
-            .ok_or("lifetime custody absent")?
-            .post_reserve_purse_physical_root = Some(post_root);
+        saved.dispatch_post_root = Some(post_root);
+        // The signed resource view exposes a logical root. The lifecycle root
+        // is obtained only from the snapshot-bound native paid plan later.
         self.save()?;
         let reserve_plan_hex =
             checked_lifetime_reserve_plan_hex(&plan, &directory.join("plan.bin"))?;
@@ -4707,6 +4818,7 @@ impl Runtime {
             "reserveIndex":receipt.get("reserveIndex"),
             "reserveReceipt":anchor}))
     }
+
 
     /// Source-owned v2 reserve for exactly the active forward API call. The
     /// private op58/59 phases expose and seal a plan; only the marked public
@@ -5366,8 +5478,8 @@ impl Runtime {
             return Err("lifetime payer attempt is already used or unresolved".into());
         }
         let reserve_dir = lifetime.reserve_dir.clone();
-        let post_purse_root = lifetime
-            .post_reserve_purse_physical_root
+        let post_purse_root = attempt
+            .dispatch_post_root
             .as_ref()
             .ok_or("lifetime signed post-reserve purse root absent")?
             .clone();
@@ -5436,7 +5548,7 @@ impl Runtime {
             4096,
         )?)
         .map_err(|error| format!("lifetime original reserve receipt JSON: {error}"))?;
-        application_api_tools::verify_lifetime_paid_inspection(
+        let post_purse_physical_root = application_api_tools::verify_lifetime_paid_inspection(
             application_api_tools::LifetimePaidInspection {
                 reserve: &reserve,
                 paid: &paid,
@@ -5450,7 +5562,10 @@ impl Runtime {
                     "acceptedCount":reserve_receipt.get("acceptedCount"),
                     "worldRoot":reserve_receipt.get("worldRoot"),
                 }),
-                signed_post_purse_physical_root: &post_purse_root,
+                signed_post_purse_world_root: state
+                    .get("worldRoot")
+                    .and_then(Value::as_str)
+                    .ok_or("signed held purse world root absent")?,
             },
         )?;
         let slots = paid
@@ -5485,6 +5600,7 @@ impl Runtime {
             .as_mut()
             .and_then(|saved| saved.lifetime.as_mut())
             .ok_or("lifetime attempt disappeared before signing")?;
+        lifetime.post_reserve_purse_physical_root = Some(post_purse_physical_root.clone());
         lifetime.paid_dir = Some(directory.clone());
         lifetime.paid_plan_sha256 = Some(sha256_file(&directory.join("plan.bin"))?);
         self.save()?;
@@ -5525,10 +5641,11 @@ impl Runtime {
             "attemptId":attempt_id,
             "bindingSha256":confirmed.get("bindingSha256"),
             "operationFingerprint":operation_fingerprint,
-            "signedPostReservePursePhysicalRoot":post_purse_root,
+            "signedPostReservePursePhysicalRoot":post_purse_physical_root,
             "planSha256":result.get("planSha256"),
             "signatures":result.get("signatures")}))
     }
+
 
     /// The resident supplies an op48 paid plan, but only the controller's
     /// retained reserve, protected signer pin, and a fresh source inspection
@@ -6555,7 +6672,10 @@ impl Runtime {
         }
         let response = match self.dispatch_rpc(request.command) {
             Ok(value) => value,
-            Err(detail) => json!({"type":"refused","detail":detail}),
+            Err(detail) => {
+                eprintln!("grain-runtime: dispatch RPC refused: {detail}");
+                json!({"type":"refused","detail":detail})
+            },
         };
         request.phase.store(2, Ordering::SeqCst);
         let _ = request.reply.send(response);
@@ -6652,6 +6772,8 @@ impl Runtime {
             prompt_oracle: false,
             prompt_decision: None,
             foreground_operation: None,
+            foreground_api_budget: None,
+            startup_deadline: None,
             output: None,
             process_first_operation_id,
             startup_recovery_active: false,
@@ -7337,9 +7459,56 @@ impl Runtime {
         self.save()?;
         Ok(id)
     }
+    fn with_startup_budget<T>(
+        &mut self,
+        outer: Option<Instant>,
+        work: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        if self.child.is_some()
+            || self.prompt_active
+            || self.foreground_operation.is_some()
+            || self.foreground_api_budget.is_some()
+        {
+            return Err("cold-start budget cannot be entered by active work".into());
+        }
+        let previous = self.startup_deadline;
+        let mut end = previous.unwrap_or(
+            Instant::now() + deadline::startup_limit(self.config.startup_timeout_seconds)?,
+        );
+        if let Some(outer) = outer {
+            end = end.min(outer);
+        }
+        self.startup_deadline = Some(end);
+        let result = self.native_work_limit().and_then(|_| work(self));
+        self.startup_deadline = previous;
+        result
+    }
+    fn native_work_limit(&self) -> Result<Duration> {
+        if let Some(budget) = &self.foreground_api_budget {
+            let remaining = budget.deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err("foreground API budget expired before native helper spawn".into());
+            }
+            return Ok(remaining.min(deadline::NATIVE_CALL));
+        }
+        // A stale maintenance marker must never extend a live worker's helper.
+        if self.child.is_none() && !self.prompt_active && self.foreground_operation.is_none() {
+            if let Some(end) = self.startup_deadline {
+                let remaining = end.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    return Err("cold-start budget expired before native helper spawn".into());
+                }
+                return Ok(remaining);
+            }
+        }
+        Ok(deadline::NATIVE_CALL)
+    }
     fn command_output(&self, program: &Path, args: &[&str]) -> Result<()> {
+        self.command_capture(program, args).map(|_| ())
+    }
+    fn command_capture(&self, program: &Path, args: &[&str]) -> Result<std::process::Output> {
         self.custody_exit_reaped.store(false, Ordering::SeqCst);
-        let output = deadline::output(Command::new(program).args(args), deadline::NATIVE_CALL).map_err(|e| {
+        let output = deadline::output(Command::new(program).args(args), self.native_work_limit()?).map_err(|e| {
             // At the deadline deadline::wait killed the child's whole process
             // group and reaped the leader: the sender is stopped too.
             if e.kind() == std::io::ErrorKind::TimedOut {
@@ -7358,7 +7527,7 @@ impl Runtime {
                 String::from_utf8_lossy(&output.stderr).trim()
             ));
         }
-        Ok(())
+        Ok(output)
     }
     fn work_output(
         &self,
@@ -7376,7 +7545,7 @@ impl Runtime {
         }
         let output = self
             .custody_gate
-            .run_capture(&self.cancelled, &mut command)?;
+            .run_capture_until(&self.cancelled, &mut command, self.native_work_limit().map_err(|_| custody_gate::CustodyError::BeforeSpawn)?)?;
         if !output.status.success() {
             return Err(custody_gate::CustodyError::Uncertain(io::Error::other(
                 format!(
@@ -7407,7 +7576,7 @@ impl Runtime {
         resource_tools::read_resource_with(&self.config, tool, read, nonce, signer, |command| {
             let output = self
                 .custody_gate
-                .run_capture(&self.cancelled, command)
+                .run_capture_until(&self.cancelled, command, self.native_work_limit()?)
                 .map_err(|error| format!("supervised native resource read: {error}"))?;
             if !output.status.success() {
                 return Err(format!(
@@ -7429,7 +7598,7 @@ impl Runtime {
         }
         let output = self
             .custody_gate
-            .run_capture(&self.cancelled, &mut command)
+            .run_capture_until(&self.cancelled, &mut command, self.native_work_limit()?)
             .map_err(|error| format!("supervised native lookup: {error}"))?;
         if !output.status.success() {
             return Err(format!(
@@ -7535,25 +7704,32 @@ impl Runtime {
         self.query_policy_observation()
     }
     fn managed_worker_subjects(&self) -> Result<Vec<String>> {
-        let mut workers = Vec::new();
-        if let Some(tool) = &self.config.tool_task {
-            workers.push(tool.subject.clone());
-        }
-        if let Some(dispatch) = &self.config.dispatch_task {
-            if workers.iter().any(|subject| subject == &dispatch.subject) {
-                return Err("dispatch and tool witness subjects must be distinct".into());
+        let workers = ordered_worker_subjects(
+            self.config.tool_task.as_ref().map(|v| v.subject.as_str()),
+            self.config.provider_task.as_ref().map(|v| v.subject.as_str()),
+            self.config.dispatch_task.as_ref().map(|v| v.subject.as_str()),
+        );
+        for (i, subject) in workers.iter().enumerate() {
+            if workers[..i].contains(subject) {
+                return Err("tool, provider and dispatch witness subjects must be distinct".into());
             }
-            workers.push(dispatch.subject.clone());
-        }
-        if let Some(provider) = &self.config.provider_task {
-            if workers.iter().any(|subject| subject == &provider.subject) {
-                return Err(
-                    "provider witness subject must be distinct from tool and dispatch".into(),
-                );
-            }
-            workers.push(provider.subject.clone());
         }
         Ok(workers)
+    }
+    /// The sole historical variant is the old runtime's tool/dispatch/provider
+    /// ordering. Compare complete native-authored bytes, never unordered roles.
+    fn managed_worker_policy_orders(&self) -> Result<Vec<Vec<String>>> {
+        let canonical = self.managed_worker_subjects()?;
+        let legacy = ordered_worker_subjects(
+            self.config.tool_task.as_ref().map(|v| v.subject.as_str()),
+            self.config.dispatch_task.as_ref().map(|v| v.subject.as_str()),
+            self.config.provider_task.as_ref().map(|v| v.subject.as_str()),
+        );
+        let mut orders = vec![canonical];
+        if legacy != orders[0] {
+            orders.push(legacy);
+        }
+        Ok(orders)
     }
     fn renew_worker_policy(&mut self, attaching_from_paused: bool) -> Result<()> {
         let workers = self.managed_worker_subjects()?;
@@ -7681,6 +7857,10 @@ impl Runtime {
         status: &str,
         desired_generation: &str,
     ) -> Result<()> {
+        let orders = self.managed_worker_policy_orders()?;
+        if workers != orders[0].as_slice() {
+            return Err("managed worker roles differ from controller configuration".into());
+        }
         let predicate = view
             .get("predicate")
             .ok_or("signed policy has no predicate")?;
@@ -7705,17 +7885,20 @@ impl Runtime {
         self.author_grain_policy_bytes("predicate", &observed_source, &observed_bytes)?;
         let observed = bounded_policy_bytes(&observed_bytes)?;
         for candidate in candidates {
-            let source =
-                managed_worker_policy_source(&self.config.subject, workers, &candidate.to_string());
-            let path = dir.join(format!("managed-{candidate}.json"));
-            write_new(
-                &path,
-                &serde_json::to_vec(&source).map_err(|e| e.to_string())?,
-            )?;
-            let output = dir.join(format!("managed-{candidate}.bin"));
-            self.author_grain_policy_bytes("grain-policy", &path, &output)?;
-            if bounded_policy_bytes(&output)? == observed {
-                return Ok(());
+            for (index, order) in orders.iter().enumerate() {
+                let source =
+                    managed_worker_policy_source(&self.config.subject, order, &candidate.to_string());
+                let suffix = if index == 0 { "" } else { "-legacy-runtime" };
+                let path = dir.join(format!("managed-{candidate}{suffix}.json"));
+                write_new(
+                    &path,
+                    &serde_json::to_vec(&source).map_err(|e| e.to_string())?,
+                )?;
+                let output = dir.join(format!("managed-{candidate}{suffix}.bin"));
+                self.author_grain_policy_bytes("grain-policy", &path, &output)?;
+                if bounded_policy_bytes(&output)? == observed {
+                    return Ok(());
+                }
             }
         }
         Err("signed policy is not a supported exact managed worker law; explicit owner audit and policy upgrade required".into())
@@ -12266,12 +12449,63 @@ impl Runtime {
         )
     }
 
-    fn tool_call(&mut self, name: &str, arguments: &Value) -> Result<Value> {
-        if self.room_tools_restricted()
-            && !resource_tools::is_room_tool(name)
-            && name != "mini_room_attempts"
+    fn require_tool_surface(&self, surface: ToolSurface, name: &str) -> Result<()> {
+        match surface {
+            ToolSurface::Resident => {
+                if self.room_tools_restricted()
+                    && !resource_tools::is_room_tool(name)
+                    && name != "mini_room_attempts"
+                {
+                    return Err("this resident accepts only room tools".into());
+                }
+            }
+            ToolSurface::OperatorForeground => {
+                if self.config.foreground_tool.is_none() {
+                    return Err("foregroundTool is not configured".into());
+                }
+                if !operator_foreground_tool(name) {
+                    return Err("foreground tool is not delegated".into());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn require_foreground_execution(&self, name: &str, arguments: &Value) -> Result<()> {
+        let attempt = self.journal.foreground_attempt.as_ref()
+            .ok_or("operator tool lacks a durable foreground request")?;
+        if self.foreground_operation != Some(attempt.operation_id)
+            || attempt.phase != ForegroundPhase::Executing
+            || attempt.reported || attempt.name != name
+            || attempt.result_path.is_some() || attempt.result_sha256.is_some()
+            || self.child.is_some() || self.journal.child.is_some() || self.prompt_active
         {
-            return Err("this resident accepts only room tools".into());
+            return Err("operator tool is not the exclusive executing foreground request".into());
+        }
+        self.journal.validate_foreground(&self.config.state_dir)?;
+        let request: ForegroundRequest = serde_json::from_slice(
+            &bounded_regular_file(&attempt.request_path, 262_144)?)
+            .map_err(|e| format!("operator retained request: {e}"))?;
+        if request.request_id != attempt.request_id || request.name != name
+            || request.arguments != *arguments
+        {
+            return Err("operator execution differs from its retained foreground request".into());
+        }
+        Ok(())
+    }
+
+    fn tool_call(&mut self, name: &str, arguments: &Value) -> Result<Value> {
+        self.tool_call_from(ToolSurface::Resident, name, arguments)
+    }
+
+    fn tool_call_from(&mut self, surface: ToolSurface, name: &str, arguments: &Value) -> Result<Value> {
+        self.require_tool_surface(surface, name)?;
+        match surface {
+            ToolSurface::OperatorForeground => self.require_foreground_execution(name, arguments)?,
+            ToolSurface::Resident if self.foreground_operation.is_some() => {
+                return Err("resident request cannot borrow an operator foreground invocation".into());
+            }
+            ToolSurface::Resident => {}
         }
         if self.cancelled.load(Ordering::SeqCst)
             || self.journal.connection == Connection::Fenced
@@ -12568,6 +12802,7 @@ impl Runtime {
     /// This is only a syntax/operator-profile preflight; the normal tool path
     /// still verifies every native grant and current source state.
     fn preflight_foreground_arguments(&self, request: &ForegroundRequest) -> Result<()> {
+        self.require_tool_surface(ToolSurface::OperatorForeground, &request.name)?;
         let arguments = &request.arguments;
         let tool = self
             .config
@@ -12949,6 +13184,80 @@ impl Runtime {
         Ok(())
     }
 
+    /// The same idle-state gate is used for readiness and tool admission.
+    fn idle_task_ready(&self) -> bool {
+        !(self.child.is_some()
+            || self.prompt_active
+            || self.foreground_operation.is_some()
+            || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
+            || self.cancelled.load(Ordering::SeqCst)
+            || self.journal.child.is_some()
+            || self.journal.foreground_attempt.is_some()
+            || self.journal.pending.is_some()
+            || self.journal.parent_hold.is_some()
+            || self.journal.tool_pending.is_some()
+            || self.journal.tool_hold.is_some()
+            || (self.journal.workspace_attempt.is_some() || self.journal.room_attempt.is_some())
+            || self.journal.workspace_birth.is_some()
+            || self.journal.birth_operation.is_some()
+            || self.journal.birth_pending.is_some()
+            || self.journal.provider_pending.is_some()
+            || self.journal.provider_hold.is_some()
+            || self.journal.provider_attempt.is_some()
+            || self.journal.dispatch_pending.is_some()
+            || self.journal.dispatch_hold.is_some()
+            || self.journal.dispatch_attempt.is_some()
+            || self.journal.application_api_attempt.is_some()
+            || self.journal.settlement_due.is_some()
+            || !self.journal.unresolved_external.is_empty())
+    }
+
+    fn prepare_full_consent(&self) -> Result<Option<ConsentFullReadiness>> {
+        if self.config.consent_full_readiness != Some(true) {
+            return Ok(None);
+        }
+        let output = self.command_capture(&self.config.mini, &[
+            "consent-full-ready",
+            "--host", self.config.host.to_str().ok_or("host path UTF-8")?,
+            "--config", self.config.host_config.to_str().ok_or("config path UTF-8")?,
+        ])?;
+        ConsentFullReadiness::parse(&output.stdout).map(Some)
+    }
+
+    /// Explicit operator readiness, before any tool request is submitted.
+    /// This may perform ordinary native recovery/soft attachment; success
+    /// requires both a clean controller and a fresh signed idle task view.
+    fn prepare_idle(&mut self, outer: Instant) -> Result<Value> {
+        if self.child.is_some()
+            || self.journal.child.is_some()
+            || self.prompt_active
+            || self.foreground_operation.is_some()
+            || self.journal.foreground_attempt.is_some()
+            || self.journal.application_api_attempt.is_some()
+        {
+            return Err("idle preparation cannot recover an active or retained worker/tool; use exact recovery".into());
+        }
+        self.with_startup_budget(Some(outer), |rt| {
+            if !rt.idle_task_ready() { rt.attach(true)?; }
+            if !rt.idle_task_ready() { return Err("controller is not reconciled and idle".into()); }
+            let consent = rt.prepare_full_consent()?;
+            let signed = rt.query()?;
+            let expected_status = match rt.journal.connection {
+                Connection::Hard => "1",
+                Connection::Soft => "2",
+                _ => return Err("controller readiness is not attached".into()),
+            };
+            if signed.pointer("/grain/status").and_then(Value::as_str) != Some(expected_status)
+                || signed.pointer("/grain/reserved").and_then(Value::as_str) != Some("0") {
+                return Err("controller readiness lacks a signed idle task".into());
+            }
+            Ok(json!({"type":"mini-grain-idle-readiness-v1", "ready":true,
+                "task":rt.config.task, "connection":rt.journal.connection,
+                "startupTimeoutSeconds":deadline::startup_limit(rt.config.startup_timeout_seconds)?.as_secs(),
+                "signedTask":signed, "fullConsent":consent}))
+        })
+    }
+
     /// Run one model-free tool call under the same signed parent/tool custody.
     /// The foreground operation ID is durable before reserve or any native
     /// submit; a lost result can only be inspected, never replayed as work.
@@ -12995,30 +13304,7 @@ impl Runtime {
         {
             return Err("foreground tool name is invalid".into());
         }
-        if !matches!(
-            request.name.as_str(),
-            "mini_grain_status"
-                | "mini_workspace_list"
-                | "mini_workspace_describe"
-                | "mini_workspace_read"
-                | "mini_workspace_propose"
-                | "mini_workspace_submit"
-                | "mini_workspace_create"
-                | "mini_workspace_recover"
-                | "mini_workspace_attempts"
-                | "mini_workspace_import_reference"
-                | "mini_workspace_export_reference"
-                | "mini_read_resource"
-                | "mini_create_resource"
-                | "mini_create_application"
-                | "mini_create_application_session"
-                | "mini_publish"
-                | "mini_application_api"
-                | "mini_oracle_discover"
-                | "mini_oracle_call"
-        ) {
-            return Err("foreground tool is not delegated".into());
-        }
+        self.require_tool_surface(ToolSurface::OperatorForeground, &request.name)?;
         let profile = self
             .config
             .foreground_tool
@@ -13029,27 +13315,8 @@ impl Runtime {
             .output
             .as_ref()
             .is_some_and(|output| output.is_active_framed_attachment(attachment_id))
-            || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
-            || self.cancelled.load(Ordering::SeqCst)
-            || self.journal.child.is_some()
-            || self.journal.foreground_attempt.is_some()
-            || self.journal.pending.is_some()
-            || self.journal.parent_hold.is_some()
-            || self.journal.tool_pending.is_some()
-            || self.journal.tool_hold.is_some()
-            || (self.journal.workspace_attempt.is_some() || self.journal.room_attempt.is_some())
-            || self.journal.workspace_birth.is_some()
-            || self.journal.birth_operation.is_some()
-            || self.journal.birth_pending.is_some()
-            || self.journal.provider_pending.is_some()
-            || self.journal.provider_hold.is_some()
-            || self.journal.provider_attempt.is_some()
-            || self.journal.dispatch_pending.is_some()
-            || self.journal.dispatch_hold.is_some()
-            || self.journal.dispatch_attempt.is_some()
-            || self.journal.application_api_attempt.is_some()
-            || self.journal.settlement_due.is_some()
-            || !self.journal.unresolved_external.is_empty()
+
+            || !self.idle_task_ready()
         {
             return Err("foreground tool requires an attached, reconciled idle task".into());
         }
@@ -13104,7 +13371,7 @@ impl Runtime {
                 let arguments = self.application_tool_arguments(&request.name, &request.arguments)?;
                 self.foreground_application_api(&arguments, input)?
             } else {
-                self.tool_call(&request.name, &request.arguments)
+                self.tool_call_from(ToolSurface::OperatorForeground, &request.name, &request.arguments)
                     .map(|value| json!({"isError":false,"text":value.to_string()}))?
             };
             self.check_not_cancelled()?;
@@ -13324,6 +13591,90 @@ impl Runtime {
         response.map(|_| ())
     }
 
+    /// Exclusive journal custody plus the prior-run watermark stops an old
+    /// controller from authoring another reserve. The v3 path saves the forward
+    /// fingerprint and dispatch attempt BEFORE opening the protected reserve
+    /// signer. No such marker means any surviving helper was only planning.
+    /// This archives a proved no-dispatch, never an HTTP response or a resend.
+    fn recover_foreground_api_unreserved(&mut self, request_id: &str) -> Result<Value> {
+        if !valid_foreground_request_id(request_id) || self.prompt_active
+            || self.foreground_operation.is_some() || self.foreground_api_budget.is_some()
+            || self.child.is_some() || self.journal.child.is_some() || !self.custody_gate.is_idle()
+            || self.journal.dispatch_pending.is_some() || self.journal.dispatch_hold.is_some()
+            || self.journal.dispatch_attempt.is_some() || self.journal.pending.is_some()
+            || self.journal.tool_pending.is_some() || self.journal.tool_hold.is_some()
+            || self.journal.provider_pending.is_some() || self.journal.provider_hold.is_some()
+            || self.journal.provider_attempt.is_some() || self.journal.birth_pending.is_some()
+            || self.journal.birth_operation.is_some() || self.journal.workspace_attempt.is_some()
+            || self.journal.workspace_birth.is_some() || self.journal.room_attempt.is_some()
+            || self.journal.settlement_due.is_some() {
+            return Err("unreserved API recovery requires a stopped invocation and no other pending effect".into());
+        }
+        let foreground = self.journal.foreground_attempt.as_ref()
+            .ok_or("unreserved API recovery has no foreground request")?.clone();
+        let forward = self.journal.application_api_attempt.as_ref()
+            .ok_or("unreserved API recovery has no retained API request")?.clone();
+        if foreground.request_id != request_id
+            || !matches!(foreground.phase, ForegroundPhase::Executing | ForegroundPhase::Uncertain)
+            || foreground.operation_id >= forward.operation_id
+            || forward.operation_id >= self.process_first_operation_id
+            || foreground.result_path.is_some() || foreground.result_sha256.is_some()
+            || !matches!(forward.phase, ApplicationApiPhase::DispatchStarted | ApplicationApiPhase::Uncertain)
+            || forward.operation_fingerprint.is_some() || forward.lifetime_committed_receipt.is_some()
+            || forward.lifetime_settled_response_sha256.is_some() || forward.lifetime_settlement.is_some()
+            || forward.reply_path.is_some() || forward.reply_sha256.is_some() {
+            return Err("unreserved API recovery differs from a prior unsealed invocation".into());
+        }
+        let tombstone = read_foreground_tombstone(&self.config.state_dir, request_id)?
+            .ok_or("unreserved API recovery foreground tombstone absent")?;
+        let raw = bounded_regular_file(&foreground.request_path, 262_144)?;
+        let request: ForegroundRequest = serde_json::from_slice(&raw)
+            .map_err(|e| format!("retained foreground request: {e}"))?;
+        if sha256_bytes(&raw)? != foreground.request_sha256
+            || tombstone.request_sha256 != foreground.request_sha256
+            || tombstone.operation_id != foreground.operation_id || request.request_id != request_id
+            || request.name != foreground.name {
+            return Err("unreserved API recovery foreground bytes changed".into());
+        }
+        let route = self.config.tool_task.as_ref().and_then(|tool|
+            tool.allowed_application_lifetime_routes.iter().find(|route| route.name == forward.route_name))
+            .ok_or("unreserved API recovery requires a pinned lifetime route")?;
+        let binding = forward.binding_sha256.as_deref().ok_or("unreserved API binding absent")?;
+        let arguments = self.application_tool_arguments(&request.name, &request.arguments)?;
+        let input = application_api_tools::parse_input(&arguments, &[route.name.clone()])?;
+        let expected = application_api_tools::lifetime_dispatch_request(forward.operation_id, binding, &input)?;
+        let forward_raw = bounded_regular_file(&forward.request_path, 262_144)?;
+        if sha256_bytes(&forward_raw)? != forward.request_sha256
+            || serde_json::from_slice::<Value>(&forward_raw).map_err(|e| e.to_string())? != expected {
+            return Err("unreserved API recovery forward HTTP differs from foreground request".into());
+        }
+        let authority = self.dispatch()?;
+        let query_start = self.journal.next_operation_id;
+        let purse = self.query_as(&authority)?;
+        if !matches!(purse.pointer("/grain/status").and_then(Value::as_str), Some("0" | "1" | "2" | "6"))
+            || purse.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
+            || purse.pointer("/grain/task").and_then(Value::as_str) != Some(authority.task.as_str()) {
+            return Err("unreserved API recovery requires signed idle dispatch purse".into());
+        }
+        let decision_id = self.next_id()?;
+        let proof = json!({"decisionId":decision_id.to_string(),"action":"recover-unreserved-foreground-api",
+            "requestId":request_id,"foregroundOperationId":foreground.operation_id.to_string(),
+            "apiOperationId":forward.operation_id.to_string(),"requestSha256":foreground.request_sha256,
+            "forwardRequestSha256":forward.request_sha256,"bindingSha256":binding,
+            "processFirstOperationId":self.process_first_operation_id.to_string(),
+            "basis":"exclusive journal; prior invocation; durable marker absent before reserve signer; signed idle purse",
+            "queryStartOperationId":query_start.to_string(),"signedPurse":purse,"noDispatch":true});
+        let mut finished = self.journal.application_api_attempt.take().unwrap();
+        finished.phase = ApplicationApiPhase::NoDispatch; finished.reported = true;
+        if self.journal.application_api_history.len() >= 16 { self.journal.application_api_history.remove(0); }
+        self.journal.application_api_history.push(finished);
+        self.journal.reconciliation_log.push(proof.clone());
+        self.save()?;
+        Ok(json!({"type":"mini-foreground-api-unreserved-recovery-v1","proof":proof,
+            "parentHoldRemains":self.journal.parent_hold.is_some(),"foregroundRemains":true,
+            "next":"reconcile remaining parent allowance and effects, then reconcile foreground audited"}))
+    }
+
     fn reconcile_foreground_audited(&mut self) -> Result<()> {
         let attempt = self
             .journal
@@ -13404,89 +13755,95 @@ impl Runtime {
         arguments: &Value,
         input: &Receiver<Input>,
     ) -> Result<Value> {
-        let (reply, received) = mpsc::channel();
-        let mut active = Some(self.begin_application_api(arguments, reply, None, false)?);
-        let deadline = Instant::now() + Duration::from_secs(1800);
-        loop {
-            self.poll_application_api(&mut active)?;
-            if let Ok(value) = received.try_recv() {
-                if value.get("isError").and_then(Value::as_bool) == Some(true)
-                    && self.journal.application_api_attempt.is_some()
-                {
-                    return Err(
-                        "application API outcome remains retained for read-only inspection".into(),
-                    );
-                }
-                return Ok(value);
-            }
-            if self.cancelled.load(Ordering::SeqCst) || Instant::now() >= deadline {
-                return Err(
-                    "foreground API call cancelled or timed out; inspect exact attempt".into(),
-                );
-            }
-            match input.try_recv() {
-                Ok(Input::Dispatch(request)) => self.answer_dispatch(request),
-                Ok(Input::Admin(request)) => {
-                    let _ = request.reply.send("foreground API call is running".into());
-                }
-                Ok(Input::Disconnect) => {
-                    self.stdin_gone = true;
-                    if self.hard_connection.load(Ordering::SeqCst) {
-                        return Err("hard disconnect during foreground API call".into());
-                    }
-                }
-                Ok(Input::Line(line)) if line == "disconnect" => {
-                    self.stdin_gone = true;
-                    if self.hard_connection.load(Ordering::SeqCst) {
-                        return Err("hard disconnect during foreground API call".into());
-                    }
-                }
-                Ok(Input::SoftDetach) => self.stdin_gone = true,
-                Ok(Input::Line(line))
-                    if line == "attach soft" && self.journal.connection == Connection::Soft =>
-                {
-                    self.emit("reconnected to soft foreground tool\n");
-                }
-                Ok(Input::Line(line))
-                    if line == "attach hard" && self.journal.connection == Connection::Soft =>
-                {
-                    self.note_hard_reconnect()?;
-                }
-                Ok(Input::ForegroundTool {
-                    attachment_id,
-                    frame,
-                }) => {
-                    if let Some(output) = &self.output {
-                        let _ = output.try_tool_event_for(
-                            attachment_id,
-                            json!({"v":1,
-                            "type":"tool-complete","isError":true,
-                            "requestId":foreground_request_id(&frame),
-                            "result":"foreground tool already in progress"}),
+        let operation_id = self.foreground_operation.ok_or("foreground API invocation absent")?;
+        self.foreground_api_budget = Some(ForegroundApiBudget::new(operation_id));
+        let result = (|| {
+            let (reply, received) = mpsc::channel();
+            let mut active = Some(self.begin_application_api(arguments, reply, None, false)?);
+            loop {
+                self.poll_application_api(&mut active)?;
+                if let Ok(value) = received.try_recv() {
+                    if value.get("isError").and_then(Value::as_bool) == Some(true)
+                        && self.journal.application_api_attempt.is_some()
+                    {
+                        return Err(
+                            "application API outcome remains retained for read-only inspection".into(),
                         );
                     }
+                    return Ok(value);
                 }
-                Ok(Input::ForegroundResult {
-                    attachment_id,
-                    request_id,
-                }) => {
-                    let _ = self.answer_foreground_result(attachment_id, &request_id);
+                if self.cancelled.load(Ordering::SeqCst) || self.native_work_limit().is_err() {
+                    return Err(
+                        "foreground API call cancelled or timed out; inspect exact attempt".into(),
+                    );
                 }
-                Ok(Input::ForegroundAck {
-                    attachment_id,
-                    request_id,
-                }) => {
-                    let _ = self.answer_foreground_ack(attachment_id, &request_id);
+                match input.try_recv() {
+                    Ok(Input::Dispatch(request)) => self.answer_dispatch(request),
+                    Ok(Input::Admin(request)) => {
+                        let _ = request.reply.send("foreground API call is running".into());
+                    }
+                    Ok(Input::Disconnect) => {
+                        self.stdin_gone = true;
+                        if self.hard_connection.load(Ordering::SeqCst) {
+                            return Err("hard disconnect during foreground API call".into());
+                        }
+                    }
+                    Ok(Input::Line(line)) if line == "disconnect" => {
+                        self.stdin_gone = true;
+                        if self.hard_connection.load(Ordering::SeqCst) {
+                            return Err("hard disconnect during foreground API call".into());
+                        }
+                    }
+                    Ok(Input::SoftDetach) => self.stdin_gone = true,
+                    Ok(Input::Line(line))
+                        if line == "attach soft" && self.journal.connection == Connection::Soft =>
+                    {
+                        self.emit("reconnected to soft foreground tool\n");
+                    }
+                    Ok(Input::Line(line))
+                        if line == "attach hard" && self.journal.connection == Connection::Soft =>
+                    {
+                        self.note_hard_reconnect()?;
+                    }
+                    Ok(Input::ForegroundTool {
+                        attachment_id,
+                        frame,
+                    }) => {
+                        if let Some(output) = &self.output {
+                            let _ = output.try_tool_event_for(
+                                attachment_id,
+                                json!({"v":1,
+                                "type":"tool-complete","isError":true,
+                                "requestId":foreground_request_id(&frame),
+                                "result":"foreground tool already in progress"}),
+                            );
+                        }
+                    }
+                    Ok(Input::ForegroundResult {
+                        attachment_id,
+                        request_id,
+                    }) => {
+                        let _ = self.answer_foreground_result(attachment_id, &request_id);
+                    }
+                    Ok(Input::ForegroundAck {
+                        attachment_id,
+                        request_id,
+                    }) => {
+                        let _ = self.answer_foreground_ack(attachment_id, &request_id);
+                    }
+                    Ok(_) | Err(mpsc::TryRecvError::Empty) => {}
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        return Err("foreground connector channel closed".into());
+                    }
                 }
-                Ok(_) | Err(mpsc::TryRecvError::Empty) => {}
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    return Err("foreground connector channel closed".into());
-                }
+                thread::sleep(Duration::from_millis(20));
             }
-            thread::sleep(Duration::from_millis(20));
-        }
+        })();
+        self.foreground_api_budget = None;
+        result
     }
     fn check_not_cancelled(&self) -> Result<()> {
+        self.native_work_limit()?;
         if self.cancelled.load(Ordering::SeqCst) {
             Err("hard connection closed; tool task requires reconciliation".into())
         } else {
@@ -13560,6 +13917,9 @@ impl Runtime {
         Ok(())
     }
     fn attach(&mut self, soft: bool) -> Result<()> {
+        self.with_startup_budget(None, |rt| rt.attach_inner(soft))
+    }
+    fn attach_inner(&mut self, soft: bool) -> Result<()> {
         // A tripped breaker or lost reply leaves the task fenced. The owner's
         // reattach first runs the same provable recovery the controller runs
         // at startup; whatever it cannot prove keeps the task fenced.
@@ -15467,8 +15827,13 @@ impl Runtime {
                 }
             }
             if msg.get("method").and_then(Value::as_str) == Some("session/request_permission") {
-                let reply = json!({"jsonrpc":"2.0","id":msg.get("id"),
-                    "result":{"outcome":{"outcome":"cancelled"}}});
+                let params = msg.get("params").cloned().unwrap_or(Value::Null);
+                let outcome = sandbox_tools::permission_outcome(&self.prompt_sandbox, &params);
+                eprintln!("grain-runtime: ACP permission {} ({}): {}",
+                    params.pointer("/toolCall/toolCallId").and_then(Value::as_str).unwrap_or("?"),
+                    params.pointer("/toolCall/kind").and_then(Value::as_str).unwrap_or("?"),
+                    outcome.pointer("/outcome/outcome").and_then(Value::as_str).unwrap_or("?"));
+                let reply = json!({"jsonrpc":"2.0","id":msg.get("id"),"result":outcome});
                 writeln!(writer, "{reply}")
                     .and_then(|_| writer.flush())
                     .map_err(|e| e.to_string())?;
@@ -15957,7 +16322,9 @@ impl Runtime {
             .get("reserveIndex")
             .and_then(Value::as_str)
             .map(str::to_owned);
-        lifetime.post_reserve_purse_physical_root = saved.dispatch_post_root.clone();
+        // Recovery retains the signed logical root in dispatch_post_root.
+        // Never label it as a lifecycle root; an existing native paid-plan
+        // physical root (if any) remains unchanged.
         self.save()
     }
 
@@ -17064,7 +17431,7 @@ impl Runtime {
             return;
         }
         self.startup_recovery_active = true;
-        let result = self.recover().and_then(|()| self.automatic_reconcile());
+        let result = self.with_startup_budget(None, |rt| rt.recover().and_then(|()| rt.automatic_reconcile()));
         self.startup_recovery_active = false;
         let decision = self.journal.next_operation_id;
         self.journal.reconciliation_log.push(json!({
@@ -17934,6 +18301,14 @@ fn serve(mut rt: Runtime) -> Result<()> {
                         .send("admin action expired before dispatch".into());
                     continue;
                 }
+                if request.command == "prepare idle" {
+                    let result = rt.prepare_idle(request.deadline);
+                    request.phase.store(2, Ordering::SeqCst);
+                    let _ = request.reply.send(match result {
+                        Ok(value) => value.to_string(), Err(error) => format!("error: {error}"),
+                    });
+                    continue;
+                }
                 if let Some(sha)=request.command.strip_prefix("resident prepare ") {
                     let result=rt.prepare_resident_prompt(sha);
                     let _=request.reply.send(match result {Ok(value)=>value.to_string(),Err(error)=>format!("error: {error}")});
@@ -18020,6 +18395,12 @@ fn serve(mut rt: Runtime) -> Result<()> {
                         Ok(value) => value.to_string(),
                         Err(error) => format!("error: {error}"),
                     });
+                    continue;
+                }
+                if let Some(id)=request.command.strip_prefix("recover foreground api-unreserved ") {
+                    let result=rt.recover_foreground_api_unreserved(id);
+                    request.phase.store(2, Ordering::SeqCst);
+                    let _=request.reply.send(match result {Ok(value)=>value.to_string(),Err(error)=>format!("error: {error}")});
                     continue;
                 }
                 if let Some(id)=request.command.strip_prefix("recover foreground session ") {
@@ -18232,6 +18613,12 @@ fn main() -> ExitCode {
             }
         };
     }
+    if args.len() == 5 && args[1] == "hermes-room" && args[2] == "resident-init" {
+        return match room_resident::initialize(Path::new(&args[3]), Path::new(&args[4])) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => { eprintln!("room resident initialization: {error}"); ExitCode::from(1) }
+        };
+    }
     if args.len() == 4 && args[1] == "hermes-room" && args[2] == "resident" {
         return match room_resident::main(Path::new(&args[3])) {
             Ok(()) => ExitCode::SUCCESS,
@@ -18424,9 +18811,24 @@ fn main() -> ExitCode {
             }
         };
         return match control::admin_call(&PathBuf::from(&args[2]), command) {
+            Ok(response) if command == "prepare idle" => {
+                let ready = serde_json::from_str::<Value>(&response).ok().is_some_and(|value|
+                    value["type"] == "mini-grain-idle-readiness-v1" && value["ready"] == true);
+                if ready { println!("{response}"); ExitCode::SUCCESS }
+                else { eprintln!("grain-runtime admin: {response}"); ExitCode::from(1) }
+            }
             Ok(response) if command == "hermes verify-session" => {
                 let ready = serde_json::from_str::<Value>(&response).ok().is_some_and(|value|
                     value["type"] == "mini-hermes-session-readiness-v1" && value["ready"] == true);
+                if ready { println!("{response}"); ExitCode::SUCCESS }
+                else { eprintln!("grain-runtime admin: {response}"); ExitCode::from(1) }
+            }
+            Ok(response) if command.starts_with("recover foreground api-unreserved ") => {
+                let request_id = command.strip_prefix("recover foreground api-unreserved ").unwrap();
+                let ready = serde_json::from_str::<Value>(&response).ok().is_some_and(|value|
+                    value["type"] == "mini-foreground-api-unreserved-recovery-v1"
+                    && value["proof"]["requestId"] == request_id
+                    && value["proof"]["noDispatch"] == true);
                 if ready { println!("{response}"); ExitCode::SUCCESS }
                 else { eprintln!("grain-runtime admin: {response}"); ExitCode::from(1) }
             }
@@ -18451,7 +18853,7 @@ fn main() -> ExitCode {
         };
     }
     if args.len() != 3 || args[1] != "serve" {
-        eprintln!("usage: grain-runtime create /absolute/spec.json | provider-table check FILE | serve /absolute/config.json | connect /absolute/socket [hard|soft] | terminal /absolute/socket [hard|soft] | tool-id | tool /absolute/socket hard|soft REQUEST_ID_32_HEX NAME /absolute/arguments.json | tool-result /absolute/socket REQUEST_ID_32_HEX | tool-ack /absolute/socket REQUEST_ID_32_HEX | admin /absolute/stateDir/admin.sock 'reconcile parent|tool|effects|worker audited|foreground audited|recover foreground session REQUEST_ID' | mcp-stdio /absolute/socket");
+        eprintln!("usage: grain-runtime create /absolute/spec.json | provider-table check FILE | serve /absolute/config.json | connect /absolute/socket [hard|soft] | terminal /absolute/socket [hard|soft] | tool-id | tool /absolute/socket hard|soft REQUEST_ID_32_HEX NAME /absolute/arguments.json | tool-result /absolute/socket REQUEST_ID_32_HEX | tool-ack /absolute/socket REQUEST_ID_32_HEX | admin /absolute/stateDir/admin.sock 'reconcile parent|tool|effects|worker audited|foreground audited|recover foreground api-unreserved REQUEST_ID|recover foreground session REQUEST_ID' | mcp-stdio /absolute/socket");
         return ExitCode::from(2);
     }
     let path = PathBuf::from(&args[2]);
@@ -18468,6 +18870,9 @@ fn main() -> ExitCode {
         ExitCode::SUCCESS
     }
 }
+
+#[cfg(test)]
+mod foreground_api_tests;
 
 #[cfg(test)]
 mod tests {
@@ -18616,7 +19021,7 @@ mod tests {
     }
 
     #[test]
-    fn lifetime_purse_signs_all_source_target_observe_authority_slots() {
+    fn lifetime_purse_signs_exact_single_target_source_slots() {
         let signer = DispatchSignerPin {
             role: "1".into(),
             index: "0".into(),
@@ -18629,29 +19034,39 @@ mod tests {
             "signing":{"decoded":true,"keyId":"7007","keyEpoch":"1",
                 "algorithm":"1"}})
         };
-        let slots = vec![slot("4"), slot("8"), slot("1")];
+        let slots = vec![slot("4"), slot("1")];
         let approved =
             lifetime_purse_signers(&slots, &signer, Path::new("/private/payer.key")).unwrap();
-        assert_eq!(approved.len(), 3);
+        assert_eq!(approved.len(), 2);
         assert_eq!(
             approved
                 .iter()
                 .map(|v| v["role"].as_str().unwrap())
                 .collect::<Vec<_>>(),
-            vec!["4", "8", "1"]
+            vec!["4", "1"]
         );
         let mut reordered = slots.clone();
-        reordered.swap(1, 2);
+        reordered.swap(0, 1);
         assert!(
             lifetime_purse_signers(&reordered, &signer, Path::new("/private/payer.key")).is_err()
         );
+        let extra_observation = vec![slot("4"), slot("8"), slot("1")];
+        assert!(lifetime_purse_signers(&extra_observation, &signer, Path::new("/private/payer.key")).is_err());
+        for field in ["keyEpoch", "algorithm", "decoded"] {
+            let mut changed = slots.clone();
+            changed[1]["signing"][field] = if field == "decoded" { json!(false) } else { json!("9") };
+            assert!(lifetime_purse_signers(&changed, &signer, Path::new("/private/payer.key")).is_err(), "{field}");
+        }
+        let mut changed = slots.clone();
+        changed[1]["index"] = json!("1");
+        assert!(lifetime_purse_signers(&changed, &signer, Path::new("/private/payer.key")).is_err());
         let mut wrong_key = slots.clone();
         wrong_key[1]["signing"]["keyId"] = json!("8008");
         assert!(
             lifetime_purse_signers(&wrong_key, &signer, Path::new("/private/payer.key")).is_err()
         );
         assert!(
-            lifetime_purse_signers(&slots[..2], &signer, Path::new("/private/payer.key")).is_err()
+            lifetime_purse_signers(&slots[..1], &signer, Path::new("/private/payer.key")).is_err()
         );
     }
 
@@ -19343,6 +19758,8 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
             host: root.join("host"),
             host_config: root.join("host-config.json"),
             host_socket: None,
+            startup_timeout_seconds: None,
+            consent_full_readiness: None,
             control_socket: state.join("control.sock"),
             custody_key: root.join("parent.key"),
             state_dir: state.clone(),

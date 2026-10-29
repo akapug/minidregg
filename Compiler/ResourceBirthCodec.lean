@@ -16,9 +16,28 @@ The former use one cSHAKE domain for durable CAS; the latter remain the exact
 selected schema materializer's roots. No equality between those functions is
 postulated.
 -/
-import Theory.ResourceBirth
-import Compiler.CredentialAuthorityEntryCodec
-import Compiler.Sp800185Cshake256
+module
+
+public import Theory.ResourceBirth
+public import Compiler.CredentialAuthorityEntryCodec
+public import Compiler.Sp800185Cshake256
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.ResourceBirthCodec
 

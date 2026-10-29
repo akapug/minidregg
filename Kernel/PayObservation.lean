@@ -33,11 +33,30 @@ This module holds the values and the pure decision; the signed receiver is
   an assigned payer that is not the issuer well, a positive amount at or before
   the tip, and the batch of issuer mints admitted by `Batch.Admission`.
 -/
-import Kernel.PayCellDomain
-import Kernel.ClockCell
-import Kernel.PayChainTip
-import Theory.CanonicalResourceKernel
-import Compiler.CredentialSignatureAdmission
+module
+
+public import Kernel.PayCellDomain
+public import Kernel.ClockCell
+public import Kernel.PayChainTip
+public import Theory.CanonicalResourceKernel
+public import Compiler.CredentialSignatureAdmission
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PayObservation
 

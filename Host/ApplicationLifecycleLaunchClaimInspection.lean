@@ -1,6 +1,10 @@
 /- Read-only operator presentation of one source-authored v3 launch claim plan. -/
-import Host.ApplicationLifecycleLaunchClaimAuthoring
-import Lean.Data.Json
+module
+
+public import Host.ApplicationLifecycleLaunchClaimAuthoring
+public import Lean.Data.Json
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationLifecycleLaunchClaimInspection
 

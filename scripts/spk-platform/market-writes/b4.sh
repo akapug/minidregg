@@ -8,23 +8,33 @@ b4_www() {
     -o "$body.www" -w '%{http_code}' "http://grain.test$1" 2>>"$out/curl.err"
 }
 
-# WordPress: lifecycle PASS (row evidence: php-fpm + nginx started, page 200). Recipe from
-# https://developer.wordpress.org/rest-api/using-the-rest-api/authentication/ (cookie auth +
-# X-WP-Nonce, nonce read from wpApiSettings in /wp-admin/post-new.php); Sandstorm's WordPress
-# logs the owner in from the bridge permissions. The read-back is the app's own rendering of the
-# post (/?p=ID over the owner route); www.sock is probed and its status named, not gated on,
-# because WordPress renders dynamically rather than writing /var/www.
+# WordPress (package d6955e8f, 4.x with php-fpm 7.3 + nginx + sqlite-integration, large class). Lifecycle PASS.
+# Source: the package's wordpress-read-only/wp-admin/install.php (Sandstorm's replacement: it calls
+# wp_install("example blog", "User", ...) with fixed data and no form) and read-only-plugins/mu-plugins/
+# sandstorm.php (auto_login(): if is_blog_installed() and nobody is logged in, it creates or loads a WP user
+# from X-Sandstorm-User-Id, maps X-Sandstorm-Permissions admin/editor/author/... to a WP role, and sets the
+# auth cookie). The run on e89fe7b8b answered GET /wp-admin/post-new.php 303 to /wp-admin/install.php: the blog
+# is NOT installed until something visits install.php, and auto_login does nothing before that. So: GET
+# /wp-admin/install.php once (installs, redirects to index.php), then GET post-new.php (auto_login sets the
+# cookie on that response), then again WITH the cookie jar so the page's wpApiSettings nonce is bound to the
+# logged-in session token, and POST the REST post with that nonce (cookie auth + X-WP-Nonce:
+# https://developer.wordpress.org/rest-api/using-the-rest-api/authentication/). The read-back is the app's
+# rendering of the post (/?p=ID over the owner route); www.sock is probed and named, not gated on, because
+# WordPress renders dynamically rather than writing /var/www.
 write_WordPress() {
-  local page; page=$(req GET /wp-admin/post-new.php)
+  jar=""
+  jreq GET /wp-admin/install.php; local inst=$JS
+  jreq GET /wp-admin/post-new.php
+  jreq GET /wp-admin/post-new.php; local page=$JS
   local nonce; nonce=$(grep -o '"nonce":"[0-9a-f]*"' "$body" | head -1 | sed 's/.*:"//; s/"//')
-  [[ $page == 200 && -n $nonce ]] || { echo "0 post-new.php $page, no REST nonce (wpApiSettings)"; return; }
-  local made; made=$(req POST /?rest_route=/wp/v2/posts -H "X-WP-Nonce: $nonce" -H 'Content-Type: application/json' \
-    --data '{"title":"featured","content":"published by a resident","status":"publish"}')
-  local id; id=$(jq -r '.id // empty' "$body" 2>/dev/null)
+  [[ $page == 200 && -n $nonce ]] || { echo "0 install.php $inst, post-new.php $page, no REST nonce (wpApiSettings): $(grep -i '^location:' "$body.headers" | tr -d '\r' | head -1)"; return; }
+  jreq POST '/?rest_route=/wp/v2/posts' -H "X-WP-Nonce: $nonce" -H 'Content-Type: application/json' \
+    --data '{"title":"featured","content":"published by a resident","status":"publish"}'
+  local made=$JS id; id=$(jq -r '.id // empty' "$body" 2>/dev/null)
   [[ $made =~ ^20 && -n $id ]] || { echo "0 POST ?rest_route=/wp/v2/posts $made: $(head -c 120 "$body" | tr -d '\n')"; return; }
-  local got; got=$(req GET "/?p=$id")
+  jreq GET "/?p=$id"; local got=$JS
   local www; www=$(b4_www "/?p=$id")
-  [[ $got == 200 ]] && grep -q 'published by a resident' "$body" && echo "1 POST wp/v2/posts $made id $id; GET /?p=$id $got (owner preview); www.sock $www"
+  [[ $got == 200 ]] && grep -q 'published by a resident' "$body" && echo "1 GET install.php $inst; POST wp/v2/posts $made id $id; GET /?p=$id $got (owner preview); www.sock $www"
 }
 
 # Hugo (the member-website app). The package is "hugo-standstorm": launcher.sh keeps a git repo in /var/git

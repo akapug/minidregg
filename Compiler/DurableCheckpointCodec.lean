@@ -5,7 +5,7 @@ The host's durable store is three objects (the whole-image `DREGG.DURABLE.IMAGE`
 record is gone):
 
 * the **seed**, written once at bootstrap (`DREGG.DURABLE.SEED/v1`);
-* the **log**: entry `h` (1-based) is one accepted record (`DREGG.DURABLE.LOG/v2`: the record and its signing subject)
+* the **log**: entry `h` (1-based) is one accepted record (`DREGG.DURABLE.LOG`, frame byte 4: the record, its signing subject and its meter credit)
   and a 32-byte tag. The log is chained by C1's log root: `chain₀ = logStart seed`
   (the host passes `NativeHostCodec.logRoot0 domain semantics`), and
   `chainₕ = Kernel.WorldRoot.chainDigest chainₕ₋₁ (recordDigest recordₕ)`; the tag of
@@ -33,17 +33,48 @@ The world root is the parameterised `Checkpoint.check` of DATAMODEL B2 over
 the current cell-root function (`rootBytes`), until C1 supplies the world-root
 function; it is recomputed from the checkpoint's cells, never trusted.
 -/
-import Compiler.PersistedCodecTags
-import Compiler.PersistedCodecShapes
-import Compiler.CanonicalCellRegistry
-import Compiler.DurableReceiverCodec
-import Compiler.Sp800185Cshake256
-import Compiler.Sp800185Kmac256
-import Kernel.DurableCheckpoint
-import Kernel.WorldRootCache
-import Kernel.WorldSystemCodec
-import Theory.AssertAxioms
-import Theory.AssertCompiled
+module
+
+public import Compiler.PersistedCodecTags
+public import Compiler.PersistedCodecShapes
+public import Compiler.CanonicalCellRegistry
+public import Compiler.DurableReceiverCodec
+public import Compiler.Sp800185Cshake256
+public import Compiler.Sp800185Kmac256
+public import Kernel.DurableCheckpoint
+public import Kernel.WorldRootCache
+public import Kernel.WorldSystemCodec
+public import Theory.AssertAxioms
+public import Theory.AssertCompiled
+meta import Compiler.PersistedCodecTags
+meta import Compiler.PersistedCodecShapes
+meta import Compiler.CanonicalCellRegistry
+meta import Compiler.DurableReceiverCodec
+meta import Compiler.Sp800185Cshake256
+meta import Compiler.Sp800185Kmac256
+meta import Kernel.DurableCheckpoint
+meta import Kernel.WorldRootCache
+meta import Kernel.WorldSystemCodec
+meta import Theory.AssertAxioms
+meta import Theory.AssertCompiled
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+meta import Compiler.PersistedCodecTagRegistry
+
+@[expose] public section
 
 namespace Minidregg.Compiler.DurableCheckpointCodec
 
@@ -551,11 +582,25 @@ theorem seedEpoch_spentMap_refused (rest : List UInt8) :
 #assert_axioms seedEpoch_v4_refused
 #assert_axioms seedEpoch_v1_refusedFor
 #assert_axioms seedEpoch_v1_refused
-/-- Version 2: a record carries its signing subject (`IntentRecord.subject`),
-which the presence index folds. A v1 record refuses (`v1_record_refused`). -/
-def recordFrame : Framed IntentRecord := ⟨Minidregg.Compiler.PersistedCodecTags.durable_log_byte_v2, intentStream⟩
+/-- Frame byte 4: a record carries its signing subject (`IntentRecord.subject`, which the
+presence index folds) and its meter credit (`IntentRecord.credit`, the seed-meter refill's).
+Bytes 1-3 refuse (`v1_record_refused`, `v2_record_refused`, `v3_record_refused`; byte 3 is
+the subject-only record of the A11 regen). -/
+def recordFrame : Framed IntentRecord := ⟨Minidregg.Compiler.PersistedCodecTags.durable_log_byte_v4, intentStream⟩
+
+def retiredRecordFrameV3 : List UInt8 := "DREGG.DURABLE.LOG".toUTF8.toList ++ [3]
+
+theorem v3_record_refused (tail : List UInt8) :
+    recordFrame.decode (bytesStream.encode retiredRecordFrameV3 ++ tail) = none :=
+  Framed.decode_other_frame recordFrame (by decide +kernel) tail
 
 def retiredRecordFrameV1 : List UInt8 := "DREGG.DURABLE.LOG".toUTF8.toList ++ [1]
+
+def retiredRecordFrameV2 : List UInt8 := "DREGG.DURABLE.LOG".toUTF8.toList ++ [2]
+
+theorem v2_record_refused (tail : List UInt8) :
+    recordFrame.decode (bytesStream.encode retiredRecordFrameV2 ++ tail) = none :=
+  Framed.decode_other_frame recordFrame (by decide +kernel) tail
 
 theorem v1_record_refused (tail : List UInt8) :
     recordFrame.decode (bytesStream.encode retiredRecordFrameV1 ++ tail) = none :=

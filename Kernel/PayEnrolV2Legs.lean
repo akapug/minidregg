@@ -12,8 +12,27 @@ the installed key/epoch/NEXT, including after pre-admission rotation. No v1 memo
 or possession signature is synthesized. Shared birth/authority constructors come
 from PayEnrolReceiver; only the v2 economics and owner binding differ.
 -/
-import Kernel.PayEnrolReceiver
-import Kernel.PayEnrolV2Decision
+module
+
+public import Kernel.PayEnrolReceiver
+public import Kernel.PayEnrolV2Decision
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PayEnrolV2Legs
 
@@ -155,6 +174,10 @@ inductive Reject where
   | economics | owner | membership | birthFee
   | grantBatch | birthShape | keyTaken | observeGrantTaken | authorityEntries
   | validation | allocation | bookAdmission
+  /-- The image holds no platform record to price the payment from. -/
+  | platformUnavailable
+  /-- The ambient's tariff or template is not the platform record's. -/
+  | platformStale
   deriving DecidableEq, Repr
 
 def requireSome {A : Type} (reason : Reject) : Option A → Except Reject A
@@ -163,6 +186,15 @@ def requireSome {A : Type} (reason : Reject) : Option A → Except Reject A
 def require (condition : Prop) [Decidable condition] (reason : Reject) :
     Except Reject (PLift condition) :=
   if holds : condition then .ok ⟨holds⟩ else .error reason
+
+/-- The check every v2 plan and claim makes before it prices: the ambient's tariff and
+template are the image's platform record's (`PayEnrolReceiver.AmbientCurrent`). -/
+def requireCurrent {F : Type} [Field F] (deployment : Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (durable : Durable) (ambient : Ambient) :
+    Except Reject (PLift (PayEnrolReceiver.AmbientCurrent deployment profile durable ambient)) :=
+  match ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable with
+  | none => .error .platformUnavailable
+  | some _ => require (PayEnrolReceiver.AmbientCurrent deployment profile durable ambient) .platformStale
 
 /-- Stable identity derives all resource identifiers, even after pending rotation. -/
 def enrolIds (deployment : Deployment) (input : EnrolInput) : PayEnrolReceiver.Ids :=
@@ -198,12 +230,12 @@ variable {F : Type} [Field F] (deployment : Deployment)
 
 def enrolObserve (authority : Loaded deployment durable.snapshot) (input : EnrolInput) :
     AuthorityGrant :=
-  PayEnrolReceiver.observeGrant deployment profile.template authority.snapshot.cell ambient.height
+  PayEnrolReceiver.observeGrant deployment ambient.template authority.snapshot.cell ambient.height
     (enrolIds deployment input)
 
 def enrolDraft (authority : Loaded deployment durable.snapshot) (input : EnrolInput) :
     Descriptor Registry :=
-  PayEnrolReceiver.draft deployment profile.semantics profile.template ambient.tariff
+  PayEnrolReceiver.draft deployment profile.semantics ambient.template ambient.tariff
     authority.snapshot.cell ambient.height (enrolIds deployment input) input.economic.float
     input.economic.consumption.creditedRemainder
 
@@ -226,19 +258,19 @@ structure EnrolLegs (directory : LoadedDirectory durable)
   grants : PreparedGrantBatch profile.compilerProfile deployment authority descriptor
   auxiliaryExact : descriptor.auxiliaryCreates = grants.auxiliaryCreates
   initials : CanonicalCellRegistry.BirthsAdmissible deployment descriptor
-  templateBound : ResourceBirthPolicyController.Concrete.TemplateBound profile.template
+  templateBound : ResourceBirthPolicyController.Concrete.TemplateBound ambient.template
     authority.snapshot.authState ambient.height descriptor
   keyFresh : PayEnrolReceiver.KeyFresh authority.snapshot
     (enrolKey deployment authority.snapshot.revision input)
-  observeReady : GrantReady authority.snapshot (enrolObserve deployment profile ambient authority input)
+  observeReady : GrantReady authority.snapshot (enrolObserve deployment ambient authority input)
   entriesDistinct : ((PayEnrolReceiver.authorityEntries descriptor
     (enrolKey deployment authority.snapshot.revision input)
-    (enrolObserve deployment profile ambient authority input)).map Sigma.fst).Nodup
+    (enrolObserve deployment ambient authority input)).map Sigma.fst).Nodup
   authorityValidated : ValidatedPatch AuthorityMaterializer authority.snapshot.cell
     authority.snapshot.cell.root
     (assignAll authority.snapshot.logical (PayEnrolReceiver.authorityEntries descriptor
       (enrolKey deployment authority.snapshot.revision input)
-      (enrolObserve deployment profile ambient authority input)))
+      (enrolObserve deployment ambient authority input)))
   allocated : ResourceBirthController.Allocated Registry directory.directory descriptor
   resources : CanonicalResourceKernel.AcceptedBatch book.payload
     (enrolBatch tariff ambient.tariff.collector input descriptor)
@@ -276,19 +308,19 @@ def prepareEnrolLegs (directory : LoadedDirectory durable)
   let aux ← require (ResourceBirthController.Concrete.sameCreates descriptor.auxiliaryCreates
     grants.auxiliaryCreates = true) .grantBatch
   let initials ← require (CanonicalCellRegistry.BirthsAdmissible deployment descriptor) .birthShape
-  let template ← require (ResourceBirthPolicyController.Concrete.TemplateBound profile.template
+  let template ← require (ResourceBirthPolicyController.Concrete.TemplateBound ambient.template
     authority.snapshot.authState ambient.height descriptor) .birthShape
   let key ← require (PayEnrolReceiver.KeyFresh authority.snapshot
     (enrolKey deployment authority.snapshot.revision input)) .keyTaken
   let observe ← require (GrantReady authority.snapshot
-    (enrolObserve deployment profile ambient authority input)) .observeGrantTaken
+    (enrolObserve deployment ambient authority input)) .observeGrantTaken
   let distinct ← require (((PayEnrolReceiver.authorityEntries descriptor
     (enrolKey deployment authority.snapshot.revision input)
-    (enrolObserve deployment profile ambient authority input)).map Sigma.fst).Nodup) .authorityEntries
+    (enrolObserve deployment ambient authority input)).map Sigma.fst).Nodup) .authorityEntries
   match validate AuthorityMaterializer authority.snapshot.cell authority.snapshot.cell.root
       (assignAll authority.snapshot.logical (PayEnrolReceiver.authorityEntries descriptor
         (enrolKey deployment authority.snapshot.revision input)
-        (enrolObserve deployment profile ambient authority input))) with
+        (enrolObserve deployment ambient authority input))) with
   | .rejected _ => throw .validation
   | .accepted validated =>
     let allocated ← match ResourceBirthController.allocate? Registry directory.directory descriptor with

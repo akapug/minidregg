@@ -28,9 +28,28 @@ check. That is the "no read path returns unverified bytes" property, enforced
 by the compiler; `verifyAt_included`, `verifyAt_bytes` and `verifyAt_sound`
 state what a `Verified` value means.
 -/
-import Compiler.DurableCheckpointCodec
-import Theory.LogAccumulator
-import Compiler.DurableIndex
+module
+
+public import Compiler.DurableCheckpointCodec
+public import Theory.LogAccumulator
+public import Compiler.DurableIndex
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.DurableHistory
 
@@ -142,7 +161,7 @@ def trailerCarried (tag : List UInt8) : Option Carried :=
 /-- One stored entry as the Store returned it. Its bytes are readable only in
 this module (`verifyAt`, `verifyTagged`). -/
 structure RawEntry where
-  mk ::
+  private mk ::
   private height : Nat
   private record : List UInt8
   private tag : List UInt8
@@ -154,7 +173,7 @@ def RawEntry.claimedHeight (entry : RawEntry) : Nat := entry.height
 
 /-- One stored accumulator node `(level, end)` as the Store returned it. -/
 structure RawNode where
-  mk ::
+  private mk ::
   private level : Nat
   private finish : Nat
   private value : List UInt8

@@ -20,9 +20,28 @@ or network.  The final section exposes the required implementation-refinement
 premise as a proof-relevant simulation relation.  No `Bool = true` receipt is
 treated as evidence of physical atomicity.
 -/
-import Kernel.MultiCellHyperedge
-import Theory.ResourceCost
-import Theory.AxiomPin
+module
+
+public import Kernel.MultiCellHyperedge
+public import Theory.ResourceCost
+public import Theory.AxiomPin
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.DurableCommitProtocol
 
@@ -51,7 +70,11 @@ separate checked boundary in `Theory.ResourceCost`.
 `Event` is intentionally parametric.  For one cell the adapter below uses the
 existing private-constructor `AcceptedCellEffect.ReceiptEvent`; for a joint
 turn it can use the exact joint receipt binding or a richer existing history
-event.  The durable layer only appends the value it was given. -/
+event.  The durable layer only appends the value it was given.
+
+`credit` is what the install adds back to the meter after debiting `exactCharge`
+(`Snapshot.install`). It is zero for every family but the seed-meter refill
+(`Kernel.MeterRefillReceiver`, the M2 statements in `Kernel.PlatformCell`). -/
 structure Intent
     (TxId : Type u) (CellId : Type v) (Nullifier : Type w) (Event : Type x) where
   transactionId : TxId
@@ -59,6 +82,7 @@ structure Intent
   nullifiers : List Nullifier
   exactCharge : Charge
   event : Event
+  credit : Charge := 0
 
 namespace Intent
 
@@ -72,16 +96,18 @@ def sameCheck [DecidableEq (RootWrite CellId)] [DecidableEq Nullifier]
   decide (left.rootWrites = right.rootWrites) &&
     decide (left.nullifiers = right.nullifiers) &&
     Lane.allCheck (fun lane => decide (left.exactCharge lane = right.exactCharge lane)) &&
-    decide (left.event = right.event)
+    decide (left.event = right.event) &&
+    Lane.allCheck (fun lane => decide (left.credit lane = right.credit lane))
 
 /-- Exact payload equality for idempotent retry.  Transaction identifiers are
-looked up separately; changing any root, nullifier, charge lane, or event under
-the same identifier is a conflict. -/
+looked up separately; changing any root, nullifier, charge lane, event or credit
+lane under the same identifier is a conflict. -/
 def SamePayload (left right : Intent TxId CellId Nullifier Event) : Prop :=
   left.rootWrites = right.rootWrites /\
     left.nullifiers = right.nullifiers /\
     left.exactCharge = right.exactCharge /\
-    left.event = right.event
+    left.event = right.event /\
+    left.credit = right.credit
 
 @[simp] theorem sameCheck_eq_true_iff
     [DecidableEq (RootWrite CellId)] [DecidableEq Nullifier] [DecidableEq Event]
@@ -90,21 +116,25 @@ def SamePayload (left right : Intent TxId CellId Nullifier Event) : Prop :=
   simp only [sameCheck, Bool.and_eq_true, decide_eq_true_eq,
     Lane.allCheck_eq_true_iff, SamePayload]
   constructor
-  · rintro ⟨⟨⟨roots, nullifiers⟩, charge⟩, event⟩
-    refine ⟨roots, nullifiers, ?_, event⟩
-    funext lane
-    exact charge lane
-  · rintro ⟨roots, nullifiers, charge, event⟩
-    refine ⟨⟨⟨roots, nullifiers⟩, ?_⟩, event⟩
-    intro lane
-    exact congrFun charge lane
+  · rintro ⟨⟨⟨⟨roots, nullifiers⟩, charge⟩, event⟩, credit⟩
+    refine ⟨roots, nullifiers, ?_, event, ?_⟩
+    · funext lane
+      exact charge lane
+    · funext lane
+      exact credit lane
+  · rintro ⟨roots, nullifiers, charge, event, credit⟩
+    refine ⟨⟨⟨⟨roots, nullifiers⟩, ?_⟩, event⟩, ?_⟩
+    · intro lane
+      exact congrFun charge lane
+    · intro lane
+      exact congrFun credit lane
 
 @[simp] theorem sameCheck_self
     [DecidableEq (RootWrite CellId)] [DecidableEq Nullifier] [DecidableEq Event]
     (intent : Intent TxId CellId Nullifier Event) :
     intent.sameCheck intent = true := by
   rw [sameCheck_eq_true_iff]
-  exact ⟨rfl, rfl, rfl, rfl⟩
+  exact ⟨rfl, rfl, rfl, rfl, rfl⟩
 
 end Intent
 
@@ -159,7 +189,7 @@ def install [DecidableEq CellId] [DecidableEq Nullifier]
     (lookupPost cellId intent.rootWrites).getD (before.roots cellId)
   consumed := fun nullifier =>
     if nullifier ∈ intent.nullifiers then true else before.consumed nullifier
-  available := fun lane => before.available lane - intent.exactCharge lane
+  available := fun lane => before.available lane - intent.exactCharge lane + intent.credit lane
   history := intent.event :: before.history
   journal := (intent.transactionId, intent) :: before.journal
 
@@ -219,18 +249,33 @@ theorem install_history_chronological
       (intent.transactionId, intent) :: before.journal :=
   rfl
 
-/-- Successful preflight funding makes the model debit exact in every lane. -/
+/-- Successful preflight funding makes the model debit exact and the credit exact in
+every lane (M2-a, `PlatformCell.install_conserves_with_credit`). -/
 theorem install_exact_debit
     [DecidableEq CellId] [DecidableEq Nullifier]
     (before : Snapshot TxId CellId Nullifier Event)
     (intent : Intent TxId CellId Nullifier Event)
     (funded : intent.exactCharge <= before.available) :
-    intent.exactCharge + (install before intent).available = before.available := by
+    intent.exactCharge + (install before intent).available = before.available + intent.credit := by
   funext lane
   change intent.exactCharge lane +
-    (before.available lane - intent.exactCharge lane) = before.available lane
-  rw [Nat.add_comm]
-  exact Nat.sub_add_cancel (funded lane)
+    (before.available lane - intent.exactCharge lane + intent.credit lane) =
+      before.available lane + intent.credit lane
+  have fits : intent.exactCharge lane ≤ before.available lane := funded lane
+  omega
+
+/-- An uncredited install debits exactly (every family but the refill). -/
+theorem install_exact_debit_uncredited
+    [DecidableEq CellId] [DecidableEq Nullifier]
+    (before : Snapshot TxId CellId Nullifier Event)
+    (intent : Intent TxId CellId Nullifier Event)
+    (funded : intent.exactCharge <= before.available) (uncredited : intent.credit = 0) :
+    intent.exactCharge + (install before intent).available = before.available := by
+  have exact := install_exact_debit before intent funded
+  rw [uncredited] at exact
+  funext lane
+  have := congrFun exact lane
+  simpa using this
 
 end Snapshot
 

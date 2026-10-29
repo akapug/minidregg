@@ -146,6 +146,8 @@ for i in $(seq 1 24); do
   sleep 15
 done
 if [ "$RC" = 0 ]; then record story sponsor "story seal $S" 0 ok ""; else record story sponsor "story seal $S" 0 FAIL "rc $RC: $(grep -m1 -E '^(refused|undecided|error|usage): ' "$ERR")"; fi
+ok story sponsor "story seal $S"
+check story "a second seal is a no-op that says so" grep -q 'already sealed' "$OUT"
 ok story sponsor "story invite $S $G gm"
 mkdir -p -m 700 "$H/gm/requests"
 sed -n "s/^story join $S //p" "$OUT" | head -1 >"$H/gm/requests/invitation.txt"
@@ -153,4 +155,40 @@ check story "the GM's invitation line was printed" test -s "$H/gm/requests/invit
 ok story gm "story join $S @invitation.txt"
 ok story gm "narrate the door groans"
 refused story sponsor "narrate the author is not the teller" law-denied ""
+# A player's invitation is idempotent: the second `story invite` for the same player prints the saved line and
+# writes nothing (demo-dry: "scalar proposal requires 1..64 actions" on a re-invite); an invitation that is not
+# one (a non-GM named as GM) is refused by name.
+outcomes() { find "$SPONSOR_WS/attempts" -name 'outcome.json' 2>/dev/null | wc -l; }
+ok story sponsor "story invite $S $G"
+INV1=$(sed -n "s/^story join $S //p" "$OUT" | head -1)
+BEFORE=$(outcomes)
+ok story sponsor "story invite $S $G"
+check story "the second invite wrote nothing (no new outcome)" test "$(outcomes)" = "$BEFORE"
+check story "the second invite reprints the same invitation" test "$(sed -n "s/^story join $S //p" "$OUT" | head -1)" = "$INV1"
+check story "and says it is already invited" grep -q 'already invited' "$OUT"
+fails story sponsor "story invite $S 424242 gm" 2 "not $S's GM"
+
+# An enrolment whose submit marker was written and whose process then died before the Host took the ingress
+# (the demo-dry dryguest4 wedge: every retry looked the same absent ingress up forever). The marker is forged
+# the way the dead process left it; a later `enroll lookup` retires the attempt, and the same name enrols.
+L=late
+mkdir -p -m 700 "$H/$L"
+ok setup "$L" "keygen mini.key"
+operator setup "CUSTODY: copy $L's secret into the sponsor home" install_private 0600 "$H/$L/keys/mini.key" "$H/sponsor/keys/$L.key"
+LPLAN="enroll plan $L $L.key $(xxd -p -c 256 "$H/$L/keys/mini.key.next.pub") $(xxd -p -c 256 "$H/$L/keys/mini.key.next.cosign")"
+ok setup sponsor "$LPLAN"
+ok setup sponsor "enroll seal $L"
+EDIR=$H/sponsor/enroll/$L
+check setup "the sealed attempt exists" test -s "$EDIR/ingress.bin"
+printf '{"format":"minidregg-participant-enrollment-custody-v1","ingressSha256":"%s","operation":88,"status":"may-have-submitted"}\n' \
+  "$(sha256sum "$EDIR/ingress.bin" | cut -d' ' -f1)" >"$EDIR/submit-marker.json"
+say sponsor "enroll lookup $L"
+check setup "a later lookup of an ingress the Host never took retires the attempt by name" grep -q 'absent from the Host' "$ERR"
+check setup "and leaves the refused-no-record record, not the marker, to plan from" test -e "$EDIR/submit-refused.json" -o -e "$EDIR/replanned"
+ok setup sponsor "$LPLAN"
+ok setup sponsor "enroll seal $L"
+ok setup sponsor "enroll submit $L"
+ok setup sponsor "enroll lookup $L"
+check setup "the retried name is enrolled as its own subject" test -n "$(jq -r '.subject // empty' "$OUT")"
+operator setup "CUSTODY: remove the copy" rm -f "$H/sponsor/keys/$L.key"
 finish

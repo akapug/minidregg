@@ -1227,6 +1227,7 @@ run_step K12M J5
 run_step K12R J5
 run_step K12H J5
 run_step WEB K12C K12T K12M K12H
+run_step JWF J5
 run_step KW J5
 run_step K10C J5
 run_step JLI J5

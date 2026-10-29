@@ -85,7 +85,7 @@ import Kernel.FinalityLiveness  -- liveness as ONE carrier: PostGSTProgress bund
 import Kernel.NativeHost
 import Kernel.NativeHostServed -- KN2 2b-1: a validated served state (no history): validateServed, OpenedServed
 import Kernel.NativeHostLight -- KN2 2b-1: the validated light opening a session serves ported operations from
-import Kernel.NativeThinConsent  -- thin consent: what a member signs without replaying is what commits (thin_display_is_commit), lying Hosts refused by name
+import Kernel.NativeThinConsent  -- thin consent: what a member signs without replaying is what commits (opened_display_is_commit), lying Hosts refused by name
 import Kernel.NativeHostSession
 import Kernel.NativeReserveContinuity
 import Kernel.NativeHostGenesis
@@ -146,7 +146,7 @@ import Kernel.FnSelectiveReleaseProofs
 import Kernel.NativeHostBookInvariant
 import Kernel.StreamResource  -- per-author streams: append leg theorems, author law, rooms (PLACE §2.3/§4.4, K-STREAM)
 import Kernel.PrivateRoomKeys  -- private room wrapping law
-import Kernel.PrivateRoomWrapGrant  -- J-PRIV-1: a member grant reads only its own wraps (AUTHORED, NOT COMPILED)
+import Kernel.PrivateRoomWrapGrant  -- J-PRIV-1: a member grant reads only its own wraps
 import Kernel.StreamWrite  -- stream head and immutable entry writes
 import Kernel.DomainEpoch  -- channel epoch record, absent opening, ChannelLaw, omission theorems (CHANNELS §2.4, CH-EPOCH)
 import Kernel.DomainEpochStream  -- the channel law at the kernel append: refusals by name (CH-EPOCH)

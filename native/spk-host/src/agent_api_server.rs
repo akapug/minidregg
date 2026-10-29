@@ -15,7 +15,7 @@ use crate::http_response;
 use crate::rpc_adapter::{PrequeueGuard, RpcDriver};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
@@ -25,7 +25,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const PROTOCOL: &str = "mini-spk-agent-api-v1";
 const MAX_APP_RESPONSE: usize = 65_536;
@@ -34,12 +34,82 @@ fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
 }
 
-fn path_absent(path: &Path) -> io::Result<bool> {
-    match fs::symlink_metadata(path) {
-        Ok(_) => Ok(false),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(true),
+fn socket_lock_path(path: &Path) -> io::Result<PathBuf> {
+    let mut name = path.file_name().ok_or_else(|| invalid("agent socket filename absent"))?.to_os_string();
+    name.push(".lock");
+    Ok(path.with_file_name(name))
+}
+
+// Keep this inode after release: unlinking a lock permits two owners of two
+// different lock files at the same pathname. Preflight never creates it.
+fn socket_lock(path: &Path, create: bool) -> io::Result<Option<File>> {
+    let file = match OpenOptions::new().read(true).write(true).create(create)
+        .mode(0o600).custom_flags(libc::O_NOFOLLOW).open(socket_lock_path(path)?) {
+        Ok(file) => file,
+        Err(error) if !create && error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let meta = file.metadata()?;
+    if !meta.is_file() || meta.nlink() != 1 || meta.uid() != unsafe { libc::geteuid() }
+        || meta.mode() & 0o7777 != 0o600 {
+        return Err(invalid("agent socket lock identity refused"));
+    }
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        return Err(invalid("agent socket listener lock held"));
+    }
+    Ok(Some(file))
+}
+
+/// An existing endpoint is reusable only when it is exactly our socket/ACL
+/// and a bounded connection explicitly reports ECONNREFUSED. Busy, linked,
+/// foreign, changed, or otherwise uncertain paths remain untouched.
+fn stale_socket(path: &Path, expected_uid: u32) -> io::Result<Option<fs::Metadata>> {
+    let meta = match fs::symlink_metadata(path) {
+        Ok(meta) => meta,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let owner = unsafe { libc::geteuid() };
+    let mode = if expected_uid == owner { 0o600 } else { 0o660 };
+    if !meta.file_type().is_socket() || meta.uid() != owner || meta.nlink() != 1
+        || meta.mode() & 0o7777 != mode {
+        return Err(invalid("agent stale socket identity refused"));
+    }
+    exact_acl(path, expected_uid, false, false)?;
+    match crate::dispatch_native::connect_deadline(path, Instant::now() + Duration::from_millis(250)) {
+        Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => Ok(Some(meta)),
+        Ok(_) => Err(invalid("agent socket still accepting")),
         Err(error) => Err(error),
     }
+}
+
+fn remove_stale_socket(path: &Path, expected_uid: u32) -> io::Result<Option<fs::Metadata>> {
+    let old = stale_socket(path, expected_uid)?;
+    if let Some(old) = &old {
+        let current = fs::symlink_metadata(path)?;
+        if (current.dev(), current.ino(), current.ctime(), current.ctime_nsec())
+            != (old.dev(), old.ino(), old.ctime(), old.ctime_nsec()) {
+            return Err(invalid("agent stale socket changed"));
+        }
+        fs::remove_file(path)?;
+        File::open(path.parent().ok_or_else(|| invalid("agent socket parent absent"))?)?.sync_all()?;
+    }
+    Ok(old)
+}
+
+/// Transport repair for an older pinned resident. This sends no Mini operation,
+/// changes no journal/config, and cannot reclaim an accepting listener.
+pub(crate) fn reclaim_socket(path: &Path, expected_uid: u32) -> io::Result<Value> {
+    if expected_uid == 0 || !path.is_absolute() {
+        return Err(invalid("agent socket pin refused"));
+    }
+    protected_agent_socket_parent(path.parent().ok_or_else(|| invalid("agent socket parent absent"))?, expected_uid, false)?;
+    let _lock = socket_lock(path, true)?;
+    let old = remove_stale_socket(path, expected_uid)?;
+    Ok(serde_json::json!({"protocol":"mini-spk-agent-socket-reclaim-v1", "socket":path,
+        "controllerUid":expected_uid,"ownerUid":unsafe {libc::geteuid()},"removed":old.is_some(),
+        "previous":old.map(|meta| serde_json::json!({"device":meta.dev(),"inode":meta.ino(),
+            "mode":meta.mode() & 0o7777,"uid":meta.uid()})),"nativeOperationSubmitted":false}))
 }
 
 fn string<'a>(value: &'a Value, field: &str) -> io::Result<&'a str> {
@@ -231,6 +301,7 @@ pub(crate) struct AgentApiListener {
     socket: PathBuf,
     socket_identity: (u64, u64),
     expected_uid: u32,
+    _lock: File,
 }
 
 impl Drop for AgentApiListener {
@@ -248,8 +319,9 @@ impl Drop for AgentApiListener {
 impl AgentApiListener {
     /// Read-only START preflight. Bind may add only the exact controller ACL
     /// after START completion; the protected parent and ancestors are fixed.
+    /// A dead exact socket may survive SIGKILL. Inspect it without removing it.
     pub(crate) fn preflight_parent(path: &Path, expected_uid: u32) -> io::Result<()> {
-        if expected_uid == 0 || !path.is_absolute() || !path_absent(path)? {
+        if expected_uid == 0 || !path.is_absolute() {
             return Err(invalid("agent socket preflight pin refused"));
         }
         protected_agent_socket_parent(
@@ -257,7 +329,10 @@ impl AgentApiListener {
                 .ok_or_else(|| invalid("agent socket parent absent"))?,
             expected_uid,
             false,
-        )
+        )?;
+        let _lock = socket_lock(path, false)?;
+        stale_socket(path, expected_uid)?;
+        Ok(())
     }
 
     pub(crate) fn as_raw_fd(&self) -> std::os::fd::RawFd {
@@ -270,10 +345,12 @@ impl AgentApiListener {
         let parent = path
             .parent()
             .ok_or_else(|| invalid("agent socket parent absent"))?;
-        if expected_uid == 0 || !path_absent(path)? {
+        if expected_uid == 0 || !path.is_absolute() {
             return Err(invalid("agent socket pin refused"));
         }
         protected_agent_socket_parent(parent, expected_uid, true)?;
+        let lock = socket_lock(path, true)?.ok_or_else(|| invalid("agent socket lock absent"))?;
+        remove_stale_socket(path, expected_uid)?;
         let listener = UnixListener::bind(&path).ctx("bind", &path)?;
         let bound = fs::symlink_metadata(&path).ctx("inspect", &path)?;
         let setup = (|| {
@@ -306,6 +383,7 @@ impl AgentApiListener {
             socket: path.to_owned(),
             socket_identity: (metadata.dev(), metadata.ino()),
             expected_uid,
+            _lock: lock,
         })
     }
 
@@ -315,13 +393,21 @@ impl AgentApiListener {
         let Some(mut stream) = self.accept_authenticated()? else {
             return Ok(false);
         };
+        // Nothing below writes a reason to the agent beyond its reply; the resident's stderr (the
+        // operator's log) keeps every refusal, uncertainty and dropped connection by its reason.
         let frame = match agent_api_wire::read_frame(&mut stream) {
             Ok(frame) => frame,
-            Err(_) => return Ok(true),
+            Err(error) => {
+                eprintln!("spk-host: agent connection closed unread: {error}");
+                return Ok(true);
+            }
         };
         let request = match Request::parse(&frame) {
             Ok(request) => request,
-            Err(_) => return Ok(true),
+            Err(error) => {
+                eprintln!("spk-host: agent request refused unparsed: {error}");
+                return Ok(true);
+            }
         };
         let operation_id = match &request {
             Request::Dispatch { operation_id, .. } | Request::Inspect { operation_id, .. } => {
@@ -331,13 +417,25 @@ impl AgentApiListener {
         };
         let watch = match CallerWatch::start(&stream) {
             Ok(watch) => watch,
-            Err(_) => return Ok(true),
+            Err(error) => {
+                eprintln!("spk-host: agent operation {} not started: caller watch: {error}", operation_id.as_deref().unwrap_or("hello"));
+                return Ok(true);
+            }
         };
         let result = resident.handle_once(&stream, request, &watch.cancelled);
         let response = match result {
-            Ok(reply) => reply,
-            Err(_) => match operation_id {
-                Some(operation_id) => Reply::Uncertain {
+            Ok(reply) => {
+                match &reply {
+                    Reply::Refused { operation_id, code, .. } => eprintln!("spk-host: agent operation {operation_id} refused: {code}"),
+                    Reply::Uncertain { operation_id, phase, .. } => eprintln!("spk-host: agent operation {operation_id} uncertain at {phase}"),
+                    _ => {}
+                }
+                reply
+            }
+            Err(error) => match operation_id {
+                Some(operation_id) => {
+                    eprintln!("spk-host: agent operation {operation_id} failed, answered uncertain: {error}");
+                    Reply::Uncertain {
                     protocol: PROTOCOL.into(),
                     operation_id,
                     binding_sha256: resident
@@ -345,8 +443,12 @@ impl AgentApiListener {
                         .and_then(|binding| binding.fingerprint())
                         .unwrap_or_else(|_| "0".repeat(64)),
                     phase: "retained-attempt".into(),
-                },
-                None => return Ok(true),
+                    }
+                }
+                None => {
+                    eprintln!("spk-host: agent hello failed: {error}");
+                    return Ok(true);
+                }
             },
         };
         if let Ok(bytes) = serde_json::to_vec(&response) {
@@ -1229,6 +1331,7 @@ mod tests {
         assert!(socket.exists());
         drop(listener);
         assert!(!socket.exists());
+        fs::remove_file(socket_lock_path(&socket).unwrap()).unwrap();
         fs::remove_dir(directory).unwrap();
     }
 
@@ -1293,7 +1396,79 @@ mod tests {
         exact_acl(&directory, controller_uid, true, false).unwrap();
         exact_acl(&socket, controller_uid, false, false).unwrap();
         drop(listener);
+        fs::remove_file(socket_lock_path(&socket).unwrap()).unwrap();
         fs::remove_dir(directory).unwrap();
+    }
+
+    #[test]
+    fn dead_exact_agent_socket_rebinds_without_weakening_live_listener_custody() {
+        let directory = Path::new("/tmp").join(format!("mini-agent-rebind-{}-{}",
+            std::process::id(), NEXT_LISTENER.fetch_add(1, Ordering::SeqCst)));
+        fs::DirBuilder::new().mode(0o700).create(&directory).unwrap();
+        let path = directory.join("api.sock");
+        let uid = unsafe { libc::geteuid() } + 10_000;
+        protected_agent_socket_parent(&directory, uid, true).unwrap();
+        // Model an older resident killed without Drop: its exact ACL socket
+        // remains, while its kernel listener no longer exists.
+        let old = UnixListener::bind(&path).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        exact_acl(&path, uid, false, true).unwrap();
+        assert!(AgentApiListener::preflight_parent(&path, uid).is_err());
+        assert!(reclaim_socket(&path, uid).is_err());
+        drop(old);
+        let before = fs::symlink_metadata(&path).unwrap();
+        let extra = format!("u:{}:rw-", uid + 1);
+        assert!(Command::new("/usr/bin/setfacl").args(["-m", &extra]).arg(&path).status().unwrap().success());
+        assert!(reclaim_socket(&path, uid).is_err());
+        assert_eq!(fs::symlink_metadata(&path).unwrap().ino(), before.ino());
+        let extra = format!("u:{}", uid + 1);
+        assert!(Command::new("/usr/bin/setfacl").args(["-x", &extra]).arg(&path).status().unwrap().success());
+        AgentApiListener::preflight_parent(&path, uid).unwrap();
+        assert_eq!(fs::symlink_metadata(&path).unwrap().ino(), before.ino());
+        let listener = AgentApiListener::bind(&path, uid).unwrap();
+        exact_acl(&path, uid, false, false).unwrap();
+        assert!(AgentApiListener::preflight_parent(&path, uid).is_err());
+        assert!(AgentApiListener::bind(&path, uid).is_err());
+        assert!(reclaim_socket(&path, uid).is_err());
+        drop(listener);
+        assert!(!path.exists());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn explicit_agent_socket_reclaim_preserves_wrong_objects_and_records_exact_inode() {
+        let directory = Path::new("/tmp").join(format!("mini-agent-reclaim-{}-{}",
+            std::process::id(), NEXT_LISTENER.fetch_add(1, Ordering::SeqCst)));
+        fs::DirBuilder::new().mode(0o700).create(&directory).unwrap();
+        let path = directory.join("api.sock");
+        let uid = unsafe { libc::geteuid() };
+        fs::write(&path, b"not a socket").unwrap();
+        assert!(reclaim_socket(&path, uid).is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"not a socket");
+        fs::remove_file(&path).unwrap();
+        std::os::unix::fs::symlink(directory.join("missing"), &path).unwrap();
+        assert!(reclaim_socket(&path, uid).is_err());
+        assert!(fs::symlink_metadata(&path).unwrap().file_type().is_symlink());
+        fs::remove_file(&path).unwrap();
+        let listener = UnixListener::bind(&path).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o666)).unwrap();
+        drop(listener);
+        assert!(reclaim_socket(&path, uid).is_err());
+        assert!(path.exists());
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        let old = fs::symlink_metadata(&path).unwrap();
+        let result = reclaim_socket(&path, uid).unwrap();
+        assert_eq!(result["previous"]["inode"], old.ino());
+        assert_eq!(result["previous"]["device"], old.dev());
+        assert_eq!(result["removed"], true);
+        assert_eq!(result["nativeOperationSubmitted"], false);
+        assert!(!path.exists());
+        assert_eq!(reclaim_socket(&path, uid).unwrap()["removed"], false);
+        let lock = socket_lock_path(&path).unwrap();
+        fs::remove_file(&lock).unwrap();
+        std::os::unix::fs::symlink(directory.join("missing"), &lock).unwrap();
+        assert!(reclaim_socket(&path, uid).is_err());
+        fs::remove_dir_all(directory).unwrap();
     }
     #[test]
     fn binary_git_reply_keeps_status_headers_and_body() {

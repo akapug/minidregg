@@ -34,6 +34,8 @@ struct Helper {
     /// be another process, and connecting to a listener that no longer exists stranded the front
     /// page (dregg-build 2026-10-27: `connect body: No such file or directory`).
     children: std::collections::HashSet<u32>,
+    /// Why the last publication hand-off could not run, said once on the operator's log until it changes.
+    collect_blocked: Option<String>,
 }
 
 fn main() {
@@ -84,7 +86,7 @@ fn run() -> Result<(), String> {
         }
     };
     listener.set_nonblocking(true).map_err(|e| e.to_string())?;
-    let mut helper = Helper { store: Store::open(&state)?, spawner: Spawner { layout }, run, gateway_uid, dev: false, children: Default::default() };
+    let mut helper = Helper { store: Store::open(&state)?, spawner: Spawner { layout }, run, gateway_uid, dev: false, children: Default::default(), collect_blocked: None };
     helper.dev = layout_is_dev(&helper.spawner.layout);
     helper.forget_bodies();
     eprintln!("mini-web-spawn: serving (gateway uid {gateway_uid}{})", if helper.dev { ", dev" } else { "" });
@@ -315,12 +317,18 @@ impl Helper {
     /// the public member, 0600). Nothing is decided here: the reference is a hint, and the public
     /// body's own signed read publishes or refuses the document.
     fn collect(&mut self) {
-        let Some(subject) = self.spawner.public_subject() else { return };
-        let Ok(public) = self.spawner.public() else { return };
+        let Some(subject) = self.spawner.public_subject() else {
+            return self.hand_off_blocked("the public reader is not enrolled (no public subject): publications are not handed to it".into());
+        };
+        let public = match self.spawner.public() {
+            Ok(public) => public,
+            Err(error) => return self.hand_off_blocked(format!("the public reader is unavailable: {error}")),
+        };
         let inbox = public.home.join("inbox");
-        if fs::create_dir_all(&inbox).is_err() {
-            return;
+        if let Err(error) = fs::create_dir_all(&inbox) {
+            return self.hand_off_blocked(format!("the public reader's inbox {}: {error}", inbox.display()));
         }
+        self.collect_blocked = None;
         let _ = fs::set_permissions(&inbox, fs::Permissions::from_mode(0o700));
         if !self.dev {
             unsafe { libc::chown(std::ffi::CString::new(inbox.to_string_lossy().as_bytes()).unwrap().as_ptr(), public.uid, u32::MAX) };
@@ -330,7 +338,12 @@ impl Helper {
                 continue;
             }
             let Ok(proposals) = fs::read_dir(home.join("workspace/proposals")) else { continue };
-            for proposal in proposals.flatten() {
+            // Several publications of one document (published, revoked, published again) share the
+            // inbox name NAME.TARGET: the newest one is handed over, whatever order the directory lists.
+            let mut proposals: Vec<_> = proposals.flatten().collect();
+            proposals.sort_by_key(|p| fs::metadata(p.path().join("recipient-reference.json")).and_then(|m| m.modified()).ok());
+            let mut chosen: std::collections::BTreeMap<PathBuf, (String, String, Vec<u8>)> = std::collections::BTreeMap::new();
+            for proposal in proposals {
                 let reference = proposal.path().join("recipient-reference.json");
                 let Ok(meta) = fs::symlink_metadata(&reference) else { continue };
                 if !meta.is_file() || meta.len() > 65536 {
@@ -347,6 +360,9 @@ impl Helper {
                     .unwrap_or_else(|| "doc".into());
                 let dest = inbox.join(format!("{doc}.{target}.json"));
                 let bytes = fs::read(&reference).unwrap_or_default();
+                chosen.insert(dest, (doc, target.to_owned(), bytes)); // oldest first: the newest stays
+            }
+            for (dest, (doc, target, bytes)) in chosen {
                 if fs::read(&dest).ok().as_deref() == Some(bytes.as_slice()) {
                     continue;
                 }
@@ -360,6 +376,14 @@ impl Helper {
                     eprintln!("mini-web-spawn: publication {doc} ({target}) from {name} handed to the public reader");
                 }
             }
+        }
+    }
+
+    /// The hand-off runs every tick; a reason it cannot run is logged when it first appears or changes.
+    fn hand_off_blocked(&mut self, why: String) {
+        if self.collect_blocked.as_deref() != Some(why.as_str()) {
+            eprintln!("mini-web-spawn: publication hand-off: {why}");
+            self.collect_blocked = Some(why);
         }
     }
 

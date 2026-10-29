@@ -9,7 +9,7 @@ is also the **route** the purse records and is charged by:
 | `credential` (route) | bearer | what gates it | what the purse pays |
 |---|---|---|---|
 | `user` | the friend's own key (`mini key set`, sealed per friend by the broker) | the friend's grant naming this Hermes runner: a per-call output-token ceiling, an optional model, calls per UTC day, and a last block height. The broker reads the body it forwards against the grant, not what the controller says | the user route's per-operation fee, nothing else: the provider bills the friend |
-| `pool` | the operator's key (`mini-keys pool --action set`, as root) | the row's `caps` (per-call output tokens, calls per UTC day per runner, and the broker's own spend ceiling on the key) and the purse: Mini must admit the provider reserve (PAY.md §2.7) | the pool fee plus the metered tariff |
+| `pool` | the operator's key (`mini-keys pool --action set`, as root) | the row's `caps` (per-call output tokens, calls per UTC day per runner, and the broker's own spend ceiling on the key) and the purse: Mini must admit the provider reserve (PAY §2.7) | the pool fee plus the metered tariff |
 | `homelab` | no `Authorization` header at all | the purse (a homelab endpoint on the operator's own network) | the homelab fee plus its metered rates |
 
 A call with no payer (a `user` row and no key or grant) is refused before
@@ -458,7 +458,7 @@ once: `chat join subscribers @subscribers-invite.json`; a renewal is adopted by
 Whether the coding plan's terms permit serving others' agents is for the join
 page to state.
 
-## State (lane L4b, 2026-10-28)
+## State (lane L4c, 2026-10-28)
 
 **The room resident (J14)** passes whole on the lane (run 24, 153/153 rows; upstream Hermes
 Agent 6d8a8beb in the gated worker, pool route, `--network none` plus the bridge). The subscriber
@@ -490,9 +490,41 @@ the resident tools `mini_pending_awaits` / `mini_answer_await`. A member announc
   (docs/oracle-agent-tools.md).
 - Every call goes through Mini's application dispatch and purse settlement. In a room without the
   bit, the call is refused `oracle-not-granted` before any dispatch.
-- The answer comes back as Hermes's paid reply. Row: J14_ORACLE=1, with J14_ORACLE_TOOLTASK naming
-  the route fragment issued for this world's Hermes task. Issuing that fragment inside J14's world
-  (codex's `issue-grant` / `prepare-route` against the J14 controller) is the open seam.
+- The answer comes back as Hermes's paid reply. `J14_ORACLE=1` selects the dedicated
+  `native/resource-client/journey.d/j14-oracle.sh` journey. It creates one fresh Store, enrolls
+  Hermes, installs the Oracle in that same Store, and issues the session and lifetime grant for
+  the actual controller. There is no preissued `J14_ORACLE_TOOLTASK` fragment.
+
+The Oracle row needs the usual journey inputs (`MINI`, `HOST`, `STORE`, `VERIFIER`,
+`GRAIN_RUNTIME`, `TEST_PROVIDER`, `JOURNEY_STEP_DIR`) plus these operator assets:
+
+```sh
+export J14_ORACLE=1
+export J14_ORACLE_BIN="$OVERLAY_BIN"  # candidate binaries and explicitly selected runtime/provider overlays
+export J14_ORACLE_CANDIDATE_MANIFEST="$CANDIDATE/manifest.json"
+export J14_ORACLE_ORCHESTRATION_COMMIT="$(git rev-parse HEAD)"
+export J14_HERMES_ROOT="$HERMES_RUNTIME_ROOT"
+export J14_ORACLE_SPK="$ORACLE_RUNTIME_SPK"
+export J14_ORACLE_DATA_SOURCE="$ORACLE_DATA_DIRECTORY"
+export J14_ORACLE_INVENTORY="$ORACLE_DATA_INVENTORY_JSON"
+native/resource-client/journey.d/j14.sh
+```
+
+Run from a committed source snapshot on the Linux lane host with passwordless access to the
+fixed SPK installer. The binary directory includes the selected candidate's native helpers,
+`spk-data-publish`, and the source snapshot's `deploy/spk-host/spk-ingest`. Core candidate hashes
+are checked before native writes; runtime/provider overlays and orchestration file hashes are
+recorded separately. Use a fresh evidence directory. The socket directory is separately allocated
+under `/build/lanes` (override `J14_ORACLE_SOCKET_PARENT` for another protected, short parent),
+and task IDs are allocated per run so preserved worlds do not share system unit names.
+Before session creation or a restarted room turn, the journey also waits for native idle
+readiness; the presence of a controller socket alone does not establish readiness.
+
+The receiving checks cover the room's named refusal, the founder's grant, the actual Oracle
+answer joined to native dispatch settlement, a fresh paid room reply, and controller restart.
+The resident-page check inspects HTTP/HTML grant state; rendered-browser use and application
+restart/recovery belong to the separate Oracle shared-data journey. Command outputs and native
+attempts remain under `JOURNEY_STEP_DIR/oracle`, including a named failure when a phase stops.
 
 **Running J14 on dregg-build.** `/build/lanes/hermes-tier-run/tools-run.sh RUN_DIR` builds the
 lane binaries into `/build/lanes/hermes-tier-target` (CARGO_BUILD_JOBS=4), rebuilds the runtime
@@ -555,90 +587,81 @@ to a candidate whose host carries bc88a5ab, and add `J14_AWAIT=1` for the bridge
   mini `resident_`, `operator_peer`, `agent_operator`. install-hermes has not run anywhere: it needs
   the demo box with infra's items.
 
-**Quest 2 on the first v8 candidate 0ce31391** (`/build/lanes/hermes-tier-run/hb-q2.sh RUN_DIR` =
-tools-run.sh with `C=` that candidate, J14_TOOLS=1 J14_AWAIT=1, root `hroot-q2`; run dirs
-`/build/lanes/hermes-live-run/hb-q2-N`):
-- run 1: J14 row 8, alice's 200000000 await funding exceeded the J14 sponsor's 100000; fixed
-  (b740e6f0, sponsor funded under J14_AWAIT).
-- run 2: 122/133, stopped at row 133. Row 122: the room write was refused at the tail bound (head 257
-  certified 0 bound 256); J14 never certified its World. Fixed (2aa94b0c, the operator certifies
-  before each resident pass). Compaction never ran (journal.providerSettlement persists as the next
-  call's anchor); fixed (2aa94b0c, keep from the latest settlement and prompt). `host-ops.txt`:
-  1, 2, 3, 4, 5, 17, 19, 96, 97, 98, 144, all on the allowlist; 0, 6-11, 30, 31, 99-102, 151,
-  153, 180 unused (narrow after the await rows run). Footprint before compaction: g 63.5 MiB /
-  13,329 inodes for 4 prompts and 14 model calls.
-- run 3: 126/137, stopped at row 137. Row 126: the tools pass ran out of budget at compute turn
-  57 of 180. The gate wrote no CPU record because the controller's stop killed it, so 1800 s was
-  charged. Fixed in 1d947aa9 (unverified): systemd's CPUUsageNSec is recorded before the kill.
-  **Open, undiagnosed:** the tools pass selected bob's earlier nogrant request ("please append
-  'typo fixed' to cell ..."), not his sandbox ask. Hermes was offered the seven sandbox tools
-  (provider.shown.jsonl) but answered the old request, so the test provider never took its sandbox
-  branch (hermes-test-provider `sandbox_reply_for` keys on `selectedRequest.text` containing
-  "sandbox"). Look at the resident's request selection after the nogrant pass
-  (`resident/requests.json` in the run's g/state).
-- run 4 (`hb-q2-4`, 0ce31391, 132/149): the CPU record still failed (systemd CPUUsageNSec
-  "[not set]"), so the charge was again 180 turns; await rows refused "this deployment registers no
-  Objective policy"; compaction never ran (g 65 MiB / 13,745 inodes); host ops as run 2 plus nothing
-  new. Fixed in 7a831d07: J14_AWAIT pins the Objective policy, the pre-kill CPU record reads
-  the unit cgroup's cpu.stat, compaction also runs at the next prompt's start (right after a
-  record the resident completion is still due).
-  **Still open, undiagnosed:** the tools prompt's brief does not contain bob's sandbox ask at all
-  (no "sandbox" text in resident-tools.jsonl; resident/requests.json shows pending [] and three
-  completed requests), so the test provider never takes its sandbox branch. Check whether bob's
-  `ask lab ... in the sandbox` line reaches the resident's request scan (cursors per author in
-  resident/requests.json) before the tools pass.
-- run 5 (`hb-q2-5`, 2d8b7ed54, 180/214; J0-J5 PASS on main's harness): compaction ran (g 47 MiB /
-  10,039 inodes, down from 65 MiB / 13,745; two passes compacted 111 and 122 operations). The CPU
-  record still failed: no cpu.stat, because the stop's SIGTERM ends the unit before the read. The
-  180-turn charge left an unconfirmed compute payment, which refused every later pass (await,
-  redteam, dismiss: "recorded payment is not confirmed; exact recovery only"). Fixed in 56f6741a:
-  the record is read before the first signal. Host ops unchanged (1-5, 17, 19, 96-98, 144).
-  The sandbox ask still never reaches the tools brief (see run 4).
-- run 6 (`hb-q2-6`, 7027e0ace, 211/233): the CPU fix works (each tools prompt ~5.6 s = 1 compute
-  turn, paid); compaction ran 4 times (g 49 MiB / 9,767 inodes for 7 prompts, 7 model calls).
-  Remaining reds (tools 127-136, await 159-167, redteam 179-195): those passes' briefs had no
-  selectedRequest and no recentMemberEntries (a maintenance pass), so the test provider never took
-  its sandbox/await/redteam branch. Hypothesis: certifying between the ask and the pass hides the
-  ask from the brief. aa325a6c moves the certify to after each pass.
-- run 7 (`hb-q2-7`, 76758dba6 genesis, tree aa325a6c, 211/233): the same 22 reds. Moving the
-  certify did not help. **Diagnosis so far (the open red):** the resident serves requests late,
-  FIFO, about two passes behind. The ask and nogrant passes ran maintenance prompts (their briefs
-  have no `selectedRequest`), the tools pass served alice's first ask (author 1205…, sequence 1;
-  `strings resident-tools.jsonl | grep -o 'selectedRequest.\{0,900\}'`), and so on. Every
-  brief's `acceptedHeight` is 49. Six requests completed in total (resident/request-*-completed.json).
-  The ask/nogrant checks pass anyway because the test librarian answers from history. Next step:
-  why `resident_requests::select` (entries `kind == say`, `to == me`, `height > acceptedHeight`
-  from `prepare_resident`'s tail page) misses the newest ask in its own pass. Compare the pass's
-  `sourceRequests` with the room tail at that moment (run J14 once with `--only J14` and inspect the
-  resident's prepared assignment).
-- run 7 footprint: g 49 MiB / 9,767 inodes, of which the room workspace's attempts/ held 22 MiB and
-  5,271 inodes (finished reads and result.json writes, which compaction skipped). d06cb6fc compacts
-  them, except attempts a room write record names.
-- run 8 (`hb-q2-8`, aae3e2e37, tree d06cb6fc, 210/233): the same tools/await/redteam reds (the
-  request lag). Footprint: the uid owns about 35 MiB and 6,400 inodes after 6 prompts and 6 model
-  calls (g 33.2 MiB / 6,326 inodes). It no longer grows per call; what is left is the latest
-  prompt's custody plus a fixed part, and the room workspace still holds 11 MiB / 2,558 inodes.
-  **Infra landed items 2-4 in demo-vm 4138262** (broker provider peers; `demo-resident-walls`
-  for the user@ drop-in, slice wall and linger, run by step 9 after `install-hermes preflight`;
-  /var/lib/mini/glm allowed). **Item 1 is open** (controller-entry.py per-registration service uid,
-  with the next infra lane): until it lands, registering a controller under mini-h-* is refused, so
-  install-hermes's `controller` step cannot pass on the box. **Infra's batch was sent to ae95a4eac63b0715e**: users, the route unit text, the four infra
-  items, this measurement, and an interim quota of 48/56 MiB and 10K/12K inodes pending ember. The
-  32 MiB / 2,000-inode target is not met yet. Owed: compact the room workspace residue (the latest
-  prompt's reads and the room-operations-referenced writes), then send infra the smaller figure.
-- The allowlist stays as seeded until the await rows run on their own ask. The used set on every run
-  so far: 1-5, 17, 19, 96-98, 144.
-- Every J14 pass runs from main's scripts and a candidate's source (coordinator); a J5 red from an
-  older tree is a stale harness.
+**Where the lane stands (L4c).** Pushed and on main (6325a6045, via lane/hermes-b 8013cd48b):
+- **birthStale at `install-hermes create` is fixed at the cause.** `grain-runtime create` reads a
+  sponsor-signed factory resource view (`mini query --view resource`), has the Host author the birth
+  against that exact image (`mini current-resource-intent`, op 91: notBefore = the current height,
+  current issuer epochs), and submits the binary intent. A generation the Host refuses (the image
+  moved after the read) is retried with a fresh read, at most 8 per run, under
+  `create/birth-author-N`. An existing `create/birth` attempt is only looked up. The birth-window
+  law (64 heights) is unchanged. Two fixes over main's first version (5156702a0): it called
+  `--view view-resource`, which `mini query` refuses, and it had no retry. Host: op 91 now passes
+  the deployment's provider routes through `SourceAgreementJson.birthAt/birthCurrent`, so Hermes's
+  purse is born with its route policy. Thin consent still re-authors with no routes; no thin flow
+  births a routed grain. J14 rows `aged`: the World is advanced past genesis+66 before create, a
+  genesis-authored birth is refused birthStale (the teeth), and then create passes.
+- **There never was a request lag.** In run 8 (`hb-q2-8`) every pass completed the ask said just
+  before it; see the `mini-resident-request-outcome-v1` lines in the pass outputs. The ACP session
+  echoes each prompt's text one pass late, which misled the earlier diagnosis. The tools and await
+  reds were the deterministic provider (`mini-hermes-test-provider`) keying its sandbox, await and
+  oracle branches on `brief.selectedRequest.text`. `selectedRequest` is the identity only; the text
+  is in the single `recentMemberEntries` entry. Fixed by `selected_text`. J14 now checks
+  `own_pass STEP WHO` after every ask pass. Row "the session offers exactly the seven granted
+  sandbox tools" broke on apostrophes in the brief; now fixed.
+- J14 writes `footprint-detail.tsv` (directories to depth 4 under the controller root) and
+  `footprint-room-workspace.tsv` (room-workspace files by name shape). These are the data for the
+  room-workspace compaction.
+- Run 8's other red: after the await pass a mini helper exceeded its 300 s deadline (model calls
+  took 20-29 s each on a loaded dregg-build). The outcome was left undecided, and the redteam pass
+  was refused with "recovery must finish first". Watch whether the next run repeats it.
 
-**Owed:**
-- Run J14_TOOLS and J14_AWAIT on a candidate carrying bc88a5ab and this lane (L4b quest 2:
-  `/build/lanes/hermes-tier-run/tools-run.sh`, `C=` the candidate). The same run yields `host-ops.txt`.
-- The redteam row's 7 reds (lane/redteam-q2 REDTEAM.md):
-  - planted calls 0-3 never reach the controller, because Hermes drops the names first;
-  - planted call 7 was not performed;
-  - a stale `created-by` check;
-  - the injection spent 8 paid turns against a bound of 4.
-- The join flow must give each enrolled member an observe reference to `subscribers`.
-- A hard `/workspace` quota (a project quota per task directory) is an infra item; the code refuses
-  a prompt over the class volume.
+**Next (owed, in order):** when the integrator names the first candidate carrying 6325a6045:
+1. Run J14_TOOLS + J14_AWAIT as one keep-going run. The coordinator says hbox, with main's scripts
+   over the candidate's binaries; the J14 machinery and the provider-table sudo rule live on
+   dregg-build (`/build/lanes/hermes-tier-run/hb-q2.sh`, with `C=` set to the candidate).
+2. Narrow `transport::RESIDENT_OPERATIONS` to that run's `host-ops.txt`. Every run so far has
+   used 1-5, 17, 19, 96-98 and 144; the await rows had never run until this fix.
+3. Compact the room workspace's remaining ~11 MiB / 2,558 inodes. Referenced write attempts are
+   kept whole for `RoomTools::lookup`; read `footprint-room-workspace.tsv` first. Then send infra
+   (a298031c78e86d651) the smaller quota figure. The interim is 48/56 MiB and 10K/12K inodes.
+4. Infra resumes install-hermes at `create` on that candidate (preship-check NEED carries 8013cd48b).
+
+**Infra and the box.** Items 2-4 landed in demo-vm 4138262. Item 1 (per-registration service uid
+in controller-entry.py) is with infra a298031c78e86d651. install-hermes reds fixed so far:
+- the provider-table check runs as root (20a7abaf);
+- per-account consent anchor directories (cb638b87);
+- umask 077 (0cfb0986);
+- birthStale (above).
+
+**Older owed items:** the join flow must give each enrolled member an observe reference to
+`subscribers`. A hard `/workspace` quota is an infra item; the code refuses a prompt over the class
+volume. The redteam rows (lane/redteam-q2 REDTEAM.md) are re-judged on the next run, now that the
+pass runs on its own ask.
+
+A failed initial worker-tree copy can continue with
+`controller-worker-prepare-resume` and its original preparation request. The
+installer accepts only an unchanged, unpublished stage with exact retained files;
+it refuses a controller which has advanced to native birth or publication.
+The J14 driver accepts a retained `mini-j14-worker-preparation-checkpoint-v1`
+for this boundary. A retained `mini-j14-worker-birth-checkpoint-v1` continues the exact native birth
+spec after a pre-submit failure or performs lookup of its retained signed attempt.
+Later failures require their native exact-attempt recovery.
+For an explicitly qualified controller binary successor before birth,
+`J14_ORACLE_CONTROLLER_UPGRADE` names a private JSON file containing `runtime`,
+`sha256`, and `sourceCommit`; the driver retains the stopped installer's upgrade
+receipt. Ordinary runs should start with the final selected runtime.
+
+The Oracle journey keeps private operator listeners under a private child of
+its socket directory. Public participant sockets remain outside that child;
+restoring a public listener reapplies the staged controller's connect ACL to
+its new inode.
+
+For a preserved world stopped before worker birth and the application's first
+START, `J14_ORACLE_OPERATOR_RELOCATION` may name a private JSON request with
+`protocol: mini-j14-operator-relocation-v1`, `previousSocket`, `socket`, and
+`hostConfigSha256`. The destination is the journey's `private/operator.sock`.
+The driver retains an exact transport transition for the baseline profile,
+operator workspaces and credential broker, then uses the stopped installer's
+`controller-operator-endpoint` operation. Store settings, keys and completed
+application attempts stay pinned. An active successor profile or a later
+application phase requires its own native recovery path.

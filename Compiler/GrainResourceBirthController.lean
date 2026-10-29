@@ -8,13 +8,32 @@ The tool settles a prior reservation. The parent is an exact, no-op witness
 of its reserved generation. The conserved Book birth fee is independent of
 the tool's permission-unit charge.
 -/
-import Kernel.AgentGrain
-import Kernel.ResourceBirthController
-import Kernel.DeclaredResourceController
-import Compiler.ResourceBirthCodec
-import Compiler.CredentialAuthorityDomainReceiver
-import Compiler.GrainResourceBirthAuthority
-import Compiler.Tower256ConcreteBackend
+module
+
+public import Kernel.AgentGrain
+public import Kernel.ResourceBirthController
+public import Kernel.DeclaredResourceController
+public import Compiler.ResourceBirthCodec
+public import Compiler.CredentialAuthorityDomainReceiver
+public import Compiler.GrainResourceBirthAuthority
+public import Compiler.Tower256ConcreteBackend
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.GrainResourceBirthController
 

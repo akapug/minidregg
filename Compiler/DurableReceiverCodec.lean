@@ -5,8 +5,27 @@ Only generic `StreamCodec` products/lists are used. Full consumption and exact
 re-encoding reject aliases and trailing bytes. All ten metering lanes, payload
 bytes, read guards, nullifiers, and event envelopes survive persistence.
 -/
-import Kernel.DurableReceiver
-import Compiler.Tower256ConcreteBackend
+module
+
+public import Kernel.DurableReceiver
+public import Compiler.Tower256ConcreteBackend
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.DurableReceiverCodec
 
@@ -93,11 +112,11 @@ def intentStream : StreamCodec IntentRecord :=
           (StreamCodec.product (StreamCodec.list nullifierStream)
             (StreamCodec.product chargeStream
               (StreamCodec.product eventStream
-                (StreamCodec.option subjectStream)))))))
+                (StreamCodec.product (StreamCodec.option subjectStream) chargeStream)))))))
     (fun record => (record.transactionId, record.writes, record.readGuards,
-      record.nullifiers, record.exactCharge, record.event, record.subject))
+      record.nullifiers, record.exactCharge, record.event, record.subject, record.credit))
     (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2.1,
-      tuple.2.2.2.2.1, tuple.2.2.2.2.2.1, tuple.2.2.2.2.2.2⟩)
+      tuple.2.2.2.2.1, tuple.2.2.2.2.2.1, tuple.2.2.2.2.2.2.1, tuple.2.2.2.2.2.2.2⟩)
     (by intro value; cases value; rfl)
 
 def seedStream : StreamCodec Seed :=
@@ -113,9 +132,9 @@ def imageStream : StreamCodec Image :=
     (fun image => (image.seed, image.accepted))
     (fun tuple => ⟨tuple.1, tuple.2⟩) (by intro value; cases value; rfl)
 
-/-- Version 2: every record carries its signing subject. A version-1 image
-refuses (the frame is compared exactly). -/
-def wireFrame : List UInt8 := "DREGG.DURABLE.IMAGE".toUTF8.toList ++ [2]
+/-- Version 3: every record carries its signing subject and its meter credit. A
+version-1 or version-2 image refuses (the frame is compared exactly). -/
+def wireFrame : List UInt8 := "DREGG.DURABLE.IMAGE".toUTF8.toList ++ [3]
 
 /-- The frame is CHECKED: its octets (the length-prefixed `wireFrame`, as
 before) must match exactly, so a version-1 or foreign frame is refused by the

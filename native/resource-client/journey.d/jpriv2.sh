@@ -199,8 +199,10 @@ check friend "workspace pins socket ssh:box, no Host image, the Host digest, the
 # below is refused at prepare (undeclaredField 2).
 run friend "create notes declared all[] (remote shell, thin birth)" 0 fshell 'create notes declared {"type":"all","predicates":[]} 2'
 NOTES_ATTEMPT=$FWS/attempts/create-notes
-check friend "  thin consent showed the birth: draft, coordinates and the finalized descriptor it signs" \
-  jq -e '.birth.draft != null and (.birth.finalized | length > 0) and (.birth.coordinates.height | length > 0)' "$NOTES_ATTEMPT/thin-display.json"
+check friend "  thin consent showed the birth: draft, coordinates, money terms and the finalized descriptor it signs" \
+  jq -e '.birth.draft != null and (.birth.finalized | length > 0) and (.birth.coordinates.height | length > 0)
+    and (.birth.terms.fee.amount | length > 0) and (.birth.terms.ownerBudget | length > 0)
+    and (.birth.terms.lifetime | length > 0)' "$NOTES_ATTEMPT/thin-display.json"
 run friend "invoke first-write notes create 2 1" 0 fshell 'invoke first-write notes create 2 1'
 run friend "submit first-write" 0 fshell 'submit first-write'
 check friend "write installed" jq -e '.type == "confirmed" and .confirmation == "installed"' "$LAST"
@@ -227,7 +229,7 @@ run friend "create notes2 declared all[] (a second thin birth, whose plan is the
 NOTES_SOURCE=$(find "$FWS/sources" -path '*create-notes.authoring*' -name source.json | sort | tail -1)
 thin_birth_plan() { # intent plan source -> one frame 235 to the laptop's provider; prints byte and detail
   python3 - "$LAPTOP/bin/minidregg-client-consent" "$LAPTOP/consent.json" "$PUB" "$@" <<'PY'
-import struct, subprocess, sys
+import json, struct, subprocess, sys
 provider, settings, key, intent, plan, source = sys.argv[1], sys.argv[2], bytes.fromhex(sys.argv[3]), *[open(p, "rb").read() for p in sys.argv[4:7]]
 pair = lambda a, b: struct.pack("<I", len(a)) + a + b
 payload = bytes([235]) + pair(intent, pair(key, pair(plan, source)))
@@ -236,16 +238,21 @@ child = subprocess.run([provider, settings, "stdio"], input=struct.pack("<I", le
 b = child.stdout
 if len(b) < 5: print(f"no-reply bytes={len(b)}"); sys.exit(1)
 n = struct.unpack("<I", b[:4])[0]; f = b[4:4 + n]
-print(f"byte={f[0]} {f[1:].decode('utf-8', 'replace')[:300]}")
+detail = f[1:].decode('utf-8', 'replace')
+try:
+    headers = len(json.loads(detail).get("headers", [])) if f[0] == 235 else 0
+except ValueError:
+    headers = 0
+print(f"byte={f[0]} headers={headers} {detail[:300]}")
 PY
 }
 run friend "provider: the first birth's intent and source with the SECOND birth's plan (frame 235)" 0 \
   thin_birth_plan "$NOTES_ATTEMPT/intent.bin" "$FWS/attempts/create-notes2/plan.bin" "$NOTES_SOURCE"
 check friend "  refused birthSourceChanged, no headers returned" \
-  bash -c "grep -q '^byte=255 ' '$LAST' && grep -q 'birthSourceChanged' '$LAST' && ! grep -q headers '$LAST'"
+  bash -c "grep -q '^byte=255 headers=0 ' '$LAST' && grep -q 'birthSourceChanged' '$LAST'"
 run friend "control: the first birth's own plan, same frame" 0 \
   thin_birth_plan "$NOTES_ATTEMPT/intent.bin" "$NOTES_ATTEMPT/plan.bin" "$NOTES_SOURCE"
-check friend "  accepted: the provider answers 235 with headers" bash -c "grep -q '^byte=235 ' '$LAST' && grep -q headers '$LAST'"
+check friend "  accepted: the provider answers 235 with headers" bash -c "grep -Eq '^byte=235 headers=[1-9]' '$LAST'"
 
 # ------------------------------------------------------------------ custody
 BOXROOTS=("$JOURNEY_WORLD" "$BOX")

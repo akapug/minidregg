@@ -4,11 +4,15 @@ current native authority or effect receipt is introduced. An activity runs to
 its first yield; the preview prints the typed Plan, resumes with each supplied
 response (checked against the entry's declared response type) and runs to the
 next yield. Responses stand in for the kernel: nothing is admitted. -/
-import Theory.ObjectiveBendTyping
-import Theory.ObjectiveBendDemandMachine
-import Theory.ObjectiveBendDemandData
-import Theory.ObjectiveBendCheckpoint
-import Compiler.ObjectiveBendDataWire
+module
+
+public import Theory.ObjectiveBendTyping
+public import Theory.ObjectiveBendDemandMachine
+public import Theory.ObjectiveBendDemandData
+public import Theory.ObjectiveBendCheckpoint
+public import Compiler.ObjectiveBendDataWire
+
+@[expose] public section
 
 namespace Minidregg.Host.ObjectiveBendPreview
 open Lean (Json toJson)

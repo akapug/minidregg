@@ -17,8 +17,12 @@ The module depends only on the machine's types, so a per-constructor case
 module may import it without importing any dispatcher (the layout of
 PROOF-ENG-DESIGN.md §1(a)).
 -/
-import Theory.ObjectiveBendDemandMachine
-import Theory.AxiomPin
+module
+
+public import Theory.ObjectiveBendDemandMachine
+public import Theory.AxiomPin
+
+@[expose] public section
 
 namespace Minidregg.Theory.ObjectiveBendDemandMachine
 

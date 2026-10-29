@@ -2,10 +2,14 @@
 Read-only custody view of the exact event27 request and detached signing plan.
 This projection is not a grant receipt or a permission to dispatch an agent.
 -/
-import Host.ApplicationAgentLifetimeGrantAuthoring
-import Kernel.ApplicationAgentLifetimeGrantLookup
-import Kernel.ApplicationAgentLifetimeDispatchReserveContext
-import Lean.Data.Json
+module
+
+public import Host.ApplicationAgentLifetimeGrantAuthoring
+public import Kernel.ApplicationAgentLifetimeGrantLookup
+public import Kernel.ApplicationAgentLifetimeDispatchReserveContext
+public import Lean.Data.Json
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationAgentLifetimeGrantInspection
 
@@ -98,7 +102,7 @@ def inspectPlan (bytes : List UInt8) : Except String Json := do
 
 /-- Historical route provenance comes from the verifier-selected event27,
 not a proposed grant plan. This does not authorize a current dispatch. -/
-private def inspectAcceptedVerified {config : NativeHost.Config}
+def inspectAcceptedVerified {config : NativeHost.Config}
     {target : NativeHost.Durable} (verified : NativeHostReplay.Verified config target)
     (bytes : List UInt8) : Except String Json := do
   let some ingress := ApplicationAgentLifetimeGrantSource.ingressCodec.decode bytes

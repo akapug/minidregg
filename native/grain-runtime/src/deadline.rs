@@ -16,6 +16,17 @@ use std::time::{Duration, Instant};
 /// profile, operator-status, credit). The Host's measured write max on a
 /// loaded box is about 57 s (docs/review/2026-10-26-deploy); five times that.
 pub(crate) const NATIVE_CALL: Duration = Duration::from_secs(300);
+/// A cold controller may need to replay the Store before its first attach.
+/// This is a total maintenance envelope, not a larger worker allowance. Keep
+/// it inside the fixed admin transport's 1770s and installer's 1800s bounds.
+pub(crate) fn startup_limit(seconds: Option<u64>) -> Result<Duration, String> {
+    let seconds = seconds.unwrap_or(1200);
+    if !(60..=1500).contains(&seconds) {
+        return Err("startupTimeoutSeconds must be between 60 and 1500".into());
+    }
+    Ok(Duration::from_secs(seconds))
+}
+
 /// One service-manager query or command (`systemctl show|kill`), a launcher
 /// protocol probe, or the launch gate.
 pub(crate) const MANAGER_QUERY: Duration = Duration::from_secs(15);

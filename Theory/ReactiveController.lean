@@ -13,8 +13,27 @@ The result has exactly three semantic states: pending, rejected, or a dependent
 compare-and-swap and nullifier insertion remain an external handler which must
 recheck the bound pre-root and nullifier atomically.
 -/
-import Theory.GuardedAdvice
-import Theory.ReactiveReceipt
+module
+
+public import Theory.GuardedAdvice
+public import Theory.ReactiveReceipt
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Theory.ReactiveController
 

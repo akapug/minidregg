@@ -26,7 +26,26 @@ undone), so a `SysSpace` namespace there would be a model-only twin.
 members of `R` with the greatest `lastSeen` over cells under `R` the reader
 covers; `since R H` = the log entries above `H` that wrote such cells.
 -/
-import Kernel.DurableReceiver
+module
+
+public import Kernel.DurableReceiver
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PresenceIndex
 
@@ -345,7 +364,7 @@ namespace Example
 def write (cell : Nat) : DataWrite := ⟨⟨cell⟩, ⟨0⟩, ⟨0⟩, []⟩
 def event : StableEvent := ⟨0, ⟨0⟩, ⟨0⟩, []⟩
 def turn (tx cell : Nat) (subject : Option Nat) : IntentRecord :=
-  ⟨⟨tx⟩, [write cell], [], [], fun _ => 0, event, subject.map SubjectId.mk⟩
+  ⟨⟨tx⟩, [write cell], [], [], fun _ => 0, event, subject.map SubjectId.mk, fun _ => 0⟩
 
 /-- A writes the room at 1, B writes it at 2, an unsigned settlement at 3. -/
 def log : List IntentRecord := [turn 1 7 (some 1), turn 2 7 (some 2), turn 3 7 none]

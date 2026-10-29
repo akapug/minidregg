@@ -90,25 +90,48 @@ pub(crate) fn poll_once(
     };
     let frame = match agent_api_wire::read_frame(&mut stream) {
         Ok(frame) => frame,
-        Err(_) => return Ok(true),
+        Err(error) => {
+            eprintln!("spk-host: agent v3 connection closed unread: {error}");
+            return Ok(true);
+        }
     };
     let request = match Request::parse(&frame) {
         Ok(request) => request,
-        Err(_) => return Ok(true),
+        Err(error) => {
+            eprintln!("spk-host: agent v3 request refused unparsed: {error}");
+            return Ok(true);
+        }
     };
     let watch = match CallerWatch::start(&stream) {
         Ok(watch) => watch,
-        Err(_) => return Ok(true),
+        Err(error) => {
+            eprintln!("spk-host: agent v3 operation not started: caller watch: {error}");
+            return Ok(true);
+        }
     };
     // On a failed dispatch, close the socket. Before a source reserve, no
     // operation fingerprint exists; after it, an error may mean native or
     // physical uncertainty. A fabricated RefusedV3 would be unsafe.
-    if let Ok(reply) = resident.handle_once(&stream, request, &watch.cancelled) {
-        if let Ok(bytes) = serde_json::to_vec(&reply) {
-            if bytes.len() <= wire::MAX_REPLY_FRAME {
-                let _ = agent_api_wire::write_frame(&mut stream, &bytes);
+    let operation = match &request {
+        Request::HelloV3 { .. } => "hello".to_owned(),
+        Request::DispatchV3 { operation_id, .. } | Request::InspectV3 { operation_id, .. } => operation_id.clone(),
+    };
+    match resident.handle_once(&stream, request, &watch.cancelled) {
+        Ok(reply) => {
+            match &reply {
+                Reply::RefusedV3 { code, .. } => eprintln!("spk-host: lifetime agent operation {operation} refused: {code}"),
+                Reply::UncertainV3 { phase, .. } => eprintln!("spk-host: lifetime agent operation {operation} uncertain at {phase}"),
+                _ => {}
+            }
+            if let Ok(bytes) = serde_json::to_vec(&reply) {
+                if bytes.len() <= wire::MAX_REPLY_FRAME {
+                    let _ = agent_api_wire::write_frame(&mut stream, &bytes);
+                }
             }
         }
+        // This diagnostic belongs only to the operator log. Closing transport
+        // still means uncertainty; an internal error is not a native refusal.
+        Err(error) => eprintln!("spk-host: lifetime agent operation {operation} failed: {error}"),
     }
     Ok(true)
 }

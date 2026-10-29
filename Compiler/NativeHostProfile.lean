@@ -22,9 +22,28 @@ rather than `2^124` because `leSlotsOff a b c` compares `a` with `b + c`.
 Until 2026-10-01 the field was BabyBear and the width 29: every law comparing
 `clock/now` (about 1.79e9) with a field holding a small number refused.
 -/
-import Compiler.CanonicalRuntimeProfile
-import Compiler.Mersenne127
-import Compiler.PredOrderWide
+module
+
+public import Compiler.CanonicalRuntimeProfile
+public import Compiler.Mersenne127
+public import Compiler.PredOrderWide
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.NativeHostProfile
 

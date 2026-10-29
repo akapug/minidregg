@@ -2,8 +2,28 @@
 PENDING preparation and private repair envelopes form ONE existing DataIntent record.
 The constructor consumes current ordinary AND purpose-specific permission and
 a separately source-admitted control edit on the SAME actual Durable image. -/
-import Kernel.JointPromiseAuthorization
-import Compiler.JointControlFrame
+module
+
+public import Kernel.JointPromiseAuthorization
+public import Compiler.JointControlFrame
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Kernel.JointReceiverAdmission
 open Minidregg.Theory
 open Minidregg.Theory.TypedAuthorization
@@ -102,6 +122,8 @@ structure Reserved {F : Type} [Field F] [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient ground command),
     ∃ accepted : JointPromiseAuthorization.Accepted prepared selected source.promise,
       IntentRecord.ofIntent original = IntentRecord.ofIntent (accepted.ordinary.dataIntent accepted.shape)
+  /-- A reservation credits no meter (M2: only the refill family carries credit). -/
+  uncredited : intent.credit = 0
 
 variable {Custody F : Type} [Field F] [DecidableEq F]
   {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
@@ -199,7 +221,7 @@ def buildReserve (codec : StreamCodec Custody) (pin : JointControlFrame.Pin)
                       some ⟨intent,effect,installation,rfl,rfl,rfl,rfl,rfl,held,pin,before,after,source,accepted.sourceExact,
                         rfl,by intro g hg; exact List.mem_append_right _ hg,
                         beforeExact,controlPost,funded,
-                        ⟨command,selected,prepared,accepted,rfl⟩⟩
+                        ⟨command,selected,prepared,accepted,rfl⟩, rfl⟩
                     else none
                   else none
                 else none

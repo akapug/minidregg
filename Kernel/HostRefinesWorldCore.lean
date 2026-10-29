@@ -119,12 +119,31 @@ Its two poles, which T4 must keep:
   append-only rewrite, `Example.toy_rewrite_refused` shows `ofIntent` refusing
   it); and `policy_source_rewrite_has_no_turn` (no turn rewrites a ROM record).
 -/
-import Kernel.SnapRepresents
-import Kernel.DeployedBridge
-import Kernel.TurnRecord
-import Compiler.DurableReceiverCore
-import Compiler.CanonicalCellRegistry
-import Theory.AssertAxioms
+module
+
+public import Kernel.SnapRepresents
+public import Kernel.DeployedBridge
+public import Kernel.TurnRecord
+public import Compiler.DurableReceiverCore
+public import Compiler.CanonicalCellRegistry
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.HostRefinesWorld
 
@@ -333,6 +352,8 @@ theorem policy_source_birth_is_turn {D' : Type} [DecidableEq D']
         exact unretired)
       fresh hh ⟨by simp [sourceBirth], by simp [sourceBirth]⟩ ?_
     intro l hl
+    replace hl : (sourceBirth H x c record ev).charge l ≠ 0 :=
+      hl.resolve_right (by simp [sourceBirth])
     have pos : 0 < w.meter l := lt_of_lt_of_le (Nat.pos_of_ne_zero hl) (funded' l)
     rw [meter_system] at pos ⊢
     revert pos
@@ -738,9 +759,14 @@ def toyH : History toyR TransactionId StableEvent Nat where
   eventBytes := fun _ => 0
   cellDigest := fun _ => 0
 
+/-- The toy genesis system cell: the head, and every meter lane recorded at `0` (the seed's
+allowance), as the deployed genesis records every lane (`TurnLog.genesisSystem`). -/
+def toySystem : Store (sysLayout TransactionId Nat) :=
+  meterLanes.foldr (fun l s => s.set ⟨SysSpace.allowance, l⟩ (some (0 : Nat))) (genesisSystem toyH)
+
 /-- Cell 0 holds `log = 1, heap = 5`. -/
 def w0 : World toyR TransactionId Nat :=
-  ⟨(0 : Cells toyR).update 0 (some (toyCell 1 5)), genesisSystem toyH⟩
+  ⟨(0 : Cells toyR).update 0 (some (toyCell 1 5)), toySystem⟩
 
 def toyRoot (_ : List UInt8) : Theory.TypedAuthorization.Digest := ⟨0⟩
 
@@ -789,6 +815,24 @@ theorem toy_write_leg :
         t.legs.map fun leg => leg.patch.length) = some [2] := by
   decide +kernel
 
+/-- The toy refill turn (M2): no writes, one pin on cell 0, credit 5 on the incidences lane. -/
+def refillTurn : DTurn toyR Nat where
+  txId := ⟨9⟩
+  creates := []
+  legs := []
+  retires := []
+  event := ⟨0, ⟨0⟩, ⟨0⟩, []⟩
+  pins := [(0, 0)]
+  credit := fun l => if l = .incidences then 5 else 0
+
+/-- **Satisfiable pole (M2, the World half of item 7): a refill at an exhausted meter.**
+`w0` records its incidences allowance at `0`; the refill turn steps, and the stepped world's
+incidences meter is `5` (`step_meter`: `0 - 0 + 5`). -/
+theorem toy_refill_at_exhausted_meter :
+    w0.meter .incidences = 0 ∧
+      (World.step toyH w0 refillTurn).map (fun w => w.meter .incidences) = some 5 := by
+  decide +kernel
+
 /-- The deployed snapshot of a seed holding cell 0's bytes. -/
 def toySnap : DataSnapshot toyRoot :=
   DurableReceiver.Seed.snapshot toyRoot ⟨[], [(⟨0⟩, [1, 5])], 0⟩
@@ -798,6 +842,31 @@ theorem genesis_sys_none (a : Address (sysLayout TransactionId Nat)) (ne : a.1 �
   unfold genesisSystem
   rw [Store.set_ne _ _ _ _ (fun e => ne (by rw [e]))]
   rfl
+
+theorem lanesSet_ne (s : Store (sysLayout TransactionId Nat)) (lanes : List Lane)
+    (a : Address (sysLayout TransactionId Nat)) (ne : a.1 ≠ SysSpace.allowance) :
+    lanes.foldr (fun l s => s.set ⟨SysSpace.allowance, l⟩ (some (0 : Nat))) s a = s a := by
+  induction lanes with
+  | nil => rfl
+  | cons l rest ih =>
+      rw [List.foldr_cons, Store.set_ne _ _ _ _ (fun e => ne (congrArg Sigma.fst e)), ih]
+
+theorem lanesSet_at (s : Store (sysLayout TransactionId Nat)) (lanes : List Lane) (l : Lane)
+    (m : l ∈ lanes) :
+    lanes.foldr (fun l s => s.set ⟨SysSpace.allowance, l⟩ (some (0 : Nat))) s ⟨SysSpace.allowance, l⟩ =
+      some (0 : Nat) := by
+  induction lanes with
+  | nil => cases m
+  | cons l0 rest ih =>
+      rw [List.foldr_cons]
+      by_cases e : l = l0
+      · subst e; exact Store.set_eq _ _ _
+      · rw [Store.set_ne _ _ _ _ (sys_key_ne e)]
+        exact ih (by simpa [e] using m)
+
+theorem toySys_none (a : Address (sysLayout TransactionId Nat)) (ne : a.1 ≠ SysSpace.head)
+    (na : a.1 ≠ SysSpace.allowance) : toySystem a = none := by
+  exact (lanesSet_ne _ _ _ na).trans (genesis_sys_none _ ne)
 
 /-- **`Represents` is satisfiable**: the seed snapshot represents `w0`. -/
 theorem toy_represents : SnapRepresents toyB toySnap 0 w0 := by
@@ -811,20 +880,17 @@ theorem toy_represents : SnapRepresents toyB toySnap 0 w0 := by
       show some none = some (((0 : Cells toyR).update 0 (some (toyCell 1 5))) c)
       rw [cells_update_ne _ _ e]
       rfl
-  · show (genesisSystem toyH ⟨SysSpace.spent, d⟩).isSome = true ↔ _
-    rw [genesis_sys_none _ (fun e => SysSpace.noConfusion e)]
+  · show (toySystem ⟨SysSpace.spent, d⟩).isSome = true ↔ _
+    rw [toySys_none _ (fun e => SysSpace.noConfusion e) (fun e => SysSpace.noConfusion e)]
     simp [toySnap, DurableReceiver.Seed.snapshot]
-  · show (genesisSystem toyH ⟨SysSpace.journal, x⟩).isSome = _
-    rw [genesis_sys_none _ (fun e => SysSpace.noConfusion e)]
+  · show (toySystem ⟨SysSpace.journal, x⟩).isSome = _
+    rw [toySys_none _ (fun e => SysSpace.noConfusion e) (fun e => SysSpace.noConfusion e)]
     rfl
-  · rw [meter_system]
-    show Option.getD (α := Nat) (genesisSystem toyH ⟨SysSpace.allowance, l⟩) 0 = _
-    rw [genesis_sys_none _ (fun e => SysSpace.noConfusion e)]
+  · exact lanesSet_at _ _ _ (mem_meterLanes l)
+  · show (toySystem ⟨SysSpace.retired, c⟩).isSome = false
+    rw [toySys_none _ (fun e => SysSpace.noConfusion e) (fun e => SysSpace.noConfusion e)]
     rfl
-  · show (genesisSystem toyH ⟨SysSpace.retired, c⟩).isSome = false
-    rw [genesis_sys_none _ (fun e => SysSpace.noConfusion e)]
-    rfl
-  · exact genesis_sys_none _ (fun e => SysSpace.noConfusion e)
+  · exact toySys_none _ (fun e => SysSpace.noConfusion e) (fun e => SysSpace.noConfusion e)
 
 /-- The toy root is constant, and so is the toy slot digest: pins agree. -/
 theorem toy_pinCoherent : PinCoherent toyB toyH toyRoot := fun _ _ _ _ => rfl
@@ -898,6 +964,7 @@ end Example
 #assert_axioms Example.toy_rewrite_refused
 #assert_axioms Example.toy_rewrite_has_no_turn
 #assert_axioms Example.toy_write_steps
+#assert_axioms Example.toy_refill_at_exhausted_meter
 #assert_axioms Example.toy_write_leg
 #assert_axioms Example.toy_represents
 #assert_axioms Example.toy_refined

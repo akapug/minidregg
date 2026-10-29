@@ -4,8 +4,12 @@ This is Mini's own payload format, not a second implementation of fn's carrier
 or authorship semantics. The caller must first obtain exact source octets from
 fn's native hybrid verifier under an independently selected key pin.
 -/
-import Kernel.FnEvidence
-import Kernel.Base64
+module
+
+public import Kernel.FnEvidence
+public import Kernel.Base64
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnPortableSource
 

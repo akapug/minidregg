@@ -3,8 +3,27 @@ The exact signed carrier for a Mini-owned application lifecycle BEGIN. Its
 event records the pending physical request; a DRC invocation with the same
 state write but the ordinary event is not a lifecycle pending record.
 -/
-import Kernel.ApplicationLifecycleBegin
-import Compiler.NativeHostCodec
+module
+
+public import Kernel.ApplicationLifecycleBegin
+public import Compiler.NativeHostCodec
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleBeginIngress
 

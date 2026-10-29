@@ -64,13 +64,39 @@ This file proves round-trip, injectivity and canonicity GENERALLY, for every
 layout and every store; the worked instances at the end are evaluated
 witnesses, not the proofs.
 -/
-import Compiler.FiniteDependentMapCodec
-import Compiler.FiniteDependentMapCachedOrdering
-import Compiler.Sp800185Cshake256
-import Compiler.Sp800185Kmac256
-import Theory.CellState
-import Mathlib.Data.List.Lex
-import Mathlib.Data.Finset.Sort
+module
+
+public import Compiler.FiniteDependentMapCodec
+public import Compiler.FiniteDependentMapCachedOrdering
+public import Compiler.Sp800185Cshake256
+public import Compiler.Sp800185Kmac256
+public import Theory.CellState
+public import Mathlib.Data.List.Lex
+public import Mathlib.Data.Finset.Sort
+meta import Compiler.FiniteDependentMapCodec
+meta import Compiler.FiniteDependentMapCachedOrdering
+meta import Compiler.Sp800185Cshake256
+meta import Compiler.Sp800185Kmac256
+meta import Theory.CellState
+meta import Mathlib.Data.List.Lex
+meta import Mathlib.Data.Finset.Sort
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.StoreCodec
 
@@ -762,6 +788,25 @@ def opening (store : Store L) (entry : Entry L) : Opening :=
 def leaves (store : Store L) : List (List UInt8) :=
   (entries W store).map fun entry => (opening W store entry).leaf
 
+/-! ### The compiled root
+
+`rootBytes` is stated over the decoded `Store`; running it that way rebuilds the
+store as a sparse map only to enumerate, re-sort and look up the very entry list
+the decoder accepted (a strictly ordered list is its store's `entries`), and the
+leaf map re-derives the blinding key per entry. The compiled root roots the
+accepted list directly, with the key computed once and each entry encoded once. -/
+
+/-- The leaves of an accepted entry list under one blinding key. -/
+def leavesUnder (key : Option (List UInt8)) (entryList : List (Entry L)) : List (List UInt8) :=
+  entryList.map fun entry =>
+    let bytes := entryBytes W entry
+    (⟨salt key bytes, bytes⟩ : Opening).leaf
+
+def leavesFast (store : Store L) : List (List UInt8) :=
+  leavesUnder W (blindingKey W store) (entries W store)
+
+@[csimp] theorem leaves_eq_fast : @leaves = @leavesFast := rfl
+
 /-- The root of a frame and a leaf sequence: what a reader recomputes. -/
 def rootOfLeaves (leafList : List (List UInt8)) : Digest :=
   (Sp800185Cshake256.hash rootCustomization (frame W ++ leafList.flatten)).digest
@@ -787,6 +832,49 @@ the same reason; proofs go through `materializer_rootOf` and `rootOf_eq_rootByte
   match (payloadStream W).toLawful.decode (bytes.drop 44) with
   | some store => saltedRoot W store
   | none => (Sp800185Cshake256.hash undecodableCustomization bytes).digest
+
+/-- The accepted payload lists: strictly address-ordered (the payload stream's wire). -/
+def canonicalEntriesStream : StreamCodec {items : List (Entry L) // List.IsChain (AddressLT W) items} :=
+  letI := addressOrder W
+  { StreamCodec.refine (entryListStream W) (List.IsChain (AddressLT W))
+    with cursorNative := W.cursorReady }
+
+/-- `blindingKey` of the store an accepted list denotes, building that store only
+when the layout has a blinding address. -/
+def blindingKeyOfEntries (entryList : List (Entry L)) : Option (List UInt8) :=
+  W.blinding.bind fun address => (fromEntries entryList address).map (W.valueStream address.1).encode
+
+def rootBytesFast (bytes : List UInt8) : Digest :=
+  match (canonicalEntriesStream W).toLawful.decode (bytes.drop 44) with
+  | some items => rootOfLeaves W (leavesUnder W (blindingKeyOfEntries W items.val) items.val)
+  | none => (Sp800185Cshake256.hash undecodableCustomization bytes).digest
+
+theorem payload_decode_eq (payload : List UInt8) :
+    (payloadStream W).toLawful.decode payload =
+      ((canonicalEntriesStream W).toLawful.decode payload).map fun items => fromEntries items.val := by
+  simp only [StreamCodec.toLawful, payloadStream, canonicalEntriesStream, StreamCodec.xmap]
+  cases accepted : (canonicalEntriesStream W).decodePrefix payload with
+  | none =>
+      simp only [canonicalEntriesStream] at accepted
+      simp [accepted]
+  | some pair =>
+      obtain ⟨items, rest⟩ := pair
+      simp only [canonicalEntriesStream] at accepted
+      by_cases empty : rest = []
+      · simp [accepted, empty, fromEntries, FiniteDependentMapCachedOrdering.fromEntriesCached_eq]
+      · simp [accepted, empty]
+
+@[csimp] theorem rootBytes_eq_fast : @rootBytes = @rootBytesFast := by
+  funext L W bytes
+  unfold rootBytes rootBytesFast
+  rw [payload_decode_eq]
+  cases (canonicalEntriesStream W).toLawful.decode (bytes.drop 44) with
+  | none => rfl
+  | some items =>
+      have ordered := entries_fromEntries_of_pairwise W items.val
+        (List.isChain_iff_pairwise.mp items.property)
+      simp only [Option.map_some, saltedRoot, leaves, leavesUnder, opening, ordered, blindingKeyOfEntries,
+        blindingKey]
 
 def codec : LawfulCodec (Store L) where
   encode := encode W

@@ -16,7 +16,27 @@ in `τ` at `e.base`'s end. `e` reads nothing but `e.cell` and cached cells of `e
   (heap within `e.gap` of a lazy state no earlier, stack no deeper), and the final
   states are still pending or, once the lazy run entered `e.cell`, agree exactly, the
   forced run then STRICTLY shorter. -/
-import Theory.ObjectiveBendDemandForcingNest
+module
+
+public import Theory.ObjectiveBendDemandForcingNest
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Theory.ObjectiveBendDemandForcing
 open Minidregg.Theory.ObjectiveBendOpenRecursion
 open Minidregg.Theory.ObjectiveBendDemandMachine

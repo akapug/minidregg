@@ -733,6 +733,7 @@ fn session_invoke(
 const USAGE: &str = r#"mini — custody and exact-retry client for minidregg-host
 
 usage:
+  mini consent-full-ready --host HOST --config CONFIG.json
   mini [--verify-host] [--remote DEST] COMMAND [options] [--replan-max N]
     --verify-host (or MINI_VERIFY_HOST=1): hash the local Host image even when the workspace pinned
     its hostSha256 at init, and refuse a mismatch before any request.
@@ -871,6 +872,7 @@ usage:
   mini agent-lifetime-grant-plan --host HOST --config CONFIG.json --operator-socket PRIVATE-SOCKET --request SOURCE.json --dir NEW-PRIVATE-DIR
   mini agent-lifetime-grant-seal --attempt PRIVATE-DIR --approval OPERATOR-PRIVATE-APPROVAL.json
   mini agent-lifetime-grant-submit --attempt PRIVATE-DIR
+  mini agent-lifetime-grant-inspect --host HOST --config CONFIG --operator-socket SOCKET --ingress CALL.bin --output NEW.json
   mini agent-lifetime-grant-lookup --attempt PRIVATE-DIR
   mini session-enrollment-plan --host HOST --config CONFIG.json --operator-socket PRIVATE-SOCKET --request SOURCE.json --dir NEW-PRIVATE-DIR
   mini session-enrollment-seal --attempt PRIVATE-DIR --approval OPERATOR-PRIVATE-APPROVAL.json
@@ -979,7 +981,7 @@ impl Args {
             return Err(USAGE.to_owned());
         }
         let mut raw = raw.peekable();
-        // `mini pay ACTION ...` (PAY.md §5 spells the verbs this way) is `mini pay --action ACTION ...`.
+        // `mini pay ACTION ...` (PAY §5 spells the verbs this way) is `mini pay --action ACTION ...`.
         if command == OsStr::new("pay") || command == OsStr::new("store") || command == OsStr::new("apps") {
             if let Some(action) = raw.next_if(|next| !next.to_string_lossy().starts_with("--")) {
                 // `mini apps share a4501 bob`: the grammar leaf's positionals are the flags
@@ -997,7 +999,7 @@ impl Args {
         }
         while let Some(flag) = raw.next() {
             let rendered = flag.to_string_lossy();
-            // `mini join --solana|--wait|--renew` (PAY.md §11.6) is `mini join --mode MODE`.
+            // `mini join --solana|--wait|--renew` (PAY §11.6) is `mini join --mode MODE`.
             if command == OsStr::new("join")
                 && matches!(rendered.as_ref(), "--solana" | "--wait" | "--renew")
             {
@@ -2875,6 +2877,15 @@ fn run(mut args: Args) -> Result<()> {
             }
         }
         #[cfg(unix)]
+        "consent-full-ready" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            args.finish()?;
+            client_consent::full_ready(&host, &config)?;
+            println!("{{\"type\":\"mini-consent-full-readiness-v1\",\"ready\":true}}");
+            Ok(())
+        }
+        #[cfg(unix)]
         "consent-resident" => {
             let consent = path(args.required("consent")?);
             let settings = path(args.required("settings")?);
@@ -3386,6 +3397,16 @@ fn run(mut args: Args) -> Result<()> {
             let directory = path(args.required("attempt")?);
             args.finish()?;
             agent_lifetime_grant::grant_submit(&directory)
+        }
+        #[cfg(unix)]
+        "agent-lifetime-grant-inspect" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let socket = path(args.required("operator-socket")?);
+            let ingress = path(args.required("ingress")?);
+            let output = path(args.required("output")?);
+            args.finish()?;
+            agent_lifetime_grant::inspect_accepted(&host, &config, &socket, &ingress, &output)
         }
         #[cfg(unix)]
         "agent-lifetime-grant-lookup" => {

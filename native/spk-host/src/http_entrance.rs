@@ -1094,6 +1094,13 @@ impl PrivateHttpEntrance {
         // no operation ID, Store record or physical effect has been allocated.
         let admission = Arc::new(Mutex::new(Admission::default()));
         let (sender, receiver) = mpsc::sync_channel(MAX_PENDING_REQUESTS);
+        // A reader that hands a request over also writes one byte here, so the
+        // dispatch loop's poll wakes at once instead of at its next tick. Both
+        // ends are nonblocking: a full wake buffer already means "wake".
+        let (wake_rx, wake_tx) = UnixStream::pair()?;
+        wake_rx.set_nonblocking(true)?;
+        wake_tx.set_nonblocking(true)?;
+        let wake_tx = Arc::new(wake_tx);
         let mut pending: VecDeque<ParsedRequest> = VecDeque::new();
         let mut waiting: VecDeque<WaitingConnection> = VecDeque::new();
         let spawn_reader = |connection: WaitingConnection, guard: AdmissionGuard| {
@@ -1105,6 +1112,7 @@ impl PrivateHttpEntrance {
                 accepted_at,
             } = connection;
             let sender = sender.clone();
+            let wake = Arc::clone(&wake_tx);
             let mut guard = Some(guard);
             std::thread::Builder::new()
                 .name("mini-spk-http-reader".into())
@@ -1135,6 +1143,7 @@ impl PrivateHttpEntrance {
                             sender
                                 .send(queued)
                                 .map_err(|_| refuse("resident dispatch loop ended"))?;
+                            let _ = (&*wake).write(&[1]);
                             // Ownership of the response passed to the dispatch loop.
                             Ok(Vec::new())
                         },
@@ -1179,8 +1188,15 @@ impl PrivateHttpEntrance {
                     revents: 0,
                 });
             }
-            // Readers notify through the bounded channel. Poll at a short bound
-            // while they exist, and block normally when the app is idle.
+            let wake_index = polls.len();
+            polls.push(libc::pollfd {
+                fd: wake_rx.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            });
+            // Readers notify through the bounded channel and wake the poll.
+            // Only connections waiting for admission need the short tick
+            // (their promotion and queue deadline); otherwise block.
             let (promoted, expired) = promote_waiting(&admission, &mut waiting, Instant::now())?;
             for (connection, guard) in promoted {
                 // A reader that cannot start fails its own request (the
@@ -1195,18 +1211,19 @@ impl PrivateHttpEntrance {
                     eprintln!("spk-host: busy refusal not started: {error}");
                 }
             }
-            let active = admission
-                .lock()
-                .map_err(|_| refuse("admission lock poisoned"))?
-                .total;
             let timeout = if !pending.is_empty() {
                 0
-            } else if active > 0 || !waiting.is_empty() {
+            } else if !waiting.is_empty() {
                 20
             } else {
                 -1
             };
             let _ = poll_entrances(&mut polls, timeout)?;
+            if polls[wake_index].revents & libc::POLLIN != 0 {
+                let mut drained = [0u8; 64];
+                while matches!((&wake_rx).read(&mut drained), Ok(count) if count > 0) {}
+            }
+            polls.truncate(wake_index);
             for (index, auxiliary) in polls.iter().skip(prior_count).enumerate() {
                 if auxiliary.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
                     // The owner decides: its handler ends the generation (app
@@ -1289,10 +1306,19 @@ impl PrivateHttpEntrance {
                         .checked_add(1)
                         .ok_or_else(|| refuse("admission turn overflow"))?;
                     served.insert(queued.policy.fixed_subject.clone(), clock);
-                    dispatch(
+                    let waited = queued.queued_at.elapsed();
+                    let began = Instant::now();
+                    let done = dispatch(
                         Ok((queued.index, queued.request, queued.kind, &queued.policy)),
                         &mut entrances,
-                    )
+                    );
+                    eprintln!(
+                        "spk-host: http-timing {method:?} queue_ms={} dispatch_ms={} pending={}",
+                        waited.as_millis(),
+                        began.elapsed().as_millis(),
+                        pending.len()
+                    );
+                    done
                     .and_then(|reply| reply.ok_or_else(|| refuse("resident HTTP response absent")))
                     .unwrap_or_else(|error| {
                         eprintln!("spk-host: dispatch unavailable ({method:?}): {error}");

@@ -8,7 +8,7 @@ umask 077
 invocation_args=("$@")
 usage() {
   cat <<'HELP'
-usage: scripts/oracle-shared-data-journey.sh [--resume|--continue-controller|--continue-session|--continue-checkpoint CHECKPOINT_JSON|--recover-foreground PLAN_JSON] BASE_BIN OWN_BIN RUN_ROOT SIGNED_RUNTIME_SPK DATA_SOURCE INVENTORY_JSON
+usage: scripts/oracle-shared-data-journey.sh [--resume|--continue-controller|--continue-session|--continue-activation|--recover-application-api REQUEST_ID|--recover-readiness|--continue-checkpoint CHECKPOINT_JSON|--recover-foreground PLAN_JSON] BASE_BIN OWN_BIN RUN_ROOT SIGNED_RUNTIME_SPK DATA_SOURCE INVENTORY_JSON
 
 Linux operator account with user systemd/linger, subordinate UID/GID allocation,
 passwordless access to deploy/spk-host/install-user-world, bwrap, jq, curl, python3.
@@ -23,13 +23,19 @@ failure after both installs, publication and share. It never repeats those phase
 qualified stopped-controller repairs, and uses a new tool ID after native enrollment.
 Its --resume-prepared suffix is limited to the recorded source-manifest refusal
 with a durable backup, identical stopped state, and no repair or tool attempt.
+--continue-activation preserves an admitted session/grant and failed pre-commit
+route enrollment. It upgrades the stopped runtime, supervises the dead app into
+a native STOP and successor START, then enrolls a newly checked route.
+--recover-readiness preserves the exact signed attached-idle readiness refusal before
+any tool request exists, then uses the same native stopped-controller recovery.
 --continue-checkpoint accepts an explicitly sealed unstarted phase boundary;
 completed effects remain retained and any started phase requires inspection.
 --recover-foreground requires an independently qualified binary manifest and
 an explicitly reviewed recovery plan for the retained uncertain session. It
 invokes one native recovery of the same foreground ID and parent reservation;
 it never resends the tool request. A failed recovery remains inspect-only.
-Creates and removes only a fresh scratch Store namespace. Keeps evidence in RUN.
+Creates and removes only a fresh scratch Store namespace. Every continuation
+keeps its retained namespace and volumes after stopping services. Keeps evidence in RUN.
 The input data is read only; publication copies it once into this Store's custody.
 No public deployment and no direct fd3 calls. Uses the same current receiving
 path as the grain API: event22 share, event28 enrollment and admitted dispatch.
@@ -47,6 +53,9 @@ case ${1:-} in
   --resume) mode=resume; shift ;;
   --continue-controller) mode=continue-controller; shift ;;
   --continue-session) mode=continue-session; shift ;;
+  --continue-activation) mode=continue-activation; shift ;;
+  --recover-readiness) mode=recover-application-api; api_recovery_request=--readiness; shift ;;
+  --recover-application-api) mode=recover-application-api; api_recovery_request=${2:?request ID required}; shift 2 ;;
   --continue-checkpoint) mode=continue-checkpoint; checkpoint=${2:?checkpoint required}; shift 2 ;;
   --recover-foreground) mode=recover-foreground; recovery_plan=${2:?recovery plan required}; shift 2 ;;
 esac
@@ -74,7 +83,7 @@ fi
 if [[ $mode == new ]]; then
   [[ ! -e $run && ! -L $run ]] || fail 'run directory already exists'
 else
-  if [[ $mode == continue-session || $mode == continue-checkpoint || $mode == recover-foreground ]]; then
+  if [[ $mode == continue-session || $mode == continue-activation || $mode == recover-application-api || $mode == continue-checkpoint || $mode == recover-foreground ]]; then
     python3 -B "$repo/deploy/oracle/acceptance/continue_controller.py" --check-session-custody "$run" >/dev/null
   else
     [[ -d $run && ! -L $run && $(stat -c '%u:%a' "$run") == "$(id -u):700" ]] || fail 'retained run custody differs'
@@ -115,14 +124,25 @@ PYRESUME
     sha256sum -c "$run/binary-sha256.txt" >"$run/resume-binary-check.txt"
   fi
 fi
+for tool in jq curl python3 sha256sum timeout; do command -v "$tool" >/dev/null || fail "missing $tool"; done
+[[ $mode != new ]] || command -v getfacl >/dev/null || fail 'missing getfacl'
 ancestor=$(dirname "$run")
 while :; do
   [[ -d $ancestor && ! -L $ancestor ]] || fail "ancestor absent or linked: $ancestor"
-  (( (8#$(stat -c '%a' "$ancestor") & 8#022) == 0 )) || fail "writable ancestor: $ancestor"
+  ancestor_mode=$(stat -c '%a' "$ancestor")
+  (( (8#$ancestor_mode & 8#022) == 0 )) || fail "writable ancestor: $ancestor"
+  # controller-stage grants traversal only on private ancestors. Its existing
+  # guard refuses extended ACLs rather than changing another world's access.
+  # Detect that same conflict before genesis or a large data publication.
+  if [[ $mode == new ]] && (( (8#$ancestor_mode & 1) == 0 )); then
+    ancestor_acl=$(getfacl -c -p -n -- "$ancestor") || fail "cannot inspect ancestor ACL: $ancestor"
+    if printf '%s\n' "$ancestor_acl" | awk '/^(mask:|default:|(user|group):[^:]+:)/ { found=1 } END { exit !found }'; then
+      fail "private ancestor has extended ACL: $ancestor; use an independent run root outside preserved worlds"
+    fi
+  fi
   [[ $ancestor == / ]] && break
   ancestor=$(dirname "$ancestor")
 done
-for tool in jq curl python3 sha256sum timeout; do command -v "$tool" >/dev/null || fail "missing $tool"; done
 [[ -f $spk && ! -L $spk && -f $inventory && ! -L $inventory && -d $source && ! -L $source ]] || fail 'inputs absent or linked'
 [[ -f $benchmark && ! -L $benchmark ]] || fail 'qualified STOP benchmark absent or linked'
 # Refuse a receipt from an older Host before creating a Store or copying data.
@@ -139,7 +159,7 @@ inventory_sha=$(sha256sum "$inventory" | cut -d ' ' -f1)
 export SPK=$spk CLASS_A=L CLASS_B=L GET_PATH_A=/health GET_PATH_B=/health
 export KIND_A=api KIND_B=api ROLE_BASIS_A='{"type":"role","id":"0"}' ROLE_BASIS_B='{"type":"role","id":"0"}'
 if [[ ${ORACLE_BROWSER_B:-0} == 1 ]]; then
-  [[ $mode == new ]] || fail 'browser-B is only supported for a fresh qualification'
+  [[ $mode == new || $mode == continue-activation || $mode == recover-application-api ]] || fail 'browser-B requires a fresh or unstarted activation qualification'
   [[ ${ORACLE_BROWSER_PORT:-} =~ ^[1-9][0-9]{3,4}$ ]] && ((ORACLE_BROWSER_PORT>=1024 && ORACLE_BROWSER_PORT<=65535)) || fail 'explicit browser port required'
   [[ ${ORACLE_CADDY_BIN:-} == /* && -x $ORACLE_CADDY_BIN && ! -L $ORACLE_CADDY_BIN
       && ${ORACLE_CADDY_SHA256:-} =~ ^[0-9a-f]{64}$ ]] || fail 'pinned Caddy executable required'
@@ -150,14 +170,17 @@ elif [[ ${ORACLE_BROWSER_B:-0} != 0 ]]; then
 fi
 case ${ORACLE_POOLED_TENANT_PROBE:-0} in
   0) ;;
-  1) [[ $mode == new ]] || fail 'pooled tenant probe requires a fresh qualification' ;;
+  1) [[ $mode == new || $mode == continue-activation || $mode == recover-application-api ]] || fail 'pooled tenant probe requires a fresh or unstarted activation qualification' ;;
   *) fail 'ORACLE_POOLED_TENANT_PROBE must be 0 or 1' ;;
 esac
 export POST_PATH_A=/query POST_PATH_B=/query POST_TYPE_A=application/json POST_TYPE_B=application/json
 . "$repo/deploy/oracle/acceptance/world.sh"
 configured=0
 preserve_existing_exit=0
-[[ $mode != continue-controller && $mode != continue-session && $mode != continue-checkpoint && $mode != recover-foreground ]] || preserve_existing_exit=1
+# A continuation inherits retained custody; successful checks do not authorize
+# deleting that earlier namespace or its state volumes.
+[[ $mode == new ]] || preserve_retained_namespace=1
+[[ $mode != continue-controller && $mode != continue-session && $mode != continue-activation && $mode != recover-application-api && $mode != continue-checkpoint && $mode != recover-foreground ]] || preserve_existing_exit=1
 trap world_cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
@@ -169,6 +192,10 @@ if [[ $mode == recover-foreground ]]; then
   # A recovered definite refusal concludes this retained failed journey. It
   # never creates a grant or starts an application; cleanup preserves the Store.
   if [[ ${foreground_settlement_only:-0} == 1 ]]; then exit 0; fi
+elif [[ $mode == recover-application-api ]]; then
+  world_recover_application_api
+elif [[ $mode == continue-activation ]]; then
+  world_continue_activation "$run" "$repo"
 elif [[ $mode == continue-checkpoint ]]; then
   world_continue_checkpoint "$run" "$repo"
 elif [[ $mode == continue-session ]]; then
@@ -195,7 +222,7 @@ cp "$inventory" "$run/inventory.json"
 cp "$benchmark" "$run/copied-store-stop-benchmark.json"
 fi
 phase() { timeout 1800 "$journey" phase "$run/world" "$@"; }
-if [[ $mode != continue-controller && $mode != continue-session && $mode != continue-checkpoint && $mode != recover-foreground ]]; then
+if [[ $mode != continue-controller && $mode != continue-session && $mode != continue-activation && $mode != recover-application-api && $mode != continue-checkpoint && $mode != recover-foreground ]]; then
 # INSTALL does not launch the app or open its signed data attachment. Complete
 # both installations while the large-profile spool reserve is available, then
 # publish data before either START. The native guards remain unchanged.
@@ -211,10 +238,15 @@ world_disk_snapshot after-publication
 phase share-a
 fi
 publication=$GRAINS_ROOT/spk/public-data/sha256-$inventory_sha
-if [[ $mode != continue-session && $mode != continue-checkpoint && $mode != recover-foreground ]]; then world_controller_prepare; fi
+if [[ $mode != continue-session && $mode != continue-activation && $mode != recover-application-api && $mode != continue-checkpoint && $mode != recover-foreground ]]; then world_controller_prepare; fi
 if [[ $mode == continue-checkpoint || $mode == recover-foreground ]]; then world_phase_record admitted-application-journey started; fi
-phase start-a
-world_controller_activate "$run/world/evidence/start-a.stdout" initial
+if [[ $mode == continue-activation || $mode == recover-application-api ]]; then
+  world_controller_activate "$continuation/successor-start.json" initial
+  world_phase_record enrollment completed "$run/agent-lifetime/enrollment-initial/result.json"
+else
+  phase start-a
+  world_controller_activate "$run/world/evidence/start-a.stdout" initial
+fi
 world_controller_probe initial probe
 world_authority_probe
 phase floor-a enroll-a get-a
@@ -304,6 +336,7 @@ capture_mounts 9101; capture_mounts 9201
 a_generation=$(jq -er '[.runs[] | select(.state=="running")][-1].generation' "$run/before-stop-a.json")
 world_controller_stop before-app-stop
 phase stop-a
+world_reclaim_stopped_agent_socket 9101 "$a_generation" before-data-refusals
 world_operator_identity >"$run/op155-operator-before.json"
 world_stop_probe 9101 "$a_generation" "$run/op155-a"
 world_operator_identity >"$run/op155-operator-after-a.json"
@@ -396,6 +429,7 @@ cmp "$run/world/evidence/post-b1-body.body" "$run/world/evidence/post-b3-body.bo
 retain 9101; retain 9201
 world_controller_stop before-final-stops
 phase stop-a2 stop-b2 status-a status-b
+world_reclaim_stopped_agent_socket 9101 "$(jq -er .generation "$run/world/evidence/stop-a2.stdout")" final-stop
 retain 9101; retain 9201
 world_disk_snapshot after-stops
 sha256sum -c "$run/input-sha256.txt" >"$run/input-recheck.txt"

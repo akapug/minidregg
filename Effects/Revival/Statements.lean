@@ -41,8 +41,12 @@ arm (a real refinement, not an `rfl` through a reader this lane wrote), and in
 `contentSpec.Complete`, the declared frame of the fifteen content actions (a claim that can
 be false, with its own teeth).
 -/
-import Effects.Revival.Engine
-import Kernel.DeclaredResourceController
+module
+
+public import Effects.Revival.Engine
+public import Kernel.DeclaredResourceController
+
+@[expose] public section
 
 namespace Minidregg.Effects.Revival
 
@@ -355,5 +359,105 @@ inhabitant, owed). -/
 def HostAccepted : Prop :=
   ∃ (op : ContentResource.Command) (ctx : HostCtx) (cell cell' : HostCell),
     hostTargetDispatch 1 (ContentResource.commandStream.encode op) ctx cell = .ok cell'
+
+/-! ## §8. The deployed receiver factors through the dispatcher.
+
+`HostKeystone` is about `hostTargetDispatch`, a wrapper this file writes; its contract alone
+is not the receiver's.  `PrepareFactors` (pass 27) states the controller's own per-target
+preparation, `ResourceTransaction.prepareTarget`, as the content handler's dispatch followed
+by `genericChecks`, which reads only the pre and post cells, the policy source and the
+audience, never the payload or the command.  The bridge's three directions (acceptance,
+acceptance up to generic refusal, refusal by name) are its corollaries, and it is the shape
+`prepareTarget` takes at the migration commit, where this is that commit's gate.
+
+`HostLegacyCensus` is the structural deletion check over the live legacy input type, the
+`Payload` inductive: no payload constructor at a registered code.  It is FALSE today
+(`Payload.content` has tag 1); it becomes provable exactly when the migration removes that
+constructor. -/
+
+/-- The host context of a content target. -/
+def hostCtxOf (ctx : LiveCtx) (deployment : DeclaredResourceController.Deployment)
+    (version : Nat) (root : Digest) (observe : Option CapabilityId) (epoch : Option Nat)
+    (roster : Option ObjectAudienceRoster.Roster) : HostCtx :=
+  { ctx with deployment, version, root, observe, epoch, roster }
+
+/-- The receiver's checks after the effect, payload-blind by signature: the final-post law,
+the policy source, audience freshness (`prepareTarget`'s order), each refusal named. -/
+def genericChecks (deployment : DeclaredResourceController.Deployment)
+    (directory : CellRegistry.Directory Nat DeclaredResourceController.Registry)
+    (snapshot : DeclaredResourceController.AuthoritySnapshot) (target : Nat)
+    (epoch : Option Nat) (before after : HostCell) : Except DispatchRefusal HostCell :=
+  if CanonicalCellRegistry.FinalPostLaw deployment target before after then
+    match CanonicalCellRegistry.loadPolicySource snapshot.domain directory
+        (snapshot.authState.policyAddress ⟨target⟩ (snapshot.authState.policyRevision ⟨target⟩)) with
+    | none => .error (ofReject 1 .policyUnavailable)
+    | some source =>
+      match ObjectAudience.checkFresh source.record.audience target epoch with
+      | .error reason => .error (ofReject 1 (.audience reason))
+      | .ok () => .ok after
+  else .error (ofReject 1 .invalidPost)
+
+/-- **THE RECEIVER FACTORIZATION.**  For a content target whose slot is present, the
+deployed preparation (its post packed, its refusals named) is the dispatch, then the
+generic checks. -/
+def PrepareFactors (E : ContentSpec) : Prop :=
+  ∀ (deployment : DeclaredResourceController.Deployment)
+    (directory : CellRegistry.Directory Nat DeclaredResourceController.Registry)
+    (ctx : LiveCtx) (command : ContentResource.Command) (version : Nat) (root : Digest)
+    (observe : Option CapabilityId) (epoch : Option Nat)
+    (roster : Option ObjectAudienceRoster.Roster) (before : HostCell),
+    directory.slots ctx.target = .present before →
+    ((DeclaredResourceController.prepareTarget deployment directory ctx.snapshot ctx.semantics
+        ctx.ambient ctx.command (contentTarget ctx version root command observe epoch roster)).map
+        (fun prepared => DeclaredResourceController.packTarget
+          (contentTarget ctx version root command observe epoch roster) prepared.candidate.post)).mapError
+        (ofReject 1) =
+      (dispatch [(1, contentHandlerOf E)] 1 (ContentResource.commandStream.encode command)
+          (hostCtxOf ctx deployment version root observe epoch roster) before) >>=
+        genericChecks deployment directory ctx.snapshot ctx.target epoch before
+
+/-- The live legacy input type's tag: `payloadStream`'s tag octet. -/
+def payloadTag (payload : DeclaredResourceController.Payload) : Nat :=
+  ((DeclaredResourceController.payloadStream.encode payload).headD 0).toNat
+
+/-- **THE LIVE LEGACY CENSUS** (false until the content constructor is deleted). -/
+def HostLegacyCensus : Prop := LegacyDisjoint payloadTag [(1, contentHandler)]
+
+/-- **Census teeth, today**: the content payload still carries code 1, so the census is
+false until the migration deletes it. -/
+def HostLegacyCensusRefutedToday : Prop := ¬ HostLegacyCensus
+
+/-! ### The deployed payload decoder, read as a prefix (review gap 3, live).
+
+`targetStream` reads a target's payload with `payloadStream.decodePrefix` and then continues
+with the target's later fields.  `ContentPrefixAgreement` says that on content's code the
+deployed decoder consumes exactly what the registry's prefix reader consumes and hands back
+the same suffix, so routing the payload through the registry at the migration commit does
+not move a single target's bytes.  Its teeth: the agreement is not a property of every code
+(binding the content handler at the observe-only read's code 3 disagrees). -/
+
+/-- The deployed payload decoder as a prefix reader: the tag octet, the payload's bytes after
+it, the suffix. -/
+def payloadPrefix : PrefixReader := fun bytes =>
+  (DeclaredResourceController.payloadStream.decodePrefix bytes).map fun decoded =>
+    (payloadTag decoded.1, (DeclaredResourceController.payloadStream.encode decoded.1).tail, decoded.2)
+
+/-- **LIVE PREFIX AGREEMENT.**  On content's code, every byte string is read alike by the
+deployed payload decoder and by the registry's prefix reader: refused alike, or the same
+operation bytes and the same suffix. -/
+def ContentPrefixAgreement : Prop :=
+  ∀ rest, payloadPrefix (1 :: rest) = readPrefix [(1, contentHandler)] (1 :: rest)
+
+/-- **Satisfiable.**  The agreement's accepting side is inhabited: a content command's
+encoding after code 1, with any suffix, is read as that command's bytes and that suffix. -/
+def ContentPrefixAccepts : Prop :=
+  ∃ (command : ContentResource.Command) (suffix : List UInt8),
+    payloadPrefix (1 :: (ContentResource.commandStream.encode command ++ suffix)) =
+      some (1, ContentResource.commandStream.encode command, suffix)
+
+/-- **Teeth.**  At the read's code (3), the deployed decoder accepts `[3]` (an observe-only
+read, no bytes after its tag) while the content handler bound there refuses it. -/
+def ContentPrefixTeeth : Prop :=
+  payloadPrefix [3] ≠ readPrefix [(3, contentHandler)] [3]
 
 end Minidregg.Effects.Revival

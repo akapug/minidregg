@@ -19,12 +19,32 @@ producer depends on:
   refuses every effectful plan on it. Adapters bind by payload, not only by
   resource and root (`ObjectiveBendNativePlanData.bindEffect.payloadExact`,
   `ObjectiveBendResultAdapter.storesReturn`). -/
-import Compiler.ObjectiveBendPlanAdapter
-import Compiler.ObjectiveBendResultAdapter
-import Compiler.ObjectiveBendCombinedResult
-import Compiler.ObjectiveBendGenericResult
-import Kernel.ObjectiveBendPreparedOutput
-import Theory.AssertAxioms
+module
+
+public import Compiler.ObjectiveBendPlanAdapter
+public import Compiler.ObjectiveBendResultAdapter
+public import Compiler.ObjectiveBendCombinedResult
+public import Compiler.ObjectiveBendGenericResult
+public import Kernel.ObjectiveBendPreparedOutput
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Compiler.ObjectiveInvocationLayout
 open Minidregg.Theory Minidregg.Compiler
 open Minidregg.Theory.ObjectiveBendTyping

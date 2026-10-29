@@ -1,7 +1,9 @@
 # The minidregg project
 
-This document is the stable construction plan. [`README.md`](README.md) explains the design point;
-[`GOAL.md`](GOAL.md) records evidence and history.
+This document holds the project's design: its invariants, the semantic machine and its boundaries.
+[`README.md`](README.md) explains the design point. The current plan is
+[`docs/DEMO-PREFIX-2026-10-26.md`](docs/DEMO-PREFIX-2026-10-26.md); status is
+[`docs/STATUS.md`](docs/STATUS.md).
 
 ## One sentence
 
@@ -362,36 +364,6 @@ actual history false acceptance must imply history PCS, binding/CR, or ROM/commo
 
 Open **P** work: construct that classifier and common-coin realization with concrete PCS opening,
 commitment CR/binding, ROM transport, MCA/code-exact hypotheses, and hiding/sub-UD.
-
-## Consumer migration
-
-The proof system does not subsume a kernel until consumers move. Required **D** demonstrations:
-
-1. token authorization: one real capability/revocation/nullifier path;
-2. DeOS/agent platform: one reactive view, invalidation, promise, and tool lifecycle;
-3. Grains: one R3 causal chain and checkpoint;
-4. Drex/FHEgg/Dark Bazaar: one sealed computation, resource settlement, and later release;
-5. DreggCloud/DreggNet: one multi-resource command through a durable handler; and
-6. hypermedia: one offline branch, authenticated transclusion/backlink, merge conflict, and current
-   authority settlement.
-
-Each adapter must map request, authority, state roots, effects, history, failure behavior, and
-physical completion. Compatibility modules are migration views, not proof of cutover.
-
-## Ordered frontier
-
-1. Construct the actual-history same-coin PCS/CR/ROM classifier and instantiate common-coin
-   transport, MCA, code-exactness, and hiding.
-2. Give Tower256 additive and lookup work complete versioned proof/container/domain codecs and
-   artifact-native work identities; emit an executable Lean-owned checker boundary.
-3. Instantiate concrete Ext6 PCS/subfield/proximity/final-LDT reductions inside the landed
-   controller and extensible global ledger.
-4. Deploy the pure private-computation core for one BFV consumer, then add disclosure as a separate
-   authorized event.
-5. Instantiate durable storage refinement for one consumer, including WAL recovery and tariffs.
-6. Complete Hyperdocument operation grammar, authenticated transclusion/backlink maintenance, and
-   one real offline merge UI.
-7. Run matched **B** workloads against candidate external stacks and apply Selvage's kill criteria.
 
 ## Process
 

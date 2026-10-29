@@ -7,7 +7,11 @@ version, read in the resuming turn (`Kernel.ObjectiveActivity`, resume with
 view); the version is what the activity, a card or a later turn can name to say
 which state it saw. The version is a counter of writes, distinct from the
 schema version of the object's declared type. -/
-import Kernel.ObjectiveActivityWire
+module
+
+public import Kernel.ObjectiveActivityWire
+
+@[expose] public section
 
 namespace Minidregg.Kernel
 open Minidregg.Compiler.Tower256ConcreteBackend

@@ -4,8 +4,27 @@ joint factory/Book/tool/parent command, not a bare resource birth. The outer
 frame retains the app's independent delegation envelope and complete ticket
 spec for one special durable issue event.
 -/
-import Kernel.ApplicationShareIssueSource
-import Kernel.GrainResourceBirthPolicyController
+module
+
+public import Kernel.ApplicationShareIssueSource
+public import Kernel.GrainResourceBirthPolicyController
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationShareIssueGrainSource
 

@@ -2,11 +2,30 @@
 Package/declaration and canonical annotated Core4 packet are distinct identities.
 Checking establishes typed core only; a captured-source elaboration witness and
 current source-read/authority remain receiving obligations. -/
-import Compiler.NativeInvocationStatement
-import Compiler.PolicyRecordCodec
-import Compiler.ObjectiveBendLawCodec
-import Theory.ObjectiveBendTyping
-import Theory.AssertAxioms
+module
+
+public import Compiler.NativeInvocationStatement
+public import Compiler.PolicyRecordCodec
+public import Compiler.ObjectiveBendLawCodec
+public import Theory.ObjectiveBendTyping
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.ObjectiveBendSourceArtifact
 open Minidregg.Theory

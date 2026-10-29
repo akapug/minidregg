@@ -21,6 +21,8 @@ BOX=${SEED_HOST:-box}      # the house member: the sponsor/box account
 SAGE=${SEED_GUEST:-sage}   # the second seed member (the frame enrols it; README)
 PUBLIC=$(cat /etc/mini/public-subject 2>/dev/null) || { echo "seed: /etc/mini/public-subject is missing (the public reader is not enrolled)" >&2; exit 2; }
 BUDGET=${SEED_HERMES_BUDGET:-100}
+# The publication grant's per-read cost ceiling: the file the web body's Publish form reads too.
+PUBMAX=$(tr -d '[:space:]' <"$here/public-read-max-cost") || { echo "seed: public-read-max-cost is missing" >&2; exit 2; }
 FAILS=0
 OUT=; ERR=; RC=0
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
@@ -73,6 +75,7 @@ fi
 ok_ "members: $BOX=$BOXS $SAGE=$SAGES public=$PUBLIC"
 
 # --- 1. documents: build a document from a one-paragraph-per-line file, publish it to the public reader
+# (the grant's MAX-COST is a per-read ceiling: every read costs its encoded intent's length, so 0 covers no read)
 doc_build() { # MEMBER NAME FILE
   local m=$1 n=$2 f=$3 i=0 l id fail=0
   as "$m" "doc show $n" || as "$m" "doc new $n draft" || { fail_ "doc $n: doc new: $(errtail_)"; return 1; }
@@ -86,9 +89,11 @@ doc_build() { # MEMBER NAME FILE
   [ "$fail" = 0 ] && ok_ "doc $n: $i lines"
 }
 publish_public() { # MEMBER REF
-  local id="pub-$2"
+  # pubr-: the first publications (id pub-) carried MAX-COST 0, which covers no read; a world that holds
+  # them is published again under this id, and the public reader's import replaces the dead reference.
+  local id="pubr-$2"
   if have "$1" "$id"; then skip_ "publish $2 to the public reader: done"; return 0; fi
-  as "$1" "delegate $id $2 $PUBLIC observe 0" && as "$1" "submit $id" && as "$1" "publish $id" \
+  as "$1" "delegate $id $2 $PUBLIC observe $PUBMAX" && as "$1" "submit $id" && as "$1" "publish $id" \
     && ok_ "publish $2 to the public reader" || fail_ "publish $2: $(errtail_)"
 }
 for d in what-is-mini a-refusal-explains-itself the-lost-reply the-lamplighters-note house-rules field-notes; do
@@ -119,10 +124,15 @@ post "$BOX" "$(cat "$D/lobby/hermes-intro.txt")"
 publish_public "$BOX" lobby
 
 # --- 4. the story table, its law, a first scene
+# `story new` is skipped once the story exists; `story seal` is idempotent (an already sealed table writes
+# nothing), so it runs every time and a seal that failed on an earlier pass is finished on this one.
 if as "$BOX" "story list" && grep -qw tale <<<"$OUT"; then skip_ "story tale exists"
 else
-  as "$BOX" "story new tale --from tale --gm $SAGES" 600 && as "$BOX" "story seal tale" 600 \
-    && ok_ "story tale installed under the sealed law, GM $SAGE" || fail_ "story new/seal: $(errtail_)"
+  as "$BOX" "story new tale --from tale --gm $SAGES" 600 || fail_ "story new: $(errtail_)"
+fi
+if as "$BOX" "story list" && grep -qw tale <<<"$OUT"; then
+  as "$BOX" "story seal tale" 600 \
+    && ok_ "story tale installed under the sealed law, GM $SAGE" || fail_ "story seal: $(errtail_)"
 fi
 if as "$SAGE" "story list" && grep -qw tale <<<"$OUT"; then skip_ "$SAGE already in story tale"
 elif as "$BOX" "story invite tale $SAGES gm"; then
@@ -138,7 +148,8 @@ if as "$SAGE" "look" && grep -qF "lamp upstairs" <<<"$OUT"; then skip_ "first sc
 else as "$SAGE" "narrate '$opening'" && ok_ "first scene narrated by the GM" || fail_ "narrate: $(errtail_)"; fi
 
 # --- 5. one Objective Bend program, one run
-if as "$BOX" "bend show lobby-tally"; then skip_ "bend object lobby-tally exists"
+# done = the object has an activity record (a made cell alone is not a run: `bend show` says "no activity record")
+if as "$BOX" "bend show lobby-tally" && ! grep -q "no activity record" <<<"$OUT"; then skip_ "bend object lobby-tally already runs tally"
 else
   src=${TALLY_SRC:-$C/world/activity/Tally.obend}; [ -f "$src" ] || src=$here/../../world/activity/Tally.obend
   if [ -f "$src" ]; then

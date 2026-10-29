@@ -4,8 +4,12 @@ verifies the exact authored source and historical Store verdict; this module
 only interprets Mini's application body and correlation fields. It does not
 parse or decide NNTP/Store authority.
 -/
-import Kernel.FnReplyPublication
-import Kernel.FnPortableSource
+module
+
+public import Kernel.FnReplyPublication
+public import Kernel.FnPortableSource
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnReplySource
 

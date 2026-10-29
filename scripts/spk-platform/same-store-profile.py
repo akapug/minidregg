@@ -12,6 +12,8 @@ spec=importlib.util.spec_from_file_location('fixture',HERE/'ws-continuity-fixtur
 def prepare(path):
     f.require(os.getuid()!=0,'run as Store operator')
     c=f.load(path);f.require(c['protocol']=='mini-spk-same-store-profile-input-v1','wrong profile contract')
+    import_profile=c.get('importProfile','standard-v1')
+    f.require(import_profile in ['standard-v1','market-large-v1','operator-appliance-v1'],'unknown import profile')
     m=f.load(c['manifest']);f.require(m['sourceCommit']==c['expectedSourceCommit'],'manifest source differs')
     for role in ['host','mini','spkHost']:
         f.require(f.sha(m[role])==m['sha256'][role],'candidate image differs')
@@ -43,6 +45,8 @@ def prepare(path):
           'bwrap':c['bwrap'],'bwrapSha256':f.sha(c['bwrap']),'spkHost':m['spkHost'],'spkHostSha256':m['sha256']['spkHost'],
           'wsAuthorityLeaseSeconds':c.get('leaseSeconds',120)}
     host['brokerSocket']=broker
+    # Native importer enforces the selected policy; this only carries its name.
+    host['importProfile']=import_profile
     f.save(destination,host);os.chmod(destination,0o600)
     result={'protocol':'mini-spk-grain-profile-result-v1','profilePath':str(destination),'stateRoot':str(state),'grainsRoot':str(grains),
             'miniConfig':str(config),'miniConfigSha256':c['miniConfigSha256'],'initStoreResult':str(root/'init-store.json'),'brokerSocket':broker}

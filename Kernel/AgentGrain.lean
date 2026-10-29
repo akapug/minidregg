@@ -10,10 +10,29 @@ arbitrary caller-authored initial allowance. The one funded increase is the
 in the same turn, so one micro-unit is one credit. No field is a policy revision or grant
 revocation generation. A stopped status proves admission fencing, not that
 an external process or provider actually stopped. -/
-import Kernel.DeclaredFields
-import Kernel.ResourceTransaction
-import Pred.Core
-import Theory.AxiomPin
+module
+
+public import Kernel.DeclaredFields
+public import Kernel.ResourceTransaction
+public import Pred.Core
+public import Theory.AxiomPin
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.AgentGrain
 open Minidregg.Theory.TypedAuthorization
@@ -551,7 +570,7 @@ theorem policy_mutation_nonincrease_without_refill (management : Pred)
 A shared parent task (the workroom's metered parent, 7901 on the demo) is touched by every
 composite grain birth under it: the birth carries the parent as a joint exact-state witness,
 the no-op `witnessCaveat` at the parent's pinned generation. The named-worker form of a task's
-law (`Host.Json.grainPolicy`) names the subjects that may make that touch; a member installing
+law (`Host.SourceAgreementJson.grainPolicy`) names the subjects that may make that touch; a member installing
 an app holds a grant on the parent (delegated by the operator) but is not named, so its birth
 was refused by the parent's law (L13, 2026-10-27). Ruled Option A: the delegated grant IS the
 authority, so the holder form names no subject. A law cannot see grants: the generic receiver

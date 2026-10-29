@@ -55,6 +55,32 @@ def exact(value, required, optional, what):
     return value
 
 
+# The selection's field sets, one spelling for every producer and consumer:
+# composed-inputs.sh writes a selection, `selection_shape` is what it must satisfy.
+SELECTION_FIELDS = (["protocol", "evidence", "grainsRoot", "brokerSocket", "package", "app"], ["leaseSeconds", "sizeClass", "connector"])
+PACKAGE_FIELDS = (["path", "sha256"], [])
+APP_FIELDS = (["owner", "room", "members", "resources", "capabilities"], ["lifecycleRequestId"])
+MEMBER_FIELDS = (["subject", "expectedHost"], [])
+CONNECTOR_FIELDS = (["subject", "name", "expectedHost", "sheet", "role", "task", "document", "resources", "capabilities",
+                     "reader", "endpoint", "ca", "operation"], [])
+READER_FIELDS = (["subject", "document"], [])
+
+
+def selection_shape(selection):
+    """The selection's exact field sets (no world read): top level, package, app, members, connector."""
+    exact(selection, *SELECTION_FIELDS, "selection")
+    require(selection["protocol"] == SELECTION, "unknown selection protocol")
+    exact(selection["package"], *PACKAGE_FIELDS, "package")
+    app = exact(selection["app"], *APP_FIELDS, "app selection")
+    require(isinstance(app["members"], dict), "app selection members must be an object")
+    for row in app["members"].values():
+        exact(row, *MEMBER_FIELDS, "session member")
+    if "connector" in selection:
+        connector = exact(selection["connector"], *CONNECTOR_FIELDS, "connector selection")
+        exact(connector["reader"], *READER_FIELDS, "independent reader")
+    return selection
+
+
 def consecutive(first, names, what):
     require(decimal(first) and first != "0", what + " allocation must start at a positive canonical decimal")
     return {name: str(int(first) + index) for index, name in enumerate(names)}
@@ -93,9 +119,7 @@ class World:
     def __init__(self, platform_inputs, selection, world_inventory=None):
         self.inputs_path = absolute(platform_inputs)
         self.ctx = load(self.inputs_path)
-        self.selection = exact(load(absolute(selection)),
-            ["protocol", "evidence", "grainsRoot", "brokerSocket", "package", "app"], ["leaseSeconds", "sizeClass", "connector"], "selection")
-        require(self.selection["protocol"] == SELECTION, "unknown selection protocol")
+        self.selection = selection_shape(load(absolute(selection)))
         if world_inventory is not None:
             self.selection = named_selection(self.ctx, self.selection, load(absolute(world_inventory)))
         identity = self.ctx["identity"]
@@ -180,7 +204,7 @@ class World:
         return rows[0]["spendCapabilityId"]
 
     def package(self):
-        package = exact(self.selection["package"], ["path", "sha256"], [], "package")
+        package = exact(self.selection["package"], *PACKAGE_FIELDS, "package")
         require(sha(absolute(package["path"])) == package["sha256"], "selected package bytes differ")
         return package
 
@@ -206,7 +230,7 @@ def profile(world):
 
 
 def attach(world):
-    app = exact(world.selection["app"], ["owner", "room", "members", "resources", "capabilities"], ["lifecycleRequestId"], "app selection")
+    app = exact(world.selection["app"], *APP_FIELDS, "app selection")
     owner = app["owner"]
     owner_workspace, _ = world.member(owner)
     members = app["members"]
@@ -219,7 +243,7 @@ def attach(world):
         keys[subject] = key
     keys[owner] = world.member_key(owner)
     for index, label in enumerate(order):
-        row = exact(members[label], ["subject", "expectedHost"], [], "session member")
+        row = exact(members[label], *MEMBER_FIELDS, "session member")
         require(re.fullmatch("[A-Za-z0-9][A-Za-z0-9_-]{0,63}", label) is not None, "session member label invalid: " + label)
         require(isinstance(row["expectedHost"], str) and re.fullmatch(r"[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?(:[1-9][0-9]{0,4})?", row["expectedHost"]) is not None,
                 "entrance host must be a lowercase DNS name with an optional port")
@@ -268,8 +292,7 @@ def attach(world):
 
 def connector_selection(world):
     require("connector" in world.selection, "selection names no connector")
-    return exact(world.selection["connector"], ["subject", "name", "expectedHost", "sheet", "role", "task", "document", "resources", "capabilities",
-                                                "reader", "endpoint", "ca", "operation"], [], "connector selection")
+    return exact(world.selection["connector"], *CONNECTOR_FIELDS, "connector selection")
 
 
 def connector(world, attached_path):
@@ -299,7 +322,7 @@ def journey(world, provisioned_path):
     provisioned = absolute(provisioned_path)
     result = load(provisioned)
     require(result["protocol"] == "mini-app-document-provisioned-v1" and result["subject"] == c["subject"], "provision result belongs to another connector")
-    reader = exact(c["reader"], ["subject", "document"], [], "independent reader")
+    reader = exact(c["reader"], *READER_FIELDS, "independent reader")
     require(reader["subject"] != c["subject"], "readback must use an independent participant")
     reader_workspace, _ = world.member(reader["subject"])
     require(re.fullmatch(r"https://[a-z0-9.-]+(:[1-9][0-9]{0,4})?/", c["endpoint"]) is not None, "connector endpoint must be an https origin ending in /")

@@ -298,7 +298,11 @@ fn check_upstream(path: &Path, config: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+/// The client receives the 254 frame (its bytes unchanged); the operator's log, this relay's
+/// stderr, receives the same reason with the peer that was refused.
 fn refusal(stream: &mut UnixStream, stop: &AtomicBool, bounds: Bounds, reason: &str) {
+    let peer = transport::peer_uid(stream).map_or_else(|_| "unknown".to_owned(), |uid| uid.to_string());
+    eprintln!("mini: public proxy refused uid {peer}: {reason}");
     let mut frame = vec![254];
     frame.extend_from_slice(reason.as_bytes());
     let _ = transport::write_frame(
@@ -340,7 +344,8 @@ fn connection(
     }) {
         Ok(Some(frame)) => frame,
         Ok(None) => return,
-        Err(_) => {
+        Err(error) => {
+            eprintln!("mini: public proxy frame read: {error}");
             return refusal(
                 &mut public,
                 stop,
@@ -369,7 +374,8 @@ fn connection(
     }
     let mut private = match connect(upstream, stop, Instant::now() + bounds.connect) {
         Ok(stream) => stream,
-        Err(_) => {
+        Err(error) => {
+            eprintln!("mini: public proxy upstream {} unavailable: {error}", upstream.display());
             return refusal(
                 &mut public,
                 stop,
@@ -393,6 +399,7 @@ fn connection(
     )
     .is_err()
     {
+        eprintln!("mini: public proxy op {} forward to the upstream failed; the outcome is uncertain", frame.first().copied().unwrap_or(0));
         return;
     }
     let response = match transport::read_frame(&mut BoundedStream {
@@ -401,7 +408,11 @@ fn connection(
         deadline: Instant::now() + bounds.response,
     }) {
         Ok(Some(frame)) => frame,
-        _ => return,
+        other => {
+            let why = match other { Err(error) => error.to_string(), _ => "the upstream closed without a reply".to_owned() };
+            eprintln!("mini: public proxy op {} reply lost; the outcome is uncertain: {why}", frame.first().copied().unwrap_or(0));
+            return;
+        }
     };
     let _ = transport::write_frame(
         &mut BoundedStream {
@@ -461,6 +472,7 @@ fn run(
                 if workers.handles.len() >= bounds.connections {
                     // Tiny refusal, one nonblocking attempt: overload must not
                     // stall acceptance or delay observing SIGTERM.
+                    eprintln!("mini: public proxy refused a connection: busy: public ingress connection limit ({})", bounds.connections);
                     let _ = transport::write_frame(
                         &mut stream,
                         b"\xfebusy: public ingress connection limit",
@@ -721,7 +733,9 @@ pub(crate) fn serve(socket: &Path, upstream: &Path, config: &Path, group: Option
     )
 }
 
-/// Systemd supplies one already-bound controller-owned private listener. This
+/// Systemd supplies a controller-owned private plan listener and optionally
+/// a second status-only control listener. Legacy one-listener units retain their
+/// exact restricted plan surface. This
 /// process runs as the Store operator and never owns controller custody keys.
 /// The kernel reports the listener creator's credentials to connecting clients;
 /// clients explicitly pin those credentials, independently of our service UID.
@@ -730,13 +744,18 @@ pub(crate) fn serve_agent_activated(socket: &Path, upstream: &Path, config: &Pat
     if controller_uid == 0 || controller_uid == mini_sdk::private::euid() {
         return Err("agent proxy requires a distinct non-root controller UID".into());
     }
-    if std::env::var("LISTEN_PID").ok().as_deref() != Some(std::process::id().to_string().as_str())
-        || std::env::var("LISTEN_FDS").ok().as_deref() != Some("1") {
-        return Err("agent proxy requires exactly one systemd-activated listener for this process".into());
+    if std::env::var("LISTEN_PID").ok().as_deref() != Some(std::process::id().to_string().as_str()) {
+        return Err("agent proxy requires systemd activation for this process".into());
     }
-    // SAFETY: ownership of activation fd3 transfers to this process exactly once.
+    let control_enabled=agent_control_enabled(std::env::var("LISTEN_FDS").ok().as_deref())?;
+    // SAFETY: ownership of the declared activation descriptors transfers once.
     let listener = unsafe { UnixListener::from_raw_fd(3) };
     validate_activated_listener(&listener, socket)?;
+    let control=if control_enabled {
+        let control=unsafe { UnixListener::from_raw_fd(4) };
+        validate_activated_listener(&control,&socket.with_extension("control"))?;
+        Some(control)
+    } else {None};
     private_directory(upstream)?;
     let config_bytes = transport::read_config(config)?;
     check_upstream(upstream, &config_bytes)?;
@@ -748,8 +767,26 @@ pub(crate) fn serve_agent_activated(socket: &Path, upstream: &Path, config: &Pat
     }
     drop(probe);
     let _signals = Signals::install()?;
-    run(listener, upstream.to_path_buf(), config_bytes, stop,
-        Bounds { controller_uid: Some(controller_uid), ..BOUNDS }, true)
+    let status=control.map(|control| {
+        let (stop,upstream)=(stop.clone(),upstream.with_extension("control"));
+        std::thread::Builder::new().name("mini-agent-status".into())
+            .spawn(move || crate::operator_drain::serve_status_proxy(control,&upstream,controller_uid,&stop))
+            .map_err(|e|format!("cannot start agent status proxy: {e}"))
+    }).transpose()?;
+    let result=run(listener, upstream.to_path_buf(), config_bytes, stop.clone(),
+        Bounds { controller_uid: Some(controller_uid), ..BOUNDS }, true);
+    stop.store(true,Ordering::Release);
+    if let Some(status)=status {let _=status.join();}
+    result
+}
+
+#[cfg(target_os = "linux")]
+fn agent_control_enabled(count:Option<&str>)->Result<bool,String> {
+    match count {
+        Some("1")=>Ok(false),
+        Some("2")=>Ok(true),
+        _=>Err("agent proxy requires one plan listener or two listeners (plan, status)".into()),
+    }
 }
 
 /// A room resident's operator route (deploy/hermes/README.md "One uid per
@@ -1042,6 +1079,21 @@ mod tests {
             assert_eq!(transport::read_frame(&mut client).unwrap().unwrap()[0],254);
             assert_eq!(backend.accept().unwrap_err().kind(),io::ErrorKind::WouldBlock);
         }
+    }
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn agent_status_activation_accepts_only_legacy_or_exact_two_listeners() {
+        assert_eq!(agent_control_enabled(Some("1")).unwrap(),false);
+        assert_eq!(agent_control_enabled(Some("2")).unwrap(),true);
+        for count in [None,Some("0"),Some("3"),Some("02"),Some("2 ")] {
+            assert!(agent_control_enabled(count).is_err());
+        }
+        let (fixture,backend)=Fixture::new(bounds());
+        assert!(validate_activated_listener(&backend,&fixture.private.with_extension("control")).is_err(),
+            "a plan listener cannot be substituted as the status listener");
+        let path=fixture.private.with_extension("control");
+        let control=UnixListener::bind(&path).unwrap();
+        validate_activated_listener(&control,&path).unwrap();
     }
     #[test]
     fn agent_operator_proxy_preserves_only_bounded_source_plans() {

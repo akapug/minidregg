@@ -115,6 +115,30 @@ pub(crate) fn names(granted: &[&str]) -> Vec<String> {
         .flat_map(|(_, _, names)| names.iter().map(|n| (*n).to_owned())).collect()
 }
 
+/// The controller's answer to Hermes's ACP `session/request_permission`. Upstream
+/// Hermes asks its client before a file edit (`kind: edit`) and before a command
+/// its guard flags (`kind: execute`). The trust boundary here is the sandbox (no
+/// network, a private /scratch, no capabilities, the class bounds), and the room's
+/// founder granted the toolsets, so a request is allowed once exactly when the
+/// prompt holds the toolset that makes it: `file` for an edit, `terminal` or
+/// `code_execution` for a command. Never a session-wide or permanent allowance:
+/// every request is asked and answered on its own. Anything else is cancelled.
+pub(crate) fn permission_outcome(granted: &[&str], params: &Value) -> Value {
+    let kind = params.pointer("/toolCall/kind").and_then(Value::as_str).unwrap_or("");
+    let holds = match kind {
+        "edit" => granted.contains(&"file"),
+        "execute" => granted.contains(&"terminal") || granted.contains(&"code_execution"),
+        _ => false,
+    };
+    let offered = params["options"].as_array().into_iter().flatten()
+        .any(|o| o["optionId"] == "allow_once" && o["kind"] == "allow_once");
+    if holds && offered {
+        json!({"outcome":{"outcome":"selected","optionId":"allow_once"}})
+    } else {
+        json!({"outcome":{"outcome":"cancelled"}})
+    }
+}
+
 /// The `hermes-acp` arguments that ask the worker for the granted toolsets
 /// and Hermes's own per-call timeout; none when nothing is granted.
 pub(crate) fn worker_arguments(granted: &[&str], tool_call_seconds: u64) -> Vec<String> {
@@ -141,6 +165,27 @@ pub(crate) fn compute_turns(usec: u64, seconds: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn permission_is_allowed_once_only_for_a_granted_toolset() {
+        let request = |kind: &str| json!({"sessionId":"s","toolCall":{"toolCallId":"edit-approval-1","kind":kind},
+            "options":[{"optionId":"allow_once","kind":"allow_once","name":"Allow"},
+                       {"optionId":"allow_session","kind":"allow_always","name":"Session"},
+                       {"optionId":"deny","kind":"reject_once","name":"Deny"}]});
+        let allowed = json!({"outcome":{"outcome":"selected","optionId":"allow_once"}});
+        let cancelled = json!({"outcome":{"outcome":"cancelled"}});
+        assert_eq!(permission_outcome(&["file"], &request("edit")), allowed);
+        assert_eq!(permission_outcome(&["terminal"], &request("execute")), allowed);
+        assert_eq!(permission_outcome(&["code_execution"], &request("execute")), allowed);
+        // The teeth: no grant, the wrong toolset, an unknown kind, or no once-option.
+        assert_eq!(permission_outcome(&[], &request("edit")), cancelled);
+        assert_eq!(permission_outcome(&["file"], &request("execute")), cancelled);
+        assert_eq!(permission_outcome(&["terminal"], &request("edit")), cancelled);
+        assert_eq!(permission_outcome(&["file", "terminal", "code_execution"], &request("fetch")), cancelled);
+        let mut always_only = request("edit");
+        always_only["options"] = json!([{"optionId":"allow_always","kind":"allow_always","name":"Always"}]);
+        assert_eq!(permission_outcome(&["file"], &always_only), cancelled);
+    }
+
     fn prompt(bits: Value) -> String { format!("{}{}", room_resident::ASSIGNMENT_PREFIX, json!({"sandboxTools":bits})) }
 
     #[test]

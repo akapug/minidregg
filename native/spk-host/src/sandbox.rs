@@ -38,6 +38,34 @@ pub(crate) const SECCOMP_FD: RawFd = 6;
 pub(crate) const PUBLIC_DATA_FD: RawFd = 7;
 const PUBLIC_DATA_ARGS: [&str; 3] = ["--ro-bind-fd", "7", "/opt/oracle-data"];
 
+/// Descriptor number of the platform shim's bytes inside bubblewrap (`--ro-bind-data`). bubblewrap
+/// reads it to EOF and closes it before exec, as it does fds 4, 5 and 6.
+pub(crate) const SHIM_FD: RawFd = 8;
+/// Where the shim appears in the app: a read-only file on the app's own /tmp tmpfs (the image root is
+/// read-only and has no /run, and the fixed arguments make /dev read-only before any later mount).
+pub(crate) const SHIM_PATH: &str = "/tmp/libifaddrs-lo.so";
+const SHIM_ARGS: [&str; 6] = ["--ro-bind-data", "8", SHIM_PATH, "--setenv", "LD_PRELOAD", SHIM_PATH];
+
+/// The shim's bytes, compiled by build.rs from `shim/libifaddrs-lo.c`: `getifaddrs` answers the sandbox
+/// network namespace's real content (lo, 127.0.0.1/8, ::1/128) without the AF_NETLINK socket the
+/// seccomp policy refuses.
+pub(crate) static IFADDRS_SHIM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/libifaddrs-lo.so"));
+
+/// Packages that get the shim, by packageId (the first 128 bits of the raw SPK's SHA-256, as the
+/// market names them). No other package gets it.
+///
+/// 57dedad4... is IPython Notebook 4.2.2: its libzmq 4.0.4 resolves an interface name through
+/// getifaddrs before it parses even a literal address and aborts the process when the call fails
+/// (tcp_address.cpp errno_assert), and the grain's network namespace holds only lo. The notebook's
+/// ipykernel 4.3.1 binds tcp://127.0.0.1 for its IOPub pipe whatever transport the kernel uses, so
+/// no configuration avoids the call; the sandbox refuses every AF_NETLINK socket, which stays so.
+pub(crate) const PACKAGES_NEEDING_IFADDRS_SHIM: &[&str] = &["57dedad4b0275606c24bdb13d995b218"];
+
+/// Whether a package (named by its raw SPK SHA-256) is on the shim list.
+pub(crate) fn needs_ifaddrs_shim(raw_sha256: &str) -> bool {
+    raw_sha256.len() == 64 && raw_sha256.get(..32).is_some_and(|id| PACKAGES_NEEDING_IFADDRS_SHIM.contains(&id))
+}
+
 /// Every token before the package's environment, in order. `--disable-userns`
 /// follows `--unshare-user` (it requires it); `--seccomp 6` is the compiled
 /// `seccomp/resident-web.policy`.
@@ -74,11 +102,21 @@ const fn fixed_bytes() -> usize {
     total
 }
 
+const fn shim_bytes() -> usize {
+    let mut total = 0;
+    let mut i = 0;
+    while i < SHIM_ARGS.len() {
+        total += SHIM_ARGS[i].len();
+        i += 1;
+    }
+    total
+}
+
 /// Largest bubblewrap argument vector an admitted command can produce.
-pub(crate) const MAX_BWRAP_ARGS: usize = FIXED_ARGS.len() + PUBLIC_DATA_ARGS.len() + 3 * MAX_ENV + 1 + MAX_ARGV;
+pub(crate) const MAX_BWRAP_ARGS: usize = FIXED_ARGS.len() + PUBLIC_DATA_ARGS.len() + SHIM_ARGS.len() + 3 * MAX_ENV + 1 + MAX_ARGV;
 /// Largest total argument bytes an admitted command can produce.
 pub(crate) const MAX_BWRAP_ARG_BYTES: usize =
-    fixed_bytes() + "--ro-bind-fd".len() + "7".len() + "/opt/oracle-data".len() + MAX_ENV * "--setenv".len() + "--".len() + MAX_COMMAND_BYTES;
+    fixed_bytes() + "--ro-bind-fd".len() + "7".len() + "/opt/oracle-data".len() + shim_bytes() + MAX_ENV * "--setenv".len() + "--".len() + MAX_COMMAND_BYTES;
 
 /// Per-generation cap on retained app stdout/stderr. Bytes past the cap are read
 /// and dropped (so the app never blocks on a full pipe) and counted in a trailer.
@@ -98,6 +136,8 @@ pub struct SandboxSpec {
     /// New, host-private file receiving the app's stdout and stderr. The app never
     /// inherits the launcher's own stdout/stderr.
     pub app_output: PathBuf,
+    /// Mount the platform's getifaddrs shim and preload it (see `PACKAGES_NEEDING_IFADDRS_SHIM`).
+    pub ifaddrs_shim: bool,
 }
 
 /// The connected host-side RPC stream and the contained process. This module
@@ -356,6 +396,9 @@ pub(crate) fn bwrap_args_with_public_data(spec: &SandboxSpec, public_data: bool)
     if public_data {
         args.extend(PUBLIC_DATA_ARGS.iter().map(|s| (*s).to_owned()));
     }
+    if spec.ifaddrs_shim {
+        args.extend(SHIM_ARGS.iter().map(|s| (*s).to_owned()));
+    }
     for (key, value) in &spec.environ {
         args.push("--setenv".into());
         args.push(key.clone());
@@ -373,10 +416,22 @@ pub(crate) fn has_public_data_args(args: &[String]) -> bool {
             .is_some_and(|part| part.iter().map(String::as_str).eq(PUBLIC_DATA_ARGS))
 }
 
+/// Whether the host's fixed argument prefix (after the optional public-data mount) carries the shim
+/// mount. Package argv/env values are never inspected: they come after the fixed segments.
+pub(crate) fn has_ifaddrs_shim_args(args: &[String]) -> bool {
+    let after_fixed = FIXED_ARGS.len();
+    let start = if has_public_data_args(args) { after_fixed + PUBLIC_DATA_ARGS.len() } else { after_fixed };
+    args.get(..after_fixed).is_some_and(|prefix| prefix.iter().map(String::as_str).eq(FIXED_ARGS))
+        && args.get(start..start + SHIM_ARGS.len()).is_some_and(|part| part.iter().map(String::as_str).eq(SHIM_ARGS))
+}
+
 /// Spawn a package's real command in a package-rooted namespace. The child end of
 /// a private Unix socketpair becomes fd 3 in the packaged bridge. The returned
 /// host end must be passed to `spk-rpc`; it is never mounted as a pathname.
 pub fn spawn_sandbox(spec: &SandboxSpec) -> io::Result<SandboxedChild> {
+    if spec.ifaddrs_shim {
+        return Err(invalid("the platform shim is mounted by the resident launch gate only"));
+    }
     let args = bwrap_args(spec)?;
     let app_uid = unsafe { libc::geteuid() };
     let image = open_protected_directory(&spec.image_root, app_uid, false)?;
@@ -449,7 +504,92 @@ mod tests {
             argv,
             environ,
             app_output: "/journal/app-output.log".into(),
+            ifaddrs_shim: false,
         }
+    }
+
+    const IPYTHON: &str = "57dedad4b0275606c24bdb13d995b218";
+
+    /// Only the declared package carries the shim mount and LD_PRELOAD; every other package carries
+    /// neither, with or without the public-data mount.
+    #[test]
+    fn ifaddrs_shim_is_mounted_only_for_the_declared_package() {
+        let ipython = format!("{IPYTHON}{}", "0".repeat(32));
+        assert!(needs_ifaddrs_shim(&ipython));
+        for other in [
+            format!("{}{}", "f0277a5dce2e1c6af0cce188241411a4", "0".repeat(32)),
+            format!("{}{}", "57dedad4b0275606c24bdb13d995b219", "0".repeat(32)),
+            "0".repeat(64),
+            IPYTHON.to_owned(), // a packageId alone is not a raw sha256
+            String::new(),
+        ] {
+            assert!(!needs_ifaddrs_shim(&other), "{other}");
+        }
+        let environ = vec![("A".to_owned(), "1".to_owned())];
+        for public_data in [false, true] {
+            let mut declared = spec(vec!["/bin/sh".into()], environ.clone());
+            declared.ifaddrs_shim = needs_ifaddrs_shim(&ipython);
+            let args = bwrap_args_with_public_data(&declared, public_data).unwrap();
+            assert!(has_ifaddrs_shim_args(&args), "{args:?}");
+            assert_eq!(has_public_data_args(&args), public_data);
+            let at = args.iter().position(|a| a == "--ro-bind-data").unwrap();
+            assert_eq!(args[at..at + 6], SHIM_ARGS);
+            assert_eq!(args.iter().filter(|a| *a == "LD_PRELOAD").count(), 1);
+
+            let mut other = spec(vec!["/bin/sh".into()], environ.clone());
+            other.ifaddrs_shim = needs_ifaddrs_shim(&"0".repeat(64));
+            let args = bwrap_args_with_public_data(&other, public_data).unwrap();
+            assert!(!has_ifaddrs_shim_args(&args));
+            assert!(args.iter().all(|a| a != "--ro-bind-data" && a != "LD_PRELOAD"), "{args:?}");
+        }
+    }
+
+    /// The shim returns exactly the sandbox network namespace's content: lo, 127.0.0.1/8, ::1/128,
+    /// UP|LOOPBACK|RUNNING, and nothing else.
+    #[test]
+    fn ifaddrs_shim_returns_exactly_loopback() {
+        use std::ffi::{CStr, CString};
+        let path = std::env::temp_dir().join(format!("libifaddrs-lo-test-{}.so", std::process::id()));
+        std::fs::write(&path, IFADDRS_SHIM).unwrap();
+        let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
+        let handle = unsafe { libc::dlopen(c_path.as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL) };
+        std::fs::remove_file(&path).unwrap();
+        assert!(!handle.is_null(), "dlopen: {}", unsafe { CStr::from_ptr(libc::dlerror()) }.to_string_lossy());
+        type Get = unsafe extern "C" fn(*mut *mut libc::ifaddrs) -> libc::c_int;
+        type Free = unsafe extern "C" fn(*mut libc::ifaddrs);
+        let get: Get = unsafe { std::mem::transmute(libc::dlsym(handle, c"getifaddrs".as_ptr())) };
+        let free: Free = unsafe { std::mem::transmute(libc::dlsym(handle, c"freeifaddrs".as_ptr())) };
+        let mut list: *mut libc::ifaddrs = std::ptr::null_mut();
+        assert_eq!(unsafe { get(&mut list) }, 0);
+        let mut seen = Vec::new();
+        let mut at = list;
+        while !at.is_null() {
+            let entry = unsafe { &*at };
+            let name = unsafe { CStr::from_ptr(entry.ifa_name) }.to_str().unwrap().to_owned();
+            let (address, prefix) = unsafe {
+                match (*entry.ifa_addr).sa_family as i32 {
+                    libc::AF_INET => {
+                        let a = &*(entry.ifa_addr as *const libc::sockaddr_in);
+                        let m = &*(entry.ifa_netmask as *const libc::sockaddr_in);
+                        (std::net::IpAddr::from(a.sin_addr.s_addr.to_ne_bytes()), m.sin_addr.s_addr.count_ones())
+                    }
+                    libc::AF_INET6 => {
+                        let a = &*(entry.ifa_addr as *const libc::sockaddr_in6);
+                        let m = &*(entry.ifa_netmask as *const libc::sockaddr_in6);
+                        (std::net::IpAddr::from(a.sin6_addr.s6_addr), m.sin6_addr.s6_addr.iter().map(|b| b.count_ones()).sum())
+                    }
+                    other => panic!("unexpected family {other}"),
+                }
+            };
+            seen.push((name, address.to_string(), prefix, entry.ifa_flags));
+            at = entry.ifa_next;
+        }
+        unsafe { free(list) };
+        let flags = (libc::IFF_UP | libc::IFF_LOOPBACK | libc::IFF_RUNNING) as u32;
+        assert_eq!(
+            seen,
+            [("lo".to_owned(), "127.0.0.1".to_owned(), 8, flags), ("lo".to_owned(), "::1".to_owned(), 128, flags)]
+        );
     }
 
     /// The whole argument list, token for token. A change to the sandbox floor

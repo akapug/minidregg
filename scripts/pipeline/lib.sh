@@ -87,6 +87,19 @@ pipeline_slot() {
 # box's small-check slots ($PIPELINE_SMALL_SLOTS) at LEAN_NUM_THREADS=$PIPELINE_SMALL_THREADS (2) and
 # never waits behind a full build; anything larger (or a box without small slots) takes a lane slot.
 # lane-check and lean-ask --reload build through this.
+# pipeline_under_closure_lock: true when the box's closure-lock holder (the PID closure-lock records in
+# /build/lock/closure.pid: the wrapped command's own) is this process or one of its ancestors.
+pipeline_under_closure_lock() {
+  local holder p
+  holder=$(cut -d' ' -f1 "${CLOSURE_LOCK_PIDFILE:-/build/lock/closure.pid}" 2>/dev/null)
+  case $holder in ''|*[!0-9]*) return 1 ;; esac
+  p=$BASHPID
+  while [ -n "$p" ] && [ "$p" -gt 1 ]; do
+    [ "$p" = "$holder" ] && return 0
+    p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')
+  done
+  return 1
+}
 pipeline_build_slot() {
   local mods=() n rc s
   while [ $# -gt 0 ] && [ "$1" != -- ]; do mods+=("$1"); shift; done
@@ -103,6 +116,12 @@ pipeline_build_slot() {
       env LEAN_NUM_THREADS="${PIPELINE_SMALL_THREADS:-2}" "$@"; return
     fi
     if command -v closure-lock >/dev/null 2>&1; then
+      # closure-lock is not re-entrant: a caller already running under it (a lane wrapped lane-check
+      # in closure-lock, 2026-10-28) would wait on itself for good. Its holder runs us directly.
+      if pipeline_under_closure_lock; then
+        pipeline_log "rebuild of ${n:-?} stale modules: already under closure-lock (holder is an ancestor): direct" >&2
+        "$@"; return
+      fi
       pipeline_log "rebuild of ${n:-?} stale modules, no slot files on $(hostname): closure-lock" >&2
       closure-lock "$@"; return
     fi

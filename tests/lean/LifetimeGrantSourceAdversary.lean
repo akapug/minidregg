@@ -26,6 +26,20 @@ def config : NativeHost.Config := {
   signature := ⟨"/fixture/signature"⟩
 }
 
+/-- A platform record whose owner budget and lifetime differ from the genesis template: the
+source must follow the record, never the template the profile carries. -/
+def record : PlatformCellLayout.Platform := {
+  version := 1
+  creation := config.tariff
+  grainBirth := none
+  completionCustodianKey := none
+  ownerBudget := 50000
+  lifetime := 5000
+}
+
+/-- The factory template under `record`: the template the receiver binds the birth by. -/
+def template : CanonicalRuntimeProfile.FactoryTemplate := templateAt config.template record
+
 def authority : AuthState := {
   capabilityRoot := ⟨0⟩, revocationRoot := ⟨0⟩, policyRoot := ⟨0⟩
   policyAddress := fun _ _ => ⟨0⟩
@@ -49,18 +63,24 @@ def spec : Spec := {
 
 def prepared : Option (Descriptor CanonicalCellRegistry.registry) :=
   match ApplicationAgentLifetimeGrantSource.prepare config.profile config spec with
-  | .ok ready => some (ready.expectedDescriptor config.profile config authority 10 7 [])
+  | .ok ready => some (ready.expectedDescriptor config.profile config record authority 10 7 [])
   | .error _ => none
 
 /- Positive witness is produced by the real source, then checked by the
 special method. It makes no claim that native signatures/laws admit it. -/
 #guard match prepared with
   | none => false
-  | some descriptor => decide (LifetimeGrantTemplateBound config.template authority 10 descriptor)
+  | some descriptor => decide (LifetimeGrantTemplateBound template authority 10 descriptor)
+
+/- Teeth: the same descriptor is refused under the genesis template, so a reader that kept
+the profile's owner budget or lifetime after an install would refuse the current birth. -/
+#guard match prepared with
+  | none => false
+  | some descriptor => decide (¬ LifetimeGrantTemplateBound config.template authority 10 descriptor)
 
 #guard match prepared with
   | none => false
-  | some descriptor => decide (¬ TemplateBound config.template authority 10 descriptor)
+  | some descriptor => decide (¬ TemplateBound template authority 10 descriptor)
 
 /- Mutations are made to the real source descriptor.  Subject and capability
 identity are bound by the event27 source equality; target and verb also fail
@@ -80,11 +100,11 @@ its factory template. -/
       let dId := {descriptor with grants := [owner, control, ⟨.object, identifier⟩]}
       let dExtra := {descriptor with grants := [owner, control, ⟨.object, cap⟩, owner]}
       let encoding := CanonicalCellRegistry.sourceEncoding.codec.encode
-      decide (¬ LifetimeGrantTemplateBound config.template authority 10 dTarget) &&
-      decide (¬ LifetimeGrantTemplateBound config.template authority 10 dVerb) &&
-      decide (¬ LifetimeGrantTemplateBound config.template authority 10 dExtra) &&
-      decide (LifetimeGrantTemplateBound config.template authority 10 dSubject) &&
-      decide (LifetimeGrantTemplateBound config.template authority 10 dId) &&
+      decide (¬ LifetimeGrantTemplateBound template authority 10 dTarget) &&
+      decide (¬ LifetimeGrantTemplateBound template authority 10 dVerb) &&
+      decide (¬ LifetimeGrantTemplateBound template authority 10 dExtra) &&
+      decide (LifetimeGrantTemplateBound template authority 10 dSubject) &&
+      decide (LifetimeGrantTemplateBound template authority 10 dId) &&
       decide (encoding dSubject ≠ encoding descriptor) &&
       decide (encoding dId ≠ encoding descriptor)
     | _ => false

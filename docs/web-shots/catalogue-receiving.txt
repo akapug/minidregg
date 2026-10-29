@@ -1,1 +1,1 @@
-PASS real mini web body → shell → apps search: 36 cards, 3 package-bound interfaces; combined filter returns Gogs
+PASS merged mini web body → shell → apps search: 27 featured landing cards; 98 market cards, 3 package-bound interfaces; combined filter returns Gogs

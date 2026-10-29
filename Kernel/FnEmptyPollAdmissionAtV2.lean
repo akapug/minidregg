@@ -3,8 +3,12 @@ Lower event19 component admission at a source-owned frontier cursor. Only a
 private replay walk or a live Verified wrapper may supply that predecessor;
 this function alone does not certify history or an fn poll's completeness.
 -/
-import Kernel.FnConsumerFrontierProposal
-import Kernel.FnConsumerNamespaceHistory
+module
+
+public import Kernel.FnConsumerFrontierProposal
+public import Kernel.FnConsumerNamespaceHistory
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnEmptyPollAdmissionAtV2
 

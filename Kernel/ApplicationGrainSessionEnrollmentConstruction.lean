@@ -3,8 +3,12 @@ Cycle-safe source construction for a current session enrollment. The input
 ticket is a verifier-selected original issue, not a caller's asserted ticket.
 This function does no signature checking and mints no admission evidence.
 -/
-import Kernel.ApplicationGrainSessionEnrollmentSource
-import Kernel.ApplicationDispatchAdmission
+module
+
+public import Kernel.ApplicationGrainSessionEnrollmentSource
+public import Kernel.ApplicationDispatchAdmission
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationGrainSessionEnrollmentConstruction
 

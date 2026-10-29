@@ -50,26 +50,45 @@ view of the birth, with no second judge in the family.  A newborn's law source
 (`policySource`) is born the same way (`kernelOnlyOrBorn`).  A birth with no export
 root is NEUTRAL: admitted only when a judged authorizer of the same patch names it.
 -/
-import Compiler.PersistedCodecTags
-import Compiler.WorldKindCell
-import Compiler.DeclaredEffectCell
-import Compiler.CredentialAuthorityCell
-import Compiler.HyperdocumentCell
-import Compiler.CanonicalResourcePageMaterializer
-import Compiler.ResourceBirthCodec
-import Compiler.PolicySourceCell
-import Kernel.PayCell
-import Compiler.StreamCell
-import Kernel.DomainEpochLaw
-import Compiler.NockProgramCodec
-import Compiler.Evaluator
-import Kernel.ClockCell
-import Kernel.FieldClosure
-import Kernel.SystemCell
-import Theory.CanonicalResourceBookInvariant
-import Kernel.ObjectiveActivityCell
-import Kernel.SeatCell
-import Kernel.PlatformCellLayout
+module
+
+public import Compiler.PersistedCodecTags
+public import Compiler.WorldKindCell
+public import Compiler.DeclaredEffectCell
+public import Compiler.CredentialAuthorityCell
+public import Compiler.HyperdocumentCell
+public import Compiler.CanonicalResourcePageMaterializer
+public import Compiler.ResourceBirthCodec
+public import Compiler.PolicySourceCell
+public import Kernel.PayCell
+public import Compiler.StreamCell
+public import Kernel.DomainEpochLaw
+public import Compiler.NockProgramCodec
+public import Compiler.Evaluator
+public import Kernel.ClockCell
+public import Kernel.FieldClosure
+public import Kernel.SystemCell
+public import Theory.CanonicalResourceBookInvariant
+public import Kernel.ObjectiveActivityCell
+public import Kernel.SeatCell
+public import Kernel.PlatformCellLayout
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.CanonicalCellRegistry
 

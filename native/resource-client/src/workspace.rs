@@ -4400,6 +4400,27 @@ pub(crate) fn attempt_definitely_unadmitted(attempt: &Path) -> Result<bool> {
     Ok(matches!(retained_attempt_outcome(attempt)?, AttemptOutcome::Refused))
 }
 
+/// The newest retained Host answer for the exact call is `absent`: the Host's history holds no record
+/// of it. Pure over the retained history, oldest first.
+pub(crate) fn history_ends_absent(history: &[Value]) -> bool {
+    history.last().is_some_and(|newest| newest.get("type").and_then(Value::as_str) == Some("absent"))
+}
+
+/// A retained exact call, in a LATER invocation than the one that sent it, that an exact lookup finds in
+/// no history: the earlier process ended (door timeout, seed timeout, a Store restart) before the Host
+/// took the call, so nothing was admitted. Without this rule such an attempt answers `absent` to every
+/// lookup for ever and wedges the name (demo-dry: a `story new` the Host never took). The lookup is
+/// retained as evidence beside the attempt; an attempt with no exact call, or one the lookup finds
+/// admitted, is not this case.
+pub(crate) fn attempt_never_taken(attempt: &Path) -> Result<bool> {
+    if !attempt.join("call.bin").is_file() || accepted_outcome(attempt)?.is_some() {
+        return Ok(false);
+    }
+    let _ = retry(attempt, "lookup", false);
+    let history = mini_sdk::store::AttemptDir(attempt.to_path_buf()).history()?;
+    Ok(history_ends_absent(&history) && accepted_outcome(attempt)?.is_none())
+}
+
 /// Release a definitely unadmitted birth attempt so the same name can be
 /// authored again: mark the generation that authored its intent released,
 /// release the namespace binding, and retire the attempt directory (kept as
@@ -4789,10 +4810,10 @@ fn birth(
     // A definitely unadmitted attempt (no exact call, or a final refusal)
     // holds nothing that can install: release it, and this call authors the
     // same name afresh. An uncertain attempt keeps exact custody below.
-    if attempt.exists() && attempt_definitely_unadmitted(&attempt)? {
+    if attempt.exists() && (attempt_definitely_unadmitted(&attempt)? || attempt_never_taken(&attempt)?) {
         let retired = release_unadmitted_attempt(&authoring, &attempt, &reservation)?;
         eprintln!(
-            "workspace birth attempt definitely unadmitted; retained as {}",
+            "workspace birth attempt definitely unadmitted (refused, never assembled, or absent from the Host's history on lookup); retained as {}",
             retired.display()
         );
     }
@@ -8249,6 +8270,16 @@ mod tests {
         assert!(matches!(retained_attempt_outcome(&attempt).unwrap(), AttemptOutcome::Confirmed(value) if value["transactionId"] == "123"));
         fs::remove_dir_all(root).unwrap();
     }
+
+    #[test]
+    fn only_an_absent_newest_answer_marks_a_call_never_taken() {
+        assert!(history_ends_absent(&[json!({"type":"absent","effect":"undecided"})]));
+        assert!(history_ends_absent(&[json!({"type":"uncertain"}), json!({"type":"absent"})]));
+        assert!(!history_ends_absent(&[json!({"type":"absent"}), json!({"type":"uncertain"})]));
+        assert!(!history_ends_absent(&[json!({"type":"confirmed","confirmation":"replayed"})]));
+        assert!(!history_ends_absent(&[]));
+    }
+
 
     #[test]
     fn only_a_definite_refusal_or_a_missing_call_is_unadmitted() {

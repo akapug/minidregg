@@ -12,65 +12,87 @@ signature helper is the existing cryptographic execution boundary. Unknown old
 wire versions and unsupported event families refuse rather than becoming opaque
 trusted history. Profile/clock changes require an explicit future migration.
 -/
-import Kernel.NativeHostContext
-import Kernel.NativeHostServed
-import Kernel.ObjectiveBendAuthenticatedInputs
-import Kernel.CarriedSessionEnrollmentAdmission
-import Kernel.CarriedDispatchAdmission
-import Kernel.AuditTiming
-import Kernel.GrainResourceBirthReceiver
-import Kernel.FnSelectiveReleaseAdmission
-import Kernel.FnSelectiveReleaseSourceReceiver
-import Kernel.ApplicationLifecycleBeginReceiver
-import Kernel.ApplicationLifecycleClaimCore
-import Kernel.ApplicationLifecycleClaimV2Core
-import Kernel.ApplicationShareIssueReceiver
-import Kernel.ApplicationShareIssueGrainReceiver
-import Kernel.ApplicationAgentLifetimeGrantIntentTemplate
-import Kernel.ApplicationAgentLifetimeDispatchCore
-import Kernel.ApplicationDispatchHistoricalCore
-import Kernel.ApplicationDispatchAgentCore
-import Kernel.FnConsumerFrontierReplay
-import Kernel.FnConsumerNamespaceAdmissionAt
-import Kernel.FnConsumerNamespaceHistory
-import Kernel.FnSelectedPollReleaseShape
-import Kernel.FnSelectedPollAdmissionAt
-import Kernel.FnEmptyPollAdmissionAtV2
-import Kernel.ApplicationLifecycleCompletionCore
-import Kernel.ApplicationLifecycleBeginV3Admission
-import Kernel.ApplicationLifecycleClaimV3Core
-import Kernel.ApplicationLifecycleCompletionV2Core
-import Kernel.ApplicationFailedStartRecoveryCore
-import Kernel.ApplicationLifecycleRetryBeginV4Admission
-import Kernel.ApplicationLifecycleRetryClaimV4Core
-import Kernel.ApplicationLifecycleRetryCompletionV4Core
-import Kernel.ApplicationLifecycleCreatedHistory
-import Kernel.ApplicationLifecycleRetryCompletionV4CreatedHistory
-import Kernel.ApplicationGrainSessionEnrollmentIntent
-import Kernel.ParticipantKeyEnrollmentReceiver
-import Kernel.Receivers.SubjectKeyRotation
-import Kernel.SubjectKeyCommitmentAdoption
-import Kernel.ParticipantFactoryProvisioningReceiver
-import Kernel.FleetTurnReceiver
-import Kernel.PayBookReceiver
-import Kernel.PlatformInstallReceiver
-import Kernel.PayAssignmentReceiver
-import Kernel.RealmWellReceiver
-import Kernel.ClockTickReceiver
-import Kernel.PayObservationReceiver
-import Kernel.PayEnrolReceiver
-import Kernel.PayEnrolV2Receiver
-import Kernel.PayClaimReceiver
-import Kernel.PurseRefillReceiver
-import Kernel.JobMoneyReceiver
-import Kernel.ObjectiveActivityReceiver
-import Kernel.SeatReceiver
-import Kernel.CertifyReceiver
-import Kernel.CapabilityRenounce
-import Kernel.JointReserveIngress
-import Kernel.JointReceiver
-import Kernel.JointControlBootstrap
-import Kernel.JointControlBootstrapBundle
+module
+
+public import Kernel.NativeHostContext
+public import Kernel.NativeHostServed
+public import Kernel.ObjectiveBendAuthenticatedInputs
+public import Kernel.CarriedSessionEnrollmentAdmission
+public import Kernel.CarriedDispatchAdmission
+public import Kernel.AuditTiming
+public import Kernel.GrainResourceBirthReceiver
+public import Kernel.FnSelectiveReleaseAdmission
+public import Kernel.FnSelectiveReleaseSourceReceiver
+public import Kernel.ApplicationLifecycleBeginReceiver
+public import Kernel.ApplicationLifecycleClaimCore
+public import Kernel.ApplicationLifecycleClaimV2Core
+public import Kernel.ApplicationShareIssueReceiver
+public import Kernel.ApplicationShareIssueGrainReceiver
+public import Kernel.ApplicationAgentLifetimeGrantIntentTemplate
+public import Kernel.ApplicationAgentLifetimeDispatchCore
+public import Kernel.ApplicationDispatchHistoricalCore
+public import Kernel.ApplicationDispatchAgentCore
+public import Kernel.FnConsumerFrontierReplay
+public import Kernel.FnConsumerNamespaceAdmissionAt
+public import Kernel.FnConsumerNamespaceHistory
+public import Kernel.FnSelectedPollReleaseShape
+public import Kernel.FnSelectedPollAdmissionAt
+public import Kernel.FnEmptyPollAdmissionAtV2
+public import Kernel.ApplicationLifecycleCompletionCore
+public import Kernel.ApplicationLifecycleBeginV3Admission
+public import Kernel.ApplicationLifecycleClaimV3Core
+public import Kernel.ApplicationLifecycleCompletionV2Core
+public import Kernel.ApplicationFailedStartRecoveryCore
+public import Kernel.ApplicationLifecycleRetryBeginV4Admission
+public import Kernel.ApplicationLifecycleRetryClaimV4Core
+public import Kernel.ApplicationLifecycleRetryCompletionV4Core
+public import Kernel.ApplicationLifecycleCreatedHistory
+public import Kernel.ApplicationLifecycleRetryCompletionV4CreatedHistory
+public import Kernel.ApplicationGrainSessionEnrollmentIntent
+public import Kernel.ParticipantKeyEnrollmentReceiver
+public import Kernel.Receivers.SubjectKeyRotation
+public import Kernel.SubjectKeyCommitmentAdoption
+public import Kernel.ParticipantFactoryProvisioningReceiver
+public import Kernel.FleetTurnReceiver
+public import Kernel.PayBookReceiver
+public import Kernel.PlatformInstallReceiver
+public import Kernel.MeterRefillReceiver
+public import Kernel.PayAssignmentReceiver
+public import Kernel.RealmWellReceiver
+public import Kernel.ClockTickReceiver
+public import Kernel.PayObservationReceiver
+public import Kernel.PayEnrolReceiver
+public import Kernel.PayEnrolV2Receiver
+public import Kernel.PayClaimReceiver
+public import Kernel.PurseRefillReceiver
+public import Kernel.JobMoneyReceiver
+public import Kernel.ObjectiveActivityReceiver
+public import Kernel.SeatReceiver
+public import Kernel.CertifyReceiver
+public import Kernel.CapabilityRenounce
+public import Kernel.JointReserveIngress
+public import Kernel.JointReceiver
+public import Kernel.JointControlBootstrap
+public import Kernel.JointControlBootstrapBundle
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.NativeHostReplay
 
@@ -84,6 +106,16 @@ open Minidregg.Kernel.NativeHost
 
 set_option autoImplicit false
 attribute [local irreducible] NativeHost.Config.profile CanonicalRuntimeProfile.Profile.compilerProfile
+
+/-- The pay ambient prices from the opened image's platform record: the pins' creation
+tariff (the record's, `pinnedTariff`) and the factory template under the record. Without a
+record the genesis terms stand in and every pay plan refuses `platformUnavailable`
+(`PayEnrolReceiver.AmbientCurrent`), so the stand-in prices nothing. -/
+def _root_.Minidregg.Kernel.NativeHost.payEnrolAmbient (config : Config) (opened : Opened config) : PayEnrolReceiver.Ambient :=
+  ⟨config.federation, logicalHeight config opened.durable, opened.pins.tariff,
+    match ResourceBirthPolicyController.Concrete.platformRecordAt config.deployment opened.durable with
+    | some record => ResourceBirthPolicyController.Concrete.templateAt config.profile.template record
+    | none => config.profile.template⟩
 
 /-- An issue certificate is retained only after the replay walk has admitted
 its original command, matched its complete durable record, and validated the
@@ -1165,7 +1197,8 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
         config.profile.semantics ⟨config.federation, logicalHeight config opened.durable⟩
         (source.grainCommand tariff)}
       {ingress : GrainResourceBirthPolicyController.DecodedIngress}
-      (pinned : config.grainBirthTariffValue = .ok tariff)
+      (pinned : GrainResourceBirthAdmission.grainTariffAt config.deployment opened.durable =
+        some tariff)
       (accepted : GrainResourceBirthAdmission.Accepted config.profile config.deployment
         opened.pins opened.durable ⟨config.federation, logicalHeight config opened.durable⟩
         tariff source birth grain ingress) :
@@ -1210,7 +1243,7 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
         config.profile ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
       NativeAdmission config opened (ParticipantFactoryProvisioningReceiver.intent accepted)
   | fleetTurn {ingress : FleetTurn.DecodedIngress}
-      (accepted : FleetTurnReceiver.AcceptedTurn config.deployment config.profile config.tariff
+      (accepted : FleetTurnReceiver.AcceptedTurn config.deployment config.profile opened.pins.tariff
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
       NativeAdmission config opened (FleetTurnReceiver.intent accepted)
   | payBook {ingress : PayBookReceiver.DecodedIngress}
@@ -1221,13 +1254,17 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       (accepted : PlatformInstallReceiver.AcceptedInstall config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
       NativeAdmission config opened (PlatformInstallReceiver.intent accepted)
+  | meterRefill {ingress : MeterRefillReceiver.DecodedIngress}
+      (accepted : MeterRefillReceiver.AcceptedRefill config.deployment config.profile.semantics
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+      NativeAdmission config opened (MeterRefillReceiver.intent accepted)
   | payAssignment {ingress : PayAssignmentReceiver.DecodedIngress}
       (accepted : PayAssignmentReceiver.AcceptedAssignment config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
       NativeAdmission config opened (PayAssignmentReceiver.intent accepted)
   | realmWell {ingress : RealmWellReceiver.DecodedIngress}
       (accepted : RealmWellReceiver.AcceptedWell config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset⟩
+        ⟨config.federation, logicalHeight config opened.durable, opened.pins.tariff.asset⟩
         opened.durable ingress) :
       NativeAdmission config opened (RealmWellReceiver.intent accepted)
   | clockTick {ingress : ClockTickReceiver.DecodedIngress}
@@ -1244,21 +1281,21 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
   | payEnrol {ingress : PayEnrolReceiver.DecodedIngress}
       (admission : ((PayEnrolReceiver.payEnrolFamily config.deployment config.profile).liveReceiver
         (receivingLaws config) config.signature).Admitted
-        ⟨config.federation, logicalHeight config opened.durable, config.tariff⟩ opened.durable ingress) :
+        (payEnrolAmbient config opened) opened.durable ingress) :
       NativeAdmission config opened
         (((PayEnrolReceiver.payEnrolFamily config.deployment config.profile).liveReceiver
           (receivingLaws config) config.signature).intent admission.accepted)
   | payEnrolV2 {ingress : PayEnrolReceiver.DecodedIngress}
       (admission : ((PayEnrolV2Receiver.payEnrolV2Family config.deployment config.profile).liveReceiver
         (receivingLaws config) config.signature).Admitted
-        ⟨⟨config.federation, logicalHeight config opened.durable, config.tariff⟩, config.expectedSeed⟩
+        ⟨payEnrolAmbient config opened, config.expectedSeed⟩
         opened.durable ingress) :
       NativeAdmission config opened
         (((PayEnrolV2Receiver.payEnrolV2Family config.deployment config.profile).liveReceiver
           (receivingLaws config) config.signature).intent admission.accepted)
   | payClaim {ingress : PayClaimCommand.DecodedIngress}
       (accepted : PayClaimReceiver.AcceptedClaim config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable, config.tariff⟩ opened.durable ingress) :
+        (payEnrolAmbient config opened) opened.durable ingress) :
       NativeAdmission config opened (PayClaimReceiver.intent accepted)
   | payRefill {ingress : PurseRefillReceiver.DecodedIngress}
       (accepted : PurseRefillReceiver.AcceptedRefill config.deployment config.profile
@@ -1270,12 +1307,12 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       NativeAdmission config opened (JobMoneyReceiver.intent accepted)
   | activity {ingress : ObjectiveActivityReceiver.DecodedIngress}
       (verdict : ObjectiveActivityReceiver.Verdict config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset, config.tariff.collector, {}⟩
+        ⟨config.federation, logicalHeight config opened.durable, opened.pins.tariff.asset, opened.pins.tariff.collector, {}⟩
         opened.durable ingress) :
       NativeAdmission config opened verdict.intent
   | seat {ingress : SeatReceiver.DecodedIngress}
       (accepted : SeatReceiver.Accepted config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset, config.tariff.collector, {}⟩
+        ⟨config.federation, logicalHeight config opened.durable, opened.pins.tariff.asset, opened.pins.tariff.collector, {}⟩
         opened.durable ingress) :
       NativeAdmission config opened (SeatReceiver.intent accepted)
   | certify {ingress : CertifyReceiver.DecodedIngress}
@@ -1378,6 +1415,39 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       NativeAdmission config opened
         (accepted.intent config opened cursor registration ingress)
 
+/-- **Keystone M2-b at the replay arms (`credit_confined`).** Every admission the replay can
+re-admit carries no meter credit, except a meter refill, whose intent is exactly the
+accepted refill's (`MeterRefillReceiver.intent`: no write, no charge, its marker's nullifier,
+the signed amount as credit, `MeterRefillReceiver.AcceptedRefill.sound`). Replay compares
+the complete record codec (`recordMatches`), credit included, so a committed record whose
+credit its arm does not reproduce is refused. -/
+theorem NativeAdmission.credit_confined {config : Config} {opened : Opened config}
+    {intent : DataIntent rootBytes} (admission : NativeAdmission config opened intent) :
+    intent.credit = 0 ∨
+      ∃ (ingress : MeterRefillReceiver.DecodedIngress)
+        (accepted : MeterRefillReceiver.AcceptedRefill config.deployment config.profile.semantics
+          ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress),
+        intent = MeterRefillReceiver.intent accepted := by
+  cases admission with
+  | meterRefill => rename_i accepted; exact Or.inr ⟨_, accepted, rfl⟩
+  | bootstrapBundle => rename_i accepted; left; rw [accepted.intentExact]; rfl
+  | jointReserve => rename_i reserved; exact Or.inl reserved.uncredited
+  | activity =>
+      rename_i verdict
+      left
+      cases verdict with
+      | accepted accepted => exact ActivitySeatEnd.AdmittedTurn.finalIntent_credit _ _ _ _
+      | failed => rfl
+  | applicationLifecycleClaimV3 =>
+      rename_i admitted
+      left
+      unfold ClaimAtV3.intent ApplicationLifecycleClaimV3Core.Conditional.intent
+      split <;> rfl
+  | _ => exact Or.inl rfl
+
+#assert_axioms NativeAdmission.credit_confined
+
+
 structure OrdinaryAt (config : Config) (opened : Opened config)
     (intent : DataIntent rootBytes) where
   command : DeclaredResourceController.Command
@@ -1405,12 +1475,12 @@ kernel's, each with the intent it commits. -/
 inductive KernelTurn (config : Config) (opened : Opened config) (intent : DataIntent rootBytes) : Type
   | activity (ingress : ObjectiveActivityReceiver.DecodedIngress)
       (verdict : ObjectiveActivityReceiver.Verdict config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset, config.tariff.collector, {}⟩
+        ⟨config.federation, logicalHeight config opened.durable, opened.pins.tariff.asset, opened.pins.tariff.collector, {}⟩
         opened.durable ingress)
       (exact : intent = verdict.intent)
   | seat (ingress : SeatReceiver.DecodedIngress)
       (accepted : SeatReceiver.Accepted config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset, config.tariff.collector, {}⟩
+        ⟨config.federation, logicalHeight config opened.durable, opened.pins.tariff.asset, opened.pins.tariff.collector, {}⟩
         opened.durable ingress)
       (exact : intent = SeatReceiver.intent accepted)
 
@@ -1515,7 +1585,19 @@ def Derived.ofBootstrapBundle {config : Config} {opened : Opened config}
     begin := none
     beginV2 := none
     claimV2 := none
-    bootstrapBundle := some ⟨source,accepted,rfl⟩ }
+    bootstrapBundle := some ⟨source,accepted,rfl⟩
+    ordinary := none
+    beginV3 := none
+    claimV3 := none
+    completionV2 := none
+    grantIssue := none
+    jointReservation := none
+    bootstrap := none
+    kernel := none
+    failedStartRecovery := none
+    beginV4 := none
+    claimV4 := none
+    completionV4 := none }
 
 /-- Fresh reserve admission is retained as executable proof data for source
 replay and one physical append; no raw event can construct this witness. -/
@@ -1529,7 +1611,19 @@ def Derived.ofJointReserve {config : Config} {opened : Opened config}
     begin := none
     beginV2 := none
     claimV2 := none
-    jointReservation := some ⟨reserved,rfl⟩ }
+    jointReservation := some ⟨reserved,rfl⟩
+    ordinary := none
+    beginV3 := none
+    claimV3 := none
+    completionV2 := none
+    grantIssue := none
+    bootstrap := none
+    bootstrapBundle := none
+    kernel := none
+    failedStartRecovery := none
+    beginV4 := none
+    claimV4 := none
+    completionV4 := none }
 
 /-- Retain the original native birth admission for an exact CAS readback.
 The accepted value can only be made by the complete birth admission path. -/
@@ -1543,7 +1637,19 @@ def Derived.ofBirth {config : Config} {opened : Opened config}
     begin := none
     beginV2 := none
     claimV2 := none
-    bootstrap := JointControlBootstrap.admitBirth accepted }
+    bootstrap := JointControlBootstrap.admitBirth accepted
+    ordinary := none
+    beginV3 := none
+    claimV3 := none
+    completionV2 := none
+    grantIssue := none
+    jointReservation := none
+    bootstrapBundle := none
+    kernel := none
+    failedStartRecovery := none
+    beginV4 := none
+    claimV4 := none
+    completionV4 := none }
 
 theorem Derived.ofBirth_intent {config : Config} {opened : Opened config}
     (accepted : ResourceBirthPolicyController.Concrete.AcceptedBirth
@@ -1651,7 +1757,19 @@ def FailedStartRecoveryAt.toDerived {config : Config} {opened : Opened config}
   { intent := admitted.intent
     admission := .applicationFailedStartRecovery admitted
     issue := none, begin := none, beginV2 := none, claimV2 := none
-    failedStartRecovery := some ⟨ingress, ⟨admitted, rfl⟩⟩ }
+    failedStartRecovery := some ⟨ingress, ⟨admitted, rfl⟩⟩
+    ordinary := none
+    beginV3 := none
+    claimV3 := none
+    completionV2 := none
+    grantIssue := none
+    jointReservation := none
+    bootstrap := none
+    bootstrapBundle := none
+    kernel := none
+    beginV4 := none
+    claimV4 := none
+    completionV4 := none }
 
 theorem FailedStartRecoveryAt.toDerived_intent {config : Config} {opened : Opened config}
     {ingress : ApplicationFailedStartRecoveryIngress.Ingress}
@@ -1676,7 +1794,19 @@ def BeginAtV4.toDerived {config : Config} {opened : Opened config}
   { intent := admitted.intent
     admission := .applicationRetryBeginV4 admitted
     issue := none, begin := none, beginV2 := none, claimV2 := none
-    beginV4 := some ⟨ingress, ⟨admitted, rfl⟩⟩ }
+    beginV4 := some ⟨ingress, ⟨admitted, rfl⟩⟩
+    ordinary := none
+    beginV3 := none
+    claimV3 := none
+    completionV2 := none
+    grantIssue := none
+    jointReservation := none
+    bootstrap := none
+    bootstrapBundle := none
+    kernel := none
+    failedStartRecovery := none
+    claimV4 := none
+    completionV4 := none }
 
 theorem BeginAtV4.toDerived_intent {config : Config} {opened : Opened config}
     {ingress : ApplicationLifecycleRetryBeginV4Ingress.Ingress}
@@ -1689,7 +1819,19 @@ def ClaimAtV4.toDerived {config : Config} {opened : Opened config}
   { intent := admitted.intent
     admission := .applicationRetryClaimV4 admitted
     issue := none, begin := none, beginV2 := none, claimV2 := none
-    claimV4 := some ⟨ingress, ⟨admitted, rfl⟩⟩ }
+    claimV4 := some ⟨ingress, ⟨admitted, rfl⟩⟩
+    ordinary := none
+    beginV3 := none
+    claimV3 := none
+    completionV2 := none
+    grantIssue := none
+    jointReservation := none
+    bootstrap := none
+    bootstrapBundle := none
+    kernel := none
+    failedStartRecovery := none
+    beginV4 := none
+    completionV4 := none }
 
 theorem ClaimAtV4.toDerived_intent {config : Config} {opened : Opened config}
     {ingress : ApplicationLifecycleRetryClaimV4Ingress.Ingress}
@@ -1702,7 +1844,19 @@ def CompletionAtV4.toDerived {config : Config} {opened : Opened config}
   { intent := admitted.intent
     admission := .applicationRetryCompletionV4 admitted
     issue := none, begin := none, beginV2 := none, claimV2 := none
-    completionV4 := some ⟨ingress, ⟨admitted, rfl⟩⟩ }
+    completionV4 := some ⟨ingress, ⟨admitted, rfl⟩⟩
+    ordinary := none
+    beginV3 := none
+    claimV3 := none
+    completionV2 := none
+    grantIssue := none
+    jointReservation := none
+    bootstrap := none
+    bootstrapBundle := none
+    kernel := none
+    failedStartRecovery := none
+    beginV4 := none
+    claimV4 := none }
 
 theorem CompletionAtV4.toDerived_intent {config : Config} {opened : Opened config}
     {ingress : ApplicationLifecycleRetryCompletionV4Ingress.Ingress}
@@ -2404,7 +2558,7 @@ private def derive (config : Config) (opened : Opened config)
     | .error detail => return .error detail
     | .ok reserved => return .ok (Derived.ofJointReserve reserved)
   if let some ingress := FleetTurn.decodeIngress bytes then
-    match ← FleetTurnReceiver.admitDecodedNative config.deployment config.profile config.tariff
+    match ← FleetTurnReceiver.admitDecodedNative config.deployment config.profile opened.pins.tariff
         ⟨config.federation, height⟩ opened.durable config.signature ingress with
     | .error reason => return .error s!"fleet turn refused: {repr reason}"
     | .ok accepted =>
@@ -2452,6 +2606,13 @@ private def derive (config : Config) (opened : Opened config)
     | .ok accepted =>
         return .ok ⟨PlatformInstallReceiver.intent accepted,
           .platformInstall accepted, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
+  if let some ingress := MeterRefillReceiver.decodeIngress bytes then
+    match ← MeterRefillReceiver.admitDecodedNative config.deployment config.profile.semantics
+        ⟨config.federation, height⟩ opened.durable config.signature ingress with
+    | .error reason => return .error s!"meter refill refused: {repr reason}"
+    | .ok accepted =>
+        return .ok ⟨MeterRefillReceiver.intent accepted,
+          .meterRefill accepted, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := PayAssignmentReceiver.decodeIngress bytes then
     match ← PayAssignmentReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height⟩ opened.durable config.signature ingress with
@@ -2461,7 +2622,7 @@ private def derive (config : Config) (opened : Opened config)
           .payAssignment accepted, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := RealmWellReceiver.decodeIngress bytes then
     match ← RealmWellReceiver.admitDecodedNative config.deployment config.profile
-        ⟨config.federation, height, config.tariff.asset⟩ opened.durable config.signature ingress with
+        ⟨config.federation, height, opened.pins.tariff.asset⟩ opened.durable config.signature ingress with
     | .error reason => return .error s!"realm well command refused: {repr reason}"
     | .ok accepted =>
         return .ok ⟨RealmWellReceiver.intent accepted,
@@ -2484,7 +2645,7 @@ private def derive (config : Config) (opened : Opened config)
           .payObservation admission, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := PayClaimCommand.decodeIngress bytes then
     match ← PayClaimReceiver.admitDecodedNative config.deployment config.profile
-        ⟨config.federation, height, config.tariff⟩ config.expectedSeed opened.durable config.signature ingress with
+        (payEnrolAmbient config opened) config.expectedSeed opened.durable config.signature ingress with
     | .error reason => return .error s!"paid claim refused: {repr reason}"
     | .ok accepted =>
         return .ok ⟨PayClaimReceiver.intent accepted,
@@ -2493,7 +2654,7 @@ private def derive (config : Config) (opened : Opened config)
     if (PayEnrolV2Receiver.parsedMemo ingress.command.observation).isSome then
       match ← (PayEnrolV2Receiver.payEnrolV2Family config.deployment config.profile).admitNative
           config.profile.compilerProfile config.deployment config.signature
-          ⟨⟨config.federation, height, config.tariff⟩, config.expectedSeed⟩ opened.durable ingress with
+          ⟨payEnrolAmbient config opened, config.expectedSeed⟩ opened.durable ingress with
       | .error reason => return .error s!"v2 paid enrollment refused: {repr reason}"
       | .ok admission =>
           return .ok ⟨((PayEnrolV2Receiver.payEnrolV2Family config.deployment config.profile).liveReceiver
@@ -2501,7 +2662,7 @@ private def derive (config : Config) (opened : Opened config)
             .payEnrolV2 admission, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
     match ← (PayEnrolReceiver.payEnrolFamily config.deployment config.profile).admitNative
         config.profile.compilerProfile config.deployment config.signature
-        ⟨config.federation, height, config.tariff⟩ opened.durable ingress with
+        (payEnrolAmbient config opened) opened.durable ingress with
     | .error reason => return .error s!"pay enrolment refused: {repr reason}"
     | .ok admission =>
         return .ok ⟨((PayEnrolReceiver.payEnrolFamily config.deployment config.profile).liveReceiver
@@ -2523,7 +2684,7 @@ private def derive (config : Config) (opened : Opened config)
           .jobMoney accepted, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := ObjectiveActivityReceiver.decodeIngress bytes then
     match ← ObjectiveActivityReceiver.admitDecodedNative config.deployment config.profile
-        ⟨config.federation, height, config.tariff.asset, config.tariff.collector, {}⟩ opened.durable
+        ⟨config.federation, height, opened.pins.tariff.asset, opened.pins.tariff.collector, {}⟩ opened.durable
         config.signature ingress with
     | .error reason => return .error s!"activity turn refused: {repr reason}"
     | .ok verdict =>
@@ -2532,7 +2693,7 @@ private def derive (config : Config) (opened : Opened config)
           some (.activity ingress verdict rfl), none, none, none, none⟩
   if let some ingress := SeatReceiver.decodeIngress bytes then
     match ← SeatReceiver.admitDecodedNative config.deployment config.profile
-        ⟨config.federation, height, config.tariff.asset, config.tariff.collector, {}⟩ opened.durable
+        ⟨config.federation, height, opened.pins.tariff.asset, opened.pins.tariff.collector, {}⟩ opened.durable
         config.signature ingress with
     | .error reason => return .error s!"seat turn refused: {repr reason}"
     | .ok accepted =>
@@ -2709,9 +2870,9 @@ private def derive (config : Config) (opened : Opened config)
     | .ok accepted => return .ok ⟨accepted.intent, .applicationLifecycleBegin accepted,
         none, some ⟨ingress, ⟨accepted, rfl⟩⟩, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := GrainResourceBirthPolicyController.decodeIngress bytes then
-    match pinned : config.grainBirthTariffValue with
-    | .error detail => return .error s!"historical grain-backed birth tariff: {detail}"
-    | .ok tariff =>
+    match pinned : GrainResourceBirthAdmission.grainTariffAt config.deployment opened.durable with
+    | none => return .error "historical grain-backed birth tariff: the image's platform record pins none"
+    | some tariff =>
         let source := ingress.source
         match GrainResourceBirthController.prepareSourceBirth config.profile.compilerProfile
             config.profile.disabledEvaluators config.deployment opened.pins opened.durable config.profile.semantics tariff source height with
@@ -3244,18 +3405,21 @@ theorem validateLoaded_headTag (config : Config) (durable : Durable) (headTag : 
     (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
     (·.directory) (·.snapshot.logical)
     (fun loaded => cellsLawful config { durable with headTag := headTag } loaded.directory)
+    (PlatformCellDomain.recordAt config.deployment durable.snapshot.canonicalBytes)
     directories lawfuls rfl
   unfold validateLoaded validateParts validatePartsWith validatePartsVia
   revert core
   generalize validateCore config durable.image.seed durable.logStart
     (CredentialAuthorityDomainReceiver.loadDirectory durable)
     (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
-    (·.directory) (·.snapshot.logical) (fun loaded => cellsLawful config durable loaded.directory) = right
+    (·.directory) (·.snapshot.logical) (fun loaded => cellsLawful config durable loaded.directory)
+    (PlatformCellDomain.recordAt config.deployment durable.snapshot.canonicalBytes) = right
   generalize validateCore config durable.image.seed durable.logStart
     (CredentialAuthorityDomainReceiver.loadDirectory { durable with headTag := headTag })
     (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
     (·.directory) (·.snapshot.logical)
-    (fun loaded => cellsLawful config { durable with headTag := headTag } loaded.directory) = left
+    (fun loaded => cellsLawful config { durable with headTag := headTag } loaded.directory)
+    (PlatformCellDomain.recordAt config.deployment durable.snapshot.canonicalBytes) = left
   intro core
   cases left <;> cases right <;> simp_all [Except.map]
 

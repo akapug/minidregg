@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# J-PAY-6 (PAY.md P6): a Book burn funds an AgentGrain purse in one joint turn,
+# J-PAY-6 (PAY P6): a Book burn funds an AgentGrain purse in one joint turn,
 # on a fresh private Store.
 #
 # Follows the journey hook contract (journey.sh header): executed with HOST,
@@ -593,9 +593,9 @@ CONSENT = os.path.join(os.path.dirname(HOST), "minidregg-client-consent")
 rogue = json.load(open(CONFIG_B))
 rogue["providerServices"][0]["tariff"]["routes"]["user"]["perOp"] = str(USER_FEE + 1)
 json.dump(rogue, open(path("rogue-tariff-config.json"), "w"), indent=1)
-def consent_230(author_config, label):
+def consent_230(author_config, label, source="birth-intent.json"):
     out = path(f"{label}-birth-intent.bin")
-    subprocess.run([HOST, author_config, "author", "birth-intent", path("birth-intent.json"), out],
+    subprocess.run([HOST, author_config, "author", "birth-intent", path(source), out],
                    check=True, capture_output=True)
     intent = open(out, "rb").read()
     signer = keys[OPERATOR].verify_key.encode()
@@ -612,6 +612,22 @@ row(f"consent refuses a purse law off the pinned tariff (plant) and consents to 
     f"pinned: op {ok_op} ({ok_body}); rogue: op {bad_op} ({bad_body})",
     ok_op == 230 and bad_op == 255
     and f"provider service {PURSE}: the law this draft installs does not carry the pinned per-route schedule" in bad_body)
+# PLANT (the thin birth arm's discriminator, NativeThinBirth.thinBirthIntent): an ordinary
+# (declared, not grain-backed) birth on the thin intent frame is refused by name, since it is
+# consented only with the member's source (frames 234/235); the grain purse birth above is not
+# a thin birth and must never reach that refusal (a red here is the purse consent routed to the
+# thin birth arm again).
+THIN_BIRTH_REFUSAL = "a thin birth is consented with the member's source (thin birth frames 234/235)"
+ordinary = json.loads(json.dumps(birth))
+ordinary["nonce"] = ordinary["birth"]["nonce"] = "22001"
+ordinary["birth"]["resources"] = [r for r in ordinary["birth"]["resources"] if r["storage"] == "declared"]
+json.dump(ordinary, open(path("ordinary-birth-intent.json"), "w"))
+plain_op, plain_body = consent_230(CONFIG_B, "ordinary", "ordinary-birth-intent.json")
+row("discriminator (plant): an ordinary birth on frame 230 is refused for its source; the grain purse birth is not",
+    f"ordinary: op 255 '{THIN_BIRTH_REFUSAL}'; purse: op 230, no thin birth refusal",
+    f"ordinary: op {plain_op} ({plain_body}); purse: op {ok_op} ({ok_body})",
+    plain_op == 255 and THIN_BIRTH_REFUSAL in plain_body
+    and ok_op == 230 and THIN_BIRTH_REFUSAL not in ok_body)
 runtime = {"mini": MINI, "host": HOST, "hostConfig": CONFIG_B, "hostSocket": SOCKET,
            "controlSocket": os.path.join(STATE, "control.sock"), "custodyKey": path(f"keys/{OPERATOR}.key"),
            "stateDir": STATE, "cwd": DIR, "task": str(PARENT), "subject": "7", "capability": "71",

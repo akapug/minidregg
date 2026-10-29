@@ -47,6 +47,9 @@
 #     INSTANCE=glm BASE=9871000 MODEL=glm-5.3-flash ROOM=subscribers TIER=1 POOL_ROW=zai-glm \
 #       HERMES_ROOT=OUT install-hermes preflight route subjects room concierge runtime create handoff summon controller dispatch resident
 set -euo pipefail
+# Custody files are owner-private whatever the calling shell's umask; explicit
+# modes come from install -m.
+umask 077
 OPERATOR=${OPERATOR:-mini-core}
 # The archived candidate by its real path: the registration compares the
 # controller's mini/host paths with the root-pinned image.
@@ -86,10 +89,15 @@ here=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(CDPATH='' cd -- "$here/../../.." && pwd)
 
 die() { echo "install-hermes: $*" >&2; exit 1; }
-as_op() { runuser -u "$OPERATOR" -- "$@"; }
+# Consent anchors: runuser's HOME for both accounts is a root-owned directory,
+# so each account names its own persistent anchor directory (the operator's is
+# the Store's, as the run sheet's `apps bootstrap` uses; the resident's is
+# ANCHORS, which its controller and resident units name too).
+ANCHORS=$V/anchors
+as_op() { runuser -u "$OPERATOR" -- env MINI_CONSENT_ANCHOR_DIR="$NODE/consent-anchors" "$@"; }
 # The resident pins its route's listener creator (systemd, uid 0); every
 # child `mini` of its commands inherits the pin.
-as_res() { runuser -u "$RESIDENT" -- env MINI_OPERATOR_PEER_UID=0 "$@"; }
+as_res() { runuser -u "$RESIDENT" -- env MINI_OPERATOR_PEER_UID=0 MINI_CONSENT_ANCHOR_DIR="$ANCHORS" "$@"; }
 resident_subject() { case $1 in hermes|hhost|hprov) return 0 ;; *) return 1 ;; esac; }
 as_owner() { local who=$1; shift; if resident_subject "$who"; then as_res "$@"; else as_op "$@"; fi; }
 home_of() { if resident_subject "$1"; then echo "$H/$1"; else echo "$HO/$1"; fi; }
@@ -122,7 +130,8 @@ step_preflight() {
   # the broker refuses a call above the row's per-call cap.
   jq -e --arg r "$POOL_ROW" '.providers[] | select(.name == $r) | (.caps.perCall | tonumber) >= 1024' "$PTABLE" >/dev/null \
     || die "pool row $POOL_ROW caps.perCall is below the controller's maxOutputTokens 1024"
-  as_op "$GRAIN" provider-table check "$PTABLE" >/dev/null || die "grain-runtime refuses $PTABLE"
+  # As root: the table is root-owned and grain-runtime trusts its own euid as owner (production loads with owner 0).
+  "$GRAIN" provider-table check "$PTABLE" >/dev/null || die "grain-runtime refuses $PTABLE"
   [ "$("$GRAIN" --controller-manager-protocol)" = mini-controller-manager-v1 ] || die "grain-runtime lacks the controller-manager contract"
   ! grep -rqs '^RestrictSUIDSGID=yes' /etc/systemd/system/mini-grain-controller@.service /etc/systemd/system/mini-grain-controller@.service.d \
       /etc/systemd/system/mini-grain-resident@.service /etc/systemd/system/mini-grain-resident@.service.d \
@@ -150,7 +159,8 @@ step_preflight() {
   # operator's part is the operator's; everything else is the resident's.
   install -d -o root -g root -m 0755 "$V"
   install -d -o "$OPERATOR" -g "$OPERATOR" -m 0700 "$OPV" "$HO" "$WO" "$RECORD"
-  install -d -o "$RESIDENT" -g "$RESIDENT" -m 0700 "$H" "$WS" "$RUN"
+  install -d -o "$RESIDENT" -g "$RESIDENT" -m 0700 "$H" "$WS" "$RUN" "$ANCHORS"
+  [ -d "$NODE/consent-anchors" ] || install -d -o "$OPERATOR" -g "$OPERATOR" -m 0700 "$NODE/consent-anchors"
   printf '%s\n' "$POOL_ROW" | as_op tee "$RECORD/pool-row" >/dev/null
   mark preflight
 }

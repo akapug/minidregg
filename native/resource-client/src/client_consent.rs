@@ -10,6 +10,8 @@ use mini_sdk::local::{Codec, CodecError};
 
 const CAP: usize = mini_sdk::local::CAP;
 static SESSION: Mutex<Option<Consent>> = Mutex::new(None);
+/// The delegated connection's liveness, beside the session it belongs to (same lock order: SESSION first).
+static LIFELINE: Mutex<Option<crate::consent_proxy::Lifeline>> = Mutex::new(None);
 static DELEGATED_SESSION: OnceLock<Option<crate::consent_proxy::Selection>> = OnceLock::new();
 
 /// Pure codec operations always use a separately selected local native image.
@@ -63,13 +65,16 @@ fn with_consent<T>(host: &Path, config: &Path, frame: impl FnOnce(&mut Consent) 
         if selected!=&delegated{return Err("consent transport selection changed within signing session".into());}
     } else {DELEGATED_SESSION.set(delegated.clone()).map_err(|_|"consent transport selection raced")?;}
     let mut slot=SESSION.lock().map_err(|_|"local consent session lock poisoned")?;
+    let mut lifeline=LIFELINE.lock().map_err(|_|"consent lifeline lock poisoned")?;
+    drop_dead_delegated_session(&mut slot,&mut lifeline);
     if let Some(consent)=slot.as_ref() {
         if consent.0.executable()!=executable||consent.0.settings()!=settings_bytes {
             return Err("local consent executable or settings changed within signing session".into());
         }
     } else if let Some(selection)=delegated {
-        let (input,output)=crate::consent_proxy::connect(&selection,&settings_bytes)?;
+        let (input,output,live)=crate::consent_proxy::connect_with_lifeline(&selection,&settings_bytes)?;
         *slot=Some(Consent(mini_sdk::local::Session::over(input,output,executable,settings_bytes)));
+        *lifeline=Some(live);
     } else if resident_enabled() {
         let mini=std::env::current_exe().map_err(|e|format!("resident consent provider: {e}"))?;
         let mut launch=Command::new(mini);
@@ -79,12 +84,29 @@ fn with_consent<T>(host: &Path, config: &Path, frame: impl FnOnce(&mut Consent) 
         let anchors=mini_sdk::consent::anchor_dir()?;
         *slot=Some(Consent(mini_sdk::consent::start(&anchors,executable,&settings,settings_bytes)?));
     }
-    frame(slot.as_mut().unwrap()).map_err(|error| {
+    let answer=frame(slot.as_mut().unwrap());
+    // A request that met a dead delegated transport is undecided: it is never replayed here, and the
+    // next request opens a fresh connection through the socket-activated unit.
+    let lost=answer.is_err()&&drop_dead_delegated_session(&mut slot,&mut lifeline);
+    answer.map_err(|error| {
         if error.is_stale_observation() {
             STALE_OBSERVATION.store(true,std::sync::atomic::Ordering::Relaxed);
         }
-        error.to_string()
+        if lost {format!("{error} (consent transport lost before an answer: this request is undecided and was not replayed; the next request reconnects)")} else {error.to_string()}
     })
+}
+
+/// Drop a delegated session whose connection can no longer carry a request, so the next request
+/// reconnects instead of failing "consent transport is poisoned" for ever. True when it dropped one.
+/// A local (non-delegated) session has no lifeline and is never dropped: its provider's frontier
+/// is in that process.
+pub(crate) fn drop_dead_delegated_session(slot:&mut Option<Consent>,lifeline:&mut Option<crate::consent_proxy::Lifeline>)->bool {
+    if lifeline.as_ref().is_some_and(|live|!live.alive()) {
+        *slot=None;
+        *lifeline=None;
+        return true;
+    }
+    false
 }
 
 /// `mini consent-resident --consent EXECUTABLE --settings SETTINGS`: hold one provider for this
@@ -107,6 +129,34 @@ pub(crate) fn codec_resident(executable:PathBuf,settings:PathBuf)->Result<()> {
 }
 
 fn read(path:&Path)->Result<Vec<u8>> { crate::fsio::read_bounded_or_empty(path, CAP) }
+
+/// Negotiate with the selected local executable before sending the new frame.
+/// Old providers refuse the storeless feature command; this never treats their
+/// ordinary anchored readiness as full verification.
+pub(crate) fn full_ready(host: &Path, config: &Path) -> Result<()> {
+    let executable = PINS.get().map(|pins|pins.consent.clone())
+        .or_else(||std::env::var_os("MINI_CONSENT_HOST").map(PathBuf::from))
+        .unwrap_or_else(||host.with_file_name("minidregg-client-consent"));
+    let settings = PINS.get().map(|pins|pins.config.clone())
+        .or_else(||std::env::var_os("MINI_CONSENT_CONFIG").map(PathBuf::from))
+        .unwrap_or_else(||config.to_path_buf());
+    if !executable.is_absolute() || !settings.is_absolute() {
+        return Err("local consent executable/settings must be absolute".into());
+    }
+    let delegated = match PINS.get() {
+        Some(pins) => pins.delegated.clone(),
+        None => crate::consent_proxy::Selection::from_env()?,
+    };
+    if delegated.is_none() && !resident_enabled() {
+        return Err("full consent readiness requires a retained resident or delegated provider".into());
+    }
+    let features = Command::new(&executable).arg(&settings).arg("features").output()
+        .map_err(|e|format!("consent readiness feature probe: {e}"))?;
+    if !features.status.success() || features.stdout != b"mini-consent-full-ready-v1\n" {
+        return Err("selected consent provider does not support explicit full readiness".into());
+    }
+    with_consent(host, config, |consent| consent.full_ready())
+}
 
 /// Consent 220 (thin: 230; a thin birth: 234, with the member's retained source) for the retained intent at `intent` and the signer's public `key`;
 /// the retained bytes the provider confirmed.

@@ -25,9 +25,28 @@ As in `DurableCommitProtocol`, this is a model boundary.  The last section
 states the proof-relevant simulation a database, filesystem, or replicated
 service must discharge; it does not manufacture physical durability.
 -/
-import Kernel.DurableCommitProtocol
-import Theory.AxiomPin
-import Kernel.Bounds
+module
+
+public import Kernel.DurableCommitProtocol
+public import Theory.AxiomPin
+public import Kernel.Bounds
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.DurableDataIntent
 
@@ -114,6 +133,9 @@ structure DataIntent (rootBytes : List UInt8 -> TypedAuthorization.Digest) where
     rootBytes write.canonicalPostBytes = write.exactPost
   guardsReadOnly : forall guard, guard ∈ readGuards ->
     guard.cellId ∉ writes.map DataWrite.cellId
+  /-- What the install adds back to the meter (`DurableCommitProtocol.Intent.credit`):
+  zero for every family but the seed-meter refill (`Kernel.MeterRefillReceiver`). -/
+  credit : Charge := 0
 
 namespace DataIntent
 
@@ -135,6 +157,7 @@ def erase (intent : DataIntent rootBytes) :
     { writes := intent.writes
       readGuards := intent.readGuards
       event := intent.event }
+  credit := intent.credit
 
 @[simp] theorem erase_transactionId (intent : DataIntent rootBytes) :
     intent.erase.transactionId = intent.transactionId := rfl
@@ -162,19 +185,20 @@ theorem erase_samePayload_iff (left right : DataIntent rootBytes) :
       left.readGuards = right.readGuards /\
       left.nullifiers = right.nullifiers /\
       left.exactCharge = right.exactCharge /\
-      left.event = right.event := by
+      left.event = right.event /\
+      left.credit = right.credit := by
   simp only [Intent.SamePayload, erase]
   constructor
-  · rintro ⟨_, nullifiers, charge, envelope⟩
+  · rintro ⟨_, nullifiers, charge, envelope, credit⟩
     have writes : left.writes = right.writes :=
       congrArg ReplayEnvelope.writes envelope
     have guards : left.readGuards = right.readGuards :=
       congrArg ReplayEnvelope.readGuards envelope
     have event : left.event = right.event :=
       congrArg ReplayEnvelope.event envelope
-    exact ⟨writes, guards, nullifiers, charge, event⟩
-  · rintro ⟨writes, guards, nullifiers, charge, event⟩
-    simp [writes, guards, nullifiers, charge, event]
+    exact ⟨writes, guards, nullifiers, charge, event, credit⟩
+  · rintro ⟨writes, guards, nullifiers, charge, event, credit⟩
+    simp [writes, guards, nullifiers, charge, event, credit]
 
 @[simp] theorem erase_sameCheck_eq_true_iff
     (left right : DataIntent rootBytes) :
@@ -183,7 +207,8 @@ theorem erase_samePayload_iff (left right : DataIntent rootBytes) :
       left.readGuards = right.readGuards /\
       left.nullifiers = right.nullifiers /\
       left.exactCharge = right.exactCharge /\
-      left.event = right.event := by
+      left.event = right.event /\
+      left.credit = right.credit := by
   rw [Intent.sameCheck_eq_true_iff, erase_samePayload_iff]
 
 end DataIntent

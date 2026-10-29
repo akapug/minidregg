@@ -25,9 +25,28 @@ holds only the fields it declared at birth, unless it declared itself open.
 states that every old effect page is refused by the cell codec, whatever
 follows its header.  There is no decoder for the old frame.
 -/
-import Compiler.IntStream
-import Compiler.StoreCodec
-import Theory.DeclaredActionLowering
+module
+
+public import Compiler.IntStream
+public import Compiler.StoreCodec
+public import Theory.DeclaredActionLowering
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.DeclaredEffectCell
 

@@ -3,8 +3,13 @@ No effect evaluator lives here. Native current laws, execution, atomic physical
 writes and funding remain the actual receiving transaction's obligations.
 Current constructor registry: ordered content createDocument/createAtom and
 room-stream append. Other constructors are unsupported, never scalar-coerced. -/
-import Compiler.ObjectiveBendResultAdapter
-import Compiler.ObjectiveBendPlanAdapter
+module
+
+public import Compiler.ObjectiveBendResultAdapter
+public import Compiler.ObjectiveBendPlanAdapter
+
+@[expose] public section
+
 namespace Minidregg.Compiler.ObjectiveBendNativePlanData
 open Minidregg.Theory Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.ObjectiveBendDemandData

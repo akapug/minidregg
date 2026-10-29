@@ -7,9 +7,30 @@ This module has no durable effect by itself. The publication receiver must
 journal a separate event before an outbound fn POST is attributed to source
 authority.
 -/
-import Kernel.FnSelectiveReleaseSourcePublication
-import Kernel.ResourceObservationAdmission
-import Kernel.PhysicalResourceReadGuard
+module
+
+public import Kernel.FnSelectiveReleaseSourcePublication
+public import Kernel.ResourceObservationAdmission
+public import Kernel.PhysicalResourceReadGuard
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnSelectiveReleaseSourceAuthority
 

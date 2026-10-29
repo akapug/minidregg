@@ -20,11 +20,33 @@ left inverse.  The JSON writer consumes that value, following the existing emit/
 pattern.  The injective Goedel address is a mathematical content address, not a
 cryptographic hash claim.
 -/
-import Compiler.SemanticManifest
-import Compiler.TranscriptController
-import Compiler.DeclaredEffectArtifact
-import Theory.DisclosureDeclaration
-import Theory.ReactiveController
+module
+
+public import Compiler.SemanticManifest
+public import Compiler.TranscriptController
+public import Compiler.DeclaredEffectArtifact
+public import Theory.DisclosureDeclaration
+public import Theory.ReactiveController
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+public import Theory.DeriveEncodable
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Compiler.SemanticArtifactBundle
 

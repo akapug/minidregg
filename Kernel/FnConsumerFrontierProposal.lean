@@ -1,7 +1,11 @@
 /- Exact gateway signing requests for the two ordered progress families. -/
-import Kernel.FnConsumerFrontierGateway
-import Kernel.FnSelectedPollCoverage
-import Kernel.FnEmptyPollProgressV2
+module
+
+public import Kernel.FnConsumerFrontierGateway
+public import Kernel.FnSelectedPollCoverage
+public import Kernel.FnEmptyPollProgressV2
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnConsumerFrontierProposal
 

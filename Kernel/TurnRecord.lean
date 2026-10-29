@@ -19,8 +19,27 @@ Two bridges from the pre-B2 durable model to `Kernel.World`:
   The torn install (cells without the system half) refutes the premise
   (`Example.torn_not_refinement`).
 -/
-import Kernel.World
-import Theory.AcceptedCellEffect
+module
+
+public import Kernel.World
+public import Theory.AcceptedCellEffect
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.TurnRecord
 
@@ -134,6 +153,7 @@ theorem step_single_accepted {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq 
   have hv : Patch.ValidFrom w.system (sysPatch H t height logRoot w.meter) := by
     refine sysPatch_valid_plain H rfl rfl fresh hh ⟨by simp [t, singleTurn], by simp [t, singleTurn]⟩ ?_
     intro lane hl
+    replace hl : t.charge lane ≠ 0 := hl.resolve_right (by simp [t, singleTurn])
     have pos : 0 < w.meter lane := lt_of_lt_of_le (Nat.pos_of_ne_zero hl) (covered lane)
     rw [meter_system] at pos ⊢
     revert pos

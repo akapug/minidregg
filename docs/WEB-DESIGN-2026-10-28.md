@@ -14,8 +14,9 @@ fonts and a small CSS brand mark require no asset provider or network font reque
 
 The front page composes `Site::doc`, the existing operations `tail`, and the same
 `apps search --json` gallery as the market. It does not copy a welcome document or
-invent activity. Failed reads keep their explanations. The command grammar still
-provides the field types, names, alternatives, confirmations and outcome classes;
+invent activity. Failed reads keep their explanations; a failed front-document
+read is logged for the operator and falls back to the published-reference index.
+The command grammar still provides the field types, names, alternatives, confirmations and outcome classes;
 this change groups each label with its control and improves their shared presentation.
 Stories and programs continue to fill the real grammar forms. Authority, admission,
 exact retry and the distinction between refusal and uncertainty stay in their
@@ -116,7 +117,7 @@ meanings and matching shapes.
 
 **JWF: 62/62 PASS**, including the Chromium tour, on a fresh J0–J8 world using
 candidate `76758dba687cde9447bc45d77931bb7d57527e56`'s Host and this lane's Rust
-binaries ([rows](web-shots/jwf-results.tsv)). Parity covered **74 verbs / 216 leaves**,
+binaries. Parity covered **74 verbs / 216 leaves**,
 with zero usage or world refusals. The scratch world has no market index; its public
 page displayed that explained read error. Catalogue visuals use the renderer fixtures;
 this run does not establish catalogue deployment. The full evidence remains under
@@ -154,11 +155,10 @@ phone contexts. Adding the landing search exposed startup focus stealing the ski
 link; startup and quiet refresh now preserve focus, and the unchanged keyboard check
 passes. The final script passes all 12 app FOUC cases; the unchanged site passes 12.
 
-The captured 36-entry market observation is from the interface lane's catalogue;
-the preview uses this lane base's **17** featured ranks. No count is built into the
-UI. Updating to main's featured set requires the still-pending merge: `git fetch`
-was denied writing `.git/worktrees/cx-web/FETCH_HEAD` despite the advertised writable
-Git root. These captures are not evidence of a merged or deployed 27-app catalogue.
+The initial catalogue captures used a 36-entry observation and 17 featured ranks.
+The merged previews now use main's recorded 98-entry index through the production
+parser and JSON projection, including all **27** featured apps. No count is built
+into the UI. These are renderer previews, not evidence of deployment.
 
 The follow-up JWF tour passed **62/62** on a fresh world against the same candidate
 Host, with the new catalogue code and unchanged JWF assertions; full output is in
@@ -176,10 +176,57 @@ pass. A real HTTP request through `mini web --body` → `mini shell` → `apps s
 renders all **36** index entries and **three** package-bound interfaces; a combined
 `q=Gogs&category=DevTools` request returns one card. The test uses a private mount
 namespace to supply `/var/lib/mini-market/index.json`, leaving the host catalogue
-untouched ([result](web-shots/catalogue-receiving.txt)). The body still clears its
-child environment. The JWF run above predates the final capture fix; its post-merge
-rerun remains due with the main integration. All test services have been stopped.
+untouched. The body still clears its child environment. The pre-merge JWF run
+above predates the final capture fix; merged-tree evidence is recorded below.
+Its test services were stopped.
 
-Staging also failed creating `.git/worktrees/cx-web/index.lock`. Main merge,
-post-merge verification, commit and push remain blocked on effective Git write
-access; the configured writable-root announcement did not make either write work.
+## Main integration
+
+The parent committed the catalogue work as `28792cd4e` and initiated the merge of
+`a134d13da2b3c200f29ed74b81a105bf0175d276`. The front-document conflict preserves
+main's failure logging, reference-index fallback and navigation, composed inside
+the redesigned entrance. Main's public-read cost bound, grant refresh imports,
+market verdict identity and expanded featured set remain intact. The JWF source
+is unchanged from the merge input; no assertions were edited during resolution.
+
+The Mac sandbox permits source edits but not Git metadata writes. The parent
+will stage the named files and finish this already-started merge; this lane does
+not run Git mutations.
+
+Merged-tree validation runs in `/build/lanes/cx-web`, reusing its warm Rust target,
+with every build under `swarm-build`. The filtered client checks pass **83/83**;
+gateway checks pass **6/6**, including login and terminal flow; door checks pass
+**7/7**. Logs are `scratch/merge-{web-final-tests,page-tests,door-tests}.log`.
+
+The release build and all three preview generators pass. Refreshed captures show
+**27 featured landing cards**, **98 market cards**, and three package-bound agent
+interfaces; the combined Gogs/DevTools query renders one card. All **33** base
+layouts and three expanded-interface captures pass, including category submission,
+keyboard navigation, independent activity refresh and dirty-form retention. Phone
+captures disable JavaScript. All **24/24 FOUC cases** pass (12 app, 12 site), with
+no flash or first-paint problems; the updated measurements are in
+[the FOUC results](web-shots/fouc-checks.json).
+
+A real HTTP receiving-path check also passes with the merged client and the full
+recorded index: **27** landing cards, **98** market cards, **three** matching
+interfaces and **one** Gogs/DevTools result. Its private mount supplies the default
+index path without altering the host catalogue ([result](web-shots/catalogue-receiving.txt)).
+
+The first merged JWF run exposed a verification-command error: `--bin mini`
+restricted a multi-package build and left an older `mini-web-spawn` binary in use.
+Its `public-republish` row failed, correctly detecting the old publication handoff.
+Building `mini-web-spawn` explicitly picked up main's newest-publication selection;
+the app/site FOUC rerun with that helper passes **24/24**. Main's current JWF script
+has **69 rows**, including seven added since the original 62-row run. No JWF
+assertions were changed during this integration.
+
+The final merged JWF run passes **69/69**, including public republishing and the
+Chromium tour, against candidate `9bd52317c34252028d62db31708516d396716281`'s Host
+and the merged Rust binaries ([rows](web-shots/jwf-results.tsv)). Parity covers
+**74 verbs / 216 leaves**, with no missing faces or usage/world refusals. The final
+public entrance returns **200**; this scratch world's absent market index is
+explained on the page. The separate receiving-path check above supplies the full
+index and verifies the complete gallery. Full JWF evidence is retained in
+`/build/lanes/cx-web/scratch/merge-tour-final-1793210027`. All test services and
+retained residents were stopped by recorded, command-checked PIDs; no lane
+executables remain running. There are no outstanding verification failures.

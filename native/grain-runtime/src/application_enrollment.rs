@@ -14,6 +14,8 @@ struct Request {
     mode: String,
     expected_binding_sha256: String,
     target_config_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    resident_state: Option<PathBuf>,
 }
 
 fn bytes(value: &impl Serialize) -> Result<Vec<u8>> {
@@ -66,11 +68,11 @@ fn retain(path: &Path, data: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn quiescent(j: &Journal) -> Result<()> {
+fn quiescent(j: &Journal, resident: quiescence::ResidentEvidence) -> Result<()> {
     // Reuse the retained-work census, including unresolved historical rows.
     // A failed initial read may leave the connection fenced with no work; this
     // command preserves that fence. Soft alone is not a held allowance.
-    let retained = quiescence::retained(j, quiescence::ResidentEvidence::NotConfigured);
+    let retained = quiescence::retained(j, resident);
     // Older qualified controllers predate the optional retry-gate field.
     // Inspect the serialized field when present without requiring that old
     // controller to acquire a new provider state machine for app enrollment.
@@ -78,7 +80,8 @@ fn quiescent(j: &Journal) -> Result<()> {
         .map_err(|e| e.to_string())?
         .get("providerRetryGate")
         .is_some_and(|value| !value.is_null());
-    if retained.iter().any(|field| *field != "connection_fenced")
+    if matches!(resident, quiescence::ResidentEvidence::Unknown)
+        || retained.iter().any(|field| *field != "connection_fenced")
         || j.connection == Connection::Hard
         || j.provider_settlement.is_some()
         || provider_retry
@@ -572,10 +575,8 @@ pub(crate) fn run(config_path: &Path, request_path: &Path) -> Result<Value> {
     if journal.format != "minidregg-grain-runtime-v1" {
         return Err("journal format differs".into());
     }
-    // This bounded enrollment API has no external resident-state selector.
-    // The existing guard proves NotConfigured, refusing room-enabled configs.
-    let _resident = quiescence::ResidentGuard::acquire(&target, None)?;
-    quiescent(&journal)?;
+    let resident = quiescence::ResidentGuard::acquire(&target, request.resident_state.as_deref())?;
+    quiescent(&journal, resident.evidence())?;
     permitted(&old, &target, &journal, &request.mode)?;
     validate(&target)?;
     journal.validate_birth_registry()?;
@@ -603,6 +604,7 @@ pub(crate) fn run(config_path: &Path, request_path: &Path) -> Result<Value> {
         return Err("retained enrollment changed more than exact target binding".into());
     }
     if replayed {
+        resident.assert_unchanged()?;
         return Ok(
             json!({"protocol":PROTOCOL,"status":"enrolled","replayed":true,"requestSha256":id,"record":record_path,"bindingSha256":digest(&after["binding"])?}),
         );
@@ -620,6 +622,7 @@ pub(crate) fn run(config_path: &Path, request_path: &Path) -> Result<Value> {
     {
         return Err("enrollment inputs changed before commit".into());
     }
+    resident.assert_unchanged()?;
     journal_io::write(&journal_path, &after_bytes)
         .map_err(|e| format!("enrollment journal publication: {e}"))?;
     Ok(

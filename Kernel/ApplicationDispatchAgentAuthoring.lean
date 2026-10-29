@@ -4,7 +4,26 @@ route explicitly refuses agent tickets. This separate source reads a reserved
 AgentGrain parent from one verifier-opened image and prepares the additional
 DRC witness; it is not yet an external signing route or delivery permit.
 -/
-import Kernel.ApplicationDispatchAuthoring
+module
+
+public import Kernel.ApplicationDispatchAuthoring
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationDispatchAgentAuthoring
 
