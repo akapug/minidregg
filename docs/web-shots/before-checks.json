@@ -1,0 +1,164 @@
+[
+  {
+    "page": "front",
+    "variant": "light",
+    "overflow": false,
+    "unlabelled": []
+  },
+  {
+    "page": "apps",
+    "variant": "light",
+    "overflow": false,
+    "unlabelled": []
+  },
+  {
+    "page": "rooms",
+    "variant": "light",
+    "overflow": false,
+    "unlabelled": []
+  },
+  {
+    "page": "stories",
+    "variant": "light",
+    "overflow": false,
+    "unlabelled": []
+  },
+  {
+    "page": "programs",
+    "variant": "light",
+    "overflow": false,
+    "unlabelled": []
+  },
+  {
+    "page": "command",
+    "variant": "light",
+    "overflow": false,
+    "unlabelled": []
+  },
+  {
+    "page": "reader",
+    "variant": "light",
+    "overflow": false,
+    "unlabelled": []
+  },
+  {
+    "page": "resident",
+    "variant": "light",
+    "overflow": false,
+    "unlabelled": []
+  },
+  {
+    "page": "refusal",
+    "variant": "light",
+    "overflow": false,
+    "unlabelled": []
+  },
+  {
+    "page": "front",
+    "variant": "dark",
+    "overflow": false,
+    "unlabelled": []
+  },
+  {
+    "page": "apps",
+    "variant": "dark",
+    "overflow": false,
+    "unlabelled": []
+  },
+  {
+    "page": "rooms",
+    "variant": "dark",
+    "overflow": false,
+    "unlabelled": []
+  },
+  {
+    "page": "stories",
+    "variant": "dark",
+    "overflow": false,
+    "unlabelled": []
+  },
+  {
+    "page": "programs",
+    "variant": "dark",
+    "overflow": false,
+    "unlabelled": []
+  },
+  {
+    "page": "command",
+    "variant": "dark",
+    "overflow": false,
+    "unlabelled": []
+  },
+  {
+    "page": "reader",
+    "variant": "dark",
+    "overflow": false,
+    "unlabelled": []
+  },
+  {
+    "page": "resident",
+    "variant": "dark",
+    "overflow": false,
+    "unlabelled": []
+  },
+  {
+    "page": "refusal",
+    "variant": "dark",
+    "overflow": false,
+    "unlabelled": []
+  },
+  {
+    "page": "front",
+    "variant": "phone",
+    "overflow": false,
+    "unlabelled": []
+  },
+  {
+    "page": "apps",
+    "variant": "phone",
+    "overflow": false,
+    "unlabelled": []
+  },
+  {
+    "page": "rooms",
+    "variant": "phone",
+    "overflow": false,
+    "unlabelled": []
+  },
+  {
+    "page": "stories",
+    "variant": "phone",
+    "overflow": false,
+    "unlabelled": []
+  },
+  {
+    "page": "programs",
+    "variant": "phone",
+    "overflow": false,
+    "unlabelled": []
+  },
+  {
+    "page": "command",
+    "variant": "phone",
+    "overflow": false,
+    "unlabelled": []
+  },
+  {
+    "page": "reader",
+    "variant": "phone",
+    "overflow": false,
+    "unlabelled": []
+  },
+  {
+    "page": "resident",
+    "variant": "phone",
+    "overflow": false,
+    "unlabelled": []
+  },
+  {
+    "page": "refusal",
+    "variant": "phone",
+    "overflow": false,
+    "unlabelled": []
+  }
+]

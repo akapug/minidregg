@@ -55,11 +55,12 @@ Terminal pane is xterm.js (`@xterm/xterm` 5.5.0 + `addon-fit` 0.10.0, vendored u
 `native/mini-web/assets/vendor/`, pinned by sha256; no CDN; the box has no egress and the page loads
 no third-party script). Copy/paste, resize, mobile keyboard, reconnect to a live shell.
 
-**One design language** (`app.css`, ~300 lines): paper and ink, system font stack, monospace for ids
-and the terminal, one accent; outcome colours are the only colours (admitted green, refused red,
-undecided amber), used as a left rule, never as decoration; `prefers-color-scheme: dark` honoured; 16px
-gutters, no horizontal scroll at phone width; every control reachable by keyboard. The world-readable
-sentence (D8) stands in the page footer for every visitor, member or not.
+**One design language**: the gateway, direct reader and join door share `app.css`; warm paper,
+forest accent, system sans for controls and serif for reading, light and dark tokens, responsive
+cards and grammar-derived field groups. The public front composes the existing welcome document,
+operations read and app catalogue; the market renders the catalogue as cards. Refusals retain their
+clauses and next steps. Details and before/after previews: `docs/WEB-DESIGN-2026-10-28.md`.
+The world-readable sentence (D8) remains in the gateway footer for every visitor.
 
 ## 2. The mechanism: sshd's privilege separation, for the browser
 

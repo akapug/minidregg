@@ -258,10 +258,9 @@ pub(super) fn index(site: &Site) -> Page {
         ));
     }
     let note = if site.front.read_only {
-        "<p class=note>The public reader runs no verb; with a session every one of these is a form.</p>"
+        "<p>Everything you can do in Mini, in one place. <a href=\"/join\" data-full>Join</a> to use these commands as forms.</p>"
     } else {
-        "<p>Every verb of <code>mini shell</code>, as a form: the same words, the same Host, the same decoded outcome. Derived from the shell's verb table, so a verb is here the day it exists.</p>\
-         <p class=note>Interim: these forms are read from each verb's usage string. The structured command grammar (one data structure per verb: subcommands, typed arguments, reference kinds, uploads, confirmations, outcome schema) that the shell's parsing, help, completion and this page will all consume replaces them verb by verb (docs/DEMO-EXPERIENCE-2026-10-27.md A0).</p>"
+        "<p>Everything you can do in Mini, in one place. Choose a command, fill in its fields, and read the result.</p>"
     };
     Page { status: 200, title: "Commands".into(), stamp: Stamp::None, body: format!("{note}\n<table><thead><tr><th>verb</th><th>usage</th><th>operation</th></tr></thead><tbody>{rows}</tbody></table>") }
 }
@@ -278,16 +277,10 @@ pub(super) fn page(site: &Site, name: &str, target: &str) -> Page {
     let alts = alternatives_of(name, verb.usage);
     let refs = site.names();
     let mut body = format!(
-        "<p><code>{}</code></p><p class=note>{}</p>\n<datalist id=\"refs\">{}</datalist>\n",
-        escape(verb.usage),
-        escape(verb.operation),
+        "<p>Choose an action below. Required fields must be filled before you run it.</p><details><summary>Command reference</summary><p><code>{}</code></p><p class=note>{}</p></details>\n<datalist id=\"refs\">{}</datalist>\n",
+        escape(verb.usage), escape(verb.operation),
         refs.iter().map(|r| format!("<option value=\"{}\">", escape(r))).collect::<String>()
     );
-    if crate::shell_grammar::grammar(name).is_some() {
-        body.push_str("<p class=note>This verb's grammar is data (A0): these forms, the shell's parsing and <code>help</code> read the same leaves.</p>");
-    } else {
-        body.push_str("<p class=note>Interim: this verb's forms are read from its usage string until its grammar is data (A0).</p>");
-    }
     if site.front.read_only {
         body.push_str("<p class=note>The public reader runs no verb.</p>");
         return Page { status: 200, title: name.to_owned(), stamp: Stamp::None, body };
@@ -403,7 +396,7 @@ fn input(id: &str, field: &str, label: &str, optional: bool, kind: &Kind, value:
     let req = if optional { "" } else { " required" };
     let preset = value.map(|v| format!(" value=\"{}\"", escape(v))).unwrap_or_default();
     let shown = format!("{}{}", escape(label), if optional { " <span class=note>(optional)</span>" } else { "" });
-    match kind {
+    let control = match kind {
         Kind::Text => format!("<label for=\"{id}\">{shown}</label><textarea id=\"{id}\" name=\"{field}\" maxlength=\"4096\"{req}>{}</textarea>", value.map(escape).unwrap_or_default()),
         Kind::Choice(options) => format!(
             "<label for=\"{id}\">{shown}</label><select id=\"{id}\" name=\"{field}\">{}{}</select>",
@@ -415,7 +408,8 @@ fn input(id: &str, field: &str, label: &str, optional: bool, kind: &Kind, value:
         Kind::Number => format!("<label for=\"{id}\">{shown}</label><input id=\"{id}\" name=\"{field}\" type=\"text\" inputmode=\"numeric\"{req}{preset}>"),
         Kind::Word => format!("<label for=\"{id}\">{shown}</label><input id=\"{id}\" name=\"{field}\" type=\"text\"{req}{preset}>"),
         Kind::Rest => format!("<label for=\"{id}\">{shown}</label><input id=\"{id}\" name=\"{field}\" type=\"text\" maxlength=\"2000\"{req}{preset}>"),
-    }
+    };
+    format!("<div class=\"field\">{control}</div>")
 }
 
 // ---------------------------------------------------------------- running

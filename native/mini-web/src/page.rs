@@ -78,6 +78,8 @@ pub fn page(title: &str, status: u16, who: Option<&Who>, path: &str, stage: &str
     };
     let mut rail = String::new();
     for (label, href, hint) in PLACES {
+        let group = match *href { "/doc" => Some("Explore"), "/purse" => Some("Your workspace"), "/registry" => Some("Understand & build"), _ => None };
+        if let Some(group) = group { rail.push_str(&format!("<li class=\"nav-group\">{group}</li>")); }
         let current = if path == *href || path.starts_with(&format!("{href}/")) { " aria-current=\"page\"" } else { "" };
         rail.push_str(&format!("<li><a href=\"{href}\" title=\"{}\" data-pane{current}>{label}</a></li>", h(hint)));
     }
@@ -416,6 +418,25 @@ fn civil(z: i64) -> (i64, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "wraps visual fixtures in the real page shell"]
+    fn design_preview() {
+        let dir = std::path::PathBuf::from(std::env::var("MINI_WEB_PREVIEW").expect("MINI_WEB_PREVIEW"));
+        let pages: serde_json::Value = serde_json::from_slice(&std::fs::read(dir.join("pages.json")).unwrap()).unwrap();
+        let who = Who { sid: "preview".into(), name: "alice".into(), csrf: "fixture".into() };
+        for p in pages.as_array().unwrap() {
+            if p["standalone"] == true { continue; }
+            let s = |key: &str| p[key].as_str().unwrap();
+            let html = page(s("title"), 200, (p["member"] == true).then_some(&who), s("path"), s("body"), "11 November 2026");
+            std::fs::write(dir.join(format!("{}.html", s("name"))), html).unwrap();
+        }
+        for (name, _, bytes) in ASSETS {
+            let file = dir.join("assets").join(name);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, bytes).unwrap();
+        }
+    }
 
     /// The heading levels of a rendered page, in document order. `<h2` names a heading
     /// only as a whole tag (`<header` is not one), so the character after the level is

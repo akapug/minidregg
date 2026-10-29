@@ -26,7 +26,7 @@ pub(super) fn page(site: &Site, name: &str) -> Page {
             .map(str::to_owned)
     };
     let base = site.base();
-    let mut body=format!("<p><a href=\"{base}/room/{0}\">Room</a> | <a href=\"{base}/room/{0}/new-document\">Create output document</a></p>",escape(name));
+    let mut body=format!("<p class=\"eyebrow\">An agent in your room</p><p>Work with a resident, read its replies, and see exactly which tools this room grants it.</p><p><a href=\"{base}/room/{0}\">Room</a> | <a href=\"{base}/room/{0}/new-document\">Create output document</a></p>",escape(name));
     let founder = view["cell"]["entries"].as_array().and_then(|entries| {
         let key = crate::room_schema::FOUNDER_FIELD.to_string();
         entries.iter().find(|e| e["key"]["field"].as_str() == Some(key.as_str()))?["value"].as_str().map(str::to_owned)
@@ -149,8 +149,8 @@ pub(super) fn tools_html(room: &str, tools: Option<&str>, compute: Option<&str>,
             )).collect();
             out.push_str(&format!(
                 "<div class=\"verb-form\"><form method=\"post\" action=\"/room/{r}/hermes-tools\"><input type=\"hidden\" name=\"was-tools\" value=\"{bits}\"><input type=\"hidden\" name=\"was-compute\" value=\"{seconds}\">\
-                 <div class=\"fields\">{boxes}<label for=\"hc-{r}\">Sandbox CPU seconds per paid turn (0: the operator's default)</label>\
-                 <input id=\"hc-{r}\" name=\"compute\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" value=\"{seconds}\"></div>\
+                 <div class=\"fields\">{boxes}<div class=\"field\"><label for=\"hc-{r}\">Sandbox CPU seconds per paid turn (0: the operator's default)</label>\
+                 <input id=\"hc-{r}\" name=\"compute\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]+\" value=\"{seconds}\"></div></div>\
                  <p><button>Set what Hermes may do</button></p><p class=note>{who} each change is <code>tariff {r} set hermes/tools N</code> (or <code>hermes/compute</code>), one founder turn.</p></form></div>",
                 r = escape(room),
                 who = if founder.is_some() { "You founded this room, so you set its grant:" } else { "This room's roster names no founder; the Host admits a change only from the room's founder:" }

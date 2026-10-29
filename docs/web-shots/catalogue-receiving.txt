@@ -1,0 +1,1 @@
+PASS merged mini web body → shell → apps search: 27 featured landing cards; 98 market cards, 3 package-bound interfaces; combined filter returns Gogs

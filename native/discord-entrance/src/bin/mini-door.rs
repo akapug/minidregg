@@ -102,11 +102,7 @@ fn source_key(peer: IpAddr, real_ip: Option<&str>, trusted: IpAddr) -> String {
     }
 }
 
-const STYLE: &str = ":root{color-scheme:light dark}body{font:16px/1.5 system-ui,sans-serif;max-width:42rem;margin:2rem auto;padding:0 1rem;color:#1a1a1a;background:#fbfbf8}\
-code,pre,textarea{font:14px ui-monospace,monospace}pre{white-space:pre-wrap;word-break:break-all;background:#efeee8;padding:.6rem}\
-textarea,input[type=text]{width:100%;box-sizing:border-box}.warn{border-left:4px solid #b5651d;padding-left:.8rem}\
-#wallet-pay .wallets{min-height:2.6rem}#wallet-pay .status,#wallet-pay .sent{min-height:1.5em}\
-@media (prefers-color-scheme:dark){body{color:#e8e6e0;background:#161614}pre{background:#24231f}}";
+const STYLE: &str = include_str!("../../../mini-web/assets/app.css");
 
 /// The vendored scripts the wallet page loads (assets/vendor/VENDOR.md pins them) and the page's
 /// own payment script; nothing is fetched from anywhere else.
@@ -158,7 +154,7 @@ const WALLET_PAGE: &str = r#"(async () => {
 fn page(title: &str, body: &str) -> Vec<u8> {
     format!(
         "<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport content=\"width=device-width,initial-scale=1\"><meta name=color-scheme content=\"light dark\">\
-         <title>{}</title><style>{STYLE}</style><body><h1>{}</h1>{body}</body></html>",
+         <title>{} · Mini</title><style>{STYLE}</style><body class=\"standalone\"><a class=\"skip\" href=\"#main\">Skip to content</a><header><a class=\"brand\" href=\"/\">Mini</a><a href=\"/tour\">Explore the demo</a></header><main id=\"main\"><p class=\"eyebrow\">Your place in the world</p><h1>{}</h1>{body}</main></body></html>",
         html(title),
         html(title)
     )
@@ -525,6 +521,18 @@ fn story_section(story: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "writes the real join page to MINI_WEB_PREVIEW"]
+    fn design_preview() {
+        let dir = std::path::PathBuf::from(std::env::var("MINI_WEB_PREVIEW").expect("MINI_WEB_PREVIEW"));
+        let d = door("design-preview");
+        std::fs::write(dir.join("join.html"), d.join_page()).unwrap();
+        let file = dir.join("pages.json");
+        let mut pages: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        pages.as_array_mut().unwrap().push(serde_json::json!({"name":"join","path":"/join","title":"Join the Mini demo","standalone":true}));
+        std::fs::write(file, serde_json::to_vec_pretty(&pages).unwrap()).unwrap();
+    }
 
     const KEY: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl";
 

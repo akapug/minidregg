@@ -222,15 +222,14 @@ fn answer(stream: &mut UnixStream, page: &Page, site: &Site) -> Result<()> {
 fn get(site: &Site, parts: &[&str], target: &str) -> Page {
     match parts {
         ["tour"] => tour(site, None),
+        ["activity"] => Page { status: 200, title: "Life in this world".into(), stamp: Stamp::None, body: operations(site) },
         ["export"] if !site.front.read_only => export_page(site, None),
         ["subscribe"] if !site.front.read_only => super::subscribe::page(site, None),
         [] | ["doc"] => {
             if site.front.read_only {
                 import_inbox(site);
                 if parts.is_empty() {
-                    if let Some(page) = front_doc_page(site) {
-                        return page;
-                    }
+                    return public_front(site);
                 }
             }
             let mut page = site.index();
@@ -341,24 +340,45 @@ fn get(site: &Site, parts: &[&str], target: &str) -> Page {
 
 /// The public front page as the operator's published document (`--front-doc`), rendered through
 /// the same page path as `/doc/NAME`, so it carries the same shell and styles as every page. `None`
-/// (no setting, or the document is not published to the public reader, or its read fails): the caller
-/// serves today's index. `/doc` stays the index, linked from here.
+/// (no setting, or the document is not published to the public reader): the caller serves the
+/// index. A failed read keeps its explanation. `/doc` stays the index, linked from here.
 fn front_doc_page(site: &Site) -> Option<Page> {
     let name = site.shell.as_ref()?.front_doc.as_deref()?;
     if !site.names().iter().any(|n| n == name) {
         eprintln!("mini web --body (public reader): front document {name} is not among the reader's references (nothing published to the reader under that name yet); the index is shown");
         return None;
     }
-    let mut page = site.route(&["doc".to_owned(), name.to_owned()]);
+    let page = site.route(&["doc".to_owned(), name.to_owned()]);
     if page.status != 200 {
         log_public_failure(&format!("front document {name}, the index is shown instead"), &page);
         return None;
     }
-    page.body.push_str(
-        "<nav class=\"front-more\"><p><a href=\"/doc\">Every published document</a> · <a href=\"/receipts\">receipts</a> · \
-         <a href=\"/registry\">the laws of the box</a> · <a href=\"/tour\">the tour</a> · <a href=\"/join\">Join</a></p></nav>\n",
-    );
     Some(page)
+}
+
+/// Compose the existing signed document, activity and app views into one public entrance.
+/// The published welcome is still `Site::doc`, never a second copy of its contents.
+fn public_front(site: &Site) -> Page {
+    public_front_with_welcome(site, front_doc_page(site))
+}
+
+fn public_front_with_welcome(site: &Site, welcome: Option<Page>) -> Page {
+    let (stamp, reading) = match welcome {
+        Some(page) => (page.stamp, format!("<section><h2>{}</h2>{}<p><a href=\"/doc\">Every published document →</a> · <a href=\"/receipts\">Receipts</a> · <a href=\"/registry\">The laws of the box</a> · <a href=\"/tour\">The tour</a> · <a href=\"/join\">Join</a></p></section>", escape(&page.title), page.body)),
+        None => (Stamp::None, format!("<section><h2>From the community</h2><p>Explore what members have shared with the public reader.</p>{}</section>", site.index().body)),
+    };
+    Page { status: 200, title: "Welcome to Mini".into(), stamp, body: format!(
+        "<section class=\"hero\"><p class=\"eyebrow\">A shared world, with rules you can read</p><h2>Make a little world together.</h2>\
+         <p class=\"lede\">Mini brings documents, rooms, apps and AI residents into one shared workspace. Every change meets the world's rules. When a change is refused, the reason is there to read.</p>\
+         <div class=\"actions\"><a class=\"button\" href=\"/join\" data-full>Join this world</a><a class=\"button secondary\" href=\"/tour\">Take the tour</a></div>\
+         <p class=\"note\">You are browsing as the public reader. Explore first; join when you want to make something.</p></section>\
+         <div class=\"front-grid\">{reading}{}</div>\
+         <section><div class=\"section-heading\"><h2>Tools to make it yours</h2><a href=\"/apps\">Browse all apps →</a></div>\
+         <p class=\"note\">Apps from the Sandstorm catalogue. Publisher claims and this box's verdict are shown separately.</p>{}</section>\
+         <section><div class=\"section-heading\"><h2>Find your way around</h2><a href=\"/registry\">Read the world's laws →</a></div>\
+         <ul class=\"place-list\"><li><a href=\"/room\">Gather in a room</a></li><li><a href=\"/story\">Step into a story</a></li><li><a href=\"/receipts\">Follow the receipts</a></li></ul></section>",
+        operations(site), apps::catalogue(site, "", "", true)
+    ) }
 }
 
 /// `/board` and `/room`: the workspace's references, each opened as that place.
@@ -368,10 +388,10 @@ fn place_index(site: &Site, place: &str) -> Page {
         rows.push_str(&format!("<li><a href=\"/{place}/{n}\">{n}</a></li>\n", n = escape(&name)));
     }
     let (title, note) = match place {
-        "board" => ("Boards", "A reference read with the board layout: task n's state is field 2n+2, its owner field 2n+3."),
-        _ => ("Rooms", "A reference read as a room: its members (the Host's `who` view), the names bound in it, its streams."),
+        "board" => ("Boards", "See work as a board: tasks, their state and who has taken them. Open a reference below in the board layout."),
+        _ => ("Rooms", "Gather around a conversation, shared documents and a resident. Open a reference below as a room to see what your grants cover."),
     };
-    Page { status: 200, title: title.into(), stamp: Stamp::None, body: format!("<p class=note>{note}</p>\n<ul>{rows}</ul>{}", if place == "room" && !site.front.read_only { room_new_form() } else { String::new() }) }
+    Page { status: 200, title: title.into(), stamp: Stamp::None, body: format!("<p>{note}</p>\n<ul class=\"place-list\">{rows}</ul>{}", if place == "room" && !site.front.read_only { room_new_form() } else { String::new() }) }
 }
 
 fn room(site: &Site, name: &str) -> Page {
@@ -389,7 +409,7 @@ fn room(site: &Site, name: &str) -> Page {
         }
         if !site.front.read_only {
             page.body.push_str(&format!(
-                "<form method=\"post\" action=\"/room/{n}/say\" class=\"row\"><label for=\"say-{n}\">Say</label><input id=\"say-{n}\" type=\"text\" name=\"text\" maxlength=\"2000\" required autocomplete=\"off\"><button>Send</button></form>\n",
+                "<form method=\"post\" action=\"/room/{n}/say\" class=\"row\"><div><label for=\"say-{n}\">Add to the conversation</label><input id=\"say-{n}\" type=\"text\" name=\"text\" maxlength=\"2000\" required autocomplete=\"off\"></div><button>Send</button></form>\n",
                 n = escape(name)
             ));
         }
@@ -660,7 +680,7 @@ fn operations(site: &Site) -> String {
     }
     match verb(site, &["tail -n 20 --in operations".to_owned()]) {
         Some(ending) if ending.code == 0 => format!(
-            "<section class=\"ops chat\" data-live=\"30000\"><h2>Operations room</h2><p class=note>The box's ships, drills, certifier ticks and backup receipts, as signed turns of <code>mini-s-box</code>.</p><pre class=\"turns\">{}</pre><p><a href=\"/room/operations\">the room</a></p></section>\n",
+            "<section class=\"ops chat\" data-live=\"30000\" data-live-path=\"/activity\"><p class=\"eyebrow\">From the operations room</p><h2>Life in this world</h2><p class=note>Ships, drills, checkpoints and backups, as signed turns of <code>mini-s-box</code>.</p><pre class=\"turns\">{}</pre><p><a href=\"/room/operations\">the room</a></p></section>\n",
             escape(ending.text().trim())
         ),
         Some(ending) => format!("<section class=\"ops\"><h2>Operations room</h2>{}</section>\n", answered(&ending, &[])),
@@ -1221,13 +1241,23 @@ fn verb_detached(site: &Site, line: &str, log: &std::path::Path) -> bool {
     true
 }
 
+fn captured_ending(code: i32, stdout: Vec<u8>, stderr: Vec<u8>, lines: &[String]) -> Ending {
+    let stdout = if code == 0 && structured_answer(lines) {
+        match super::capture::structured(stdout) {
+            Ok(value) => value,
+            Err(reason) => return Ending { code: 1, stdout: String::new(), stderr: reason.into() },
+        }
+    } else { super::capture::text(stdout) };
+    Ending { code, stdout, stderr: super::capture::text(stderr) }
+}
+
 /// Run shell lines as this member: `mini shell` in script mode (one line per form action, or the
 /// proposal and its `submit`), the same binary and subcommand the ssh login runs.
 pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
     let shell = site.shell.as_ref()?;
     #[cfg(test)]
     if let Some(ending) = redteam::FAKE_SHELL.with(|fake| fake.borrow().as_ref().map(|answer| answer(lines))) {
-        return Some(ending);
+        return Some(captured_ending(ending.code, ending.stdout.into_bytes(), ending.stderr.into_bytes(), lines));
     }
     let exe = std::env::current_exe().ok()?;
     let script = lines.iter().map(|l| format!("{l}\n")).collect::<String>();
@@ -1251,7 +1281,11 @@ pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
             let mut chunk = [0u8; 8192];
             while let Ok(n) = pipe.read(&mut chunk) {
                 if n == 0 { break; }
-                if let Ok(mut b) = sink.lock() { b.extend_from_slice(&chunk[..n]); }
+                if let Ok(mut b) = sink.lock() {
+                    // Retain one overflow byte, then keep draining without growing memory.
+                    let keep = n.min((super::capture::MAX_CAPTURE + 1).saturating_sub(b.len()));
+                    b.extend_from_slice(&chunk[..keep]);
+                }
             }
         });
         (buf, handle)
@@ -1269,18 +1303,11 @@ pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
             _ => break None,
         }
     };
-    let cap = |v: Vec<u8>| {
-        let mut s = String::from_utf8_lossy(&v).into_owned();
-        if s.len() > 64 * 1024 {
-            s.truncate(64 * 1024);
-            s.push_str("\n…");
-        }
-        s
-    };
+    let cap = super::capture::text;
     if let Some(status) = status {
         let _ = out_thread.join();
         let _ = err_thread.join();
-        return Some(Ending { code: status.code().unwrap_or(1), stdout: cap(snapshot(&out_buf)), stderr: cap(snapshot(&err_buf)) });
+        return Some(captured_ending(status.code().unwrap_or(1), snapshot(&out_buf), snapshot(&err_buf), lines));
     }
     if !only_answers(lines) {
         // A line that may move the world is never cut short: the shell keeps running to its
@@ -1313,6 +1340,16 @@ pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
         "error: the read did not finish within 100 s; what it printed stands above\n".to_owned()
     };
     Some(Ending { code: 1, stdout, stderr: notice })
+}
+
+/// Only a grammar-declared JSON answer uses the structured capture. Transition
+/// outcomes and unfinished requests retain their existing transcript/uncertainty path.
+fn structured_answer(lines: &[String]) -> bool {
+    use crate::shell_grammar::{grammar, parse, parse_line};
+    if lines.len() != 1 || !only_answers(lines) { return false; }
+    let Ok(words) = crate::shell::words(&lines[0]) else { return false; };
+    let Some(g) = words.first().and_then(|w| grammar(w)) else { return false; };
+    parse(g, &words).or_else(|_| parse_line(g, &lines[0])).is_ok_and(|p| p.flag("--json").is_some())
 }
 
 /// Whether every line is a read or a local verb by its grammar leaf (stopping one cannot leave the
@@ -1579,6 +1616,9 @@ pub(super) fn quote(word: &str) -> String {
 #[cfg(test)]
 #[path = "body/redteam.rs"]
 mod redteam;
+#[cfg(test)]
+#[path = "body/design_preview.rs"]
+mod design_preview;
 
 #[cfg(test)]
 mod tests {
@@ -1697,4 +1737,15 @@ mod tests {
         // A receipt path that is not an attempt id is not offered as one.
         assert!(!outcome_of(&refused, &[("x", "/receipts/a/b")], true).contains("from="));
     }
+}
+
+#[cfg(test)]
+#[test]
+fn structured_capture_follows_the_grammar() {
+    assert!(structured_answer(&["apps search --json".into()]));
+    assert!(structured_answer(&["apps show app --json".into()]));
+    assert!(!structured_answer(&["apps install app --json".into()]));
+    assert!(!structured_answer(&["apps search".into()]));
+    assert!(!structured_answer(&["say \"--json\"".into()]));
+    assert!(!structured_answer(&["apps search --json".into(), "whoami".into()]));
 }

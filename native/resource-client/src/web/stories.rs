@@ -94,11 +94,11 @@ pub(super) fn page(site: &Site) -> Page {
         return simple(200, "Stories", "this face has no home directory: stories are held by the shell's home");
     };
     let mine = held(&home);
-    let mut body = String::from("<p>A story is a table of scenes under a sealed law; each player moves their own cell, and the law judges every move. Its rule for the built-in tale is the Lean theorem <code>sealed_story_scene_monotone</code>.</p>\n");
+    let mut body = String::from("<p class=\"eyebrow\">Shared worlds to play in</p><p>Accept an invitation, step into a scene, and see where your choices lead. Each player moves their own character; the story's sealed law judges every move.</p><p class=note>The built-in tale's rule is the Lean theorem <code>sealed_story_scene_monotone</code>.</p>\n");
     let pending = pending(&home);
     body.push_str("<section id=\"invitations\"><h2>Invitations waiting</h2>");
     if pending.is_empty() {
-        body.push_str("<p>None: every invitation in your requests is to a story you already play in that role.</p>");
+        body.push_str("<p class=\"empty\">No invitations are waiting. You can continue a story below, or start one of your own.</p>");
     }
     for inv in &pending {
         let to_me = inv.recipient == site.subject;
