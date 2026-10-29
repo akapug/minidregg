@@ -123,12 +123,19 @@ jq -e --slurpfile receipt "$GRANT/receipt.json" '
   ' "$LOOKUP" >/dev/null || fail "exact event27 lookup receipt differs"
 jq -e --argjson expected "$EXPECTED" --argjson custodyOnly "$CUSTODY_ONLY" '
   def decimal: type == "string" and test("^(0|[1-9][0-9]*)$");
-  (keys | sort) == (["appSigners","controllerRouteName","enrollmentObserveCapability",
+  # A pin set names either a v3 signed API prefix or a v4 hosted web route (an app
+  # without an api interface is reached through its member WebSession at an https origin).
+  def base: ["appSigners","controllerRouteName","enrollmentObserveCapability",
     "grantSigner","hostUid","hostUnit","manifestObserveCapability","maximumCharge",
     "packageManifest","parentCapability","parentObserve","payerPins","payerSubject",
     "purseCapability","purseObserve","purseResource","reserveAmount",
-    "sessionObserveCapability","signedApiPath","snapshotManifest","socketPath"] | sort) and
-  (if $expected == null then .signedApiPath == "/repo.git/"
+    "sessionObserveCapability","snapshotManifest","socketPath"];
+  ((keys | sort) == ((base + ["signedApiPath"]) | sort) or
+   ((keys | sort) == ((base + ["route"]) | sort) and $expected != null)) and
+  (if has("route") then
+     (.route | type == "object" and (keys | sort) == ["kind","origin"] and .kind == "web" and
+       (.origin | type == "string" and test("^https://[a-z0-9]([a-z0-9.:-]*[a-z0-9])?$") and length <= 260))
+   elif $expected == null then .signedApiPath == "/repo.git/"
    else (.signedApiPath | type == "string" and startswith("/") and endswith("/") and
      (contains("?") or contains("#") or contains("..") or contains("%") | not)) end) and
   (.controllerRouteName | type == "string" and test("^[A-Za-z0-9-]+-app$")) and
@@ -225,7 +232,6 @@ jq -n --slurpfile a "$OUTPUT/accepted-grant.json" --slurpfile p "$PINS" \
    ticketResource:$a.ticketResource,participantSubject:$a.subject,
    parentTask:$a.parentTask,originalParentGeneration:$a.originalGeneration,
    originalDescriptorSha256:$descriptorSha,purseResource:$p.purseResource,
-   signedApiPath:$p.signedApiPath,
    dispatchSelectors:{issueIndex:$a.originalEvent22Index,
      packageManifest:$p.packageManifest,snapshotManifest:$p.snapshotManifest,
      sessionObserve:$p.sessionObserveCapability,
@@ -235,12 +241,13 @@ jq -n --slurpfile a "$OUTPUT/accepted-grant.json" --slurpfile p "$PINS" \
    grantObserveCapability:$a.grantObserveCapability,grantAttemptDir:$grantAttempt,
    grantDigest:$a.grantDigest,grantInitializedRoot:$a.grantInitializedRoot,
    originalIssueReceipt:$a.originalEvent22Receipt,grantIssueReceipt:$a.grantIssueReceipt}
+  + (if $p | has("route") then {route:$p.route} else {signedApiPath:$p.signedApiPath} end)
   ' >"$OUTPUT/controller-route-v3.json"
 fi
 jq -n --slurpfile a "$OUTPUT/accepted-grant.json" --slurpfile p "$PINS" \
   --arg descriptorSha "$DESCRIPTOR_SHA" '
   $a[0] as $a | $p[0] as $p |
-  {protocol:"mini-spk-agent-lifetime-custody-v3",
+  {protocol:(if $p | has("route") then "mini-spk-agent-lifetime-custody-v4" else "mini-spk-agent-lifetime-custody-v3" end),
    lineage:{appResource:$a.app,sessionResource:$a.session,participantSubject:$a.subject,
      ticketResource:$a.ticketResource,originalParentTask:$a.parentTask,
      originalParentGeneration:$a.originalGeneration,
@@ -260,6 +267,7 @@ jq -n --slurpfile a "$OUTPUT/accepted-grant.json" --slurpfile p "$PINS" \
    grantObserveCapability:$a.grantObserveCapability,payerSubject:$p.payerSubject,
    reserveAmount:$p.reserveAmount,maximumCharge:$p.maximumCharge,
    appSigners:$p.appSigners,grantSigner:$p.grantSigner,payerPins:$p.payerPins}
+  + (if $p | has("route") then {route:$p.route} else {} end)
   ' >"$OUTPUT/resident-custody-v3.json"
 chmod 600 "$OUTPUT"/*.json
 [ "$(sha "$HOST")" = "$HOST_SHA" ] &&

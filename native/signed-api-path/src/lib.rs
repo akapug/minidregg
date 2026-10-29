@@ -77,6 +77,19 @@ pub fn route(prefix: &str, relative: &str) -> Result<String, &'static str> {
     Ok(result)
 }
 
+/// A member's WebSession route carries no signed prefix: the model path is the exact
+/// canonical relative browser path (no leading slash, no query or fragment, no repair or
+/// decoding), the Host's `app_route_path` rule for a browser target. Bounded like `route`.
+pub fn browser_route(relative: &str) -> Result<String, &'static str> {
+    if relative.len() > MAX_RELATIVE_PATH
+        || relative.starts_with('/')
+        || relative.contains(['?', '#'])
+    {
+        return Err("relative browser path is not canonical");
+    }
+    Ok(relative.to_owned())
+}
+
 /// Check that an app-relative path is exactly under the same signed prefix.
 pub fn is_under(prefix: &str, app_relative: &str) -> bool {
     checked_prefix(prefix).is_ok()
