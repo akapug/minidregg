@@ -2,9 +2,9 @@
   "format": "mini-app-interface-v1",
   "name": "ethercalc",
   "interfaceVersion": 1,
-  "appId": "a0n6hwm32zjsrzes8gnjg734dh6jwt7x83xdgytspe761pe2asw0",
-  "packageId": "9b3b76152e7d8db9f54dba7455ea9239",
-  "appVersion": "2020.12.28.1+sandstorm1",
+  "appId": "umpy9re0saa7vtckd6mnprv6mc5vjgr0qh5qucs4na3qjrxrrzch",
+  "packageId": "da9d64ca90e51cdf2643c3271f9ee9b1",
+  "appVersion": "2026.10.26.0+sandstorm1",
   "status": "prototype-unqualified",
   "limits": {
     "bodyBytes": 16384,
@@ -204,7 +204,7 @@
   "sources": [
     "https://github.com/sandstorm-org/ethercalc-sandstorm",
     "scripts/spk-platform/featured-qualify.sh:77",
-    "https://github.com/audreyt/ethercalc/blob/master/API.md",
-    "package:9b3b76152e7d8db9f54dba7455ea9239/opt/app/dist/app.js"
+    "https://github.com/audreyt/ethercalc/blob/0.20261026.0/API.md",
+    "package:da9d64ca90e51cdf2643c3271f9ee9b1/opt/app/API.md"
   ]
 }
