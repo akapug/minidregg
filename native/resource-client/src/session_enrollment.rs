@@ -36,7 +36,7 @@ fn reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
 
 fn author_reply_with_outcome<'a>(frame: &'a [u8], operation: u8,
     decode: impl FnOnce(&[u8]) -> Result<Value>) -> Result<&'a [u8]> {
-    let is_outcome = matches!(frame.first(), Some(&253) | Some(&255))
+    let is_outcome = matches!(frame.first(), Some(&mini_sdk::host_operations::RESPONSE_NO_RECORD) | Some(&mini_sdk::host_operations::RESPONSE_HOST_OUTCOME))
         || (frame.first() == Some(&operation)
             && frame.get(1..).is_some_and(|body| body.starts_with(b"DREGG/NATIVE-HOST/OUTCOME/v8")));
     if is_outcome {

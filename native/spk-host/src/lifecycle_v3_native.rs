@@ -622,6 +622,7 @@ pub(crate) fn recover_begin_receipt_only(
 #[cfg(test)]
 mod tests {
     use super::*;
+    const CLAIM_SUBMIT: u8 = crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT;
     use crate::descriptor_native::SourceDescriptor;
     use crate::launch_descriptor_native::SourceLaunchDescriptor;
     use crate::materialize::InstalledPackage;
@@ -643,8 +644,8 @@ mod tests {
     fn same_opcode_outcomes_name_cause_without_committed_power() {
         // NativeHostCodec.outcomeStream: uncertain is five right branches;
         // bytesStream is a Nat length and byte sequence. No app-specific codec.
-        let uncertain = source_outcome_frame(26, &[1,1,1,1,1, 4,255, b't',b'i',b'p',b'!']);
-        let error = payload_or_outcome("claim submit", &uncertain, 26, b"COMMITTED", |payload| {
+        let uncertain = source_outcome_frame(CLAIM_SUBMIT, &[1,1,1,1,1, 4,255, b't',b'i',b'p',b'!']);
+        let error = payload_or_outcome("claim submit", &uncertain, CLAIM_SUBMIT, b"COMMITTED", |payload| {
             assert_eq!(payload, &uncertain[5..]);
             Ok(json!({"type":"uncertain","effect":"undecided","detail":"74697021"}))
         }).unwrap_err().to_string();
@@ -655,14 +656,14 @@ mod tests {
         refused_tail.extend_from_slice(&[7,255]);
         refused_tail.extend_from_slice(b"refused");
         refused_tail.push(0); // StreamCodec.option none
-        let refused = source_outcome_frame(26, &refused_tail);
-        let error = payload_or_outcome("claim submit", &refused, 26, b"COMMITTED", |_| {
+        let refused = source_outcome_frame(CLAIM_SUBMIT, &refused_tail);
+        let error = payload_or_outcome("claim submit", &refused, CLAIM_SUBMIT, b"COMMITTED", |_| {
             Ok(json!({"type":"refused","reason":"operation-rejected"}))
         }).unwrap_err().to_string();
         assert!(error.contains("operation-rejected"), "{error}");
         // A confirmed historical receipt still cannot supply a fresh projection.
-        let replay = source_outcome_frame(26, &[0,1,0,11,255,12,255,13,255,14,255]);
-        let error = payload_or_outcome("claim submit", &replay, 26, b"COMMITTED", |_| {
+        let replay = source_outcome_frame(CLAIM_SUBMIT, &[0,1,0,11,255,12,255,13,255,14,255]);
+        let error = payload_or_outcome("claim submit", &replay, CLAIM_SUBMIT, b"COMMITTED", |_| {
             Ok(json!({"type":"confirmed","confirmation":"replayed"}))
         }).unwrap_err().to_string();
         assert!(error.contains("replayed"), "{error}");
@@ -670,23 +671,23 @@ mod tests {
 
     #[test]
     fn same_opcode_outcome_refuses_malformed_frames_before_decode() {
-        let original = source_outcome_frame(26, &[1,1,1,0,0]); // contention
+        let original = source_outcome_frame(CLAIM_SUBMIT, &[1,1,1,0,0]); // contention
         for frame in [original[..original.len()-1].to_vec(), vec![1,0], {
             let mut wrong = original.clone(); wrong[4] = 82; wrong
         }] {
-            let error = payload_or_outcome("claim submit", &frame, 26, b"COMMITTED", |_| {
+            let error = payload_or_outcome("claim submit", &frame, CLAIM_SUBMIT, b"COMMITTED", |_| {
                 panic!("malformed transport must not reach pinned decoder")
             }).unwrap_err();
             assert_eq!(error.kind(), io::ErrorKind::InvalidData);
         }
         let mut committed = 11u32.to_le_bytes().to_vec();
-        committed.push(26);
+        committed.push(CLAIM_SUBMIT);
         committed.extend_from_slice(b"COMMITTED!");
-        assert_eq!(payload_or_outcome("claim submit", &committed, 26, b"COMMITTED", |_| {
+        assert_eq!(payload_or_outcome("claim submit", &committed, CLAIM_SUBMIT, b"COMMITTED", |_| {
             panic!("a committed projection must not be decoded as an outcome")
         }).unwrap(), b"COMMITTED!");
-        let malformed = source_outcome_frame(26, &[9]);
-        assert!(payload_or_outcome("claim submit", &malformed, 26, b"COMMITTED", |_| {
+        let malformed = source_outcome_frame(CLAIM_SUBMIT, &[9]);
+        assert!(payload_or_outcome("claim submit", &malformed, CLAIM_SUBMIT, b"COMMITTED", |_| {
             Err(io::Error::new(io::ErrorKind::InvalidData, "noncanonical outcome"))
         }).unwrap_err().to_string().contains("noncanonical outcome"));
     }
