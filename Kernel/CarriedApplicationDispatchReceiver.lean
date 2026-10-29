@@ -277,7 +277,7 @@ private def receiveAdmitted {config : Config} {anchor : Opened config} {target :
   | .ordinary ordinary =>
       match ordinary with
       | .confirmed _ _ => return .uncertain "dispatch lacks exact post-CAS readback"
-      | .rejected _ => return .rejected "durable dispatch refused"
+      | .rejected reason => return .rejected s!"durable dispatch refused: {repr reason}"
       | .contention => return .contention
       | .unavailable detail => return .unavailable detail
       | .uncertain detail => return .uncertain detail

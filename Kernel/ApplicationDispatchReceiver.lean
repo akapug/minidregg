@@ -318,7 +318,7 @@ def receiveAdmitted (config : Config) {target : Durable}
       match ordinary with
       | .confirmed _ _ =>
           return .uncertain "dispatch confirmation lacks exact fresh post-CAS readback"
-      | .rejected _ => return .rejected "durable dispatch refused"
+      | .rejected reason => return .rejected s!"durable dispatch refused: {repr reason}"
       | .contention => return .contention
       | .unavailable detail => return .unavailable detail
       | .uncertain detail => return .uncertain detail
