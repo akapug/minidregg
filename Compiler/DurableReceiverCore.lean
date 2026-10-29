@@ -1673,9 +1673,8 @@ def Loaded.extend {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes
     none,
     loaded.track.advance (nextEq ▸ ready.executed) (by simp [Image.append]),
     loaded.chainLog.push chain,
-    by rw [Array.toList_push, loaded.chainLogExact]
-       show _ = chainPrefixes loaded.logStart (loaded.image.accepted ++ [record])
-       rw [DurableLogTags.chainPrefixes_snoc, ← loaded.chainExact]⟩
+    by rw [Array.toList_push, loaded.chainLogExact, Image.accepted_append,
+         DurableLogTags.chainPrefixes_snoc, ← loaded.chainExact]⟩
 
 /-- **The extended snapshot is the executor's next snapshot.** -/
 theorem Loaded.extend_snapshot {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
@@ -2164,8 +2163,10 @@ def Loaded.prefixOwn {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBy
               Array.replicate image.accepted.length none, Array.size_replicate, none, none,
               trackOf rootBytes image resumed,
               (loaded.chainLog.toList.take (height + 1)).toArray,
-              by rw [List.toList_toArray, loaded.chainLogExact,
-                   DurableLogTags.chainPrefixes_take _ _ _ within]⟩,
+              by rw [List.toList_toArray, loaded.chainLogExact]
+                 simp only [image, Image.accepted_ofAccepted]
+                 exact (DurableLogTags.chainPrefixes_take _ _ _
+                   (by simpa only [Loaded.height_eq] using within)).symm⟩,
               rfl, rfl, rfl, rfl, rfl⟩
   else .error "durable log is shorter than the requested height"
 
