@@ -1,0 +1,20 @@
+{
+  "repository": "https://github.com/hledgerorg/hledger.git",
+  "version": "1.52.4",
+  "tag": "1.52.4",
+  "tagObject": "d26537a49229a86dfae1aaaa5b4961855191a0b9",
+  "commit": "33fa849e7ae841968bd21c427094c4fb4a4ec38d",
+  "publishedAt": "2026-09-10T23:51:51Z",
+  "releaseAsset": {
+    "url": "https://github.com/hledgerorg/hledger/releases/download/1.52.4/hledger-linux-x64.tar.gz",
+    "sha256": "f76a2e4088e162b7658e43077502569d5a6fdacd219b19bfb9aab6588b69643a"
+  },
+  "appVersion": 15204,
+  "sandstormTool": "sandstorm-308",
+  "sandstormToolSha256": "f1317754765b11f260a757724b28e92d5318d8b277f970c99662c01bd9291879",
+  "apiPath": "/",
+  "appId": "894fztp7d6e4u8fgw2qtm8jv904jw6w19frfqgc0pwytj0q10s80",
+  "packageId": "7c0c42cbc414380ded0f0f5c1e743e06",
+  "spkSha256": "7c0c42cbc414380ded0f0f5c1e743e06874102ff2ce86f71d856075a81d27a1f",
+  "declarationSha256": "ab55ab38d00e563cce995d29c7eac10231d084de86fe5be5c3843edfba0ea387"
+}
