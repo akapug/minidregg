@@ -1,0 +1,98 @@
+{
+  "format": "mini-app-interface-v1",
+  "name": "etherdraw",
+  "interfaceVersion": 1,
+  "appId": "1gda5n8p8zsc0r9pcana2yjgtvsq169068k4ve8mk68z4x9fvzuh",
+  "packageId": "71ebb1517a10002e8f5a631009743235",
+  "appVersion": "0.2",
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 16384,
+    "replyBytes": 1048576,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "$defs": {},
+  "operations": {
+    "project.read": {
+      "description": "Read a populated project snapshot from this grain/room. This package omits project:load for a new empty room and emits premature loading:end; such reads can refuse. No typed write is advertised until readiness/snapshot behavior is repaired, and no timing sleep hides the limitation.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "room": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          }
+        },
+        "required": [
+          "room"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "maxLength": 1048576
+          }
+        },
+        "required": [
+          "project"
+        ],
+        "additionalProperties": true
+      },
+      "write": false,
+      "binding": {
+        "protocol": "conversation",
+        "wire": "socket.io-eio3",
+        "path": [
+          "socket.io/"
+        ],
+        "query": {},
+        "steps": [
+          {
+            "emit": "subscribe",
+            "args": [
+              {
+                "room": {
+                  "arg": "room"
+                }
+              }
+            ]
+          },
+          {
+            "id": "project",
+            "receive": {
+              "event": "project:load",
+              "where": [
+                {
+                  "path": [
+                    0,
+                    "project"
+                  ],
+                  "exists": true
+                }
+              ]
+            }
+          }
+        ],
+        "result": {
+          "result": [
+            "project",
+            0
+          ]
+        }
+      }
+    }
+  },
+  "qualification": [],
+  "auth": {
+    "kind": "member-route"
+  },
+  "sources": [
+    "https://github.com/ocdtrekkie/draw",
+    "package:71ebb1517a10002e8f5a631009743235/server.js",
+    "package:71ebb1517a10002e8f5a631009743235/src/util/db.js"
+  ]
+}
