@@ -282,11 +282,10 @@ def decodeFast : List UInt8 -> Option (PackedCell registry)
   unfold decode
   split
   · rw [decodeFast.eq_1]
+    -- `split` generalizes `registry.kindAtTag tag` on both sides at once.
     split
-    · rename_i found
-      rw [found]
-    · rename_i kind found
-      rw [found]
+    · rfl
+    · rename_i kind _
       exact (decodePayload_eq registry kind _).symm
   · rename_i other
     rw [decodeFast.eq_2 _ _ other]
