@@ -21,7 +21,7 @@ pub(super) fn summary(app_id: &str, package_id: &str) -> Value {
         return Value::Null;
     };
     json!({"version":d["interfaceVersion"], "status":d["status"], "$defs":d["$defs"], "operations":d["operations"]
-        .as_object().into_iter().flatten().map(|(name, op)| json!({
+        .as_object().into_iter().flatten().filter(|(_, op)| op["internal"] != true).map(|(name, op)| json!({
             "name":name,"description":op["description"],"input":op["input"],
             "output":op["output"],"write":op["write"]
         })).collect::<Vec<_>>()})
@@ -38,7 +38,8 @@ mod tests {
             let package = d["packageId"].as_str().unwrap();
             let found = summary(app, package);
             assert_eq!(found["status"], d["status"]);
-            assert_eq!(found["operations"].as_array().unwrap().len(), d["operations"].as_object().unwrap().len());
+            let public = d["operations"].as_object().unwrap().values().filter(|op| op["internal"] != true).count();
+            assert_eq!(found["operations"].as_array().unwrap().len(), public, "internal operations are never advertised");
             assert!(summary(app, "another-package").is_null());
             assert!(summary("another-app", package).is_null());
         }

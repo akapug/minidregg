@@ -3177,8 +3177,7 @@ def advance {config : Config} (opened : Opened config) (derived : Derived config
 and `audit` judge exactly what the receiving loop judged. -/
 theorem advance_judged {config : Config} {opened : Opened config} {derived : Derived config opened}
     {next : Durable} (advanced : advance opened derived = .ok next) :
-    Kernel.TailBound.gate config.systemCell (opened.durable.height + 1) opened.durable.chain
-      opened.durable.snapshot derived.intent = .ok () := by
+    Kernel.TailBound.gate config.systemCell opened.durable opened.durable.snapshot derived.intent = .ok () := by
   revert advanced
   unfold advance
   simp only

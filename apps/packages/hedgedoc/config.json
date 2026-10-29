@@ -1,0 +1,11 @@
+{
+  "production": {
+    "db": {
+      "dialect": "sqlite",
+      "storage": "/var/hedgedoc.db"
+    },
+    "tooBusyLag": 700,
+    "email": false,
+    "allowFreeURL": true
+  }
+}

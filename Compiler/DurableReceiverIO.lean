@@ -79,8 +79,7 @@ abbrev Commit {rootBytes : List UInt8 → Digest} (transport : Transport)
   CommitEvidence candidate (transport.sourceGate loaded.snapshot candidate.intent)
     (match transport.systemCell with
     | none => (Except.ok () : Except RejectReason Unit)
-    | some systemId => Kernel.TailBound.gate systemId (loaded.height + 1)
-        loaded.chain loaded.snapshot candidate.intent)
+    | some systemId => Kernel.TailBound.gate systemId loaded loaded.snapshot candidate.intent)
 
 /-- Admission now returns the evidence consumed by the append, rather than
 throwing away the judgment as Unit. -/
@@ -95,8 +94,7 @@ def Loaded.judge {rootBytes : List UInt8 → Digest} (transport : Transport)
     | .ok () =>
       match tail : (match transport.systemCell with
         | none => (Except.ok () : Except RejectReason Unit)
-        | some systemId => Kernel.TailBound.gate systemId (loaded.height + 1)
-            loaded.chain loaded.snapshot candidate.intent) with
+        | some systemId => Kernel.TailBound.gate systemId loaded loaded.snapshot candidate.intent) with
       | .error reason => .error reason
       | .ok () => .ok ⟨reserved, source, tail⟩
 
@@ -104,7 +102,7 @@ theorem Commit.tail_pinned {rootBytes : List UInt8 → Digest} {transport : Tran
     {loaded : Loaded rootBytes} {candidate : Candidate loaded}
     (commit : Commit transport loaded candidate) (systemId : CellId)
     (pinned : transport.systemCell = some systemId) :
-    Kernel.TailBound.gate systemId (loaded.height + 1) loaded.chain loaded.snapshot candidate.intent = .ok () := by
+    Kernel.TailBound.gate systemId loaded loaded.snapshot candidate.intent = .ok () := by
   simpa only [pinned] using commit.tail
 
 /-- An ordinary certificate cannot write any OB-protected coordinate, for
@@ -138,7 +136,7 @@ theorem Judged.tail_pinned {rootBytes : List UInt8 → Digest} {transport : Tran
     {loaded : Loaded rootBytes} {intent : DataIntent rootBytes}
     (judged : Judged transport loaded intent) (systemId : CellId)
     (pinned : transport.systemCell = some systemId) :
-    Kernel.TailBound.gate systemId (loaded.height + 1) loaded.chain loaded.snapshot intent = .ok () := by
+    Kernel.TailBound.gate systemId loaded loaded.snapshot intent = .ok () := by
   rw [← judged.intentExact]
   exact Commit.tail_pinned judged.commit systemId pinned
 

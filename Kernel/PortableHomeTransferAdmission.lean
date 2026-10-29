@@ -58,8 +58,7 @@ structure Prepared {F : Type} [Field F] [DecidableEq F]
 
 variable {F : Type} [Field F] [DecidableEq F]
   {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
-  {ambient : Ambient} {ground : Ground deployment} {durable : Durable}
-  {ownerCommand renterCommand : Command}
+  {ambient : Ambient} {ground : Ground deployment} {durable : Durable} {ownerCommand renterCommand : Command}
   {ownerPrepared : PreparedInvocation deployment profile ambient ground ownerCommand}
   {renterPrepared : PreparedInvocation deployment profile ambient ground renterCommand}
   {ownerSigned renterSigned : SignedCommand}
