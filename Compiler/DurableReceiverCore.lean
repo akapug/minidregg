@@ -2279,27 +2279,32 @@ def indexRows (transport : Transport) (height : Nat) (keys : List DurableIndex.I
     (depth : Nat := 520) : IO (Except String (List Bool → Option DurableIndex.Row)) := do
   let mut seen : Std.HashSet (List UInt8) := {}
   let mut requested : Array (Nat × List UInt8) := #[]
+  let mut paths : Std.HashMap (List UInt8) (List Bool) := {}
   for k in keys do
     for path in DurableIndex.readPrefixes k depth do
       let rowKey := DurableIndex.rowKey path
       unless seen.contains rowKey do
         seen := seen.insert rowKey
+        paths := paths.insert rowKey path
         requested := requested.push (DurableIndex.indexSpace, rowKey)
   -- The Store answers at most 65536 node keys per request: read in chunks.
-  let mut found : Std.HashMap (List UInt8) DurableIndex.Row := {}
+  let mut found : Std.HashMap (List Bool) DurableIndex.Row := {}
   for chunk in requested.toList.toChunks 60000 do
     match ← transport.history ⟨height, [], chunk⟩ with
     | .error message => return .error message
     | .ok read =>
         found := read.nodes.foldl (init := found) fun map node =>
-          match node.2.2 with
+          match paths.get? node.2.1 with
           | none => map
-          | some (_, value) =>
-              match DurableIndex.rowStream.toLawful.decode value with
-              | some row => map.insert node.2.1 row
+          | some path =>
+              match node.2.2 with
               | none => map
+              | some (_, value) =>
+                  match DurableIndex.rowStream.toLawful.decode value with
+                  | some row => map.insert path row
+                  | none => map
   let rows := found
-  return .ok fun path => rows.get? (DurableIndex.rowKey path)
+  return .ok fun path => rows.get? path
 
 /-- Use the index rows of `keys`: first down to 48 bits (the family byte, then a
 compressed trie over far fewer than 2^40 keys of a family rarely reaches

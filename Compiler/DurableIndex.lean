@@ -365,11 +365,46 @@ def Row.digest : Row → Digest
   | .leaf k v => dig (.leaf k v)
   | .branch l r => dig (.branch l r)
 
+/-- One octet of bits, most significant first and zero-padded on the right. -/
+def packByte (chunk : List Bool) : UInt8 :=
+  UInt8.ofNat (chunk.foldl (fun acc bit => acc * 2 + (if bit then 1 else 0)) (0 : Nat) * 2 ^ (8 - chunk.length))
+
 /-- Bits packed eight to an octet, most significant first (the last octet zero-padded). -/
 def packBits (bits : List Bool) : List UInt8 :=
-  (List.range ((bits.length + 7) / 8)).map fun i =>
-    let chunk := (bits.drop (8 * i)).take 8
-    UInt8.ofNat (chunk.foldl (fun acc bit => acc * 2 + (if bit then 1 else 0)) (0 : Nat) * 2 ^ (8 - chunk.length))
+  (List.range ((bits.length + 7) / 8)).map fun i => packByte ((bits.drop (8 * i)).take 8)
+
+/-- One pass over the bits: each step consumes only the next octet, rather than
+re-dropping the whole prefix for every output byte. -/
+def packBitsFast : List Bool → List UInt8
+  | [] => []
+  | b :: rest => packByte ((b :: rest).take 8) :: packBitsFast ((b :: rest).drop 8)
+termination_by bits => bits.length
+decreasing_by
+  simp only [List.length_drop, List.length_cons]
+  omega
+
+theorem packBits_cons (b : Bool) (rest : List Bool) :
+    packBits (b :: rest) = packByte ((b :: rest).take 8) :: packBits ((b :: rest).drop 8) := by
+  have count : ((b :: rest).length + 7) / 8 = (((b :: rest).drop 8).length + 7) / 8 + 1 := by
+    simp only [List.length_cons, List.length_drop]
+    omega
+  rw [packBits, count, List.range_succ_eq_map]
+  simp only [List.map_cons, List.map_map, Nat.mul_zero, List.drop_zero, Function.comp_apply]
+  congr 1
+  rw [packBits]
+  apply List.map_congr_left
+  intro i _
+  simp only [Nat.mul_add, Nat.mul_one, List.drop_drop]
+  change packByte (((b :: rest).drop (8 * (i + 1))).take 8) =
+    packByte (((b :: rest).drop (8 + 8 * i)).take 8)
+  rw [show 8 * (i + 1) = 8 + 8 * i by omega]
+
+/-- Compiled row keys use the single-pass packer; the specification is unchanged. -/
+@[csimp] theorem packBits_eq_packBitsFast : @packBits = @packBitsFast := by
+  funext bits
+  induction bits using packBitsFast.induct with
+  | case1 => simp [packBits, packBitsFast]
+  | case2 b rest ih => rw [packBits_cons, packBitsFast, ih]
 
 /-- The Store key of the row at a bit prefix: its length, then its packed bits. -/
 def rowKey (prefixBits : List Bool) : List UInt8 :=
@@ -1115,6 +1150,7 @@ end Probe
 #assert_axioms key_injective
 #assert_axioms family_disjoint
 #assert_axioms bitsOf_length
+#assert_axioms packBits_eq_packBitsFast
 #assert_axioms nodeBytes_injective
 #assert_axioms collision_is_cshake
 #assert_axioms lookup_sound

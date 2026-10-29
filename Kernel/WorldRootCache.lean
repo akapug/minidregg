@@ -64,7 +64,7 @@ def RootsExact (cache : RootCache) (es : List (Key × Digest)) : Prop := cache.H
 namespace RootCache
 
 /-- Bulk build: one digest per leaf and per branch. -/
-def ofEntries (es : List (Key × Digest)) : RootCache := AuthTrie.Cache.build deployedIx_length es
+def ofEntries (es : List (Key × Digest)) : RootCache := AuthTrie.Cache.buildFast deployedIx_length es
 
 /-- Write one slot: one walk, one digest per branch on it. -/
 def write (cache : RootCache) (key : Key) (value : Digest) : RootCache :=
@@ -83,7 +83,7 @@ def opening (cache : RootCache) (k : Key) : AuthTrie.Opening Key Digest Digest :
 end RootCache
 
 theorem RootsExact.ofEntries (es : List (Key × Digest)) : RootsExact (RootCache.ofEntries es) es :=
-  AuthTrie.Cache.build_holds deployedIx_length es
+  AuthTrie.Cache.buildFast_holds deployedIx_length es
 
 /-- **The kept root is the specification root.** -/
 theorem RootsExact.root_eq {cache : RootCache} {es : List (Key × Digest)} (exact : RootsExact cache es) :
