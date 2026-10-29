@@ -50,6 +50,13 @@ socket) and the perf rake's verified backlog (docs/PERF-BACKLOG-2026-10-28.md, "
 | 703d0c0af | perf-batch1's red fixed (Theory/CellSlot `decode_eq_decodeFast`) |
 | 8db6db77e | DeployedBridge `packOf_unpack` via `Materialized.ext` |
 | 023a13096 | merge of main (Host.Main String.take fix; census deleted). Host.Main + ClientConsentSession green on hbox |
+| 2bd0ad095 | contentlaw d81cb88ce: ContentLaw + EventHistoryLaw document equality decided in one pass (proved equivalent) |
+| 05f843a71 | index 8c78cc96a: `packBits` single pass, `deployedRoot` one-pass canonicalization (csimp) |
+| bb73d02c6 | charge e403b95bf: historical records identity-first (`withPtrEqDecEq`), receiver charges materialized once |
+| (merge) | pred f463d78f2: policy state indexed once per evaluation (`IndexedState`, csimp) |
+| (merge) | profile 346136236: `Config` carries its profile (`Config.ofInputs`), `Profile` its semantics digest |
+| 2009a6eb8 | receiver semantics cached in `Profile`; `compilerProfile` via csimp (the GET's 9.5%) |
+| pending | seed (worker running), history (worker running), verifier 172d90188 (worker finishing; fix at merge: its `@[extern] def ... := 2` must become `opaque` externs) |
 
 ## Design: one persistent-state layer (what exists, what changes)
 
@@ -90,7 +97,8 @@ measured per-turn cost is NOT the absence of that layer; it is derived values co
 
 ## Running
 
-- hbox: base build `build.sh b-host Host.Main Host.ClientConsentSession` (PID file build.pid, log b-host.log).
+- hbox: integrated batch build `build.sh b-batch1 Host.Main Host.ClientConsentSession` at 2009a6eb8 (PID file build.pid). Then
+  `after.sh TAG SHA` measures (doc bench pair + SandMD route world on the new Host + 20 GETs).
 - Mac: seven claude-kimi workers (PID files above).
 
 ## Next
