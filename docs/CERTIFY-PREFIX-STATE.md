@@ -17,7 +17,9 @@ is generic over.
   - The durable `holdsHead` uses the same head the tail gate reads. The gate now
     derives the record height from the history (`TailBound.recordHeight`).
 
-## Implementation: WIP commit after c71fa04ec, NOT YET ELABORATED
+## Implementation: WIP commits after c71fa04ec, partly elaborated
+Checked green with lane-check on dregg-ref: Kernel/ChainHistory, Kernel/TailBound and
+Compiler/DurableLogTags. Everything else below is unelaborated.
 1. **One rule.** Written; unchecked except ChainHistory.
    - `TailBound.judge` and `TailBound.gate` are generic over `[ChainHistory H]` and
      call `certifiable`. New theorems: `certified_true` and
@@ -57,9 +59,7 @@ position. I checked whether it is on the wire or persisted:
 ## Next steps
 - Run per-file lane-check in dependency order on dregg-ref, in the warm tree
   /build/lanes/qualify-certify-prefix (cloned from thin-birth; user lanes):
-  1. Kernel/TailBound
-  2. Compiler/DurableLogTags
-  3. Compiler/DurableReceiverCore
+  1. Compiler/DurableReceiverCore (TailBound and DurableLogTags are green)
   4. Compiler/DurableReceiverIO
   5. Compiler/DurableServed
   6. Kernel/CertifyReceiver
@@ -72,7 +72,5 @@ position. I checked whether it is on the wire or persisted:
   report racedRefusals 0 for headMismatch once this lands.
 
 ## Running jobs
-- One lane-check, started over ssh as user lanes in the tree above, on ChainHistory,
-  TailBound and DurableLogTags. It runs in the foreground of an ssh session, so there
-  is NO PID file: do not kill it. Its log is /build/lanes/qcp-check.log, and it ends
-  by itself. The tree files on the box match this commit.
+None. The lane-check is finished, and the imports of TailBound and DurableLogTags are
+built in the warm tree.
