@@ -2,9 +2,9 @@
   "format": "mini-app-interface-v1",
   "name": "hedgedoc",
   "interfaceVersion": 1,
-  "appId": "4uda6a9yfxk4v3x2mpxjdn2md9y54tj104091480qjr8h758u4dh",
-  "packageId": "ff642cdb65178a6a2dff96ca15dd7028",
-  "appVersion": "1.9.8",
+  "appId": "a0wt1wk03g737k60grvphm2rxy9yjnkev8g4jjj9zgu9mm3ggay0",
+  "packageId": "8452968c1fc59a324106009faa14dedd",
+  "appVersion": "1.12.0",
   "status": "prototype-unqualified",
   "limits": {
     "bodyBytes": 16384,
@@ -14,8 +14,68 @@
   },
   "$defs": {},
   "operations": {
+    "note.create": {
+      "description": "Create a new named note with exact markdown content. Existing note names conflict; this does not replace or concurrently edit a note.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "note": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 8192
+          }
+        },
+        "required": [
+          "note",
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer",
+            "enum": [
+              302,
+              303
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "POST",
+        "path": [
+          "new/",
+          {
+            "arg": "note",
+            "encoding": "segment"
+          }
+        ],
+        "headers": {
+          "content-type": "text/markdown"
+        },
+        "text": {
+          "arg": "text"
+        },
+        "decode": "status",
+        "status": [
+          302,
+          303
+        ]
+      }
+    },
     "note.read": {
-      "description": "Read persisted markdown by grain-scoped note ID. HTTP body writes are defective in this pinned package; socket OT mutation remains unqualified, not advertised by this declaration.",
+      "description": "Read exact persisted markdown by grain-scoped note ID.",
       "input": {
         "type": "object",
         "properties": {
@@ -51,12 +111,40 @@
       }
     }
   },
-  "qualification": [],
+  "qualification": [
+    {
+      "id": "write",
+      "op": "note.create",
+      "args": {
+        "note": {
+          "context": "runId"
+        },
+        "text": "typed HedgeDoc note\n"
+      }
+    },
+    {
+      "id": "read",
+      "op": "note.read",
+      "args": {
+        "note": {
+          "context": "runId"
+        }
+      },
+      "assert": [
+        {
+          "path": [],
+          "equals": "typed HedgeDoc note\n"
+        }
+      ]
+    }
+  ],
   "auth": {
     "kind": "member-route"
   },
   "sources": [
-    "http://github.com/zenhack/sandstorm-hedgedoc",
-    "scripts/spk-platform/market-writes/rt.sh:26"
+    "https://github.com/hedgedoc/hedgedoc/blob/1.12.0/lib/web/note/router.js",
+    "https://github.com/hedgedoc/hedgedoc/blob/1.12.0/lib/web/note/util.js",
+    "https://github.com/hedgedoc/hedgedoc/blob/1.12.0/lib/web/note/controller.js",
+    "apps/packages/hedgedoc/config.json"
   ]
 }
