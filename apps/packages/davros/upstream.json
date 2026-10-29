@@ -1,0 +1,14 @@
+{
+  "repository": "https://github.com/mnutt/davros.git",
+  "commit": "d323f746f3ab1ff47a2879bf79982c19cb96d5ca",
+  "commitDate": "2026-10-22T15:55:20-04:00",
+  "version": "0.33.4",
+  "appVersion": 334,
+  "sandstormTool": "sandstorm-308",
+  "sandstormToolSha256": "f1317754765b11f260a757724b28e92d5318d8b277f970c99662c01bd9291879",
+  "apiPath": "/",
+  "appId": "g9vdgqnn4dnj6r7tyaw9duydgmgskxzq9564fxceekqhvcds33zh",
+  "packageId": "5485d227d04a1af26e08358dcb92accf",
+  "spkSha256": "5485d227d04a1af26e08358dcb92accf37b3a8855194caae3ad8b5919396155d",
+  "declarationSha256": "d53aeaa47788002271285ab118c0eb3fe75ec9b83e775f6d647d7e722e5fb483"
+}

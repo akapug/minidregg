@@ -157,14 +157,23 @@ for role in factory parent tool; do
   key=task; [[ $role != factory ]] || key=target
   authority=$(jq --arg role "$role" --arg key "$key" --slurpfile r "$ref" '.[$role] = {($key): $r[0].target, ownerCapability: $r[0].observeCapability, managementCapability: $r[0].operationCapability}' <<<"$authority")
 done
+# The owner custody: the world's operator owner when its inventory names one apart from management
+# (jworld-scratch JWORLD_MANAGEMENT=distinct: sponsor 7 owns, tool 8 manages); else the one operator
+# principal is both.
+owner=$(jq -c --arg ms "$management_subject" --arg mk "$management_key" --arg mseed "$mgmt_seed" --arg mpub "$mgmt_pub" \
+  '(.operatorCustody.owner // null) as $o
+   | if $o != null and ($o.subject | tostring) != $ms
+     then {subject: ($o.subject | tostring), keyId: ($o.keyId | tostring), keyEpoch: "2", seed: $o.seed, publicKey: $o.publicKey}
+     else {subject: $ms, keyId: $mk, keyEpoch: "2", seed: $mseed, publicKey: $mpub} end' "$world")
+for f in seed publicKey; do [[ -f $(jq -r ".$f" <<<"$owner") ]] || refuse "the world's operator owner custody names no $f file"; done
 jq -n --arg config "$config" --arg genesis "$genesis" --arg manifest "$out/manifest.json" --arg public "$socket" --arg private "$private_socket" \
-  --arg sponsor "$sponsor_ws" --argjson inventory "$inventory" --argjson authority "$authority" \
+  --arg sponsor "$sponsor_ws" --argjson inventory "$inventory" --argjson authority "$authority" --argjson owner "$owner" \
   --arg cseed "$completion_seed" --arg cpub "$completion_pub" --arg ms "$management_subject" --arg mk "$management_key" --arg mseed "$mgmt_seed" --arg mpub "$mgmt_pub" \
   --arg domain "$(jq -r .domain "$genesis")" --arg msha "$(sha256sum "$out/manifest.json" | cut -d ' ' -f1)" --arg csha "$(sha256sum "$config" | cut -d ' ' -f1)" '
   {identity:{domain:($domain|tonumber),manifestSha256:$msha,configSha256:$csha},config:$config,genesis:$genesis,manifest:$manifest,
    publicSocket:$public,privateSocket:$private,operatorWorkspace:$sponsor,memberInventory:$inventory,
    custody:{completionSeed:$cseed,completionPublic:$cpub,
-     owner:{subject:$ms,keyId:$mk,keyEpoch:"2",seed:$mseed,publicKey:$mpub},
+     owner:$owner,
      management:{subject:$ms,keyId:$mk,keyEpoch:"2",seed:$mseed,publicKey:$mpub}},
    authority:$authority}' >"$out/platform-inputs.json"
 # ── the metered workroom: parent reserved, tool attached (workroom-ready.sh) ──────

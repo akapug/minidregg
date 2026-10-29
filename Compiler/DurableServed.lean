@@ -1047,7 +1047,7 @@ def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UI
   | .accepted next =>
       if let .error reason := transport.sourceGate view intent then return .rejected reason
       if let some systemId := transport.systemCell then
-        if let .error reason := Kernel.TailBound.gate systemId (served.height + 1) served.chain view intent then
+        if let .error reason := Kernel.TailBound.gate systemId (⟨served.height, served.chain⟩ : Kernel.ChainHistory.Tip) view intent then
           return .rejected reason
       let key := opening.store.key
       let height := served.height + 1

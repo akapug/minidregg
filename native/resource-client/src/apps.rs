@@ -82,6 +82,11 @@ pub(crate) struct Entry {
     pub web_link: String,
     pub code_link: String,
     pub created_at: String,
+    /// Actual package build time and upstream release, recorded by our pinned
+    /// packages. The store's createdAt is neither; old entries stay explicit
+    /// "not reported" in the CLI and web instead of borrowing that timestamp.
+    pub package_built_at: String,
+    pub upstream_version: String,
     pub open_source: bool,
     /// Operator-pinned entries only (`index-check --local`): the whole raw
     /// SHA-256 of the package, the URL it is fetched from when it is not
@@ -191,6 +196,8 @@ fn parse_entry(value: &Value) -> Result<Entry> {
         web_link: bounded_text(value, "webLink", false)?,
         code_link: bounded_text(value, "codeLink", false)?,
         created_at: bounded_text(value, "createdAt", false)?,
+        package_built_at: bounded_text(value, "packageBuiltAt", false)?,
+        upstream_version: bounded_text(value, "upstreamVersion", false)?,
         open_source: value.get("isOpenSource").and_then(Value::as_bool).unwrap_or(false),
         pinned,
     })
@@ -230,7 +237,8 @@ pub(crate) fn render_index(entries: &[Entry]) -> Value {
         "appId":e.app_id,"packageId":e.package_id,"name":e.name,"version":e.version,
         "versionNumber":e.version_number,"author":{"name":e.author},"upstreamAuthor":e.upstream_author,
         "shortDescription":e.short_description,"categories":e.categories,"webLink":e.web_link,
-        "codeLink":e.code_link,"createdAt":e.created_at,"isOpenSource":e.open_source});
+        "codeLink":e.code_link,"createdAt":e.created_at,"packageBuiltAt":e.package_built_at,
+        "upstreamVersion":e.upstream_version,"isOpenSource":e.open_source});
         if let Some(pin) = &e.pinned {
             app["sha256"] = json!(pin.sha256);
             if let Some(url) = &pin.package_url { app["packageUrl"] = json!(url); }
@@ -283,30 +291,24 @@ pub(crate) fn resolve<'a>(entries: &'a [Entry], selector: &str) -> Result<&'a En
 /// App IDs determine curated order only; typed capabilities come from declarations.
 pub(crate) const FEATURED: &[&str] = &[
     "h37dm17aa89yrd8zuqpdn36p6zntumtv08fjpu8a8zrte7q1cn60",
-    "a0n6hwm32zjsrzes8gnjg734dh6jwt7x83xdgytspe761pe2asw0",
-    "4uda6a9yfxk4v3x2mpxjdn2md9y54tj104091480qjr8h758u4dh",
-    "8aspz4sfjnp8u89000mh2v1xrdyx97ytn8hq71mdzv4p4d8n0n3h",
-    "uawacvvx9f9ncex1sqj8njwpujf8s9fkmg7wmp55hg6xetrd45w0",
-    "c6rk81r4qk6dm3k04x1kxmyccqewhh4npuxeyg1xrpfypn2ddy0h",
+    "umpy9re0saa7vtckd6mnprv6mc5vjgr0qh5qucs4na3qjrxrrzch",
+    "a0wt1wk03g737k60grvphm2rxy9yjnkev8g4jjj9zgu9mm3ggay0",
+    "g9vdgqnn4dnj6r7tyaw9duydgmgskxzq9564fxceekqhvcds33zh",
+    "f3s5vv8g7xuay08e3x1g5zwuaycz0mt7170nmz3kf5e1g1q9ytr0",
+    "k2drffaa4xx1mq1gz6hh5cnw2kfqr6mkpvz51h54xkp4eawx6wn0",
     "nx3dqcmz2sjjz939vkg4847vvxrzqsatqfjrt3ea50z3jac5kv7h",
     "rhtntjye2n7p71vrcq0ae4f6n9nr139fdk4n884tw55k40vy4uph",
-    "f5z8uwz7ynf89c286f9d5tse5dwjknv32nyd78qzsyema3zf9m8h",
     "d9ygf47xrtnw12j92cyt6cu8ut75esx01u4q3kcrn8415w9qzzgh",
     "8x12h6p0x0nrzk73hfq6zh2jxtgyzzcty7qsatkg7jfg2mzw5n90",
     "7qvcjh7gk0rzdx1s3c8gufd288sesf6vvdt297756xcv4q8xxvhh",
     "m86q05rdvj14yvn78ghaxynqz7u2svw6rnttptxx49g1785cdv1h",
     "61gh7gnns305cknp20v2ekvdex48g4d3rv6wghuzk6huzx5qmp7h",
-    "1gda5n8p8zsc0r9pcana2yjgtvsq169068k4ve8mk68z4x9fvzuh",
     "w544a46cjwtje73rfearjvszwa3nhjtxjanu5s83qkdutx6k0nz0",
     "1d3umpx9ug1jv5stepvqfrucx3yr8n2a4gd7y5cud2vsq6mmj8uh",
-    "nn7axgy3y8kvd0m1mtk3cwca34t916p5d7m4j1j2e874nuz3t8y0",
     "5uh349d0kky2zp5whrh2znahn27gwha876xze3864n0fu9e5220h",
     "wfg1r0qra2ewyvns05r0rddqttt57qxurz3nz5z95rjnm63et7e0",
-    "70xjeuj6t85v3s9a3up583q97wu044mnt8aekf3pqs41e3ct2v70",
-    "u0yh8xndrzewsfx7z0jemv9scvyxtkwr2qzepgg93hm6r77m6580",
     "r8y55acmnwm0r8a2k3jp8m74pdf2xg7v2v5pxc07mcsqpq0ag3zh",
     "zxent02jw0z9ckkagz1uscdxesaf1f1wgzdunx2wrcj0jt9uf9rh",
-    "yp9xt15y8s0rsuntnhgnr510qpcvm2tatd9mn1gzwr2au8h2n4p0",
     "p04q48xd2kgkystkrda5n77kdns6u569wnactgh904tf7s3vev70",
     "uws252ya9mep4t77tevn85333xzsgrpgth8q4y1rhknn1hammw70",
 ];
@@ -403,6 +405,7 @@ pub(crate) fn entry_json(entry: &Entry, verdict: &Verdict) -> Value {
         "appId":entry.app_id,"packageId":entry.package_id,"name":entry.name,"version":entry.version,
         "interface":interfaces::summary(&entry.app_id, &entry.package_id),
         "versionNumber":entry.version_number,"publisher":entry.author,"upstreamAuthor":entry.upstream_author,
+        "packageBuiltAt":entry.package_built_at,"upstreamVersion":entry.upstream_version,
         "shortDescription":entry.short_description,"categories":entry.categories,"webLink":entry.web_link,
         "codeLink":entry.code_link,"packageUrl":package_url(entry),
         "verdict":{"state":verdict.state,"reason":verdict.reason,"rawBytes":verdict.raw_bytes,
@@ -784,6 +787,9 @@ fn catalogue(action: &str, mut args: Args, paths: &Paths, as_json: bool) -> Resu
             println!("  appId      {}", entry.app_id);
             println!("  packageId  {}  ({})", entry.package_id, package_url(entry));
             println!("  publisher  {}  upstream {}", entry.author, entry.upstream_author);
+            println!("  built      {}  upstream version {}",
+                if entry.package_built_at.is_empty() { "not reported" } else { &entry.package_built_at },
+                if entry.upstream_version.is_empty() { "not reported" } else { &entry.upstream_version });
             println!("  about      {}", entry.short_description);
             println!("  categories {}", entry.categories.join(", "));
             println!("  links      {}  {}", entry.web_link, entry.code_link);
@@ -1693,10 +1699,12 @@ mod tests {
         assert_eq!(all.len(), entries.len());
         let names: Vec<&str> = all.iter().take(FEATURED.len()).map(|e| e.name.as_str()).collect();
         assert_eq!(names[0], "Etherpad");
-        assert_eq!(names.len(), 27, "every featured appId is in the recorded index: {names:?}");
+        assert_eq!(names.len(), 21, "every featured appId is in the recorded index: {names:?}");
         assert!(all[FEATURED.len()..].iter().all(|e| featured(&e.app_id).is_none()));
         let pad = entry_json(all[0], &Verdict { state: "unverified".into(), reason: None, raw_bytes: None, signed_app_id: None, running: 0 });
         assert_eq!(pad["featured"]["rank"], 1);
+        assert_eq!(pad["packageBuiltAt"], "", "the store createdAt is never promoted to a build time");
+        assert_eq!(pad["upstreamVersion"], "");
         assert!(pad["featured"].get("agentHook").is_none());
         assert_eq!(pad["typedInterface"]["status"], "native-attachment-required");
         assert!(pad["typedInterface"]["tools"].as_array().unwrap().iter().any(|tool| tool["operation"] == "document.replace"));
@@ -1704,22 +1712,46 @@ mod tests {
 
     #[test]
     fn apps_typed_discovery_requires_the_declared_package_and_hides_internal_tools() {
-        let entries = fixture();
-        let mut datasette = entries.iter().find(|entry| entry.name == "Datasette").unwrap().clone();
+        // Any declaration carrying an internal operation (packages get repackaged under new ids, so
+        // the entry is the market's entry for that declaration, not a pinned index row).
+        let (_, declared) = interfaces::declarations().iter()
+            .find(|(_, d)| d["operations"].as_object().unwrap().values().any(|op| op["internal"] == true))
+            .expect("a declaration with an internal operation");
+        let internal: Vec<&String> = declared["operations"].as_object().unwrap().iter()
+            .filter(|(_, op)| op["internal"] == true).map(|(name, _)| name).collect();
+        let mut entry = fixture()[0].clone();
+        entry.app_id = declared["appId"].as_str().unwrap().to_owned();
+        entry.package_id = declared["packageId"].as_str().unwrap().to_owned();
         let verdict = Verdict { state: "unverified".into(), reason: None, raw_bytes: None, signed_app_id: None, running: 0 };
-        let shown = entry_json(&datasette, &verdict);
+        let shown = entry_json(&entry, &verdict);
         let interface = &shown["typedInterface"];
         assert_eq!(interface["status"], "native-attachment-required");
         let tools = interface["tools"].as_array().unwrap();
-        assert!(tools.iter().any(|tool| tool["operation"] == "records.upsert"));
-        assert!(tools.iter().all(|tool| tool["operation"] != "session.prepare"));
+        assert!(!tools.is_empty());
+        assert!(tools.iter().all(|tool| !internal.iter().any(|name| tool["operation"] == name.as_str())), "internal operations are never tools");
         assert!(tools.iter().all(|tool| tool["inputSchema"].is_object() && tool["outputSchema"].is_object()));
-        datasette.package_id = "00000000000000000000000000000000".into();
-        let shown = entry_json(&datasette, &verdict);
+        entry.package_id = "00000000000000000000000000000000".into();
+        let shown = entry_json(&entry, &verdict);
         let mismatch = &shown["typedInterface"];
         assert_eq!(mismatch["status"], "package-mismatch");
         assert_eq!(mismatch["schemaAvailable"], false);
         assert!(mismatch.get("tools").is_none());
+    }
+
+    #[test]
+    fn apps_unmaintained_duplicates_stay_out_of_the_featured_set() {
+        // docs/SPK-FRESH-2026-10-29.md records the upstream evidence and the
+        // maintained surface (where one exists) for each removal.
+        for app_id in [
+            "f5z8uwz7ynf89c286f9d5tse5dwjknv32nyd78qzsyema3zf9m8h", // SandCal
+            "1gda5n8p8zsc0r9pcana2yjgtvsq169068k4ve8mk68z4x9fvzuh", // EtherDraw
+            "nn7axgy3y8kvd0m1mtk3cwca34t916p5d7m4j1j2e874nuz3t8y0", // FileDrop
+            "70xjeuj6t85v3s9a3up583q97wu044mnt8aekf3pqs41e3ct2v70", // Tube
+            "u0yh8xndrzewsfx7z0jemv9scvyxtkwr2qzepgg93hm6r77m6580", // 2048
+            "yp9xt15y8s0rsuntnhgnr510qpcvm2tatd9mn1gzwr2au8h2n4p0", // Simple Chat
+        ] {
+            assert!(featured(app_id).is_none(), "{app_id} returned without fresh packaging evidence");
+        }
     }
 
     #[test]
@@ -1774,6 +1806,7 @@ mod tests {
         let oracle = json!({"apps":[{
             "appId":"ephaf4h4cx8f9s36hmukm4yzkznyhqjhvj8efp3at9cru2zn10mh","packageId":"bded240f916b93d51ad5e90ffc12d8a8",
             "name":"veri7vn oracle","version":"4","versionNumber":4,"author":{"name":"ember"},
+            "packageBuiltAt":"2026-10-29T05:00:00Z","upstreamVersion":"1.2.3",
             "sha256":"bded240f916b93d51ad5e90ffc12d8a8cc9985e35306105eff69f926b3333ed0","class":"L"}]});
         let local = parse_index(&serde_json::to_vec(&oracle).unwrap()).unwrap();
         let pin = local[0].pinned.clone().unwrap();
@@ -1786,6 +1819,8 @@ mod tests {
         assert_eq!(again, merged, "the pin survives the round trip");
         let shown = entry_json(&merged[98], &verdict(Path::new("/nonexistent"), Path::new("/nonexistent"), "bded240f916b93d51ad5e90ffc12d8a8"));
         assert_eq!(shown["suggestedClass"], "L");
+        assert_eq!(shown["packageBuiltAt"], "2026-10-29T05:00:00Z");
+        assert_eq!(shown["upstreamVersion"], "1.2.3");
         assert!(shown["packageUrl"].as_str().unwrap().starts_with("file: adopted"));
         // A pin whose sha256 does not start with its packageId, or without a pin at all, refuses.
         let mut bad = oracle.clone();
