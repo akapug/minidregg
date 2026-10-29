@@ -1,6 +1,5 @@
 # Batch B3 writes: boards and drawing. Reasoned from each package's own source (unpacked from the
 # signed .spk under the lane's scratch/), no live probe.
-b3_py="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/b3-sio.py"
 
 # diagrams.net 20.5.2 (package e7f8ac92: root process /server, Sandstorm's own static-publishing server
 # speaking WebSession directly, no http-bridge; its strings say "PUT only supported under /var").
@@ -16,28 +15,9 @@ write_DiagramsNet() {
     || echo "0 PUT /var/drawiodiagram.xml $put, GET $got: document not read back"
 }
 
-# EtherDraw 0.2 (package 71ebb151: node server.js, express + socket.io 1.0.6 + ueberDB sqlite at var/sqlite3.db).
-# server.js: socket.on('subscribe', {room}) then 'draw:progress' / 'draw:end' (room, uid, JSON string of the
-# path) -> src/util/draw.js endExternalPath -> db.storeProject(room). There is no HTTP read of a drawing
-# (GET /d/* is the static page), so the read-back is what a second subscriber is sent: 'project:load' whose
-# paper.js JSON must carry the stroke's name. Note it is served from the server's in-memory project (the
-# sqlite write ran at draw:end); a restart-surviving read would need a grain stop/start, not done here.
-write_EtherDraw() {
-  local res; res=$(python3 -I "$b3_py" etherdraw "$dir" featured 2>&1 | tail -1)
-  [[ $res == *'"ok": true'* ]] && echo "1 socket.io draw:end stroke, read back in project:load: ${res:0:100}" \
-    || echo "0 socket.io: ${res:0:200}"
-}
-
-# Scrumblr 0.5 (package cf6ae092: run.sh starts the bundled redis-server (redis.conf, dir /var, save 10 1)
-# then `node server.js 8000`; express + socket.io 1.4.8). server.js: client.on('message') with
-# {action:'joinRoom', data:room}, then {action:'createCard', data:{id,text,x,y,rot,colour}} ->
-# db.createCard (redis); {action:'initializeMe'} answers 'initCards' from db.getAllCards. The read-back is
-# a fresh client's initCards, so the card went through the inner redis.
-write_Scrumblr() {
-  local res; res=$(python3 -I "$b3_py" scrumblr "$dir" /featured 2>&1 | tail -1)
-  [[ $res == *'"ok": true'* ]] && echo "1 socket.io createCard, read back in a fresh client's initCards: ${res:0:100}" \
-    || echo "0 socket.io: ${res:0:200}"
-}
+# Source-pinned declarations replace the former per-app Socket.IO recipes.
+write_EtherDraw() { echo '0 etherdraw-empty-project-readiness-defect: declared populated-project read is read-only'; }
+write_Scrumblr() { echo '0 native-conversation-receiver-not-attached: scrumblr card.write requires native qualification'; }
 
 # Swagger Editor 2.10.4 (package c6dbeddc: nginx on 8000 via http-bridge, .sandstorm/service-config/nginx.conf
 # `location /editor/ { dav_methods PUT; alias /var/editor/; }`; launcher.sh seeds /var/editor/spec;

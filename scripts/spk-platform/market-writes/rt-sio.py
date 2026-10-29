@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
-"""rt-sio.py MODE ROUTE_DIR ARG: realtime writes for the rt batch, over a grain's owner route.
+"""Legacy shared WebSocket helpers for callers not yet migrated to native declarations.
 
-ROUTE_DIR holds http.sock and browser.token (the custodian-minted participant session).
-  wbo      ROUTE_DIR BOARD     a Rectangle item as a socket.io `broadcast` on WBO's /socket.io/
-Prints one JSON line after independent getboard memory readback. The caller also checks
-the saved HTTP download; send delivery alone is not an application acknowledgement.
+No WBO app operation lives here. Whiteboard operations belong to their declarations
+and the generic native conversation engine.
 """
 import base64, json, os, socket, struct, sys, time
 
@@ -97,35 +95,3 @@ class SIO:
                 yield json.loads(t[2:])
             elif t[:2] == "44":
                 yield ["connect_error", t[2:]]
-
-
-def wbo(route, board):
-    s = SIO(route, "")
-    s.emit("getboard", board)
-    item = {"tool": "Rectangle", "type": "rect", "id": "featured" + os.urandom(4).hex(),
-            "color": "#123456", "size": 4, "x": 10, "y": 10, "x2": 120, "y2": 90}
-    s.emit("broadcast", {"board": board, "data": item})
-    time.sleep(3)  # the server applies broadcasts in order
-    # Read-back by WBO's own protocol: a second socket joins the board with getboard and the server answers
-    # one `broadcast` event whose _children are the board's items (sockets.js onGetBoard).
-    r = SIO(route, "")
-    r.emit("getboard", board)
-    seen = 0
-    for ev in r.events(60):
-        if ev[0] == "broadcast" and isinstance(ev[1], dict) and "_children" in ev[1]:
-            kids = ev[1]["_children"]
-            seen = len(kids)
-            if any(k.get("id") == item["id"] for k in kids):
-                print(json.dumps({"ok": True, "id": item["id"], "items": seen, "readback": "getboard"}))
-                return 0
-            break
-    print(json.dumps({"ok": False, "refused": "itemNotInGetboard", "id": item["id"], "items": seen}))
-    return 1
-
-
-if __name__ == "__main__":
-    mode, route, arg = sys.argv[1:4]
-    try:
-        sys.exit({"wbo": wbo}[mode](route, arg))
-    except Exception as e:  # noqa: BLE001
-        print(json.dumps({"ok": False, "refused": str(e)[:300]})); sys.exit(1)
