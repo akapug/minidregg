@@ -1703,7 +1703,7 @@ mod tests {
         assert!(all[FEATURED.len()..].iter().all(|e| featured(&e.app_id).is_none()));
         let pad = entry_json(all[0], &Verdict { state: "unverified".into(), reason: None, raw_bytes: None, signed_app_id: None, running: 0 });
         assert_eq!(pad["featured"]["rank"], 1);
-        assert_eq!(pad["packageBuiltAt"], "BUILT_AT", "a fresh package reports its recorded build time");
+        assert_eq!(pad["packageBuiltAt"], "2026-10-29T10:27:05Z", "a fresh package reports its recorded build time");
         assert_eq!(pad["upstreamVersion"], "3.3.12-1");
         assert!(pad["featured"].get("agentHook").is_none());
         assert_eq!(pad["typedInterface"]["status"], "native-attachment-required", "the pinned package is the declared one");
