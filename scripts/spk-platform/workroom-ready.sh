@@ -3,7 +3,7 @@
 # The metered workroom for same-Store app births: the parent task reserved in its first generation,
 # the tool task attached. same-store-app.py check_task_readiness births only under a reserved hard
 # parent and an attached, settled tool; `mini apps bootstrap` registers both paused. The grain
-# operations are grain-journey.sh's workroom_ready, by the management subject (the bootstrap's) with
+# operations are grain-journey.sh's workroom_ready, by the bootstrap's subject (the sponsor) with
 # the sponsor workspace's key, each confirmed; idempotent on the tasks' state.
 set -euo pipefail
 umask 077
@@ -13,7 +13,6 @@ refuse() { echo "workroom-ready: $*" >&2; exit 1; }
 sponsor_ws=$(jq -r '.members | to_entries[] | select(.value.entry == "sponsor") | .value.workspace' "$world" | head -1)
 [[ -n $sponsor_ws && -f $sponsor_ws/workspace.json ]] || refuse "the inventory names no sponsor workspace"
 config=$(jq -r .config "$sponsor_ws/workspace.json") socket=$(jq -r .socket "$sponsor_ws/workspace.json") host=$(jq -r .host "$sponsor_ws/workspace.json")
-management_subject=$(jq -er .lifecycleManagement.managementSubject "$config")
 for role in parent tool; do
   [[ -f $sponsor_ws/refs/$role.json ]] || refuse "meteredTasksRequired: no $sponsor_ws/refs/$role.json; run mini apps bootstrap first"
 done
@@ -45,8 +44,10 @@ task_op() { # NAME SUBJECT TASK CAPABILITY NONCE OPERATION
     --key "$sponsor_key" --dir "$work/$1-attempt" >"$work/$1.stdout" 2>"$work/$1.stderr" || refuse "workroom $1 refused: $(tail -n1 "$work/$1.stderr")"
   jq -e '.type == "confirmed" and .confirmation == "installed"' "$work/$1-attempt/outcome.json" >/dev/null || refuse "workroom $1 did not confirm"
 }
-# mini apps bootstrap births both tasks under the management subject (apps.rs bootstrap).
-subject=$management_subject
+# mini apps bootstrap births both tasks under the subject of the workspace it runs in (apps.rs
+# bootstrap_source: creator and owner = that workspace's subject), here the sponsor's: the tasks are
+# read and driven as that subject with its key, whether or not genesis names a distinct management.
+subject=$(jq -er .subject "$sponsor_ws/workspace.json")
 parent_task=$(jq -er .target "$sponsor_ws/refs/parent.json") parent_cap=$(jq -er .operationCapability "$sponsor_ws/refs/parent.json")
 tool_task=$(jq -er .target "$sponsor_ws/refs/tool.json") tool_cap=$(jq -er .operationCapability "$sponsor_ws/refs/tool.json")
 task_read parent-state "$subject" "$parent_task" "$parent_cap" "$nonce_base"
