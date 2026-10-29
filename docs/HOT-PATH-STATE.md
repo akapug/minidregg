@@ -74,26 +74,35 @@ measured per-turn cost is NOT the absence of that layer; it is derived values co
 3. Per evaluation: the policy state indexed once (worker `pred`); document law decided in one pass (`contentlaw`).
 4. Per historical certificate: the record a `PriorIssue` names is compared by identity first, and record charges
    are materialized once (worker `charge`), so a request never re-derives a historical intent.
-5. Across processes (cold start): the state is opened from the MAC'd checkpoint plus the suffix (v4 fast-forward,
-   on main). Left: the walk families (dispatch, lifecycle, grain session, fn frontier) still walk from GENESIS on a
-   process's first such request, and the consent provider re-admits from genesis without an anchor. Plan: seal the
-   walk's derived certificate lists (`Verified.issues/reserves/begins*/claims*/grants/retry/frontier`) beside each
-   checkpoint under the same operator MAC; start = checkpoint + certificate snapshot + `extendVerified` over the
-   suffix. DECISION NEEDED (ember): this adds the trust premise "a certificate list MAC'd by this operator key was
-   produced by a genesis walk", the same premise the state open already takes for the checkpoint body; it changes
-   `Verified.admitted` from "replayed from genesis in this process" to "replayed from genesis by a process holding
-   the checkpoint key". Not weakening what a client can check (clients never trusted operator checkpoints:
-   ConsentAnchor), but it is a new premise on the operator side.
+5. Across processes (cold start). RULED (ember 10-29): trust walk snapshots on our own filesystem, sealed under the
+   operator checkpoint MAC. Design, from the code (Kernel/NativeHostReplay.lean):
+   - The walk families need `Verified config target`: the genesis `AdmittedReplay` plus 13 certificate lists
+     (`PriorIssue`, `PriorDispatchReserve`, `PriorBegin*`, `PriorClaim*`, `PriorCreatedV3`, `PriorRunningV3`,
+     `PriorLifetimeGrant`, `RetryHistory`, `FnConsumerFrontierReplay.Audit`, `PriorSelectedRelease`). Each certificate is
+     data (index, ingress, record, receipt) plus `admitted : ∃ original : Opened, ∃ accepted, record = ofIntent
+     accepted.intent` (or `ingress.Admitted config record`); consumers use the data, `present` (re-checked against the
+     current image) and occasionally the proof (`ApplicationDispatchAgentReserveCore` destructures `raw.sourceExact`).
+   - `SuffixVerified config anchor target` (+ `walkSuffix`, `SuffixContext`) already admits natively from an anchor,
+     but starts from an empty context: a dispatch naming a pre-anchor issue refuses.
+   - Plan: (a) a derived codec for the certificate data (`WalkSnapshot`), sealed beside each stored checkpoint under
+     the checkpoint key with its own domain tag (height, chain, world root bind it to the prefix); (b) each
+     certificate's proof field becomes `Provenance P` = `walked (h : P)` or `sealed (s : SealedAt config index)`, where
+     `SealedAt` carries the MAC check and membership of this certificate in the verified snapshot; consumers take the
+     disjunction, so statements gain the explicit premise "or present in a snapshot this operator sealed" (the ruled
+     trust), never a silent one; (c) `NativeHostSession.walkPhysical` starts from the newest sealed snapshot at or below
+     the head: fast-forward open at its height, restore the context, `walkSuffix` over the records after it; the
+     genesis walk remains for `audit`/`store-audit` and when no snapshot verifies; (d) `Verified` and `SuffixVerified`
+     unify behind one interface the walk families read (they read only the lists and `opened`).
+   - Order: land the per-turn batch first; then (a)+(c) with an interface over the two verified kinds; then (b).
 6. Seals: `storeCheckpoint` encodes every cell each `checkpointEvery` (64) records. Amortized O(state)/64; with
    cached cell bytes the encode copies cached bytes. Delta checkpoints only if a measurement shows seals matter.
 7. Cell codecs: after 1-4 the remaining doc-submit cost is codec work on the written cell (encode ~27%, decode with
    per-lookup key encoding and `List.Lex` compares ~15-30%). Next owner work: a decoded-store lookup keyed by the
    wire's ordering bytes compared as ByteArray, and encode from the cached entry bytes of unchanged entries.
-   DECISION NEEDED (ember): blinded cells (Hyperdocument, DeclaredEffect, LegacyContentCarry; StoreCodec
+   RULED (ember 10-29): keep the ratchet; make it fast in constant factors. Blinded cells (Hyperdocument, DeclaredEffect, LegacyContentCarry; StoreCodec
    K-HIDE-ROTATE) re-key EVERY entry's salt on every write, by design, so their root is O(entries) per append however
    it is cached. O(changed) for documents needs per-entry salt epochs, which reveals to a holder of two views which
-   entries changed between them. Keep the ratchet (documents stay O(n) per append, made fast in constant factors) or
-   take per-entry epochs (O(log n) per append, weaker unlinkability)?
+   entries changed between them; ember keeps the ratchet.
 
 ## Running
 
