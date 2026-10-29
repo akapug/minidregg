@@ -291,11 +291,11 @@ pub(crate) fn resolve<'a>(entries: &'a [Entry], selector: &str) -> Result<&'a En
 /// App IDs determine curated order only; typed capabilities come from declarations.
 pub(crate) const FEATURED: &[&str] = &[
     "h37dm17aa89yrd8zuqpdn36p6zntumtv08fjpu8a8zrte7q1cn60",
-    "a0n6hwm32zjsrzes8gnjg734dh6jwt7x83xdgytspe761pe2asw0",
-    "4uda6a9yfxk4v3x2mpxjdn2md9y54tj104091480qjr8h758u4dh",
-    "8aspz4sfjnp8u89000mh2v1xrdyx97ytn8hq71mdzv4p4d8n0n3h",
-    "uawacvvx9f9ncex1sqj8njwpujf8s9fkmg7wmp55hg6xetrd45w0",
-    "c6rk81r4qk6dm3k04x1kxmyccqewhh4npuxeyg1xrpfypn2ddy0h",
+    "umpy9re0saa7vtckd6mnprv6mc5vjgr0qh5qucs4na3qjrxrrzch",
+    "a0wt1wk03g737k60grvphm2rxy9yjnkev8g4jjj9zgu9mm3ggay0",
+    "g9vdgqnn4dnj6r7tyaw9duydgmgskxzq9564fxceekqhvcds33zh",
+    "f3s5vv8g7xuay08e3x1g5zwuaycz0mt7170nmz3kf5e1g1q9ytr0",
+    "k2drffaa4xx1mq1gz6hh5cnw2kfqr6mkpvz51h54xkp4eawx6wn0",
     "nx3dqcmz2sjjz939vkg4847vvxrzqsatqfjrt3ea50z3jac5kv7h",
     "rhtntjye2n7p71vrcq0ae4f6n9nr139fdk4n884tw55k40vy4uph",
     "d9ygf47xrtnw12j92cyt6cu8ut75esx01u4q3kcrn8415w9qzzgh",
