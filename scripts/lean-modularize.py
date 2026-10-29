@@ -67,14 +67,7 @@ RULES = [
 RETIRED = {"import all Mathlib.Tactic.DeriveEncodable"}
 # Files that stay non-modules, with the reason. A non-module sees every imported body; a module may not
 # import one, so every importer of a kept file is kept too (the list is closed under importers).
-#  * the persisted-codec census fingerprints codec STRUCTURE by walking definition bodies across the tree;
-#    the fingerprints are hashed into the StoreEpoch, so it must see exactly the bodies it saw before
-#    (from a module, unexposed bodies are hidden and every fingerprint moves): it and its importers stay.
-KEEP = {
-    "Compiler/PersistedCodecTagCensus.lean", "Kernel/ConsentAnchor.lean", "Kernel/NativeClientConsent.lean",
-    "Kernel/NativeSpecializedConsent.lean", "Host/ClientConsentCore.lean", "Host/ClientConsentSession.lean",
-    "Host/MemberPlanConsent.lean", "Host/ObjectiveConsent.lean",
-}
+KEEP = set()
 PER_FILE = {
     "Compiler/Mersenne127.lean": ["import all Mathlib.NumberTheory.LucasLehmer"],
     "Kernel/GenericSimplex.lean": ["import all Init.Util"],
