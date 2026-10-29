@@ -69,7 +69,9 @@ abbrev GrainBirthTariffPin := Kernel.PlatformCellLayout.GrainBirthTariffPin
 step, so 1 s at about 1.5e6 steps; rounded down. -/
 def defaultNockFSync : Nat := 1000000
 
-structure Config where
+/-- The source-owned configuration fields, separated so the derived profile's
+exactness can be stated before the cached configuration itself. -/
+structure Config.Inputs where
   deployment : CanonicalCellRegistry.Deployment
   federation : FederationId
   template : CanonicalRuntimeProfile.FactoryTemplate
@@ -106,17 +108,9 @@ structure Config where
   layout; absence retains the complete historical parameter preimage. -/
   invocationBindings : Option (List (NativeInvocationStatement.Route × List UInt8)) := none
 
-def Config.grainBirthTariffValue (config : Config) :
-    Except String GrainResourceBirthController.Tariff := do
-  let some pinned := config.grainBirthTariff
-    | throw "grain-backed birth tariff is not enabled"
-  if positive : 0 < pinned.base then
-    pure ⟨pinned.base, pinned.perBirth, positive⟩
-  else throw "grain-backed birth tariff base must be positive"
-
 /-- This manifest enters runtime semantics. The seed commitment is separate
 because the genesis's source policies themselves contain that semantics. -/
-def Config.runtimeParameters (config : Config) : List UInt8 :=
+def Config.Inputs.runtimeParameters (config : Config.Inputs) : List UInt8 :=
   "DREGG.NATIVE-HOST.PARAMETERS/v2".toUTF8.toList ++
   (StreamCodec.list StreamCodec.nat).encode
     [config.deployment.domain.value, config.deployment.factoryId,
@@ -148,10 +142,44 @@ def Config.runtimeParameters (config : Config) : List UInt8 :=
   | some context => "DREGG/NATIVE-HOST/SOURCE-CONSENSUS/v2".toUTF8.toList ++
       GenericSimplexCodec.contextStream.encode { context with instanceBytes := [] })
 
+/-- Registration wraps the ENTIRE legacy manifest. Submitted commands never
+select this policy, and registration grants no current source authority. -/
+def Config.Inputs.invocationParameters (config : Config.Inputs) : List UInt8 :=
+  match config.invocationBindings with
+  | none => config.runtimeParameters
+  | some bindings => NativeInvocationProfile.encode
+      ⟨config.runtimeParameters, config.activityControl, bindings⟩
+
+/-- The specification profile, retained separately from its compiled cache accessor. -/
+def Config.Inputs.profile (config : Config.Inputs) :=
+  NativeHostProfile.profile config.template config.invocationParameters config.disabledEvaluators
+
+/-- A configuration carries its derived profile, deferred and computed at most
+once per configuration value. `profileExact` binds it to all source inputs. -/
+structure Config extends Config.Inputs where
+  profileCache : Thunk (CanonicalRuntimeProfile.Profile NativeHostProfile.Field)
+  profileExact : profileCache.get = toInputs.profile
+
+/-- Construct a configuration and its exact profile cache together. -/
+def Config.ofInputs (inputs : Config.Inputs) : Config :=
+  let profile := Thunk.mk fun _ => inputs.profile
+  ⟨inputs, profile, rfl⟩
+
+def Config.grainBirthTariffValue (config : Config) :
+    Except String GrainResourceBirthController.Tariff := do
+  let some pinned := config.grainBirthTariff
+    | throw "grain-backed birth tariff is not enabled"
+  if positive : 0 < pinned.base then
+    pure ⟨pinned.base, pinned.perBirth, positive⟩
+  else throw "grain-backed birth tariff base must be positive"
+
+def Config.runtimeParameters (config : Config) : List UInt8 :=
+  config.toInputs.runtimeParameters
+
 /-- Disabling the new mode preserves the complete pre-existing parameter
 preimage, hence its legacy semantics/profile and genesis interpretation. -/
 theorem Config.runtimeParameters_withoutOptionalModes (config : Config) :
-    ({ config with grainBirthTariff := none, completionCustodianKey := none, jointControl := none, activityControl := none, jointConsensus := none } : Config).runtimeParameters =
+    (Config.ofInputs { config.toInputs with grainBirthTariff := none, completionCustodianKey := none, jointControl := none, activityControl := none, jointConsensus := none }).runtimeParameters =
       "DREGG.NATIVE-HOST.PARAMETERS/v2".toUTF8.toList ++
         (StreamCodec.list StreamCodec.nat).encode
           [config.deployment.domain.value, config.deployment.factoryId,
@@ -159,25 +187,34 @@ theorem Config.runtimeParameters_withoutOptionalModes (config : Config) :
            config.federation.value, config.genesisHeight, config.tariff.base,
            config.tariff.perBirth, config.tariff.perGrant,
            config.tariff.perInitialPayloadByte, config.tariff.collector,
-           config.tariff.asset] := by simp [Config.runtimeParameters]
+           config.tariff.asset] := by
+  simp [Config.runtimeParameters, Config.Inputs.runtimeParameters, Config.ofInputs]
 
-/-- Registration wraps the ENTIRE legacy manifest. Submitted commands never
-select this policy, and registration grants no current source authority. -/
 def Config.invocationParameters (config : Config) : List UInt8 :=
-  match config.invocationBindings with
-  | none => config.runtimeParameters
-  | some bindings => NativeInvocationProfile.encode
-      ⟨config.runtimeParameters, config.activityControl, bindings⟩
+  config.toInputs.invocationParameters
 
 @[simp] theorem Config.invocationParameters_legacy (config : Config)
     (legacy : config.invocationBindings = none) :
     config.invocationParameters = config.runtimeParameters := by
-  simp [Config.invocationParameters, legacy]
+  simp [Config.invocationParameters, Config.Inputs.invocationParameters,
+    Config.runtimeParameters, legacy]
 
 #assert_axioms Config.invocationParameters_legacy
 
 def Config.profile (config : Config) :=
-  NativeHostProfile.profile config.template config.invocationParameters config.disabledEvaluators
+  config.toInputs.profile
+
+/-- The profile as compiled code reads it: derived on the first read of this
+configuration value and never again. -/
+def Config.profileCached (config : Config) :=
+  config.profileCache.get
+
+@[csimp] theorem Config.profile_eq_profileCached :
+    @Config.profile = @Config.profileCached := by
+  funext config
+  exact config.profileExact.symm
+
+#assert_axioms Config.profile_eq_profileCached
 
 attribute [local irreducible] Config.profile CanonicalRuntimeProfile.Profile.compilerProfile
 

@@ -133,7 +133,8 @@ def Settings.checkDisabledEvaluators (settings : Settings) : Except String Unit 
     if (Minidregg.Compiler.Evaluator.resolveName name).isSome then .ok ()
     else .error s!"disabledEvaluators: no compiled-in evaluator named {name}"
 
-def Settings.config (settings : Settings) : NativeHost.Config where
+def Settings.config (settings : Settings) : NativeHost.Config :=
+  NativeHost.Config.ofInputs {
   deployment := ⟨⟨settings.domain⟩, settings.factoryId, settings.resourceBookId, settings.authorityCellId⟩
   federation := ⟨settings.federation⟩
   disabledEvaluators := settings.disabledEvaluatorIds
@@ -157,7 +158,7 @@ def Settings.config (settings : Settings) : NativeHost.Config where
       ⟨pin.capability⟩, ⟨pin.policyAddress.toNat!⟩⟩
   grainBirthTariff := settings.grainBirthTariff.map fun tariff => ⟨tariff.base, tariff.perBirth⟩
   completionCustodianKey := settings.completionCustodianKey.map fun key =>
-    (SourceAgreementJson.decodeHex "completionCustodianKey" (.str key)).toOption.getD []
+    (SourceAgreementJson.decodeHex "completionCustodianKey" (.str key)).toOption.getD [] }
 
 /-- Recognizing the Host's authoring table cannot change the verifier's
 deployment, tariffs, storage, signature verifier, evaluator or other law. -/

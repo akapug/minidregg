@@ -140,14 +140,24 @@ structure Profile (F : Type) [Field F] where
   disabledEvaluators : List Digest := []
   /-- Source manifest supplied by the compiled native builder, never an ingress field. -/
   runtimeComponents : List (List UInt8)
+  /-- The complete compiler-semantics digest, deferred and computed at most once. -/
+  semanticsCache : Thunk Digest
+  semanticsExact : semanticsCache.get =
+    (sourceCompilerDescriptor
+      (receiverSemanticsFrom runtimeComponents template receiverParameters disabledEvaluators)
+      fieldIdentity characteristic (.scalar orderWidth)).digest
 
 def Profile.fromComponents {F : Type} [Field F] (components : List (List UInt8)) (template : FactoryTemplate)
     (fieldIdentity : Digest) (characteristic : Nat)
     (characteristicCorrect : CharP F characteristic) (orderWidth : Nat)
     (orderNoWrap : PredOrder.NoWrap F orderWidth) (receiverParameters : List UInt8 := [])
     (disabledEvaluators : List Digest := []) : Profile F :=
+  let semantics := Thunk.mk fun _ =>
+    (sourceCompilerDescriptor
+      (receiverSemanticsFrom components template receiverParameters disabledEvaluators)
+      fieldIdentity characteristic (.scalar orderWidth)).digest
   ⟨template, fieldIdentity, characteristic, characteristicCorrect, orderWidth, orderNoWrap,
-    receiverParameters, disabledEvaluators, components⟩
+    receiverParameters, disabledEvaluators, components, semantics, rfl⟩
 
 def Profile.compilerProfile {F : Type} [Field F] (profile : Profile F) :
     PolicyCompilerProfile F :=
@@ -158,6 +168,18 @@ def Profile.compilerProfile {F : Type} [Field F] (profile : Profile F) :
 
 def Profile.semantics {F : Type} [Field F] (profile : Profile F) : Digest :=
   profile.compilerProfile.semantics
+
+/-- The semantics as compiled code reads it: hashed on the first read of this
+profile value and never again. -/
+def Profile.semanticsCached {F : Type} [Field F] (profile : Profile F) : Digest :=
+  profile.semanticsCache.get
+
+@[csimp] theorem Profile.semantics_eq_semanticsCached :
+    @Profile.semantics = @Profile.semanticsCached := by
+  funext F _ profile
+  exact profile.semanticsExact.symm
+
+#assert_axioms Profile.semantics_eq_semanticsCached
 
 theorem Profile.receiverSemantics_exact {F : Type} [Field F] (profile : Profile F) :
     profile.compilerProfile.descriptor?.map (·.receiverSemantics) =

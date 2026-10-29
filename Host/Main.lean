@@ -923,7 +923,8 @@ def Settings.checkDisabledEvaluators (settings : Settings) : Except String Unit 
     if (Minidregg.Compiler.Evaluator.resolveName name).isSome then .ok ()
     else .error s!"disabledEvaluators: no compiled-in evaluator named {name}"
 
-def Settings.config (settings : Settings) : NativeHost.Config where
+def Settings.config (settings : Settings) : NativeHost.Config :=
+  NativeHost.Config.ofInputs {
   deployment := ⟨⟨settings.domain⟩, settings.factoryId, settings.resourceBookId, settings.authorityCellId⟩
   federation := ⟨settings.federation⟩
   disabledEvaluators := settings.disabledEvaluatorIds
@@ -946,7 +947,7 @@ def Settings.config (settings : Settings) : NativeHost.Config where
     CompletionCustodianKeySettings.bytes
   nockFSync := settings.nockFSync.getD NativeHost.defaultNockFSync
   jointConsensus := settings.jointConsensus.map JointConsensusSettings.context
-  invocationBindings := ObjectiveInvocationSettings.bindings settings.objectiveInvocation
+  invocationBindings := ObjectiveInvocationSettings.bindings settings.objectiveInvocation }
 
 /-- Authoring allowlists do not alter the verifier's configuration or the
 meaning of already admitted history. -/
