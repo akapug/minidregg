@@ -74,7 +74,11 @@ appIds until their repackaging lands with its declarations; repackaged apps may 
 1. When f34b03095 is READY and Kimi is clear: merge staging into main, push, gate it (tour + composed sponsor/route
    front), send the READY path to hot-path, infra and demo-path; tell demo-path its world window is open.
 2. Take down /ci/c-d9661b-k when infra is done.
-3. Wire hot-path's flatness bench into the gate.
+3. Wire hot-path's flatness bench into the gate: scripts/perf/flatness-bench.py on lane/hot-path after 1e207e402
+   (doc-submit CPU early vs late, fails beyond a log factor). It FAILS today: 60 ms at append 2, 1.7 s at append 141.
+   Batch-1 umbrella reds on hot-path's tree: Fixtures NativeAcceptedFixture, NativeDocWriteFixture, BirthPlanPoles
+   (re-record: codec writer and `.process` -> `.native` receipt sources) and Effects/Revival/EngineProofs.lean:45
+   materialize_logical (needs `CellState.Materialized.ext rfl`; effects worker).
 4. Harness: residents root hand-offs; distinct-mode birth signing.
 5. Hand infra (a21547c57335a2932) the rehearsal-3 candidate once hot-path, demo-path and oracle7 are in.
 
