@@ -1712,18 +1712,26 @@ mod tests {
 
     #[test]
     fn apps_typed_discovery_requires_the_declared_package_and_hides_internal_tools() {
-        let entries = fixture();
-        let mut datasette = entries.iter().find(|entry| entry.name == "Datasette").unwrap().clone();
+        // Any declaration carrying an internal operation (packages get repackaged under new ids, so
+        // the entry is the market's entry for that declaration, not a pinned index row).
+        let (_, declared) = interfaces::declarations().iter()
+            .find(|(_, d)| d["operations"].as_object().unwrap().values().any(|op| op["internal"] == true))
+            .expect("a declaration with an internal operation");
+        let internal: Vec<&String> = declared["operations"].as_object().unwrap().iter()
+            .filter(|(_, op)| op["internal"] == true).map(|(name, _)| name).collect();
+        let mut entry = fixture()[0].clone();
+        entry.app_id = declared["appId"].as_str().unwrap().to_owned();
+        entry.package_id = declared["packageId"].as_str().unwrap().to_owned();
         let verdict = Verdict { state: "unverified".into(), reason: None, raw_bytes: None, signed_app_id: None, running: 0 };
-        let shown = entry_json(&datasette, &verdict);
+        let shown = entry_json(&entry, &verdict);
         let interface = &shown["typedInterface"];
         assert_eq!(interface["status"], "native-attachment-required");
         let tools = interface["tools"].as_array().unwrap();
-        assert!(tools.iter().any(|tool| tool["operation"] == "records.upsert"));
-        assert!(tools.iter().all(|tool| tool["operation"] != "session.prepare"));
+        assert!(!tools.is_empty());
+        assert!(tools.iter().all(|tool| !internal.iter().any(|name| tool["operation"] == name.as_str())), "internal operations are never tools");
         assert!(tools.iter().all(|tool| tool["inputSchema"].is_object() && tool["outputSchema"].is_object()));
-        datasette.package_id = "00000000000000000000000000000000".into();
-        let shown = entry_json(&datasette, &verdict);
+        entry.package_id = "00000000000000000000000000000000".into();
+        let shown = entry_json(&entry, &verdict);
         let mismatch = &shown["typedInterface"];
         assert_eq!(mismatch["status"], "package-mismatch");
         assert_eq!(mismatch["schemaAvailable"], false);
