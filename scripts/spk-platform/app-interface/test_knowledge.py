@@ -103,7 +103,13 @@ class CalendarDeclaration(unittest.TestCase):
                 nonlocal version
                 from xml.sax.saxutils import escape
                 path='radicale/owner/typed-calendar.ics/typed-event.ics'
-                if r['method']=='MKCALENDAR':return 201,{},b''
+                if r['method']=='MKCOL':
+                    import xml.etree.ElementTree as ET
+                    root=ET.fromstring(r['body'])
+                    if root.tag!='{DAV:}mkcol' or root.find('.//{urn:ietf:params:xml:ns:caldav}calendar') is None:
+                        raise AssertionError('MKCOL must declare a calendar collection')
+                    return 201,{},b''
+                if r['method']=='MKCALENDAR':raise AssertionError('native WebSession has no MKCALENDAR method')
                 if r['method']=='PUT':
                     self_check=r['path']==path
                     if not self_check:raise AssertionError('foreign calendar')

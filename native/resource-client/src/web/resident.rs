@@ -105,7 +105,7 @@ pub(super) fn page(site: &Site, name: &str) -> Page {
         body,
     }
 }
-/// The room's grant to its resident (field `hermes/tools`, bits 1/2/4/8) and its compute block
+/// The room's grant to its resident (field `hermes/tools`, bits 1/2/4/8/16) and its compute block
 /// (`hermes/compute`), as the room's own signed view holds them: what Hermes may do here. The
 /// founder (roster field 2000) gets the grant as a form whose answer is the `tariff ROOM set`
 /// leaf's outcome; anyone else sees who sets it.
@@ -114,6 +114,7 @@ pub(super) const TOOLS: &[(u64, &str, &str)] = &[
     (2, "terminal", "a shell and its processes in that scratch area"),
     (4, "python", "run Python code there"),
     (8, "oracle", "ask the Oracle grain (discover its operations and call one)"),
+    (16, "apps", "use the typed tools of the hosted apps this box's operator attached to Hermes (each call is still admitted by the app's own member permissions)"),
 ];
 
 pub(super) fn tools_html(room: &str, tools: Option<&str>, compute: Option<&str>, founder: Option<&str>, me: &str, writes: bool) -> String {
@@ -136,7 +137,7 @@ pub(super) fn tools_html(room: &str, tools: Option<&str>, compute: Option<&str>,
         "<section id=\"hermes-tools\" data-hermes-tools=\"{bits}\" data-hermes-compute=\"{seconds}\"><h2>What Hermes may do here</h2>\
          <table><thead><tr><th>tool</th><th>bit</th><th>this room</th></tr></thead><tbody>{rows}</tbody></table>\
          <p>{compute_line}</p>\
-         <p class=note>Hermes gets what the operator's ceiling allows <em>and</em> this room grants: the ceiling is the operator's controller setting and is not part of this room's read, so a tool granted here may still be off on this box. The Oracle also needs the operator's Oracle route; without it Hermes refuses <code>oracle-not-configured</code>, and without bit 8 here, <code>oracle-not-granted</code>.</p>"
+         <p class=note>Hermes gets what the operator's ceiling allows <em>and</em> this room grants: the ceiling is the operator's controller setting and is not part of this room's read, so a tool granted here may still be off on this box. The Oracle also needs the operator's Oracle route; without it Hermes refuses <code>oracle-not-configured</code>, and without bit 8 here, <code>oracle-not-granted</code>. The typed app tools need the operator's attachments; without them Hermes refuses <code>typed-apps-not-configured</code>, and without bit 16 here, <code>typed-apps-not-granted</code>.</p>"
     );
     // A room born by `room new` records no founder row (only `chat new` writes the roster); the
     // form is offered there too, and the Host admits the change only from the room's founder.

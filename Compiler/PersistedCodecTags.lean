@@ -1,7 +1,5 @@
-/- Registry of persisted receiving identities. The named elaboration census
-requires equality with the independently discovered reachable tag/frame set,
-including string prefixes and binary version suffixes. No receiving modules
-need to import this registry; an added or changed tag must update it to build. -/
+/- Persisted receiving identities and domain-separation labels. The manifest
+contributes to the Store epoch; implementation definition bodies do not. -/
 module
 
 public import Compiler.PersistedCodecTagRegistry

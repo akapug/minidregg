@@ -92,3 +92,20 @@ can instead require a caller-provided revision and complete bounded OT operation
 with declared read preflight. Full Markdown replacement needs shared text/OT
 vocabulary and conflict semantics. Existing HTTP body-parser defect remains as
 recorded in the knowledge adapter document.
+
+The new WBO qualification separately asserts fresh memory snapshot and saved
+history JSON geometry, with bounded read-only observation of the package's
+asynchronous save. A 500 can mean missing history but also a real save defect,
+so it fails immediately rather than being retried as readiness.
+It never retransmits the rectangle. Scrumblr similarly observes only fresh
+read snapshots after its single card send. A read that remains empty or a saved
+file that remains unavailable fails at the bound; neither means successful
+persistence. EtherDraw's read-only declaration refuses write qualification.
+Native fixture frames are source-derived, not recorded live captures.
+
+The old WBO/EtherDraw/Scrumblr Python operation branches are removed with these
+declarations. Existing batch rows name `native-conversation-receiver-not-attached`
+for WBO/Scrumblr until the native receiving entrypoint is attached, and
+`etherdraw-empty-project-readiness-defect` for EtherDraw. They do not dispatch a
+parallel app interpreter or count read-only export as a write PASS. The remaining
+shared legacy socket helpers are retained only for unmigrated callers.

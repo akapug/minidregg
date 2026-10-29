@@ -1,18 +1,139 @@
 # Hosted app interfaces: one declaration for agent tools and qualification
 
-Run 1, `lane/cx-app-interface`, 2026-10-28. Decision: **a typed, package-pinned
-adapter declaration, projected into tool schemas and exercised by the same
-qualification interpreter** (option c). Use existing Mini application admission
-where it can express the transport; extend the Effects engine for the missing
-conversation operations. Do not write another kernel effect by hand.
+Runs 1–2, `lane/cx-app-interface`, 2026-10-28. Approved design: **typed,
+package-pinned adapter declarations projected into tools and interpreted by the
+same native executor for calls and qualification** (option c). The product is
+an agent working on the member's live app data while a human uses that same
+grain in the browser. Qualification establishes that behavior; it is not the
+product. The 36-app selection below remains the candidate suite, not a claim
+of 36 completed integrations.
 
-This run supplies 36 curated candidates and three executable prototypes: Gogs,
-Wekan and Davros. The prototype runs on a member's hosted grain route and emits
-MCP tool schemas. It is **a qualification harness, not an installed Hermes
-runtime feature**. No Python service enters the platform. The production
-receiving boundary remains Lean admission plus Rust custody. In particular,
-passing a browser-route row does not establish agent-event admission or an
-actual Hermes turn. Those are distinct acceptance rows below.
+The Rust SDK now supplies declaration loading, schemas, HTTP/DAV encodings,
+preparations, relation checks, bounded DDP state, generic conversations and
+receipt-preserving execution. All 33 current declarations load in the native
+executor, generate bound tools and match the Python canonical digest. This
+checks the declaration/runtime contract, not live app acceptance. The shell calls
+the controller's existing foreground tool interface. The derived Effects receiving
+extension passes nine focused Rust receiving checks, including physical idle
+socket expiry, and awaits integration. **Hermes attachment/catalogue wiring, the
+composed real-agent turn,
+and Lean validation of the receiving extension remain open.** A browser-route
+PASS does not establish native agent admission or a real Hermes turn.
+
+### Current product boundary
+
+[`native/mini-sdk/APP-INTERFACES.md`](../native/mini-sdk/APP-INTERFACES.md) documents
+`Declaration::execute` and `Declaration::qualify`. Both use one interpreter and
+an injected native admission callback. The callback receives the exact prepared
+request and protected `SessionBinding`; it returns the verified response and
+native receipt. Every preparation, relation read and physical conversation send
+uses current authority. The SDK encodes app data; it cannot grant access.
+
+The controller attaches a declaration to an installed package and member session.
+Its immutable alias selects the namespace `mini_app_<alias>_<operation>`; dots
+in operation IDs become underscores. Aliases and resulting names must be unique.
+Model arguments contain application data, never a host, member identity, package
+selection or route credential. The shell pins `_miniInterfaceDigest`; the
+controller compares it to the attachment and strips it before input validation.
+The hidden foreground `mini_app_<alias>_qualify` entry point exercises the same
+executor and is excluded from the resident's advertised tools.
+
+**A stranger summons a Hermes resident into a shared house room. There is no
+per-room resident allocation.** The room is a collaboration surface, not an
+ambient grant to every participant's grains. Each attachment must remain bound
+to its member, task, package, session and serving generation. Switching task or
+member must not carry cookies, channel state or attachment authority forward.
+The current room/task grants and the package's member permissions are separate
+checks. The resident may act only through the admitted attachment available on
+that turn; a room message naming another member's grain confers no authority.
+
+The composed receiving row will ask the summoned resident to create a Gogs
+repository and issue, store a Davros file containing the issue reference, then
+read both back. An independent human browser session must display the issue and
+file on those same grains. The evidence must join the real model tool trace,
+package/declaration identities, native dispatch receipts and browser observation.
+A negative turn must actually attempt an unauthorized attachment and receive a
+named refusal; model reluctance is not a refusal row. L4c owns the Hermes
+controller integration; this lane supplies the SDK and declarations.
+
+### What the expanded suite establishes so far
+
+The detailed source contracts and limitations are in
+[knowledge interfaces](APP-INTERFACE-KNOWLEDGE-2026-10-28.md),
+[data interfaces](app-interfaces/DATA-2026-10-28.md) and
+[realtime interfaces](app-interfaces/REALTIME-2026-10-28.md).
+They correct discovery assumptions without rewriting historical run evidence:
+
+- Etherpad's packaged `/api` is disabled; declared text replacement uses its
+  multipart import and reads plain export. EtherCalc operates on the human's
+  same sheet, with full CSV replacement explicitly described.
+- Datasette includes signed-package upload and write plugins. The declaration
+  imports a database, writes records and queries them; it is not read-only.
+- MediaWiki uses token preparations and revision checks; WordPress drafts use
+  the package's Sandstorm role mapping, with application cookies omitted.
+- OrgTodo uses its sync endpoint and content hash precondition. Prioritize uses
+  a whole-state versioned replacement; duplicate task keys are refused before
+  dispatch. These are explicit concurrency contracts, not implicit transactions.
+- DokuWiki remote editing is disabled in this package; Permanote lacks a semantic
+  note read endpoint; SandCal lacks a semantic CSRF endpoint. Export-only tools
+  remain useful but cannot pass write qualification. YATA has a reviewed source
+  repair awaiting a newly signed package. A root-only synthetic Mercurial bundle
+  is not a general parent-aware commit interface.
+- Notebook execution needs both correlated `execute_reply` and idle. Groove
+  Basin's server token must stay attached to an open socket during HTTP file
+  access. Hummingbird events are transient: readback must occur on the socket
+  held across the tracking write. These requirements shape the shared native
+  conversation interpreter rather than per-app scripts.
+
+The old scripts are removed as their declared operations replace them. Python
+remains a bounded protocol conformance harness, never a platform service. New
+conversation features execute in the Rust interpreter; there is no second
+Python conversation implementation. Qualification rejects empty/read-only
+scenarios and unasserted writes. An asserted correlated event returned after a
+compound write is valid readback for a transient protocol; reconnecting to read
+an unrelated count would not be.
+
+Run 2's hbox work uses candidate `b26630168b63024c9c46311745fa0b25fa09c13f`.
+Etherpad, EtherCalc and FileDrop have passed live declared write/readback on
+member browser routes; FileDrop includes exact binary content and listing. Wekan lifecycle passed, but authentication still fails before mutation:
+payload-free physical-send timing shows the HTTP half arrives 11.56 seconds
+after the DDP login, beyond the app's ten-second deadline; the app then answers
+in about 18 ms. The compound native descriptor must admit both exact preimages
+before releasing the login and HTTP sends. Increasing recipe timeouts cannot
+repair this ordering. Earlier op26/op82 frame refusals did not reproduce on this
+candidate and have not been attributed to Wekan.
+
+Radicale passed lifecycle but its first calendar creation used `MKCALENDAR`,
+which the current native HTTP method surface cannot carry. The corrected
+declaration uses the package's supported extended `MKCOL` with an explicit calendar
+resource type; it does not promise timezone support. Datasette performed upload,
+insert and upsert, then failed output validation because the declaration expected
+a bare query array instead of the packaged version's `{ok, rows, ...}` envelope.
+The corrected projection passes focused fixtures; fresh live requalification
+is pending for both apps. Neither original failure counts as typed qualification.
+The batch stopped starting further phases when shared hbox Store processes
+blocked in ZFS writeback. A subsequent data-world stop also exposed the old
+op26 tag diagnostic; exact reply bytes were lost during teardown, so its
+underlying outcome remains unknown. Source review shows that opcode may carry
+a legitimate refusal or uncertain outcome instead of a fresh committed callback.
+The corrected clients decode those outcomes through the pinned Host and retain
+them, preserving the fresh-commit requirement and no-replay behavior. Enrollment
+authoring now also distinguishes NO_RECORD (253) from an undecided outcome (255).
+Two lifecycle and five enrollment checks pass, including the existing lost-submit
+no-reinvoke check. The original lost reply's specific outcome remains unknown.
+
+MediaWiki initially timed out during ingestion, before an API call. Its package
+has 23,540 files and 1,691 directories; serial per-file durability barriers
+amplified shared HDD latency. The materializer change retains a filesystem error
+cursor before staging writes, flushes the sealed stage before atomic publication,
+and persists the rename separately. The original package then passed an
+**importer-only** check in 86 seconds under the unchanged 273-second cap. This
+is not a MediaWiki lifecycle or agent-tool acceptance claim. The Linux durability
+contract is documented by [syncfs(2)](https://man7.org/linux/man-pages/man2/sync.2.html).
+
+The remaining sections preserve Run 1's design, curation and precisely scoped
+historical evidence. Present implementation details above supersede statements
+below that describe the initial three-app harness.
 
 ## 1. Curation and evidence
 

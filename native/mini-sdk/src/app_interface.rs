@@ -283,6 +283,41 @@ pub fn resolve(x: &Value, args: &Value, context: &Value, results: &Value) -> Res
     }
     Ok(x.clone())
 }
+fn checked_alias(alias: &str) -> Result<()> {
+    if alias.is_empty()
+        || alias.len() > 32
+        || !alias.as_bytes()[0].is_ascii_alphabetic()
+        || !alias
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+    {
+        return Err(refuse("attachment-alias-invalid"));
+    }
+    Ok(())
+}
+pub fn bound_tool_name(alias: &str, operation: &str) -> Result<String> {
+    checked_alias(alias)?;
+    if operation == "qualify"
+        || operation.is_empty()
+        || operation.len() > 128
+        || !operation.as_bytes()[0].is_ascii_alphabetic()
+        || !operation
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.'))
+        || operation.split('.').any(str::is_empty)
+    {
+        return Err(refuse("operation-name-invalid-or-reserved"));
+    }
+    Ok(format!(
+        "mini_app_{}_{}",
+        alias,
+        operation.replace('.', "_")
+    ))
+}
+pub fn qualification_tool_name(alias: &str) -> Result<String> {
+    checked_alias(alias)?;
+    Ok(format!("mini_app_{alias}_qualify"))
+}
 impl Declaration {
     pub fn load(bytes: &[u8]) -> Result<Self> {
         if bytes.len() > 4 * 1024 * 1024 {
@@ -312,12 +347,19 @@ impl Declaration {
                 return Err(refuse("declaration-limit-invalid"));
             }
         }
+        let mut names = std::collections::BTreeSet::new();
+        for name in ops.keys() {
+            if !names.insert(bound_tool_name("bound", name)?) {
+                return Err(refuse("operation-tool-name-collision"));
+            }
+        }
         for op in ops.values() {
             if !op["input"].is_object() || !op["output"].is_object() || !op["write"].is_boolean() {
                 return Err(refuse("declaration-invalid"));
             }
         }
         for op in ops.values() {
+            transport::validate_binding(&op["binding"])?;
             check_schema(&op["input"], 0)?;
             check_schema(&op["output"], 0)?;
         }
@@ -408,6 +450,16 @@ impl Declaration {
         }
         Ok(tools)
     }
+    pub fn bound_tools(&self, alias: &str) -> Result<Vec<Value>> {
+        checked_alias(alias)?;
+        let mut tools = self.tools()?;
+        for tool in &mut tools {
+            let op = string(&tool["operation"])?;
+            tool["name"] = json!(bound_tool_name(alias, op)?);
+            tool["_meta"]["attachment"] = json!(alias);
+        }
+        Ok(tools)
+    }
     pub fn validate_input(&self, name: &str, args: &Value) -> Result<()> {
         self.validate(&self.operation(name)?["input"], args, "input", 0)
     }
@@ -441,7 +493,24 @@ impl Declaration {
         results: &Value,
     ) -> Result<PreparedCall> {
         let op = self.operation(name)?;
-        let b = &op["binding"];
+        self.encode_http_binding(
+            name,
+            &op["binding"],
+            op["write"] == true,
+            args,
+            context,
+            results,
+        )
+    }
+    fn encode_http_binding(
+        &self,
+        name: &str,
+        b: &Value,
+        write: bool,
+        args: &Value,
+        context: &Value,
+        results: &Value,
+    ) -> Result<PreparedCall> {
         if b["protocol"] != "http" {
             return Err(refuse("transport-unsupported"));
         }
@@ -523,6 +592,36 @@ impl Declaration {
         if body.len() as u64 > number(&self.value["limits"]["bodyBytes"])? {
             return Err(refuse("body-over-bound"));
         }
+        if let Some(cookies) = b.get("cookies") {
+            if headers
+                .as_object()
+                .is_none_or(|o| o.keys().any(|k| k.eq_ignore_ascii_case("cookie")))
+            {
+                return Err(refuse("cookie-binding-ambiguous"));
+            }
+            let cookies = resolve(cookies, args, context, results)?;
+            let mut pairs = vec![];
+            for (k, v) in cookies
+                .as_object()
+                .ok_or_else(|| refuse("app-cookie-invalid"))?
+            {
+                if k == "__Host-mini_spk_session" {
+                    return Err(refuse("app-cookie-reserved"));
+                }
+                let v = string(v)?;
+                if k.is_empty()
+                    || k.chars()
+                        .any(|c| !c.is_ascii_alphanumeric() && !"_-.".contains(c))
+                    || v.chars().any(|c| c.is_control() || c == ';')
+                {
+                    return Err(refuse("app-cookie-invalid"));
+                }
+                pairs.push(format!("{k}={v}"));
+            }
+            if !pairs.is_empty() {
+                headers["cookie"] = json!(pairs.join("; "));
+            }
+        }
         let mut ordered_headers = vec![];
         for (k, v) in headers
             .as_object()
@@ -566,7 +665,7 @@ impl Declaration {
             declaration_sha256: self.sha256.clone(),
             package_id: self.package_id.clone(),
             operation: name.into(),
-            write: op["write"] == true,
+            write,
         })
     }
     pub fn decode(
@@ -609,16 +708,9 @@ impl Declaration {
         })()
         .map_err(|mut e: Refusal| {
             if write
-                && matches!(
-                    e.name.as_str(),
-                    "output-schema"
-                        | "app-response-invalid"
-                        | "app-content-type"
-                        | "app-text-invalid"
-                        | "reply-over-bound"
-                        | "dav-response-invalid"
-                        | "projection-shape-invalid"
-                )
+                && op["binding"]["status"]
+                    .as_array()
+                    .is_some_and(|a| a.contains(&json!(status)))
             {
                 e.uncertain = true;
             }
@@ -636,6 +728,15 @@ impl Declaration {
             return Err(refuse("interface-binding-mismatch"));
         }
         let op = self.operation(&p.operation)?;
+        self.decode_http_binding(op, status, headers, body)
+    }
+    fn decode_http_binding(
+        &self,
+        op: &Value,
+        status: u16,
+        headers: &[(String, String)],
+        body: &[u8],
+    ) -> Result<Value> {
         let write = op["write"] == true;
         if body.len() as u64 > number(&self.value["limits"]["replyBytes"])? {
             return Err(Refusal {
@@ -681,7 +782,49 @@ impl Declaration {
                 }) {
                     return Err(refuse("app-content-type"));
                 }
-                serde_json::from_slice(body).map_err(|_| refuse("app-response-invalid"))?
+                if body.is_empty() {
+                    op["binding"]
+                        .get("emptyValue")
+                        .cloned()
+                        .ok_or_else(|| refuse("app-response-invalid"))?
+                } else {
+                    serde_json::from_slice(body).map_err(|_| refuse("app-response-invalid"))?
+                }
+            }
+            "json-string-fragment" => {
+                if op["internal"] != true || write {
+                    return Err(refuse("binding-auth-fragment-invalid"));
+                }
+                let prefix = string(&op["binding"]["fragment"]["prefix"])?;
+                let suffix = string(&op["binding"]["fragment"]["suffix"])?;
+                if !(1..=256).contains(&prefix.chars().count())
+                    || !(1..=64).contains(&suffix.chars().count())
+                {
+                    return Err(refuse("binding-auth-fragment-invalid"));
+                }
+                let text =
+                    std::str::from_utf8(body).map_err(|_| refuse("app-auth-fragment-invalid"))?;
+                if text.matches(prefix).count() != 1 {
+                    return Err(refuse("app-auth-fragment-invalid"));
+                }
+                let fragment = text.split_once(prefix).unwrap().1;
+                if !fragment.starts_with('"') {
+                    return Err(refuse("app-auth-fragment-invalid"));
+                }
+                let mut stream = serde_json::Deserializer::from_str(fragment).into_iter::<Value>();
+                let value = stream
+                    .next()
+                    .transpose()
+                    .map_err(|_| refuse("app-auth-fragment-invalid"))?
+                    .filter(Value::is_string)
+                    .ok_or_else(|| refuse("app-auth-fragment-invalid"))?;
+                if !fragment[stream.byte_offset()..]
+                    .trim_start()
+                    .starts_with(suffix)
+                {
+                    return Err(refuse("app-auth-fragment-invalid"));
+                }
+                value
             }
             "json-lines" => {
                 let text = std::str::from_utf8(body).map_err(|_| refuse("app-text-invalid"))?;
@@ -706,6 +849,38 @@ impl Declaration {
             "caldav-multistatus" => dav(body, true)?,
             _ => return Err(refuse("binding-decoding-unsupported")),
         };
+        if let Some(mapping) = op["binding"].get("responseHeaders") {
+            let mut out = serde_json::Map::new();
+            for (field, name) in mapping
+                .as_object()
+                .ok_or_else(|| refuse("binding-response-headers-invalid"))?
+            {
+                let name = string(name)?;
+                if !matches!(
+                    name,
+                    "etag"
+                        | "last-modified"
+                        | "content-type"
+                        | "content-length"
+                        | "x-sandstorm-app-data-version"
+                ) {
+                    return Err(refuse("binding-response-headers-invalid"));
+                }
+                let found: Vec<_> = headers
+                    .iter()
+                    .filter(|(k, _)| k.eq_ignore_ascii_case(name))
+                    .collect();
+                if found.len() != 1 {
+                    return Err(refuse("app-response-header-missing-or-duplicate"));
+                }
+                let value = &found[0].1;
+                if value.len() > 4096 || value.chars().any(char::is_control) {
+                    return Err(refuse("app-response-header-invalid"));
+                }
+                out.insert(field.clone(), json!(value));
+            }
+            return Ok(json!({"body":value,"headers":out}));
+        }
         Ok(value)
     }
     fn validate(&self, s: &Value, v: &Value, phase: &str, depth: usize) -> Result<()> {
@@ -768,6 +943,15 @@ impl Declaration {
             }
         }
         if let Some(o) = v.as_object() {
+            if s["maxProperties"]
+                .as_u64()
+                .is_some_and(|n| o.len() as u64 > n)
+                || s["minProperties"]
+                    .as_u64()
+                    .is_some_and(|n| (o.len() as u64) < n)
+            {
+                return Err(bad());
+            }
             if let Some(required) = s["required"].as_array() {
                 for k in required {
                     if !o.contains_key(string(k)?) {
@@ -790,6 +974,26 @@ impl Declaration {
                 || s["minItems"].as_u64().is_some_and(|n| (a.len() as u64) < n)
             {
                 return Err(bad());
+            }
+            if let Some(key) = s["uniqueBy"].as_str() {
+                let bad = || refuse(&format!("{phase}-unique-key"));
+                if a.len() > 1000 {
+                    return Err(bad());
+                }
+                let mut seen = std::collections::BTreeSet::new();
+                for item in a {
+                    let v = item.as_object().and_then(|o| o.get(key)).ok_or_else(bad)?;
+                    let key = if let Some(s) = v.as_str() {
+                        format!("s:{s}")
+                    } else if v.as_i64().is_some() || v.as_u64().is_some() {
+                        format!("i:{v}")
+                    } else {
+                        return Err(bad());
+                    };
+                    if !seen.insert(key) {
+                        return Err(bad());
+                    }
+                }
             }
             if let Some(sub) = s.get("items") {
                 for x in a {
@@ -1019,6 +1223,11 @@ impl Declaration {
         }
         let op = self.operation(name)?;
         self.validate(&op["input"], args, "input", 0)?;
+        let mut context = context.clone();
+        if let Some(ms) = context["nowMs"].as_u64() {
+            context["nowIso"] = json!(utc_iso(ms)?);
+        }
+        let context = &context;
         let mut results = json!({});
         if let Some(steps) = op.get("prepare") {
             for step in steps
@@ -1102,6 +1311,19 @@ impl Declaration {
         };
         let scoped = cookies.for_path(&target)?;
         results["__mini_cookie_jar"] = json!(scoped);
+        if op["binding"]["protocol"] == "conversation" {
+            let value = self
+                .execute_conversation(name, args, context, binding, dispatch, receipts, cookies)?;
+            return (|| {
+                let value = project(op, value, args, context, &results)?;
+                self.validate(&op["output"], &value, "output", 0)?;
+                Ok(value)
+            })()
+            .map_err(|mut e: Refusal| {
+                e.uncertain |= op["write"] == true;
+                e
+            });
+        }
         if op["binding"]["protocol"] == "ddp" {
             let value = self.execute_ddp(name, args, context, binding, dispatch, receipts)?;
             return (|| {
@@ -1194,6 +1416,11 @@ impl Declaration {
             for step in steps {
                 let op = self.operation(string(&step["op"])?)?;
                 if op["write"] == true {
+                    if step["assert"].as_array().is_some_and(|a| !a.is_empty())
+                        && compound_readback(op)
+                    {
+                        readback = true;
+                    }
                     saw_write = true
                 } else if saw_write && step["assert"].as_array().is_some_and(|a| !a.is_empty()) {
                     readback = true
@@ -1289,9 +1516,9 @@ fn check_schema(s: &Value, depth: usize) -> Result<()> {
     for (k, v) in object {
         match k.as_str() {
             "type" | "$ref" | "enum" | "const" | "required" | "minimum" | "maximum"
-            | "exclusiveMinimum" | "exclusiveMaximum" | "minLength" | "maxLength" | "minItems"
-            | "maxItems" | "title" | "description" | "default" | "examples"
-            | "contentMediaType" => {}
+            | "exclusiveMinimum" | "exclusiveMaximum" | "maxProperties" | "minProperties"
+            | "minLength" | "maxLength" | "minItems" | "maxItems" | "title" | "description"
+            | "default" | "examples" | "contentMediaType" => {}
             "format" => {
                 if v != "relative-path" {
                     return Err(refuse("schema-format-unsupported"));
@@ -1300,6 +1527,11 @@ fn check_schema(s: &Value, depth: usize) -> Result<()> {
             "contentEncoding" => {
                 if v != "base64" {
                     return Err(refuse("schema-encoding-unsupported"));
+                }
+            }
+            "uniqueBy" => {
+                if !v.as_str().is_some_and(|s| !s.is_empty()) {
+                    return Err(refuse("schema-invalid"));
                 }
             }
             "pattern" => {
@@ -1334,240 +1566,8 @@ fn check_schema(s: &Value, depth: usize) -> Result<()> {
     Ok(())
 }
 
-impl Declaration {
-    fn conversation<F>(
-        &self,
-        name: &str,
-        binding: &SessionBinding,
-        path: &str,
-        descriptor: Value,
-        mutation: bool,
-        dispatch: &mut F,
-        receipts: &mut Vec<Value>,
-    ) -> Result<Value>
-    where
-        F: FnMut(&SessionBinding, &PreparedCall) -> Result<NativeReply>,
-    {
-        let body = serde_json::to_vec(&descriptor)
-            .map_err(|_| refuse("conversation-descriptor-invalid"))?;
-        if body.len() > 65536 {
-            return Err(refuse("body-over-bound"));
-        }
-        let call = PreparedCall {
-            method: "CONVERSATION".into(),
-            path: path.into(),
-            query: String::new(),
-            ordered_headers: vec![("content-type".into(), "application/json".into())],
-            body,
-            declaration_sha256: self.sha256.clone(),
-            package_id: self.package_id.clone(),
-            operation: name.into(),
-            write: mutation,
-        };
-        let reply = dispatch(binding, &call)?;
-        receipts.push(reply.receipt);
-        let result = (|| {
-            if reply.status != 200 {
-                return Err(refuse("conversation-http-refused"));
-            }
-            if reply.body.len() > 1048576 {
-                return Err(refuse("reply-over-bound"));
-            }
-            let v: Value = serde_json::from_slice(&reply.body)
-                .map_err(|_| refuse("conversation-response-invalid"))?;
-            if v["version"] != 1
-                || v["channel"] != descriptor["channel"]
-                || v["op"] != descriptor["op"]
-                || !v["frames"]
-                    .as_array()
-                    .is_some_and(|a| a.iter().all(Value::is_string))
-            {
-                return Err(refuse("conversation-response-mismatch"));
-            }
-            Ok(v)
-        })();
-        result.map_err(|mut e: Refusal| {
-            e.uncertain |= mutation;
-            e
-        })
-    }
-    fn ddp_frames<F>(
-        &self,
-        name: &str,
-        binding: &SessionBinding,
-        path: &str,
-        channel: &str,
-        reply: &Value,
-        state: &mut crate::app_interface_ddp::DdpState,
-        dispatch: &mut F,
-        receipts: &mut Vec<Value>,
-    ) -> Result<()>
-    where
-        F: FnMut(&SessionBinding, &PreparedCall) -> Result<NativeReply>,
-    {
-        for frame in reply["frames"]
-            .as_array()
-            .ok_or_else(|| refuse("conversation-response-invalid"))?
-        {
-            if let Some(pong) = state.frame(
-                string(frame)?,
-                number(&self.value["limits"]["snapshotDocuments"])? as usize,
-            )? {
-                let text = serde_json::to_string(&pong).map_err(|_| refuse("ddp-frame-invalid"))?;
-                self.conversation(
-                    name,
-                    binding,
-                    path,
-                    json!({"version":1,"op":"send","channel":channel,"text":text}),
-                    false,
-                    dispatch,
-                    receipts,
-                )?;
-            }
-        }
-        Ok(())
-    }
-    fn execute_ddp<F>(
-        &self,
-        name: &str,
-        args: &Value,
-        context: &Value,
-        binding: &SessionBinding,
-        dispatch: &mut F,
-        receipts: &mut Vec<Value>,
-    ) -> Result<Value>
-    where
-        F: FnMut(&SessionBinding, &PreparedCall) -> Result<NativeReply>,
-    {
-        let op = self.operation(name)?;
-        let b = &op["binding"];
-        let auth = &self.value["auth"];
-        if auth["kind"] != "sandstorm-ddp-rendezvous" {
-            return Err(refuse("auth-protocol-unsupported"));
-        }
-        let seed = context["rendezvousSeed"]
-            .as_str()
-            .ok_or_else(|| refuse("controller-rendezvous-seed-required"))?;
-        if seed.len() != 64
-            || !seed
-                .bytes()
-                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-        {
-            return Err(refuse("controller-rendezvous-seed-invalid"));
-        }
-        let serial = receipts.len();
-        let root_id = context["operationId"]
-            .as_str()
-            .ok_or_else(|| refuse("controller-operation-id-required"))?;
-        let id = format!(
-            "{:x}",
-            Sha256::digest(format!("mini/ddp/op/v1/{root_id}/{serial}/{name}"))
-        );
-        let channel = format!("mini-{id}");
-        let token = format!(
-            "{:x}",
-            Sha256::digest(format!("mini/ddp/auth/v1/{seed}/{id}"))
-        );
-        let path = string(&auth["websocket"])?.trim_start_matches('/');
-        let mut state = crate::app_interface_ddp::DdpState::default();
-        let open=self.conversation(name,binding,path,json!({"version":1,"op":"open","channel":channel,"protocol":"ddp-v1","maxFrames":64,"maxBytes":65536,"deadlineMs":30000}),false,dispatch,receipts)?;
-        let mut sent_mutation = false;
-        let result=(||{
-            self.ddp_frames(name,binding,path,&channel,&open,&mut state,dispatch,receipts)?;
-            let connect=json!({"msg":"connect","version":"1","support":["1"]}).to_string();
-            let reply=self.conversation(name,binding,path,json!({"version":1,"op":"send","channel":channel,"text":connect}),false,dispatch,receipts)?;
-            self.ddp_frames(name,binding,path,&channel,&reply,&mut state,dispatch,receipts)?;
-            if !state.connected{
-                let reply=self.conversation(name,binding,path,json!({"version":1,"op":"receive","channel":channel,"condition":{"msg":"any"},"maxFrames":64,"maxBytes":65536,"deadlineMs":30000}),false,dispatch,receipts)?;
-                self.ddp_frames(name,binding,path,&channel,&reply,&mut state,dispatch,receipts)?;
-                if !state.connected{return Err(refuse("ddp-connect-incomplete"))}
-            }
-            let login_id=format!("login-{id}");let login=json!({"msg":"method","method":auth["method"],"id":login_id,"params":[token]}).to_string();
-            let reply=self.conversation(name,binding,path,json!({"version":1,"op":"rendezvous","channel":channel,"text":login,"http":{"method":"POST","path":string(&auth["postPath"])?.trim_start_matches('/'),"query":"","headers":[{"name":"content-type","value":auth["contentType"]}],"bodyHex":crate::hex::encode(token.as_bytes())},"maxFrames":64,"maxBytes":65536,"deadlineMs":30000}),false,dispatch,receipts)?;
-            self.ddp_frames(name,binding,path,&channel,&reply,&mut state,dispatch,receipts)?;
-            if reply["httpStatus"]!=204{return Err(refuse("auth-rendezvous-refused"))}
-            let login=self.ddp_finish(name,binding,path,&channel,&login_id,&mut state,false,dispatch,receipts)?;
-            let uid=login[string(&auth["userIdField"])?].as_str().filter(|s|!s.is_empty()).ok_or_else(||refuse("auth-member-required"))?;
-            let mut local=context.clone();local["userId"]=json!(uid);local["operationId"]=json!(id);
-            let params=resolve(&b["params"],args,&local,&Value::Null)?;
-            match string(&b["kind"])?{
-                "method"=>{
-                    let frame=json!({"msg":"method","method":b["method"],"id":id,"params":params}).to_string();
-                    let reply=self.conversation(name,binding,path,json!({"version":1,"op":"send","channel":channel,"text":frame}),op["write"]==true,dispatch,receipts)?;
-                    sent_mutation=op["write"]==true;
-                    self.ddp_frames(name,binding,path,&channel,&reply,&mut state,dispatch,receipts)?;
-                    let value=self.ddp_finish(name,binding,path,&channel,&id,&mut state,sent_mutation,dispatch,receipts)?;
-                    if b["result"]=="insert-id" {if value!=id{return Err(refuse("ddp-insert-id-mismatch"))}Ok(json!({"id":id}))}else if b["result"]=="json"{Ok(value)}else{Err(refuse("ddp-result-unsupported"))}
-                },
-                "snapshot"=>{
-                    let frame=json!({"msg":"sub","id":id,"name":b["publication"],"params":params}).to_string();
-                    let reply=self.conversation(name,binding,path,json!({"version":1,"op":"send","channel":channel,"text":frame}),false,dispatch,receipts)?;
-                    self.ddp_frames(name,binding,path,&channel,&reply,&mut state,dispatch,receipts)?;
-                    let collections=b["collections"].as_array().ok_or_else(||refuse("declaration-invalid"))?.iter().map(|v|string(v).map(str::to_owned)).collect::<Result<Vec<_>>>()?;
-                    if let Some(value)=state.snapshot(&id,&collections)?{return Ok(value)}
-                    let reply=self.conversation(name,binding,path,json!({"version":1,"op":"receive","channel":channel,"condition":{"msg":"ready","id":id},"maxFrames":64,"maxBytes":65536,"deadlineMs":30000}),false,dispatch,receipts)?;
-                    self.ddp_frames(name,binding,path,&channel,&reply,&mut state,dispatch,receipts)?;
-                    state.snapshot(&id,&collections)?.ok_or_else(||refuse("ddp-publication-incomplete"))
-                },_=>Err(refuse("ddp-kind-unsupported")),
-            }
-        })().map_err(|mut e|{if sent_mutation&&e.name!="ddp-method-refused"{e.uncertain=true;}e});
-        // A close is a fresh admitted operation, never a replay of any method.
-        let close = self.conversation(
-            name,
-            binding,
-            path,
-            json!({"version":1,"op":"close","channel":channel}),
-            false,
-            dispatch,
-            receipts,
-        );
-        match result {
-            Err(e) => Err(e),
-            Ok(v) => {
-                close.map_err(|mut e: Refusal| {
-                    e.uncertain |= sent_mutation;
-                    e
-                })?;
-                Ok(v)
-            }
-        }
-    }
-    fn ddp_finish<F>(
-        &self,
-        name: &str,
-        binding: &SessionBinding,
-        path: &str,
-        channel: &str,
-        id: &str,
-        state: &mut crate::app_interface_ddp::DdpState,
-        mutation: bool,
-        dispatch: &mut F,
-        receipts: &mut Vec<Value>,
-    ) -> Result<Value>
-    where
-        F: FnMut(&SessionBinding, &PreparedCall) -> Result<NativeReply>,
-    {
-        if let Some(v) = state.method_result(id)? {
-            return Ok(v);
-        }
-        // Both result and updated are required; receive preserves all intervening
-        // frames, so either order and a combined frame batch are accepted.
-        for _ in 0..64 {
-            if let Some(v) = state.method_result(id)? {
-                return Ok(v);
-            }
-            let msg = state.method_waiting_for(id);
-            let reply=self.conversation(name,binding,path,json!({"version":1,"op":"receive","channel":channel,"condition":{"msg":msg,"id":id},"maxFrames":64,"maxBytes":65536,"deadlineMs":30000}),mutation,dispatch,receipts)?;
-            self.ddp_frames(
-                name, binding, path, channel, &reply, state, dispatch, receipts,
-            )?;
-        }
-        state.method_result(id)?.ok_or_else(|| Refusal {
-            name: "ddp-method-incomplete".into(),
-            uncertain: mutation,
-        })
-    }
-}
+#[path = "app_interface_transport.rs"]
+mod transport;
 
 fn project(
     op: &Value,
@@ -1759,4 +1759,76 @@ fn rss(body: &[u8], limit: usize) -> Result<Value> {
         out.push(json!({"id":id,"title":fields.get("title").and_then(Option::as_ref),"link":fields.get("link").and_then(Option::as_ref),"description":fields.get("description").and_then(Option::as_ref),"published":fields.get("pubDate").and_then(Option::as_ref),"enclosure":enclosure}));
     }
     Ok(json!(out))
+}
+
+fn compound_readback(op: &Value) -> bool {
+    let b = &op["binding"];
+    if b["protocol"] != "conversation" {
+        return false;
+    }
+    let Some(steps) = b["steps"].as_array() else {
+        return false;
+    };
+    let Some(last) = steps
+        .iter()
+        .rposition(|s| ["send", "emit", "http"].iter().any(|k| s.get(k).is_some()))
+    else {
+        return false;
+    };
+    let mut captures = std::collections::BTreeSet::new();
+    for step in &steps[last + 1..] {
+        if step["receive"]["where"]
+            .as_array()
+            .is_some_and(|a| !a.is_empty())
+        {
+            if let Some(id) = step["id"].as_str() {
+                captures.insert(id.to_owned());
+            }
+        }
+        if let Some(terminals) = step["receiveAll"].as_array() {
+            for t in terminals {
+                if t["where"].as_array().is_some_and(|a| !a.is_empty()) {
+                    if let Some(id) = t["id"].as_str() {
+                        captures.insert(id.to_owned());
+                    }
+                }
+            }
+        }
+    }
+    fn uses(v: &Value, ids: &std::collections::BTreeSet<String>) -> bool {
+        if let Some(o) = v.as_object() {
+            if o.len() == 1 && o.contains_key("result") {
+                return v["result"][0].as_str().is_some_and(|s| ids.contains(s));
+            }
+            o.values().any(|v| uses(v, ids))
+        } else {
+            v.as_array().is_some_and(|a| a.iter().any(|v| uses(v, ids)))
+        }
+    }
+    uses(&b["result"], &captures)
+}
+
+fn utc_iso(ms: u64) -> Result<String> {
+    let days = (ms / 86400000) as i64;
+    let z = days + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let mut y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = mp + if mp < 10 { 3 } else { -9 };
+    y += if m <= 2 { 1 } else { 0 };
+    if y > 9999 {
+        return Err(refuse("controller-time-invalid"));
+    }
+    let seconds = ms / 1000;
+    Ok(format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.{:03}Z",
+        seconds / 3600 % 24,
+        seconds / 60 % 60,
+        seconds % 60,
+        ms % 1000
+    ))
 }

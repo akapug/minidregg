@@ -19,9 +19,8 @@ restoreAllArtifacts = true
 # Its .warn sub-option is silenced in moreLeanArgs above (a TOML key cannot be both a value and a table).
 [leanOptions]
 backward.privateInPublic = true
-# Proofs nested in a public definition stay inline, as before the module system: abstracting them into
-# `_proof_N` theorems changes definition VALUES, and the persisted-codec census hashes values into the
-# StoreEpoch (measured: PolicyRecordCodec.stringStream's value hash returns to main's with this on).
+# Retain the existing visibility of proofs nested in public definitions during
+# the module-system transition. Proof implementation details are not wire identities.
 backward.proofsInPublic = true
 compiler.relaxedMetaCheck = true
 

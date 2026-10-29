@@ -24,6 +24,17 @@ class DataDeclarations(unittest.TestCase):
         with self.assertRaises(Refusal):
             validate(d, op['input'], {**args, 'path': '../secret.ipynb'})
 
+    def test_datasette_query_projects_the_package_rows_envelope(self):
+        from binding import Engine
+        d = self.declaration('datasette')
+        class QueryReply:
+            def http(self, request):
+                return 200, {'content-type': 'application/json'}, json.dumps({
+                    'ok': True, 'database': 'sample', 'rows': [{'id': 'one', 'value': 'updated'}],
+                    'columns': ['id', 'value'], 'truncated': False}).encode()
+        result = Engine(d, QueryReply(), {}).call('sql.query', {'database': 'sample', 'sql': 'select id,value from records'})
+        self.assertEqual(result, [{'id': 'one', 'value': 'updated'}])
+
     def test_expense_requires_positive_amount_before_dispatch(self):
         d = self.declaration('expenseowl')
         op = d['operations']['expense.create']

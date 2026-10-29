@@ -27,6 +27,10 @@ including one jointly admitted login-frame/HTTP rendezvous. It requires trusted
 controller context `operationId`, `nowMs` and fresh cryptographic `rendezvousSeed`
 (32-byte lowercase hex). The app's login result alone supplies `userId`.
 Result and updated are both required; no reconnect/replay recovers a mutation.
+Declared `credential-resume` auth reads its credential endpoint through the same
+private admitted callback and sends `login([{resume: token}])` on that channel.
+The token and credential reply never enter the final typed result. One absolute
+`limits.seconds` deadline covers all DDP calls, including auth and cleanup.
 
 The shell uses the controller's existing foreground tool IPC, preserving its same admission,
 attachment checks, exact request custody and recovery ID:

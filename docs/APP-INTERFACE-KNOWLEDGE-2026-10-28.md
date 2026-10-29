@@ -208,3 +208,63 @@ per-file durability barriers under shared HDD latency. It does not establish
 that byte limits, package validity or an app protocol is defective. Any fix must
 preserve complete durable staging before immutable publication; enlarging a
 recipe timeout does not address that mechanism.
+
+## Receiving results after the importer fix
+
+The isolated serial browser-route run passed Etherpad lifecycle (605 s) and its
+declared multipart replacement plus exact export readback. EtherCalc lifecycle
+(394 s) and its declared CSV replacement plus typed row-value readback also
+passed. These are owner browser-route results on the same live grains; neither
+is a native agent receiver or real Hermes turn. MediaWiki's original run remains
+a pre-API ingest timeout, and the later apps remain in progress.
+
+The materializer fix `392e41c4c` replaces per-file durability barriers with one
+checked Linux `syncfs` after every private staged byte, symlink and mode is
+sealed, retaining its directory descriptor before any staged writes. Atomic
+no-replace rename and the final store-directory fsync remain. A fault-injected
+barrier EIO was observed red before wiring, then both scoped materializer tests
+passed on the warm dregg-build tree (8 s, 989 MiB); the binary build took 4 s.
+
+**Importer-only physical validation passed on hbox:** the same original
+MediaWiki SPK `16bcca05d59606b908681c07b202752a51e29ecbbcafcd2b43aa2c7de5e4cc15`
+under the unchanged 273-second `market-large-v1` guard materialized and passed
+the helper's immutable-image verification. Unit runtime was 85.511 s, CPU
+30.724 s, peak memory 57 MiB; total helper wall time was 86.29 s. Patched binary
+SHA-256 is `721054dc9a93d2f1646a3af35075574546fd5f3a7306ef48fea794683a86bb0e`.
+This used a fresh lane-owned importer namespace, without overwriting candidate
+binaries or claiming Mini lifecycle/API admission. Different cache/load state
+means the before/after durations are not a controlled performance benchmark.
+The result establishes that this package can complete the actual unchanged
+intake bound with the new durability boundary.
+
+Linux waits for filesystem sync completion and, from kernel 5.8, reports
+writeback errors. The deployed hbox kernel is 6.11; the supported deployment
+baseline must remain at least 5.8. Filesystem-wide unrelated errors conservatively
+refuse publication. See the [Linux syncfs contract](https://man7.org/linux/man-pages/man2/sync.2.html).
+
+Radicale lifecycle passed (646 s), but its original first `MKCALENDAR` request
+returned no reply and was classified `dispatch-uncertain`. It was not replayed.
+The native entrance and WebSession mapping support `MKCOL` and `REPORT`, but
+have no `MKCALENDAR` method. The corrected declaration uses packaged extended
+`MKCOL`: `do_MKCOL` parses the same collection properties then writes the
+collection, and `props_from_request` recognizes a CalDAV calendar resource type.
+It explicitly declares `DAV:collection` and CalDAV `calendar`, without timezone
+properties. A focused declaration fixture passed; fresh live readback of this
+corrected declaration remains NOT_RUN. This is a receiving-method mismatch,
+not evidence that the package cannot create calendars.
+
+The run was stopped from advancing under shared filesystem pressure. Hugo had
+passed birth (54.550 s), install (131.059 s), share (410.061 s), and start
+(174.343 s); its already-issued enrollment settled with exit code 0 and an enrollment receipt.
+The runner remained paused before the page request. No Hugo
+document operation, WordPress operation or TT-RSS operation had been dispatched.
+The queued fresh Radicale run was canceled. Its extended-MKCOL declaration
+remains fixture-validated and live pending. Exact frame/claim artifacts were
+retained privately before world teardown; these partial lifecycle results do
+not establish API acceptance.
+
+The lane world was torn down after the settled phase and final private evidence
+snapshot. `WORLD DOWN` reported `removal_assertions=0` and exit 0; its broker,
+residents, mounted grain volumes, world registration and sudo rule were removed.
+No fresh calendar run was started under the pressure stop. Native-agent/Hermes
+receiving evidence for these knowledge apps remains NOT_RUN.

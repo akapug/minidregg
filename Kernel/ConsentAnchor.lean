@@ -27,7 +27,6 @@ the signing key beside it. The chain is what makes it a commitment: equal
 chains are equal prefixes, up to a collision of the deployed hash.
 -/
 import Kernel.NativeHostReplay
-import Compiler.PersistedCodecTagCensus
 
 namespace Minidregg.Kernel.ConsentAnchor
 

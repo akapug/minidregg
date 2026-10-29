@@ -3,7 +3,7 @@
 Present state, rewritten whole by the qualification lead (lane/qualify) each time it changes. Never
 appended. Rehearsal #3 ships only when every row in sections 1 to 3 is green on ONE candidate.
 
-**As of 2026-10-28 17:40 UTC.** The newest READY candidate is 68cf4ba7a. 9bd52317c is in its gate
+**As of 2026-10-28 18:20 UTC.** The lane's state for a successor is docs/QUALIFY-STATE.md. The newest READY candidate is 68cf4ba7a. 9bd52317c is in its gate
 (enrol-resume green); it is the first build to name the refusing share-issue stage. 327096423 is
 building: it carries keep-going composed b4653448e, the refusal logging 4241cf11a, the door/story
 fixes and perf-rake. Later builds reach READY before umbrellas. **Verdict: NO-GO.**
@@ -38,7 +38,7 @@ fixes and perf-rake. Later builds reach READY before umbrellas. **Verdict: NO-GO
 | composed rooms | GREEN (q2, q3; room owner member-1) | /build/q3/composed/state | — | — |
 | composed churn | GREEN | same | — | — |
 | composed documents | GREEN at load 7-15; RED at load 45 (5 re-plans exhausted, `stale-target`) | q1 (quoted in e907f47e3) | qualify | client: time-bounded jittered re-plan, e907f47e3 on main f8cbcd5d3. Kernel commuting append: statement drafted, ruling owed (below) |
-| composed apps:sheet | RED: `mini share issue outcome did not confirm` | /build/q2/inputs/evidence/app-930001/hooks/*/117-command.stderr | B3 a85d12892ea6de3ca | Ruled out: the plan/submit window (no turn between them in ci-349d) and the issuer (b332e565c). Remaining suspects: the app-delegation leg, or grain-birth admission. 9bd52317c's stage line decides |
+| composed apps:sheet | RED: stage named on 9bd52317c, `app delegation check` (the manager cites the member's app capability) | /build/q2/inputs/evidence/app-930001/hooks/*/117-command.stderr | B3 a85d12892ea6de3ca | Product fix lane/un-japps-rows b65465c72 (52d15a6ce: the member delegates the manager a child capability). Overlay japps two-subject e2e running on hbox. The composed fixture needs the same delegation step: owed harness change (QUALIFY-STATE.md) |
 | composed apps: EtherCalc as the app | in q3 (overlay c8d0e2341) | /build/q3 | qualify | lane/qualify 41581198b (held at the integrator until q3 passes apps install) |
 | composed connector | RED: `routeFrontRequired` (no https front) | /build/q3/inputs/result.log | qualify sub-agent on dregg-infra qualify/jworld-composed | qj-2 printed no CONNECTOR UNAVAILABLE line; verifying |
 | composed residents | BLOCKED (connector); also needs distinct owner/management principals, root-owned keys-client.json, bwrap beside launch-gate, root hand-offs | same | same sub-agent | in progress |
@@ -72,8 +72,8 @@ fixes and perf-rake. Later builds reach READY before umbrellas. **Verdict: NO-GO
 
 | row | status | owner | fix |
 |---|---|---|---|
-| apps worker hard-codes the workroom shape (apps_worker.rs:1068-1072); every worker session birth refused on the demo genesis | RED (forecast) | acec1de6f1c53a04c | — |
-| a refused worker reserve is never released (apps_worker.rs:1063/1188) | RED (forecast) | acec1de6f1c53a04c | — |
+| apps worker hard-codes the workroom shape (apps_worker.rs:1068-1072); every worker session birth refused on the demo genesis | FIXED, unmerged | acec1de6f1c53a04c | e6d1f77f3 (lane/un-japps-rows) |
+| a refused worker reserve is never released (apps_worker.rs:1063/1188) | FIXED, unmerged | acec1de6f1c53a04c | f2185daf3 (lane/un-japps-rows b65465c72) |
 | real app ids above 2^63 (manifest+1, `app_n*100` wrap, grain.rs:1634, grain_agent_route.rs:262, controlGroupBound) | mostly fixed | acec1de6f1c53a04c | bd9318540 |
 | apps worker served one member at a time; install inline | FIXED, on main | ab368e520ce312b3c | dd7de9faf |
 | apps bootstrap birthStale on a world older than 64 ticks | push asked (coordinator: now) | acec1de6f1c53a04c | 6566216c8 / da5a51424. Row: `AGE=70 qrun.sh` |

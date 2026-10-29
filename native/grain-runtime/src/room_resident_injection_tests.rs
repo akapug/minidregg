@@ -131,7 +131,7 @@ fn every_tool_outside_the_room_catalogue_is_refused_by_the_controller() {
         "mini_workspace_propose", "mini_workspace_submit", "mini_workspace_import_reference", "mini_workspace_export_reference",
         "mini_workspace_read", "mini_workspace_create", "mini_publish", "mini_read_resource", "mini_grain_status",
         "mini_create_resource", "mini_create_application", "mini_create_application_session", "mini_application_api",
-        "mini_gitweb_edit", "mini_gitweb_read", "mini_stream_discovery", "mini_stream_entry",
+        "__mini_typed_http_raw", "mini_app_gogs_repo_create", "mini_gitweb_edit", "mini_gitweb_read", "mini_stream_discovery", "mini_stream_entry",
     ] {
         let error = rt.tool_call(name, &json!({"doc":"alice-private","text":"owned","recipient":"666","verbs":["control"]})).unwrap_err();
         assert!(error.contains("only room tools"), "{name:?}: {error}");

@@ -294,20 +294,6 @@ fn readonly_await_retries_only_declared_transient_statuses() {
     assert!(e.outcome.is_ok());
     assert_eq!(e.receipts.len(), 3);
 }
-#[test]
-fn additional_declared_interfaces_load_if_fixture_directory_is_supplied() {
-    let Some(dir) = std::env::var_os("MINI_INTERFACE_FIXTURES") else {
-        return;
-    };
-    for path in std::fs::read_dir(dir).unwrap() {
-        let path = path.unwrap().path();
-        if path.extension().is_some_and(|e| e == "json") {
-            if let Err(e) = Declaration::load(&std::fs::read(&path).unwrap()) {
-                panic!("{}: {}", path.display(), e.name)
-            }
-        }
-    }
-}
 
 #[test]
 fn postmutation_cookie_refusal_is_uncertain_but_default_omit_ignores_it() {
@@ -411,4 +397,383 @@ fn qualification_refuses_missing_write_readback_before_any_dispatch() {
         "qualification-write-readback-absent"
     );
     assert!(e.receipts.is_empty());
+}
+
+#[test]
+fn generic_json_conversation_collects_correlated_terminals_in_any_order() {
+    use mini_sdk::app_interface::NativeReply;
+    for reverse in [false, true] {
+        let mut v: serde_json::Value =
+            serde_json::from_slice(include_bytes!("../../../apps/interfaces/gogs.json")).unwrap();
+        v["operations"]["execute"] = json!({"description":"execute","input":{"type":"object"},"output":{"type":"object"},"write":true,"binding":{"protocol":"conversation","wire":"json-v1","path":["channels"],"steps":[{"send":{"header":{"msg_id":{"context":"operationId"}},"content":"code"}},{"receiveAll":[{"id":"reply","where":[{"path":["parent"],"equals":{"context":"operationId"}},{"path":["kind"],"equals":"reply"}]},{"id":"idle","where":[{"path":["parent"],"equals":{"context":"operationId"}},{"path":["kind"],"equals":"idle"}]}]}],"result":{"reply":{"result":["reply","value"]},"idle":{"result":["idle","kind"]}}}});
+        let d = Declaration::load(&serde_json::to_vec(&v).unwrap()).unwrap();
+        let mut sends = 0;
+        let e = d.execute(
+            "execute",
+            &json!({}),
+            &json!({"operationId":"fresh"}),
+            &binding(),
+            |_, p| {
+                let q: serde_json::Value = serde_json::from_slice(&p.body).unwrap();
+                let mut frames = vec![];
+                if q["op"] == "send" {
+                    sends += 1;
+                    frames = vec![
+                        json!({"parent":"other","kind":"reply","value":0}).to_string(),
+                        json!({"parent":"fresh","kind":"reply","value":42}).to_string(),
+                        json!({"parent":"fresh","kind":"idle"}).to_string(),
+                    ];
+                    if reverse {
+                        frames.reverse();
+                    }
+                }
+                Ok(NativeReply {
+                    status: 200,
+                    headers: vec![],
+                    body: json!({"version":1,"channel":q["channel"],"op":q["op"],"frames":frames})
+                        .to_string()
+                        .into_bytes(),
+                    receipt: json!({"exact":true}),
+                })
+            },
+        );
+        assert_eq!(sends, 1);
+        assert_eq!(e.outcome.unwrap(), json!({"reply":42,"idle":"idle"}));
+        assert_eq!(e.receipts.len(), 3);
+    }
+}
+#[test]
+fn bound_tool_projection_rejects_collisions_and_reserved_qualify() {
+    let d = Declaration::load(include_bytes!("../../../apps/interfaces/gogs.json")).unwrap();
+    assert_eq!(
+        d.bound_tools("my_gogs").unwrap()[0]["name"],
+        "mini_app_my_gogs_comment_create"
+    );
+    assert!(mini_sdk::app_interface::bound_tool_name("bad-name", "a").is_err());
+    assert!(mini_sdk::app_interface::bound_tool_name("ok", "qualify").is_err());
+    let mut v: serde_json::Value =
+        serde_json::from_slice(include_bytes!("../../../apps/interfaces/gogs.json")).unwrap();
+    v["operations"]["repo_create"] = v["operations"]["repo.create"].clone();
+    assert_eq!(
+        Declaration::load(&serde_json::to_vec(&v).unwrap())
+            .unwrap_err()
+            .name,
+        "operation-tool-name-collision"
+    );
+}
+
+#[test]
+fn conversation_preflight_refuses_duplicate_and_forward_captures() {
+    let mut v: serde_json::Value =
+        serde_json::from_slice(include_bytes!("../../../apps/interfaces/gogs.json")).unwrap();
+    for steps in [
+        json!([{"send":{"result":["future"]}},{"id":"future","receive":{}}]),
+        json!([{"id":"same","receive":{}},{"id":"same","receive":{}}]),
+    ] {
+        v["operations"]["macro"] = json!({"description":"macro","input":{"type":"object"},"output":{},"write":true,"binding":{"protocol":"conversation","wire":"json-v1","path":["ws"],"steps":steps,"result":true}});
+        assert!(Declaration::load(&serde_json::to_vec(&v).unwrap()).is_err());
+    }
+}
+
+#[test]
+fn generic_missing_terminal_is_uncertain_without_replaying_send() {
+    use mini_sdk::app_interface::NativeReply;
+    let mut v: serde_json::Value =
+        serde_json::from_slice(include_bytes!("../../../apps/interfaces/gogs.json")).unwrap();
+    v["operations"]["execute"] = json!({"description":"execute","input":{"type":"object"},"output":{"type":"object"},"write":true,"binding":{"protocol":"conversation","wire":"json-v1","path":["channels"],"steps":[{"send":{"date":{"context":"nowIso"}}},{"id":"reply","receive":{"where":[{"path":["kind"],"equals":"reply"}]}}],"result":{"result":["reply"]}}});
+    let d = Declaration::load(&serde_json::to_vec(&v).unwrap()).unwrap();
+    let mut sends = 0;
+    let e = d.execute(
+        "execute",
+        &json!({}),
+        &json!({"operationId":"fixed","nowMs":0}),
+        &binding(),
+        |_, p| {
+            let q: serde_json::Value = serde_json::from_slice(&p.body).unwrap();
+            if q["op"] == "send" {
+                sends += 1;
+                assert_eq!(
+                    serde_json::from_str::<serde_json::Value>(q["text"].as_str().unwrap()).unwrap()
+                        ["date"],
+                    "1970-01-01T00:00:00.000Z"
+                );
+            }
+            Ok(NativeReply {
+                status: 200,
+                headers: vec![],
+                body: json!({"version":1,"channel":q["channel"],"op":q["op"],"frames":[]})
+                    .to_string()
+                    .into_bytes(),
+                receipt: json!({"exact":true}),
+            })
+        },
+    );
+    assert_eq!(sends, 1);
+    assert!(e.outcome.unwrap_err().uncertain);
+    assert!(e.receipts.len() > 2);
+}
+
+#[test]
+fn sandforms_credential_resume_uses_private_admitted_http_then_server_identity() {
+    use mini_sdk::app_interface::NativeReply;
+    let d = Declaration::load(include_bytes!("../../../apps/interfaces/sandforms.json")).unwrap();
+    let mut b = binding();
+    b.package_id = d.package_id.clone();
+    let mut credentials = 0;
+    let mut mutations = 0;
+    let e = d.execute(
+        "questions.create",
+        &json!({"text":"Question?","required":true}),
+        &json!({"operationId":"sandforms-call"}),
+        &b,
+        |bound, p| {
+            assert_eq!(bound.subject, "7");
+            if p.method == "GET" {
+                credentials += 1;
+                assert_eq!(p.path, ".sandstorm-credentials");
+                return Ok(NativeReply {
+                    status: 200,
+                    headers: vec![("content-type".into(), "application/json".into())],
+                    body: br#"{"token":"private-resume"}"#.to_vec(),
+                    receipt: json!({"private":"credential-receipt"}),
+                });
+            }
+            let q: serde_json::Value = serde_json::from_slice(&p.body).unwrap();
+            let mut frames = vec![];
+            if q["op"] == "send" {
+                let m: serde_json::Value =
+                    serde_json::from_str(q["text"].as_str().unwrap()).unwrap();
+                if m["msg"] == "connect" {
+                    frames.push(json!({"msg":"connected"}).to_string())
+                } else {
+                    let result = if m["method"] == "login" {
+                        assert_eq!(m["params"], json!([{"resume":"private-resume"}]));
+                        json!({"id":"server-user"})
+                    } else {
+                        mutations += 1;
+                        assert_eq!(m["method"], "Prompts.create");
+                        json!("prompt-id")
+                    };
+                    frames.push(json!({"msg":"updated","methods":[m["id"]]}).to_string());
+                    frames.push(json!({"msg":"result","id":m["id"],"result":result}).to_string());
+                }
+            }
+            Ok(NativeReply {
+                status: 200,
+                headers: vec![],
+                body: json!({"version":1,"channel":q["channel"],"op":q["op"],"frames":frames})
+                    .to_string()
+                    .into_bytes(),
+                receipt: json!({"private":"native-receipt"}),
+            })
+        },
+    );
+    assert_eq!(credentials, 1);
+    assert_eq!(mutations, 1);
+    assert_eq!(e.outcome.unwrap(), json!("prompt-id"));
+    assert_eq!(e.receipts.len(), 6);
+}
+#[test]
+fn ddp_absolute_deadline_stops_after_incomplete_mutation_without_replay() {
+    use mini_sdk::app_interface::NativeReply;
+    let mut v: serde_json::Value =
+        serde_json::from_slice(include_bytes!("../../../apps/interfaces/sandforms.json")).unwrap();
+    v["limits"]["seconds"] = json!(1);
+    let d = Declaration::load(&serde_json::to_vec(&v).unwrap()).unwrap();
+    let mut b = binding();
+    b.package_id = d.package_id.clone();
+    let mut mutations = 0;
+    let start = std::time::Instant::now();
+    let e = d.execute(
+        "questions.create",
+        &json!({"text":"Question?","required":true}),
+        &json!({"operationId":"bounded-call"}),
+        &b,
+        |_, p| {
+            if p.method == "GET" {
+                return Ok(NativeReply {
+                    status: 200,
+                    headers: vec![("content-type".into(), "application/json".into())],
+                    body: br#"{"token":"private"}"#.to_vec(),
+                    receipt: json!({"native":true}),
+                });
+            }
+            let q: serde_json::Value = serde_json::from_slice(&p.body).unwrap();
+            if let Some(ms) = q["deadlineMs"].as_u64() {
+                assert!(ms <= 1000)
+            }
+            let mut frames = vec![];
+            if q["op"] == "send" {
+                let m: serde_json::Value =
+                    serde_json::from_str(q["text"].as_str().unwrap()).unwrap();
+                if m["msg"] == "connect" {
+                    frames.push(json!({"msg":"connected"}).to_string())
+                } else if m["method"] == "login" {
+                    frames.push(
+                        json!({"msg":"result","id":m["id"],"result":{"id":"member"}}).to_string(),
+                    );
+                    frames.push(json!({"msg":"updated","methods":[m["id"]]}).to_string());
+                } else {
+                    mutations += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(1050));
+                }
+            }
+            Ok(NativeReply {
+                status: 200,
+                headers: vec![],
+                body: json!({"version":1,"channel":q["channel"],"op":q["op"],"frames":frames})
+                    .to_string()
+                    .into_bytes(),
+                receipt: json!({"native":true}),
+            })
+        },
+    );
+    assert_eq!(mutations, 1);
+    let error = e.outcome.unwrap_err();
+    assert_eq!(error.name, "ddp-deadline");
+    assert!(error.uncertain);
+    assert!(start.elapsed() < std::time::Duration::from_secs(3));
+    assert!(e.receipts.len() >= 5);
+}
+
+#[test]
+fn complete_curated_inventory_loads_and_projects_native_tools() {
+    let checked_in = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../apps/interfaces");
+    let mut entries = Vec::new();
+    for entry in std::fs::read_dir(checked_in).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_some_and(|e| e == "json") {
+            let bytes = std::fs::read(&path).unwrap();
+            let source: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            if source["format"] == "mini-app-interface-v1" {
+                entries.push((path.display().to_string(), bytes, None));
+            }
+        }
+    }
+    assert!(!entries.is_empty(), "checked-in declaration inventory is empty");
+    if let Some(dir) = std::env::var_os("MINI_ALL_INTERFACES") {
+        let dir = std::path::PathBuf::from(dir);
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.join("manifest.json")).unwrap()).unwrap();
+        assert!(!manifest.as_object().unwrap().is_empty());
+        for (name, meta) in manifest.as_object().unwrap() {
+            entries.push((name.clone(), std::fs::read(dir.join(name)).unwrap(),
+                Some(meta["interfaceDigest"].clone())));
+        }
+    }
+    for (name, bytes, digest) in entries {
+        let d = Declaration::load(&bytes).unwrap_or_else(|e| panic!("{name}: {}", e.name));
+        if let Some(digest) = digest {
+            assert_eq!(d.sha256, digest, "{name} digest parity");
+        }
+        let tools = d
+            .bound_tools("member_app")
+            .unwrap_or_else(|e| panic!("{name}: {}", e.name));
+        let source: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let expected = source["operations"]
+            .as_object()
+            .unwrap()
+            .values()
+            .filter(|op| op["internal"] != true)
+            .count();
+        assert_eq!(tools.len(), expected, "{name} public tools");
+        for tool in tools {
+            assert!(tool["name"]
+                .as_str()
+                .unwrap()
+                .starts_with("mini_app_member_app_"));
+            assert!(tool["inputSchema"].is_object());
+            assert_eq!(tool["_meta"]["interfaceDigest"], d.sha256);
+        }
+    }
+}
+
+#[test]
+fn schema_object_property_bound_refuses_before_dispatch() {
+    let mut v: serde_json::Value =
+        serde_json::from_slice(include_bytes!("../../../apps/interfaces/gogs.json")).unwrap();
+    v["operations"]["repo.create"]["input"]["maxProperties"] = json!(1);
+    let d = Declaration::load(&serde_json::to_vec(&v).unwrap()).unwrap();
+    let e = d.execute(
+        "repo.create",
+        &json!({"name":"x","description":""}),
+        &json!({}),
+        &binding(),
+        |_, _| panic!("bound refused before dispatch"),
+    );
+    assert_eq!(e.outcome.unwrap_err().name, "input-schema");
+    assert!(e.receipts.is_empty());
+}
+
+#[test]
+fn readonly_and_compound_qualification_gates_preserve_correlated_results() {
+    let mut v: serde_json::Value =
+        serde_json::from_slice(include_bytes!("../../../apps/interfaces/gogs.json")).unwrap();
+    v["operations"]["hit"] = json!({"description":"hit","input":{"type":"object"},"output":{"type":"object"},"write":true,"binding":{"protocol":"conversation","wire":"json-v1","path":["ws"],"steps":[{"send":{"request":"beacon"}},{"id":"hit","receive":{"where":[{"path":["id"],"equals":"mine"}]}}],"result":{"result":["hit"]}}});
+    v["qualification"] =
+        json!([{"id":"hit","op":"hit","args":{},"assert":[{"path":["id"],"equals":"mine"}]}]);
+    let d = Declaration::load(&serde_json::to_vec(&v).unwrap()).unwrap();
+    let e = d.qualify(&json!({"operationId":"correlated"}), &binding(), |_, p| {
+        let q: serde_json::Value = serde_json::from_slice(&p.body).unwrap();
+        let frames = if q["op"] == "send" {
+            vec![json!({"id":"mine"}).to_string()]
+        } else {
+            vec![]
+        };
+        Ok(mini_sdk::app_interface::NativeReply {
+            status: 200,
+            headers: vec![],
+            body: json!({"version":1,"channel":q["channel"],"op":q["op"],"frames":frames})
+                .to_string()
+                .into_bytes(),
+            receipt: json!({"private":true}),
+        })
+    });
+    assert_eq!(e.outcome.unwrap()["hit"]["id"], "mine");
+}
+
+#[test]
+fn generic_absolute_deadline_bounds_open_and_forbids_cleanup_after_mutation() {
+    use mini_sdk::app_interface::NativeReply;
+    let mut v: serde_json::Value =
+        serde_json::from_slice(include_bytes!("../../../apps/interfaces/gogs.json")).unwrap();
+    v["limits"]["seconds"] = json!(1);
+    v["operations"]["macro"] = json!({"description":"macro","input":{"type":"object"},"output":{"type":"object"},"write":true,"binding":{"protocol":"conversation","wire":"json-v1","path":["ws"],"steps":[{"send":{"request":"write"}},{"http":{"protocol":"http","method":"GET","path":["read"],"status":[200],"decode":"json"},"id":"read"}],"result":{"result":["read"]}}});
+    let d = Declaration::load(&serde_json::to_vec(&v).unwrap()).unwrap();
+    let start = std::time::Instant::now();
+    let mut callbacks = vec![];
+    let e = d.execute(
+        "macro",
+        &json!({}),
+        &json!({"operationId":"one-deadline"}),
+        &binding(),
+        |_, p| {
+            assert!(
+                start.elapsed() < std::time::Duration::from_secs(1),
+                "no callback after absolute deadline"
+            );
+            let q: serde_json::Value = serde_json::from_slice(&p.body).unwrap();
+            callbacks.push(q["op"].as_str().unwrap().to_owned());
+            if q["op"] == "open" {
+                assert!(q["deadlineMs"].as_u64().unwrap() <= 1000)
+            }
+            if q["op"] == "send" {
+                std::thread::sleep(std::time::Duration::from_millis(1050));
+            }
+            Ok(NativeReply {
+                status: 200,
+                headers: vec![],
+                body: json!({"version":1,"channel":q["channel"],"op":q["op"],"frames":[]})
+                    .to_string()
+                    .into_bytes(),
+                receipt: json!({"private":"exact-native"}),
+            })
+        },
+    );
+    assert_eq!(callbacks, vec!["open", "send"]);
+    let error = e.outcome.unwrap_err();
+    assert_eq!(error.name, "conversation-deadline");
+    assert!(error.uncertain);
+    assert_eq!(e.receipts.len(), 2);
 }
