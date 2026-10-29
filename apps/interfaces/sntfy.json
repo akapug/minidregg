@@ -2,9 +2,9 @@
   "format": "mini-app-interface-v1",
   "name": "sntfy",
   "interfaceVersion": 1,
-  "appId": "c6rk81r4qk6dm3k04x1kxmyccqewhh4npuxeyg1xrpfypn2ddy0h",
-  "packageId": "bc424d5fd3cf60977cacdac328adfbee",
-  "appVersion": "v2.28.0-sandstorm-18",
+  "appId": "k2drffaa4xx1mq1gz6hh5cnw2kfqr6mkpvz51h54xkp4eawx6wn0",
+  "packageId": "f1570de10690a0de3af76437ad836cd0",
+  "appVersion": "v2.34.0-sandstorm-20",
   "status": "prototype-unqualified",
   "limits": {
     "bodyBytes": 1048576,

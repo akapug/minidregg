@@ -1,0 +1,38 @@
+{
+  "datasette": {
+    "version": "0.65.5",
+    "tag": "0.65.5",
+    "commit": "fec885fb291ffc05c80f15c5f20bb3bb67719320",
+    "sourceUrl": "https://github.com/simonw/datasette",
+    "releaseUrl": "https://github.com/simonw/datasette/releases/tag/0.65.5",
+    "publishedAt": "2026-09-16T23:51:08Z",
+    "wheel": {
+      "url": "https://files.pythonhosted.org/packages/b0/11/c30114a7f78ed33a13d7e98421f2ca1e1ead61a7441b745663e20f31bc4c/datasette-0.65.5-py3-none-any.whl",
+      "sha256": "ca5faf528d4c1acc22e78b0274257435683ae6c75cf275939f2b92a10e498dbb"
+    },
+    "sdist": {
+      "url": "https://files.pythonhosted.org/packages/98/4a/75224122c9cc725b6dcc9466fff8a720c99a2d7b67ce866a82c52a5f2141/datasette-0.65.5.tar.gz",
+      "sha256": "8d16ab1bf9a2753089cd3cb079045885d440f11267973e89e08e7fecf555264a"
+    }
+  },
+  "sandstormSupport": {
+    "version": "0.2",
+    "tag": "0.2",
+    "commit": "9d2eafe1345c4aa1ae6355d511286801be8be8ff",
+    "sourceUrl": "https://github.com/simonw/datasette-sandstorm-support",
+    "wheelSha256": "6add6ca36c761d9e29f7409ea8b585d85f4a3f18a851c35fb9a4b9e22268f11e",
+    "sdist": {
+      "url": "https://files.pythonhosted.org/packages/a7/2b/e9563e1273c58f3ea4313f7531aaecedfd8ae368459767e432adc45e17b3/datasette-sandstorm-support-0.2.tar.gz",
+      "sha256": "9f54c9ddc5e2a8fcc330e536a6a197ee60a029b1c38e1f5af80e077950a838ce"
+    }
+  },
+  "packagingBase": {
+    "sourceUrl": "https://github.com/ocdtrekkie/datasette-sandstorm",
+    "commit": "1bd5e39c2cecbf4e99dd007474ad60a60aecb9ce"
+  },
+  "pipBootstrap": {
+    "version": "26.2.2",
+    "url": "https://files.pythonhosted.org/packages/3f/06/3e4420302363fbb71be3c7f35ce042f54bfca330e3e66b3a2e3c4cca579f/pip-26.2.2-py3-none-any.whl",
+    "sha256": "fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70"
+  }
+}
