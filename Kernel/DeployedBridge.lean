@@ -170,6 +170,7 @@ def unpack (cell : Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry
   rcases cell with ⟨kind, payload⟩
   unfold packOf unpack
   congr 1
+  exact Theory.CellState.Materialized.ext rfl
 
 /-- The canonical bytes of a world slot: the lifecycle image. -/
 def encodeCell : Option (Cell deployedR) → List UInt8
