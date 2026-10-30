@@ -594,9 +594,27 @@ def main(argv=None):
             attempt = attempt_of(n)
             intent_file = root / (attempt.name + '-intent.json')
             intent_file.write_text(json.dumps(build(), indent=2))
-            words = [mini, 'submit', '--host', host, '--config', config, '--socket', socket, '--intent', intent_file, '--key', keys[signer], '--dir', attempt]
-            if kind:
-                words.extend(['--intent-kind', kind])
+            if kind == 'current-resource-birth':
+                # A birth-intent authored from the genesis is refused birthStale once the World is past genesis plus
+                # the 64-height window. The Host authors it at the current height against a sponsor-signed read of
+                # the factory (`current-resource-intent`, as `mini apps bootstrap` does); the intent file above is the
+                # source it authors from, and the signed intent is submitted as a binary.
+                query_dir = root / (attempt.name + '-factory-query')
+                factory_intent = {'subject': signer, 'nonce': str(next_nonce()), 'purpose': {'type': 'query', 'kind': 'object', 'target': str(factory['target']), 'view': 'resource'},
+                                  'grants': [{'kind': 'object', 'target': str(factory['target']), 'capability': str(factory['ownerCapability'])}]}
+                factory_file = root / (attempt.name + '-factory-query-intent.json')
+                factory_file.write_text(json.dumps(factory_intent))
+                run(label + '-factory-observe', [mini, 'query', '--host', host, '--config', config, '--socket', socket, '--intent', factory_file,
+                                                 '--key', keys[signer], '--view', 'resource', '--dir', query_dir])
+                author_dir = root / (attempt.name + '-author')
+                run(label + '-author', [mini, 'current-resource-intent', '--host', host, '--config', config, '--socket', socket, '--source', intent_file,
+                                        '--signed-observation', query_dir / 'signed-observation.bin', '--dir', author_dir])
+                words = [mini, 'submit', '--host', host, '--config', config, '--socket', socket, '--intent', author_dir / 'intent.bin', '--intent-kind', 'binary',
+                         '--key', keys[signer], '--dir', attempt]
+            else:
+                words = [mini, 'submit', '--host', host, '--config', config, '--socket', socket, '--intent', intent_file, '--key', keys[signer], '--dir', attempt]
+                if kind:
+                    words.extend(['--intent-kind', kind])
             run(label, words, effect=True)
             outcome = load(attempt / 'outcome.json')
             if outcome.get('type') != 'confirmed':
@@ -721,6 +739,14 @@ def main(argv=None):
             intent['birth']['grainBirthTariff'] = {k: str(v) for k, v in configured['grainBirthTariff'].items()}
         return intent
 
+    def born_height():
+        """The height the born grants' window starts at: the Host authored the birth at the signed factory observation's
+        height (a genesis-authored legacy birth starts at the genesis height). A child grant lies inside its parent's."""
+        for query in sorted(root.glob('resident-native-birth-attempt*-factory-query')):
+            if (root / query.name[:-len('-factory-query')] / 'outcome.json').exists():
+                return int(load(query / 'challenge.json')['height'])
+        return int(configured['genesisHeight'])
+
     def delegate(label, target, parent, child, holder, verbs):
         def build():
             cell, authority = mini_query(label + '-pre', owner_subject, target, parent)
@@ -729,13 +755,13 @@ def main(argv=None):
                 'kind': 'object', 'domain': str(genesis['domain']), 'semantics': genesis['expectedSemantics'], 'subject': owner_subject, 'nonce': str(n + 1),
                 'expectedTargetRoot': cell['root'], 'parentId': parent, 'target': str(target),
                 'child': {'id': child, 'root': parent, 'parent': parent, 'issuer': str(configured['issuer']), 'holder': {'type': 'subject', 'subject': holder},
-                          'targets': [str(target)], 'verbs': verbs, 'maxCost': '50000', 'notBefore': str(configured['genesisHeight']),
-                          'notAfter': str(int(configured['genesisHeight']) + int(configured['lifetime']) - 1), 'issuerEpoch': genesis['issuerEpoch'],
+                          'targets': [str(target)], 'verbs': verbs, 'maxCost': '50000', 'notBefore': str(born_height()),
+                          'notAfter': str(born_height() + int(configured['lifetime']) - 1), 'issuerEpoch': genesis['issuerEpoch'],
                           'policyId': str(target), 'policyEpoch': '0', 'ancestors': [parent], 'channels': []}}}},
                 'grants': [{'kind': 'object', 'target': str(target), 'capability': parent}]}
         return submit(label, build, owner_subject)
 
-    born = submit('resident-native-birth', birth_intent, owner_subject, 'birth-intent')
+    born = submit('resident-native-birth', birth_intent, owner_subject, 'current-resource-birth')
     delegations = [delegate('resident-parent-tool', a.task, caps['parent'], caps['toolWitness'], tool_subject, ['observe', 'mutate']),
                    delegate('resident-parent-provider', a.task, caps['parent'], caps['providerWitness'], provider_subject, ['observe', 'mutate']),
                    delegate('resident-publication-tool', a.task + 2, caps['publication'], caps['publicationTool'], tool_subject, ['observe', 'mutate']),
