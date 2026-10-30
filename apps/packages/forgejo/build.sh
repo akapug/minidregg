@@ -109,16 +109,16 @@ cleanup_smoke() {
     rm -f "$SMOKE_PID_FILE"
   fi
   if [[ $SMOKE_MOUNTS == 1 ]]; then
-    umount "$ROOTFS/proc"
-    umount -R "$ROOTFS/dev"
+    umount "$ROOTFS/proc" || { echo "FATAL: cannot unmount $ROOTFS/proc" >&2; exit 1; }
     SMOKE_MOUNTS=0
   fi
 }
 trap cleanup_smoke EXIT
 mkdir -p "$ROOTFS/dev" "$ROOTFS/proc"
 chown -R 65534:65534 "$ROOTFS/var"
-mount --rbind /dev "$ROOTFS/dev"
-mount --make-rslave "$ROOTFS/dev"
+# /dev is a few mknod'd nodes inside the rootfs; the host's /dev is never bind-mounted.
+mknod -m 666 "$ROOTFS/dev/null" c 1 3; mknod -m 666 "$ROOTFS/dev/zero" c 1 5; mknod -m 666 "$ROOTFS/dev/full" c 1 7
+mknod -m 666 "$ROOTFS/dev/random" c 1 8; mknod -m 666 "$ROOTFS/dev/urandom" c 1 9
 mount -t proc proc "$ROOTFS/proc"
 mount --make-rslave "$ROOTFS/proc"
 SMOKE_MOUNTS=1
@@ -134,6 +134,9 @@ echo $! >"$SMOKE_PID_FILE"
 python3 -I "$RECIPE/smoke.py" "http://127.0.0.1:$SMOKE_PORT" "$BASE/out/smoke.json"
 cleanup_smoke
 trap - EXIT
+if findmnt -rn -o TARGET | grep -F "$ROOTFS/" >&2; then
+  echo "FATAL: mounts remain under $ROOTFS; refusing to remove anything" >&2; exit 1
+fi
 rm -rf "$ROOTFS/var" "$ROOTFS/tmp" "$ROOTFS/dev" "$ROOTFS/proc"
 mkdir -p "$ROOTFS/var" "$ROOTFS/tmp"
 chmod 1777 "$ROOTFS/tmp"

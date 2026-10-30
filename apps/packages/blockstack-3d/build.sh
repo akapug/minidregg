@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Build the 3D Blockstack SPK on dregg-forge (root, x86_64). Idempotent.
 set -euo pipefail
+# Run in a private mount namespace: the smoke rootfs's /proc mount cannot leak to, or be unmounted by,
+# anything else, and it vanishes with this process.
+if [[ ${1:-} != --private-mount-namespace ]]; then
+  exec unshare --mount --propagation private bash "$0" --private-mount-namespace
+fi
 BASE=/srv/spk-build/blockstack
 RECIPE="$BASE/recipe"; WORK="$BASE/work"; BUNDLE="$BASE/package"; ROOTFS="$BUNDLE/rootfs"
 OUT="$BASE/out"; LOGS="$BASE/logs"
@@ -36,15 +41,34 @@ printf '%s\n' "$SRC_SHA" > "$ROOTFS/opt/app/UPSTREAM_COMMIT"
 # smoke in a chroot as the grain user
 mkdir -p "$ROOTFS/var" "$ROOTFS/tmp" "$ROOTFS/dev" "$ROOTFS/proc"; chmod 1777 "$ROOTFS/tmp"
 chown -R 65534:65534 "$ROOTFS/var"
-cleanup() { [[ -f $BASE/smoke.pid ]] && kill "$(cat "$BASE/smoke.pid")" 2>/dev/null || true; rm -f "$BASE/smoke.pid"
-  umount "$ROOTFS/proc" 2>/dev/null || true; umount -R "$ROOTFS/dev" 2>/dev/null || true; }
+# /dev is a few mknod'd nodes INSIDE the rootfs; the host's /dev is never bind-mounted. Only /proc is a
+# mount. Nothing under $ROOTFS is removed unless findmnt shows no mount left beneath it.
+assert_no_mounts() {
+  if findmnt -rn -o TARGET | grep -F "$ROOTFS/" >&2; then
+    echo "FATAL: mounts remain under $ROOTFS; refusing to remove anything" >&2; exit 1
+  fi
+}
+cleanup() {
+  if [[ -f $BASE/smoke.pid ]]; then
+    kill -TERM -- "-$(cat "$BASE/smoke.pid")" 2>/dev/null || true
+    for _ in $(seq 1 50); do kill -0 -- "-$(cat "$BASE/smoke.pid")" 2>/dev/null || break; sleep 0.2; done
+    rm -f "$BASE/smoke.pid"
+  fi
+  if findmnt -rn "$ROOTFS/proc" >/dev/null; then
+    umount "$ROOTFS/proc" || { echo "FATAL: cannot unmount $ROOTFS/proc" >&2; exit 1; }
+  fi
+}
 trap cleanup EXIT
-mount --rbind /dev "$ROOTFS/dev"; mount --make-rslave "$ROOTFS/dev"; mount -t proc proc "$ROOTFS/proc"
-chroot --userspec=65534:65534 "$ROOTFS" /usr/bin/env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/var TMPDIR=/var/tmp /bin/bash /opt/app/launcher.sh > "$LOGS/smoke.log" 2>&1 &
+mkdir -p "$ROOTFS/dev"
+mknod -m 666 "$ROOTFS/dev/null" c 1 3; mknod -m 666 "$ROOTFS/dev/zero" c 1 5; mknod -m 666 "$ROOTFS/dev/full" c 1 7
+mknod -m 666 "$ROOTFS/dev/random" c 1 8; mknod -m 666 "$ROOTFS/dev/urandom" c 1 9
+mount -t proc proc "$ROOTFS/proc"
+setsid chroot --userspec=65534:65534 "$ROOTFS" /usr/bin/env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/var TMPDIR=/var/tmp /bin/bash /opt/app/launcher.sh > "$LOGS/smoke.log" 2>&1 &
 echo $! > "$BASE/smoke.pid"
 for i in $(seq 1 40); do curl -fs -o /dev/null http://127.0.0.1:8000/ && break; sleep 1; done
 python3 -I "$RECIPE/smoke.py" http://127.0.0.1:8000 | tee "$OUT/smoke.json"
 cleanup; trap - EXIT
+assert_no_mounts
 rm -rf "$ROOTFS/var" "$ROOTFS/tmp" "$ROOTFS/dev" "$ROOTFS/proc"; mkdir -p "$ROOTFS/var" "$ROOTFS/tmp"; chmod 1777 "$ROOTFS/tmp"
 find "$ROOTFS" -name __pycache__ -prune -exec rm -rf {} +
 printf '%s\n' sandstorm-manifest sandstorm-http-bridge-config sandstorm-http-bridge > "$BUNDLE/sandstorm-files.list"
