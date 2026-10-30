@@ -908,6 +908,11 @@ def main(argv=None):
             or activation['inbox'] != str(inbox)):
         raise Refused('native activation/check-delivery binding differs')
     account_name = activation['account']['name']
+    # The delivered assignment carries Hermes's budget account as born (an account handoff naming the tool subject owner,
+    # with its capabilities). The tool workspace adopts it with the native verb (`credit adopt`, which imports account
+    # handoffs naming this workspace's subject) before the first native balance read of the cut. Idempotent: adopt
+    # skips a reference the workspace already holds.
+    run('native-account-adopt', [mini, 'credit', '--action', 'adopt', '--dir', ws, '--inbox', next(pathlib.Path(dispatched['inbox']).rglob(account_name + '.json')).parent])
     save('assignment.json', {'checked': checked, 'activation': activation, 'dispatch': dispatched, 'inbox': str(inbox), 'account': account_name, 'roomCell': room_cell})
 
     # ------------------------------------------------------------ requests
