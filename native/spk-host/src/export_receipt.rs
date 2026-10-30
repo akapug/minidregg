@@ -82,7 +82,11 @@ pub(crate) fn prepare(
     let header = std::str::from_utf8(&response[..end])
         .map_err(|_| invalid("export response header is not text"))?;
     if !header.starts_with("HTTP/1.1 200 ") {
-        return Err(invalid("export requires a successful representation"));
+        // The app's status line names why (no sheet, a moved route, an app error); it carries no
+        // credential, and is bounded and kept to printable ASCII.
+        let status: String = header.lines().next().unwrap_or("").chars()
+            .filter(|c| c.is_ascii_graphic() || *c == ' ').take(64).collect();
+        return Err(io::Error::new(io::ErrorKind::InvalidData, format!("export requires a successful representation; the app answered {status:?}")));
     }
     if header.lines().any(|line| {
         line.split_once(':')
