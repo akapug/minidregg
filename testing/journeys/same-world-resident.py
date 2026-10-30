@@ -16,6 +16,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import time
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
@@ -156,8 +157,15 @@ def root_handoffs(binding, receiving):
     env = ["env", "MINI_ROOT=" + str(base), "MINI_GRAIN_FIXTURE_UID=" + str(os.getuid()),
            "MINI_GRAIN_CONTROLLER_MANAGER=user"]
     def root(words):
-        done = subprocess.run(["sudo", "-n", *env, sys.executable, "-I", str(entry), *words],
-                              stdin=subprocess.DEVNULL, capture_output=True, check=False)
+        # The first provider custody copy re-renders the key broker's config (the credential store appears with the provider
+        # table) and, outside a systemd root, cannot restart the broker: the harness's broker supervisor does that within a
+        # few seconds. The act is idempotent until its ack exists, so a broker that is not yet ready is retried.
+        for attempt in range(6):
+            done = subprocess.run(["sudo", "-n", *env, sys.executable, "-I", str(entry), *words],
+                                  stdin=subprocess.DEVNULL, capture_output=True, check=False)
+            if done.returncode == 0 or not any(m in done.stderr for m in (b"credentials-not-configured", b"broker-unavailable", b"did not come up")):
+                break
+            time.sleep(5)
         sys.stderr.buffer.write(done.stderr)
         require(done.returncode == 0, "root hand-off " + words[0] + " refused: "
                 + done.stderr.decode(errors="replace").strip()[-300:])
