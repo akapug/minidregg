@@ -639,7 +639,7 @@ def main(argv=None):
 
     def say(member, label, line, text, to=None):
         workspace = pathlib.Path(member['workspace']).resolve()
-        operation = workspace / 'operations' / f'resident-{a.task}-{label}.json'
+        operation = workspace / 'room-operations' / f'resident-{a.task}-{label}.json'
         binding = {'workspace': str(workspace), 'room': room_alias, 'text': text, 'to': to}
 
         def action(path):
